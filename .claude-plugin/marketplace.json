@@ -789,7 +789,7 @@
     {
       "name": "shmem-ops-skills",
       "description": "SHMEM 自定义通信算子开发 Skills（10 个）。覆盖设计、代码生成、编译调试、正确性评估、HCCL 对比评测、性能优化、代码审查和 PyTorch 绑定。",
-      "source": "./plugins-community/shmem-ops-generator",
+      "source": "./community/ops",
       "strict": false,
       "version": "0.1.0",
       "author": {
@@ -804,16 +804,16 @@
       ],
       "category": "skills",
       "skills": [
-        "./skills/shmem-ops-dev",
-        "./skills/shmem-ops-design",
-        "./skills/shmem-ops-testcase-gen",
-        "./skills/shmem-ops-code-gen",
-        "./skills/shmem-ops-compile-debug",
-        "./skills/shmem-ops-correctness-eval",
-        "./skills/shmem-ops-performance-eval",
-        "./skills/shmem-ops-performance-optim",
-        "./skills/shmem-ops-code-review",
-        "./skills/shmem-ops-torch-bind"
+        "./shmem-ops-dev",
+        "./shmem-ops-design",
+        "./shmem-ops-testcase-gen",
+        "./shmem-ops-code-gen",
+        "./shmem-ops-compile-debug",
+        "./shmem-ops-correctness-eval",
+        "./shmem-ops-performance-eval",
+        "./shmem-ops-performance-optim",
+        "./shmem-ops-code-review",
+        "./shmem-ops-torch-bind"
       ]
     },
     {

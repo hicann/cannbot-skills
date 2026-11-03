@@ -27,7 +27,7 @@ Phase 0  需求确认
 - `meta.performance_required: true`：执行 Phase 6 性能评测。
 - `meta.performance_auto_optim: true` 且 Phase 6 未达标：进入 Phase 6.5；进入后按配置跑满优化轮次。
 
-更完整的 Phase、输入输出和产物说明见 [skills/README.md](skills/README.md)。
+更完整的 Phase、输入输出和产物说明见 [端到端编排 Skill](../../community/ops/shmem-ops-dev/SKILL.md)。
 
 ## 安装
 
@@ -81,6 +81,8 @@ bash /absolute/path/to/cannbot-skills/plugins-community/shmem-ops-generator/init
 ```
 
 ## Skills
+
+10 个 Skill 的源码统一维护在 `community/ops/shmem-ops-*/`；本插件的安装入口继续从该目录安装。
 
 | Skill | Phase | 作用 |
 | --- | --- | --- |

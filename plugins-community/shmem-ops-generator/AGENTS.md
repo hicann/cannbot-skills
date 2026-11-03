@@ -89,4 +89,4 @@ Phase 0 需求确认
 - `shmem-ops-dev` 是完整流程的唯一编排真源；其他 skills 只处理各自阶段。
 - 各阶段通过 `design.md`、case matrix、correctness report、review report 和 performance report 交换信息。
 - 生成结果是待验证的工程产物，不等同于生产可用实现。
-- 完整 Phase、产物和目录说明见 [skills/README.md](skills/README.md)。
+- 完整 Phase、产物和目录说明见 [端到端编排 Skill](../../community/ops/shmem-ops-dev/SKILL.md)。

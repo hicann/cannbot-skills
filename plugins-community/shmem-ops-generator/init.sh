@@ -15,9 +15,29 @@ PLUGIN="shmem-ops-generator"
 VERSION="0.1.0"
 INCLUDED_SKILLS="shmem-ops-dev shmem-ops-design shmem-ops-testcase-gen shmem-ops-code-gen shmem-ops-compile-debug shmem-ops-correctness-eval shmem-ops-code-review shmem-ops-torch-bind shmem-ops-performance-eval shmem-ops-performance-optim"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 PLUGIN_ROOT="$SCRIPT_DIR"
 LOCAL_SKILL_ROOT="$PLUGIN_ROOT/skills"
+
+has_required_skills() {
+  local skill
+  for skill in $INCLUDED_SKILLS; do
+    [ -f "$1/$skill/SKILL.md" ] || return 1
+  done
+}
+
+if ! has_required_skills "$LOCAL_SKILL_ROOT"; then
+  search_root="$PLUGIN_ROOT"
+  while true; do
+    if has_required_skills "$search_root/community/ops"; then
+      LOCAL_SKILL_ROOT="$search_root/community/ops"
+      break
+    fi
+    parent_root="$(dirname "$search_root")"
+    [ "$parent_root" != "$search_root" ] || break
+    search_root="$parent_root"
+  done
+fi
 
 show_help() {
   cat <<'EOF'
@@ -47,8 +67,13 @@ for arg in "$@"; do
   esac
 done
 
-if [ ! -d "$LOCAL_SKILL_ROOT" ] || [ ! -f "$PLUGIN_ROOT/AGENTS.md" ]; then
-  echo "插件目录不完整：缺少 skills/ 或 AGENTS.md" >&2
+if ! has_required_skills "$LOCAL_SKILL_ROOT"; then
+  echo "缺少完整的 SHMEM Skills：插件内 skills/ 和上级目录的 community/ops/ 均未找到全部 10 个 Skill。" >&2
+  echo "请使用完整的 cannbot-skills 仓库，或将 10 个 shmem-ops-* Skill 目录放入插件内的 skills/ 后重试；仅复制插件目录不包含 Skill 依赖。" >&2
+  exit 1
+fi
+if [ ! -f "$PLUGIN_ROOT/AGENTS.md" ]; then
+  echo "插件目录不完整：缺少 AGENTS.md" >&2
   exit 1
 fi
 
