@@ -122,6 +122,29 @@ class ChangelogFragmentTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "只能删除"):
                 changelog.verify_release(self.repo, "base", "head")
 
+    def test_release_uses_head_tree_instead_of_merge_workspace(self):
+        self.fragment("999.fixed.md", "- 【测试】目标分支并发条目。")
+        changes = [("M", "CHANGELOG.md"), ("D", "docs/changelog.d/123.fixed.md")]
+        release_text = f"{changelog.GENERATED_HEADER}\n\n" + self.old_text.replace(
+            "### 【2026-11-01】",
+            "### 【2026-11-03】\n\n#### 缺陷修复 Bug Fixes\n"
+            "- 【测试】聚合条目。\n\n### 【2026-11-01】",
+        )
+
+        def restore(_repo, commit, destination):
+            destination.mkdir(parents=True)
+            text = self.old_text if commit == "base" else release_text
+            (destination / "CHANGELOG.md").write_text(text, encoding="utf-8")
+            if commit == "base":
+                fragment = destination / "docs/changelog.d/123.fixed.md"
+                fragment.parent.mkdir(parents=True)
+                fragment.write_text("- 【测试】聚合条目。\n", encoding="utf-8")
+
+        with patch.object(changelog, "changed_file_statuses", return_value=changes):
+            with patch.object(changelog, "restore_tree", side_effect=restore) as mocked:
+                changelog.verify_release(self.repo, "base", "head")
+        self.assertEqual([call.args[1] for call in mocked.call_args_list], ["base", "head"])
+
     def test_duplicate_date_does_not_delete_fragment(self):
         self.fragment("123.fixed.md")
         (self.repo / "CHANGELOG.md").write_text(

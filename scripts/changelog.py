@@ -122,7 +122,7 @@ def changed_file_statuses(repo: Path, base: str, head: str) -> List[Tuple[str, s
     return changes
 
 
-def restore_base_tree(repo: Path, base: str, destination: Path) -> None:
+def restore_tree(repo: Path, commit: str, destination: Path) -> None:
     paths = subprocess.check_output(
         [
             "git",
@@ -131,7 +131,7 @@ def restore_base_tree(repo: Path, base: str, destination: Path) -> None:
             "ls-tree",
             "-r",
             "--name-only",
-            base,
+            commit,
             "--",
             CHANGELOG,
             FRAGMENT_DIR,
@@ -142,7 +142,7 @@ def restore_base_tree(repo: Path, base: str, destination: Path) -> None:
     ).splitlines()
     for filename in paths:
         content = subprocess.check_output(
-            ["git", "-C", str(repo), "show", f"{base}:{filename}"]
+            ["git", "-C", str(repo), "show", f"{commit}:{filename}"]
         )
         target = destination / filename
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -231,26 +231,23 @@ def verify_release(repo: Path, base: str, head: str) -> None:
     }
     if not deleted:
         raise ValueError("聚合 PR 至少要删除一个已消费 fragment，不能裸改 CHANGELOG.md")
-    if load_fragments(repo):
-        raise ValueError("聚合 PR 仍包含未消费 fragment")
-
-    base_text = subprocess.check_output(
-        ["git", "-C", str(repo), "show", f"{base}:{CHANGELOG}"],
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    head_text = (repo / CHANGELOG).read_text(encoding="utf-8")
-    match = DATE_PATTERN.search(head_text)
-    if not match:
-        raise ValueError("聚合后的 CHANGELOG.md 缺少日期标题")
-    release_date = match.group("date")
-    if release_date in DATE_PATTERN.findall(base_text):
-        raise ValueError(f"日期 {release_date} 已存在于基线")
-
     with tempfile.TemporaryDirectory() as directory:
-        base_repo = Path(directory)
-        restore_base_tree(repo, base, base_repo)
+        root = Path(directory)
+        base_repo = root / "base"
+        head_repo = root / "head"
+        restore_tree(repo, base, base_repo)
+        restore_tree(repo, head, head_repo)
+        if load_fragments(head_repo):
+            raise ValueError("聚合 PR 仍包含未消费 fragment")
+        base_text = (base_repo / CHANGELOG).read_text(encoding="utf-8")
+        head_text = (head_repo / CHANGELOG).read_text(encoding="utf-8")
+        match = DATE_PATTERN.search(head_text)
+        if not match:
+            raise ValueError("聚合后的 CHANGELOG.md 缺少日期标题")
+        release_date = match.group("date")
+        if release_date in DATE_PATTERN.findall(base_text):
+            raise ValueError(f"日期 {release_date} 已存在于基线")
+
         base_fragments = load_fragments(base_repo)
         expected_deleted = {
             fragment.path.relative_to(base_repo).as_posix()
