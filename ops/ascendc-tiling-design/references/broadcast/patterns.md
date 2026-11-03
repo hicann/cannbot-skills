@@ -159,6 +159,7 @@ WITH_LOOP 模式下 NDDMA config 不变，只有 GM/UB 偏移随外层循环变�
 
 | 主题 | 文档 |
 |------|------|
+| 性能优化方法论（DAV_2201 上的优化，多核物化 broadcast_to） | [broadcast-perf-optimization.md](broadcast-perf-optimization.md) |
 | OneDim 分支（合轴后单维） | [onedim.md](onedim.md) |
 | UB Broadcast（DAV_2201，静态接口 + 搬运指令 fallback） | [ub-broadcast.md](ub-broadcast.md) |
 | UB Broadcast 动态接口（DAV_3510，rank 1~9） | [dynamic-ub-broadcast.md](dynamic-ub-broadcast.md) |
