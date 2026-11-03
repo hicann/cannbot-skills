@@ -26,7 +26,7 @@
 #   Padding, IndexGather, ScatterUpdate, AtomicUpdate, Interpolation,
 #   SortSelect, Histogram, SlidingWindow, ControlFlow,
 #   Spectral,
-#   Sparse, CollectiveCommunication, FusedComposite,
+#   CollectiveCommunication, FusedComposite,
 #   以及 Elementwise, ReductionComposite, ArgReduce,
 #   LayoutTransform, Quantization, Recurrence, NumericalStable, DynamicShape,
 #   VariableOutput, MaskPredicate, Stateful
@@ -43,3 +43,5 @@ routes:
       - references/paradigms/histogram/patterns.md
     RandomSampling:
       - references/paradigms/random_sampling/patterns.md
+    Sparse:
+      - references/paradigms/sparse/patterns.md

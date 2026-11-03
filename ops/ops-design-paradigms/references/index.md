@@ -17,6 +17,7 @@
 | Reduction 归约轴、缓存树与资源规划 | [Reduction 入口](paradigms/reduction/patterns.md) |
 | Contraction 指标映射、选块、任务调度与分层缓冲 | [Contraction 入口](paradigms/contraction/patterns.md) |
 | RandomSampling 随机流、分布变换、状态管理与随机+逐元素复合 | [RandomSampling 入口](paradigms/random_sampling/patterns.md) |
+| Sparse 散射累积、稀疏行更新与索引重映射 | [Sparse 入口](paradigms/sparse/patterns.md) |
 | Contraction、Reduction、Broadcast 组合 | [FA 组合范式](paradigms/fused_composite/fa/patterns.md) |
 | Ascend C regbase 开发方法 | [开发指导](knowledge/regbase_development_guide.md) |
 | API 约束与签名 | [API 索引](knowledge/api/index.md) |

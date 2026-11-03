@@ -1,3 +1,7 @@
+### 【2026-11-02】
+#### 新特性 New Features
+- 【算子】`ops-design-paradigms` 新增 Sparse 范式：四算子族场景模型（Count/ScatterAdd/RowApply/IndexRemap）、索引驱动访存与冲突决策树、零初始化同步；含 AscendC SIMT 与 CANNBotDSL 双适配层（sparse_bincount 内嵌样例包与同算子草稿）；routes.yaml 同步注册。
+
 ## 🔥 更新日志
 
 > **记录规则**：单条不超过 **200 字**，按【领域】+ 问题 + 修复要点组织；技术细节、验证数据与发布过程放 PR 描述 / commit message，不写入日志。
