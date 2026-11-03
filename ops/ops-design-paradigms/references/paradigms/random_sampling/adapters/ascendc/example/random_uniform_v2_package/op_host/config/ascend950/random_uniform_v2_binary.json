@@ -1,0 +1,389 @@
+{
+  "op_type": "RandomUniformV2",
+  "op_list": [
+    {
+      "bin_filename": "RandomUniformV2_1ea4bdp73cd9df67072d9z7caec7c583",
+      "inputs": [
+        {
+          "name": "shape",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y",
+          "index": 0,
+          "dtype": "float32",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "seed",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "seed2",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "dtype",
+          "dtype": "int",
+          "value": null
+        }
+      ]
+    },
+    {
+      "bin_filename": "RandomUniformV2_1ea7bd0e3cd9ef67072d9z7amgc9c733",
+      "inputs": [
+        {
+          "name": "shape",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y",
+          "index": 0,
+          "dtype": "float32",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "seed",
+          "dtype": "int",
+          "value": null
+        },
+        {
+          "name": "seed2",
+          "dtype": "int",
+          "value": null
+        },
+        {
+          "name": "dtype",
+          "dtype": "int",
+          "value": null
+        }
+      ]
+    },
+    {
+      "bin_filename": "RandomUniformV2_1ea7bd0e3cd9de67072d9z7amgc9c583",
+      "inputs": [
+        {
+          "name": "shape",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y",
+          "index": 0,
+          "dtype": "float16",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "seed",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "seed2",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "dtype",
+          "dtype": "int",
+          "value": null
+        }
+      ]
+    },
+    {
+      "bin_filename": "RandomUniformV2_1ea7bd9g3ed9df67072d9z7amgc9c733",
+      "inputs": [
+        {
+          "name": "shape",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y",
+          "index": 0,
+          "dtype": "float16",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "seed",
+          "dtype": "int",
+          "value": null
+        },
+        {
+          "name": "seed2",
+          "dtype": "int",
+          "value": null
+        },
+        {
+          "name": "dtype",
+          "dtype": "int",
+          "value": null
+        }
+      ]
+    },
+    {
+      "bin_filename": "RandomUniformV2_1ea7bd0e3cd9df67072d9b7aaec9c583",
+      "inputs": [
+        {
+          "name": "shape",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y",
+          "index": 0,
+          "dtype": "bfloat16",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "seed",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "seed2",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "dtype",
+          "dtype": "int",
+          "value": null
+        }
+      ]
+    },
+    {
+      "bin_filename": "RandomUniformV2_1ea7bd0e3cd9de67072d9z7akyc9c583",
+      "inputs": [
+        {
+          "name": "shape",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "y",
+          "index": 0,
+          "dtype": "bfloat16",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        },
+        {
+          "name": "offset",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "shape": [
+            -2
+          ],
+          "paramType": "required"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "seed",
+          "dtype": "int",
+          "value": null
+        },
+        {
+          "name": "seed2",
+          "dtype": "int",
+          "value": null
+        },
+        {
+          "name": "dtype",
+          "dtype": "int",
+          "value": null
+        }
+      ]
+    }
+  ]
+}
