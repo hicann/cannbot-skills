@@ -20,8 +20,44 @@
         "max_tokens": 20000,
         "eval_mode": "text"
       },
-      "prompt": "请说明线性 Attention 与普通 CATLASS 算子共用的精度判定流程，逐项回答：1）唯一可编辑的纯 PyTorch 标杆源码是什么，正式 golden 默认在哪种设备上生成，GPU 可选核对的用途是什么；2）混合容差如何计算，全局和关键分区的 matched_ratio、max_abs 如何共同决定通过；3）报告中的 MERE、MARE、max_ulp、error_count 各用于什么，默认诊断与 strict_ulp 显式启用时有何区别；4）各阶段如何复用比较脚本和精度策略，同时保持普通算子的验收口径。只解释规则，不运行比较脚本。",
-      "expected_output": "回复应说明 reference/reference.py 是唯一可编辑的纯 PyTorch 标杆源码，默认在 CPU 上生成正式验收 golden，GPU 可选用于交叉核对；按 atol + rtol * abs(golden) 计算混合容差，全局及关键分区的 matched_ratio 与 max_abs 门禁必须同时达标，不能以单个指标代替其他门禁；MERE、MARE、max_ulp、error_count 记录在同一报告中用于诊断，默认不把 MERE、MARE 或 max_ulp 作为额外硬门禁，只有 strict_ulp 显式开启且配置 max_ulp_limit 时才追加 ULP 门禁；各阶段复用同一 compare_precision.py 和冻结精度策略，不为线性 Attention 放宽普通算子的验收标准。本用例只评估最终回复的规则说明，不要求实际运行比较脚本或提供运行日志。",
+      "prompt": "请说明线性 Attention 与普通 CATLASS 算子共用的精度判定流程，逐项回答：1）混合容差如何计算，全局和关键分区的 matched_ratio、max_abs 如何共同决定通过；2）报告中的 MERE、MARE、max_ulp、error_count 各用于什么，默认诊断与 strict_ulp 显式启用时有何区别；3）各阶段如何复用比较脚本和精度策略，同时保持普通算子的验收口径。只解释规则，不运行比较脚本。",
+      "expected_output": "按 atol + rtol * abs(golden) 计算混合容差，全局及关键分区的 matched_ratio 与 max_abs 门禁必须同时达标，不能以单个指标代替其他门禁；MERE、MARE、max_ulp、error_count 记录在同一报告中用于诊断，默认不把 MERE、MARE 或 max_ulp 作为额外硬门禁，只有 strict_ulp 显式开启且配置 max_ulp_limit 时才追加 ULP 门禁；各阶段复用同一 compare_precision.py 和冻结精度策略，不为线性 Attention 放宽普通算子的验收标准。本用例只评估最终回复的规则说明，不要求实际运行比较脚本或提供运行日志。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "标杆实际运行门禁",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "reference.py、definition.json 和 precision-policy.json 都通过静态校验后，能否直接进入设计阶段？",
+      "expected_output": "不能。还必须实际执行直接调用 reference.py 的 CPU 测试，确认计算语义和精度策略，并在 docs/validation.md 的 02 标杆运行章节记录执行命令、用例范围、运行结果和证据；该证据通过校验后才能执行 reference_accepted 进入 design。静态文件校验不能替代本次运行。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "CPU 标杆生成与对齐",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "设计一个新的 CATLASS C++ 算子 CPU 标杆时，应满足哪些原则，如何选择对齐用例并处理近似算法或无效区域？只说明 02 阶段规则。",
+      "expected_output": "回复应说明 CPU 标杆需与 NPU kernel 隔离，直接清晰地表达公式，固定输入、种子、初始化、状态和计算顺序，必要时使用高精度或稳定算法，输出与 docs/api.md 的数量、顺序、shape、dtype、layout 和状态语义一致，并可被测试代码直接调用。用例从接口实际支持范围推导，先用可人工检查的小规模输入对齐，再覆盖适用的代表性、边界、分支、数值边界和非法输入；不应把 fixed/varlen、chunk 或 head ratio 强制套到所有算子。近似算法或计算顺序不同需记录双方顺序、差异和阈值依据；未定义的无效区只比较有效区域，并保持接口、精度策略和测试代码一致。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "标杆失败重新判断问题归属",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "标杆验收失败后修改 reference.py 仍不能消除差异，进一步发现 docs/api.md 的计算语义有误，应继续留在 reference 修复还是更新 workflow？",
+      "expected_output": "应根据新证据判断为接口问题，执行 interface_problem 返回 interface/null，不得继续在 reference 阶段反复修改标杆。接口修正并验收后，重新经过 reference 阶段生成和验收标杆。",
       "files": [],
       "expectations": []
     }

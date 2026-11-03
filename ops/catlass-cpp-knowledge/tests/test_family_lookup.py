@@ -38,14 +38,21 @@ class FamilyLookupTest(unittest.TestCase):
                     encoding="utf-8",
                 )
 
-            def query(family):
-                return knowledge.query(root, "operators", [], family, "a2", None, True, False)["results"]
+            def query(family, arch="a2"):
+                return knowledge.query(
+                    root, "operators", [], family, arch, None, True, False
+                )["results"]
 
-            self.assertEqual([item["title"] for item in query("flash_attention")], ["flash_attention_forward.md"])
             self.assertEqual(
-                [item["title"] for item in query("flash_attention_grad")], ["flash_attention_grad_backward.md"]
+                [item["title"] for item in query("flash_attention")],
+                ["flash_attention_forward.md"],
+            )
+            self.assertEqual(
+                [item["title"] for item in query("flash_attention_grad")],
+                ["flash_attention_grad_backward.md"],
             )
             self.assertEqual(query("sparse_flash_mla")[0]["status"], "draft")
+            self.assertEqual(query("sparse_flash_mla", "ascend950"), [])
             self.assertEqual(len(query(None)), 2)
 
 

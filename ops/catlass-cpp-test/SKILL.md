@@ -1,71 +1,70 @@
 ---
 name: catlass-cpp-test
-description: CATLASS C++ 通用算子与已登记注意力家族五阶段工作流的 05 算子测试，也可用于其他类型算子工程的用例泛化与用例设计覆盖评估。默认不询问用户、按工程类型分流：CATLASS C++ 五阶段工程只执行全量精度、功能、异常和性能验收的编排、失败恢复与性能候选迭代；其他类型算子工程直接执行泛化模式，由用户提供算子源码与入口后对多类型算子生成用例、执行用例并评估用例设计覆盖。CATLASS 五阶段工程下，仅当用户主动强调泛化、泛化性、泛化功能、泛化用例、覆盖评估或指定执行后端时，才追加泛化模式。触发条件：CATLASS 五阶段工程进入 validation 阶段且 validation_scope=full，或用户主动要求泛化与覆盖测试。
+description: CATLASS C++ 五阶段工作流的 05 算子测试。默认执行全量精度、功能和性能验收；用户明确要求泛化用例时执行文末泛化模式。触发：workflow 处于 validation、处于 complete 需复核最终验收记录，或用户明确要求泛化用例与覆盖评估时。
 ---
 
 # 05 算子测试
 
-## 模式判定（默认路径与触发条件）
+## 阶段说明
 
-**默认不询问用户，按工程类型直接分流。**
+| 输入 | 本阶段处理 | 输出 |
+|---|---|---|
+| 精度通过的代码和构建产物、接口、设计、CPU 标杆、精度策略；`stage=validation` | 按顺序完成全量验收、性能验收和必要的性能迭代 | 按 `templates/validation.md.template` 完成的 `docs/validation.md` |
 
-- **CATLASS C++ 五阶段工程** → 默认只执行「默认流程」，本文件中所有标注「泛化模式」的
-  章节一律不进入。
-- **其他类型的算子工程** → 默认执行「泛化模式」，「默认流程」不适用、直接跳过。
-- **触发** → CATLASS C++ 五阶段工程下，用户主动强调泛化性、泛化功能、用例泛化、
-  覆盖评估，或指定执行后端时，在「默认流程」之外启用「泛化模式」：执行全部标注
-  「泛化模式」的章节。
+## 准入规则
 
-触发词（必须是用户主动提出的需求，而非顺带提及）：泛化、泛化性、泛化功能、泛化用例、
-覆盖评估、指定执行后端。
+- `stage=validation`、`issue_type=null` 且 04 准出成功时执行 05；`stage=complete` 时只复核已有最终验收记录；泛化用例需求按下方附录执行。
 
-### 泛化模式的适用范围（可脱离 CATLASS 五阶段工程独立运行）
+## 执行规则
 
-- **CATLASS C++ 五阶段工程**：泛化模式与「默认流程」并行执行，精度证据仍归「默认流程」
-  的判定口径所有。
-- **其他类型的算子工程**（如 Ascend C 直调工程）：跳过「默认流程」，只执行泛化
-  模式章节，可对多类型算子生成用例并评估用例设计覆盖。此时不需要 `workflow.json`
-  状态，也不需要 `reference/precision-policy.json` 或家族知识。
+`stage=complete` 时跳过 V1-V4，只对已有 `docs/validation.md` 和 `docs/workflow.json` 运行准出校验。
+校验通过后保持 `complete`；校验失败时执行 `complete_evidence_invalid`，重新进入 05。
 
-非 CATLASS 工程下的最小启动输入：
+`stage=validation` 时按以下顺序执行：
 
-1. 算子源码根目录；
-2. 入口文件名，或设计文档路径（至少提供其一；源码路径与入口文件名不得推测，必须由用户
-   提供或确认候选）；
-3. 测试工程落盘位置（用户指定，未指定时用当前工作目录）；
-4. 执行后端可用性（在流程起点主动检测，不依赖用户口述）。后端不可用时退化为「仅生成
-   用例」，仍交付用例配置、约束修正与覆盖评估报告。
+1. **V1 全量验收**：按 `references/full_case_validation.md` 补齐并执行工程原生全量用例，将覆盖关系、结果和证据写入 `docs/validation.md` 并校验；通过后进入 V2。
+2. **V2 性能验收**：按 [性能验收与优化](references/performance_validation.md) 使用普通 `msprof` 采样 5 次，取 `BasicInfo Task Duration(us)` 中位数。将结果和证据写入 `docs/validation.md`；达标时完成验收，未达标时进入 V3。
+3. **V3 流水分析**：按同一 reference 采集实际瓶颈指标，并按 [性能优化候选](references/performance_candidates.md) 生成适用候选。凡有指标依据能够改善任一 Stage/Pipe 的候选均进入候选池；按当前 baseline 下的整体耗时收益标记为 `active` 或 `deferred`，只记录候选和依据，不填写尚未执行的结果。
+4. **V4 候选选择**：从 `active` 候选中选择预计整体耗时收益最大的一个并标记为 `selected`。验证记录校验通过后，执行 `performance_candidate`，转入 `design / performance_optimize`，进入 03 更新设计，再经 04 回到 V1；`deferred` 候选跨轮保留但本轮不执行。
 
-判定结果写入本次任务的执行记录。非 CATLASS 工程下不得因缺少 workflow 状态或
-`reference/precision-policy.json` 而拒绝执行泛化模式。
+测试用例、环境或性能采集失败时，在本阶段修复并重跑失败环节；当前环境无法恢复时，
+记录阻塞原因并停止本次验收。
 
-## 默认流程
+性能未达标且没有 `active` 候选时，记录性能结果、瓶颈证据、`deferred` 候选和候选淘汰原因，
+停止本轮性能优化，不得进入 `complete`。
 
-进入条件：workflow 状态为 `validation`、`validation_scope=full`。
-读取 `guides/precision_policy.md` 和
-`guides/development_and_validation.md`。
+## 准出规则
 
-`sparse_flash_mla` 另读家族 `validation.md` 与 `performance.md`；普通 SWA
-同时应用其中的动态诊断、完整输出和流水验收规则。分别验证独立 metadata、主核与成对调用。
-原 ATK 报告的实际 accuracy、LSE 全量比较和最终构建身份才是正式精度证据；
-诊断脚本 PASS、进程返回0或仅 wheel 安装均不等同于精度 PASS。
-手写基线从用户指定历史 JSON 读取，不重新执行；候选按任务规定的
-5 次预热和 5 次正式样本取完整 device 主核均值，逐 case 比较。
+### 验收
 
-所有阶段复用冻结的 `reference/precision-policy.json` 和本 Skill 唯一
-`scripts/compare_precision.py`。全量验收覆盖功能、边界、异常、TilingKey/模板/运行分支及受影响
-算子；性能使用统一模型用例和 `msprof op_summary` 的 `Task Duration(us)`。
+在离开 `validation` 前执行：
 
-单用例连续运行 60 秒无返回视为 kernel 超时。清理进程和设备资源后，将现象、Stage、
-TilingKey 和 `blockDim` 写入 `docs/validation.md`；该用例不得计为通过，按失败证据进入对应
-恢复分支。
+```bash
+python scripts/validate_validation.py \
+  --validation <docs/validation.md> --workflow <docs/workflow.json> \
+  --event <表中的转移事件>
+```
 
-失败按 workflow validator 的恢复矩阵一次更新全部状态字段。性能不达标保持
-`stage=validation`、`issue_type=performance_optimize`；每轮只改变一个主要变量，候选先过精度
-再同条件比较。修改设计假设返回 03，只改实现返回 04。最终候选必须重新执行 fresh 全量验收。
+该校验同时检查 workflow、标杆运行、快速精度、V1/V2 状态与记录，以及性能未达标时的 V3/V4 记录。
 
-只有 full 精度、功能和要求的性能验收实际通过后，才能设置 `stage=complete`，清空问题字段并
-整理验收 README。未达到目标时如实保留未达标状态，不降低门禁。
+### 状态更新
+
+| 检查结果 | 转移事件 | 下一状态 |
+|---|---|---|
+| 功能错误，定位为实现问题 | `implementation_problem` | `implementation / null` |
+| 精度错误，定位为实现问题 | `precision_problem` | `implementation / precision_debug` |
+| 定位为设计问题 | `design_problem` | `design / null` |
+| 定位为公式或标杆问题 | `reference_problem` | `reference / null` |
+| 定位为接口问题 | `interface_problem` | `interface / null` |
+| 性能未达标并选定优化候选 | `performance_candidate` | `design / performance_optimize` |
+| V1、V2 均通过 | `validation_accepted` | `complete / null` |
+
+通过 `catlass-cpp-interface/scripts/transition_workflow.py` 执行表中的转移；只有 V1、V2
+验收和状态更新均成功，才正常准出 05。
+
+## 泛化模式入口
+
+其他类型算子，或用户明确要求泛化用例、覆盖评估或指定执行后端时，跳过 CATLASS 主流程，执行下面标注“泛化模式”的章节。启动时提供源码根目录、入口或设计文档、测试目录和可用执行后端；后端不可用时只生成用例与覆盖设计。
 
 ## 绝对不要做的事（NEVER 清单，泛化模式）
 

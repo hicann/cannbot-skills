@@ -23,12 +23,26 @@ def validate(source: Path, definition_path: Path) -> list[str]:
         reference = source.read_text(encoding="utf-8")
     except OSError as exc:
         return [f"cannot read source: {source}: {exc}"]
+    if not reference.strip():
+        errors.append("reference.py must not be empty")
+    else:
+        try:
+            compile(reference, str(source), "exec")
+        except SyntaxError as exc:
+            errors.append(
+                f"reference.py has invalid Python syntax at line {exc.lineno}: {exc.msg}"
+            )
     try:
         definition = json.loads(definition_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return [f"cannot read definition JSON: {definition_path}: {exc}"]
     if not isinstance(definition, dict):
         return ["definition must be a JSON object"]
+    for field, expected_type in (("name", str), ("inputs", list), ("outputs", list)):
+        if field not in definition:
+            errors.append(f"definition missing required field: {field}")
+        elif not isinstance(definition[field], expected_type):
+            errors.append(f"definition.{field} has invalid type")
     embedded = definition.get("reference")
     if not isinstance(embedded, str):
         errors.append("definition.reference must be a string")

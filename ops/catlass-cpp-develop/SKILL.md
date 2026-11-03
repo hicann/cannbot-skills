@@ -1,29 +1,53 @@
 ---
 name: catlass-cpp-develop
-description: CATLASS C++ 通用算子与已登记注意力家族五阶段工作流的 04 算子开发。用于按已评审 Stage 实现 device kernel、host tiling 和直调入口，并进行逐 Stage 构建与定向精度验证。触发条件：workflow 处于 implementation 阶段，两个 contract 均已冻结且设计校验通过。
+description: CATLASS C++ 五阶段工作流的 04 算子开发。用于按已评审设计逐 Stage 实现、构建和快速精度验证。触发：workflow 处于 implementation 且设计校验通过时。
 ---
 
 # 04 算子开发
 
-进入条件：workflow 状态为 `implementation`，两个 contract 均已冻结，设计校验已通过。
-完整读取 `guides/development_and_validation.md`，按实际组件查询
-`apis/`（读取 draft API 卡时显式传入 `--include-draft`），并在当前固定 CATLASS/CANN 源码中确认 API。构建前核对 `docs/workflow.json`、
-`docs/design.md`、编译参数和实际设备四者的架构一致；发现 `2201/AtlasA2` 与
-`3510/Ascend950` 混用时返回 design，不得靠编译试错继续。
+## 阶段说明
 
-逐 Stage 执行“实现、编译、设计一致性检查、运行、精度比较、记录”。device 计算必须使用
-CATLASS 组件；host tiling、workspace、AIC/AIV 分工、CrossCore/HardEvent、TilingKey 和数据
-生命周期必须与 `docs/design.md` 一致。测试程序必须核对全部输出、原始 dtype、shape、有效区域
-和关键分区。对于 `sparse_flash_mla`，读取家族 `metadata.md` 和
-`development.md`；普通 SWA 同时读取 `pipeline.md` 的协议与片上结构，
-实现独立 metadata 生产端和主核消费端；
-诊断探针不能代替完整主算子、正式注册和构建产物。
+| 输入 | 本阶段处理 | 输出 |
+|---|---|---|
+| 已评审 `docs/design.md`、已验收的接口/标杆/精度策略、`stage=implementation` | 按 Stage 实现、构建、设计一致性检查和快速精度验证 | 代码和构建产物、更新后的设计/验证记录 |
 
-每轮构建安装后重启测试进程并确认加载本轮产物。单用例连续运行 60 秒无返回视为 kernel 超时，
-清理进程和设备资源后，将现象、Stage、TilingKey 和 `blockDim` 写入 `docs/validation.md`，再按
-失败定位结果恢复到最早受影响阶段。
+## 准入规则
 
-精度实现问题使用 `issue_type=precision_debug`、`resume_from=implementation`、
-`validation_scope=precision_targeted`，只跑失败用例、受影响 Stage 和最小边界集合。
-设计假设错误使用 `design_issue/design/full` 返回 03；标杆或接口问题分别返回 02/01。
-定向精度通过后清空问题字段，设置 `stage=validation`、`validation_scope=full` 并校验。
+- 仅 `stage=implementation`，且 `issue_type` 为 `null` 或 `precision_debug`、设计校验已通过时进入本阶段。
+- 确认 workflow、设计文档、编译参数和设备架构一致，并按实际组件查询 API；架构冲突返回 03。
+
+## 执行规则
+
+- 按 Stage 执行“实现 → 构建 → 设计校验 → 运行 → 快速精度比较”。device、host tiling、workspace、AIC/AIV 分工、同步和数据生命周期必须与设计一致。
+- 正式实现必须保留设计阶段确定的跨 work 并行和 Stage 流水；不得用逐 work 串行生产、计算、消费替代正式方案。
+- 理论性能可达不等于初版实测达标。实现阶段优先验证高性能数据通路和生命周期，性能实测与优化留在 validation 阶段。
+- Stage、公式、地址、数据类型、任务映射、缓冲、生产消费关系、同步或 workspace 发生变化时，先更新 `docs/design.md`，再继续实现。
+- 快速精度使用本轮构建产物，只运行失败用例（如有）、受影响 Stage 用例和最小边界精度用例，重叠用例可去重；跨 AIC/AIV 通知和本地 pipe 完成条件必须分别闭合。连续 Vector 操作使用相同 mask 时只设置一次，mask 或有效 lane 改变后重新设置。
+- 首个 Stage 开发、同步调试或精度定位时读取 [开发与定位方法](references/development.md)；临时检查点定位完成后删除。
+- 编译、链接或代码实现失败且根因属于当前实现时，在本阶段修复，并从失败步骤继续执行。
+
+## 准出规则
+
+### 验收
+
+保持 `stage=implementation`，确认设计一致性、构建和快速精度均通过后执行：
+
+```bash
+python scripts/validate_implementation.py \
+  --design <docs/design.md> --workflow <docs/workflow.json> \
+  --validation <docs/validation.md>
+```
+
+该校验统一检查 workflow 状态、设计文档和快速精度记录。
+
+### 状态更新
+
+| 检查结果 | 转移事件 | 下一状态 |
+|---|---|---|
+| 需要定向精度定位 | `precision_problem` | `implementation / precision_debug` |
+| 发现设计问题 | `design_problem` | `design / null` |
+| 发现公式或标杆问题 | `reference_problem` | `reference / null` |
+| 发现接口问题 | `interface_problem` | `interface / null` |
+| 构建和快速精度通过 | `implementation_accepted` | `validation / null` |
+
+通过 `catlass-cpp-interface/scripts/transition_workflow.py` 执行表中的转移；状态更新成功后才进入对应阶段。

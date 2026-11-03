@@ -34,9 +34,6 @@ skills_root="$(cd "$script_dir/../.." && pwd)"
 operator_dir="$PWD/operators/$operator_name"
 workflow_file="$operator_dir/docs/workflow.json"
 workflow_template="$skills_root/catlass-cpp-interface/templates/workflow.json"
-if [ "$algorithm_family" = sparse_flash_mla ]; then
-    workflow_template="$skills_root/catlass-cpp-interface/templates/sparse-flash-mla-workflow.json"
-fi
 
 if [ ! -d "$operator_dir" ]; then
     mkdir -p "$operator_dir/docs" "$operator_dir/reference" "$operator_dir/op_host" "$operator_dir/op_kernel" "$operator_dir/build" "$operator_dir/test" "$operator_dir/scripts"
@@ -77,7 +74,6 @@ validator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(validator)
 state = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 state["algorithm_family"] = sys.argv[4]
-state["workflow_id"] = validator.WORKFLOWS[sys.argv[4]]
 errors = validator.validate_workflow(state)
 if errors:
     raise SystemExit("; ".join(errors))
@@ -86,6 +82,7 @@ PY
 fi
 copy_missing "$skills_root/catlass-cpp-reference/templates/definition.template.json" "$operator_dir/reference/definition.template.json"
 copy_missing "$skills_root/catlass-cpp-reference/templates/precision-policy.json" "$operator_dir/reference/precision-policy.json"
+copy_missing "$skills_root/catlass-cpp-test/templates/validation.md.template" "$operator_dir/docs/validation.md"
 
 "$python_bin" "$script_dir/validate_workflow.py" --workflow "$operator_dir/docs/workflow.json"
 printf 'Initialized %s with %s workflow\n' "$operator_dir" "$algorithm_family"

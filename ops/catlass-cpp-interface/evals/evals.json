@@ -8,8 +8,20 @@
         "max_tokens": 20000,
         "eval_mode": "text"
       },
-      "prompt": "Linear Attention 算子开发中途切换窗口，发现精度问题。应该读取哪些现场文件，从哪个阶段恢复？",
-      "expected_output": "回复应说明先校验 docs/workflow.json 的当前状态，再根据失败证据按主 Skill 恢复表分类恢复：精度错误回 implementation（issue_type=precision_debug），设计问题回 design，标杆问题回 reference，接口或语义变化回 interface；恢复时按表更新状态字段并再次校验。",
+      "prompt": "Linear Attention 算子开发中途切换窗口，当前 workflow 记录为 validation/null，发现精度问题但尚未定位根因。请逐项说明：1）恢复前应读取和校验哪些现场文件；2）分别针对实现、设计、标杆、接口问题，列出转移事件和完整的 stage/issue_type；3）如何统一更新状态；4）回退后如何重新验收并推进后续阶段。只解释规则，不创建文件或实际执行状态转移。",
+      "expected_output": "回复应说明先校验 docs/workflow.json，再按问题归属路由：实现精度问题通过 precision_problem 进入 implementation/precision_debug，设计、标杆和接口问题分别通过 design_problem、reference_problem 和 interface_problem 返回 design/null、reference/null 和 interface/null。状态更新必须使用统一转移脚本，返回后重新验收并顺序经过后续阶段。本用例只评估最终回复的规则说明，不要求创建文件或实际执行状态转移；允许完整命令、表格或上下文清晰表达同一规则，不要求逐字复述，但各分支目标状态和后续验收要求不能省略。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "目标产品与架构归一",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "CATLASS C++ 工作流当前允许哪些目标产品？用户说 A2、A3、A5 或 950 时，target_architecture 应该如何填写？不同 algorithm_family 的支持范围是否不同？只说明归一规则，不修改文件。",
+      "expected_output": "回复应说明 atlas_a2_a3 对应 Atlas A2系列产品和 Atlas A3系列产品，ascend950 对应 Ascend 950PR&950DT系列产品；A2/A3 归一为 atlas_a2_a3，A5/950 归一为 ascend950。所有 algorithm_family 均支持这两个 target_architecture，不按 family 限制架构。",
       "files": [],
       "expectations": []
     },
@@ -20,8 +32,32 @@
         "max_tokens": 20000,
         "eval_mode": "text"
       },
-      "prompt": "请说明 Linear Attention CATLASS 五阶段工作流：按顺序列出各阶段的名称、对应 stage 状态和核心职责，并明确回答 validation 在什么条件下才允许进入 complete（包括 validation_scope 的要求）。只解释流程与门禁，不实际修改工程状态。",
-      "expected_output": "回复应列出五个阶段：01 接口确认、02 标杆生成、03 方案设计、04 算子开发、05 算子测试，说明各阶段的核心职责，并说明只有通过 full 全量验收才能进入 complete。",
+      "prompt": "请说明 Linear Attention CATLASS 五阶段工作流：按顺序列出各阶段的名称、对应 stage 状态和核心职责，说明验证结果和证据应记录在哪个文件，并明确回答 validation 在什么条件下才允许进入 complete。只解释流程与门禁，不实际修改工程状态。",
+      "expected_output": "回复应按顺序列出 01 接口确认、02 标杆生成、03 方案设计、04 算子开发、05 算子测试及其核心职责，说明 01 验收公开接口并确定 target_architecture 后进入 02。验证结果和证据记录在 docs/validation.md；只有 V1 全量验收和 V2 性能验收均通过时才能从 validation/null 进入 complete/null。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "跨架构接口与预留参数",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "同一个 CATLASS C++ 算子同时面向 Atlas A2/A3 和 Ascend 950，公开接口中的预留参数应该如何定义和记录？平台差异是否可以改变公开接口？只解释接口阶段规则。",
+      "expected_output": "回复应说明同一公开接口在不同 SoC 上保持一致，平台差异放在内部实现；预留参数必须在 docs/api.md 明确类型、当前行为、host 校验和后续兼容方式，不能因当前未使用而省略语义。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "接口阶段准出",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "CATLASS C++ 接口确认完成后，进入标杆生成前需要完成哪些准出动作？请按 01 阶段的准出顺序说明：1）接口校验脚本检查的文件及章节内容要求；2）用户需要确认的事项；3）通过哪个事件和脚本在同次转移中写入哪些字段，目标状态是什么，如何避免只更新部分状态；4）进入 02 的完整前提。只解释规则，不创建文件或实际执行校验、状态转移。",
+      "expected_output": "回复应说明先运行 validate_interface.py 校验 docs/api.md 存在，包含非空且无未完成占位的‘接口签名’‘支持范围’‘边界行为’三个章节，再由用户确认接口、支持范围、计算语义、algorithm_family 和 target_architecture；随后使用 interface_accepted 事件同时写入算法家族和目标架构，并原子更新为 reference/null。接口产物验收和状态转移都成功后才进入 02。本用例只评估最终回复的规则说明，不要求创建文件或实际执行命令。允许等价表达：使用 transition_workflow.py 的完整命令同时传入已确认的 --algorithm-family 和 --target-architecture，并说明推进到 reference/null，即可表达由统一脚本完成同次一致状态更新，不要求逐字出现‘原子’；需结合完整准出顺序和失败后重新验收的上下文判断双重前提，不能只截取最后一句。",
       "files": [],
       "expectations": []
     }

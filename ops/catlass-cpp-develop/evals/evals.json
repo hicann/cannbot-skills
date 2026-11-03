@@ -8,8 +8,8 @@
         "max_tokens": 20000,
         "eval_mode": "text"
       },
-      "prompt": "算子开发中发现精度问题，修复迭代期间应该跑哪些用例？什么时候恢复全量测试？",
-      "expected_output": "回复应说明按主 Skill 恢复表进入定向精度迭代（validation_scope=precision_targeted）；迭代中只编译并运行失败用例、受影响 Stage 用例与最小边界精度用例三类；这些用例全部通过后回到全量校验（validation_scope=full），执行全量验证。",
+      "prompt": "算子在 implementation/null 开发中发现实现精度问题，修复迭代期间应该跑哪些用例？什么时候恢复全量测试？请说明进入定向调试的状态转移、迭代用例集合、正式执行方式的约束，以及恢复全量测试的条件和转移事件。这里只解释工作流，不实际修改工程或运行测试。",
+      "expected_output": "回复应说明通过 precision_problem 进入 implementation/precision_debug；正式实现仍保持设计中的跨 work 并行和 Stage 流水，不能用串行路径替代；迭代中构建当前修复，只运行失败用例、受影响 Stage 用例与最小边界精度用例组成的定向集合，重叠用例可去重；设计一致性、构建和这些用例全部通过后执行 implementation_accepted，进入 validation/null 执行全量验证。",
       "files": [],
       "expectations": []
     },
@@ -20,8 +20,32 @@
         "max_tokens": 20000,
         "eval_mode": "text"
       },
-      "prompt": "精度修复时发现是 Stage、workspace 或同步方案设计错误，应该如何恢复？",
-      "expected_output": "回复应说明设计错误需回退到 design（issue_type=design_issue、resume_from=design、validation_scope=full），重新检查 Stage 划分与设计假设；设计通过后回到 implementation 继续定向精度迭代或 full 全量验证，完成全量验收。",
+      "prompt": "精度修复时发现是 Stage、workspace 或同步方案设计错误，应该如何恢复？请说明从返回设计阶段到重新完成全量验收的完整路径，包括设计验收、实现、构建、快速精度验证和状态转移。这里只说明工作流规则，不实际修改工程或执行状态转移。",
+      "expected_output": "回复应说明通过 design_problem 返回 design/null，重新检查 Stage 划分与设计假设；设计验收通过后经 implementation 完成实现和快速精度，再进入 validation 重新执行全量验收。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "逐 Stage 精度与同步定位",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "CATLASS C++ 算子某个 Stage 首次出现精度差异，同时连续 Vector 操作使用同一个 mask。开发阶段应如何定位并处理 mask？请一并说明定位期间正式并行/流水与独立诊断的边界，以及临时检查点和正式构建复验的要求。这里只说明定位方法，不实际修改工程或运行测试。",
+      "expected_output": "回复应读取 references/development.md，固定失败用例、输入、随机种子、代码版本和有效区域，沿设计依赖定位首个差异 Stage，再检查公式、dtype/cast、地址/layout、有效区搬运、同步、空间复用和写回。精度定位必须保持正式跨 work 并行和 Stage 流水，串行实现只能作为独立诊断。临时检查点不能改变生产消费关系，定位后删除并用正式构建复验。连续 Vector 操作使用相同 mask 时预先设置一次，并在 API 支持时关闭自动设置；mask 模式或有效 lane 改变后重新设置。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 11,
+      "title": "实现失败留在当前阶段",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "workflow 处于 implementation/precision_debug，编译失败且根因属于当前代码实现。请分别说明：1）当前 stage、issue_type 和 workflow.json 是否需要更新，代码修复后从哪一步继续；2）若进一步定位为设计、公式或标杆、接口问题，分别使用什么转移事件，目标 stage/issue_type 是什么。只解释规则，不实际修改工程或执行状态转移。",
+      "expected_output": "在当前 implementation/precision_debug 状态修复代码并从失败步骤重新执行，不修改 workflow.json；只有定位为设计、标杆或接口问题时，才执行对应转移。",
       "files": [],
       "expectations": []
     }

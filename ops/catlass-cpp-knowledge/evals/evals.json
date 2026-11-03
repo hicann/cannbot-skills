@@ -6,11 +6,12 @@
       "id": 1,
       "title": "设计阶段读取 SparseFlashMLA 家族知识",
       "config": {"max_tokens": 20000, "eval_mode": "text"},
-      "prompt": "正在设计 sparse_flash_mla 算子，插件依赖已安装。请说明如何查询这个家族的 Operator 卡并读取完整正文；查询返回 draft 卡时应该如何处理？只需给出步骤和命令，不执行。",
-      "expected_output": "从本 Skill 目录执行 scripts/record_knowledge.py query --project-root <workspace> --type operators --family sparse_flash_mla --compact，再把返回的相对 path 原样传给 get --path。说明显式家族查询包括 stable 和 draft，保留并核对 status，draft 内容需要结合冻结 contract、固定源码和实际证据判断；不能只读取摘要。",
+      "prompt": "正在为 Atlas A2系列产品设计 sparse_flash_mla 算子，workflow.json 已冻结 target_architecture=atlas_a2_a3，插件依赖已安装。请说明如何查询这个家族和架构的 Operator 卡并读取完整正文；查询返回 draft 卡时应该如何处理？只需给出步骤和命令，不执行。",
+      "expected_output": "从本 Skill 目录执行 scripts/record_knowledge.py query --project-root <workspace> --type operators --family sparse_flash_mla --arch atlas_a2_a3 --compact，再把返回的相对 path 原样传给 get --path。说明显式家族查询包括 stable 和 draft，保留并核对 status，draft 内容需要结合冻结 contract、固定源码和实际证据判断；不能只读取摘要。",
       "files": [],
       "expectations": [
         {"type": "contains", "pattern": "--family sparse_flash_mla"},
+        {"type": "contains", "pattern": "--arch atlas_a2_a3"},
         {"type": "contains", "pattern": "--path"},
         {"type": "contains", "pattern": "draft"}
       ]
@@ -39,6 +40,34 @@
         {"type": "contains", "pattern": "--family flash_attention"},
         {"type": "contains", "pattern": "--family flash_attention_grad"},
         {"type": "contains", "pattern": "get"}
+      ]
+    },
+    {
+      "id": 4,
+      "title": "按目标架构路由 Stage 规则",
+      "config": {"max_tokens": 20000, "eval_mode": "text"},
+      "prompt": "CATLASS C++ 进入方案设计，workflow.json 已冻结 target_architecture。请说明如何查询并读取芯片 Stage 设计规则：分别给出 atlas_a2_a3 和 ascend950 对应的规则路径及查询命令，说明 --compact 是否影响架构过滤、如何用 get 核对完整正文；如何保证只读取与目标架构匹配的完整规则文件，不把另一架构规则混入设计？如果目标架构未知应如何处理？只给出步骤和命令，不执行。",
+      "expected_output": "先读取 workflow.json 的 target_architecture；执行 scripts/record_knowledge.py query --project-root <workspace> --type guides --arch <target_architecture> --text \"Stage 设计规则\" --compact。atlas_a2_a3 应返回 guides/stage_design_atlas_a2_a3.md，ascend950 应返回 guides/stage_design_ascend950.md。再将返回的相对 path 原样传给 get --project-root <workspace> --path，读取完整正文后再开始设计。不能用另一架构文件补齐或混用规则，未知架构不能兜底。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "--type guides"},
+        {"type": "contains", "pattern": "--arch"},
+        {"type": "contains", "pattern": "stage_design_atlas_a2_a3.md"},
+        {"type": "contains", "pattern": "stage_design_ascend950.md"},
+        {"type": "contains", "pattern": "target_architecture"}
+      ]
+    },
+    {
+      "id": 5,
+      "title": "目标架构没有家族知识时不跨架构回退",
+      "config": {"max_tokens": 12000, "eval_mode": "text"},
+      "prompt": "正在为 Ascend 950PR&950DT系列产品设计 sparse_flash_mla，workflow.json 已冻结 target_architecture=ascend950。使用 family 和 arch 查询 Operator 卡返回 0 条，但去掉 --arch 后能看到 Atlas A2/A3 卡。下一步应怎么做？只说明规则，不修改文件。",
+      "expected_output": "保持 --family sparse_flash_mla --arch ascend950 的查询边界；0 条表示当前知识仓没有该架构的匹配家族知识，不能去掉 --arch，也不能使用 Atlas A2/A3 卡兜底。继续依据冻结的接口和标杆、Ascend 950 芯片 Stage 规则、目标版本 CATLASS/CANN API 与源码完成设计，并记录知识缺口。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "--arch ascend950"},
+        {"type": "contains", "pattern": "不能"},
+        {"type": "contains", "pattern": "Atlas A2/A3"}
       ]
     }
   ]

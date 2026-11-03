@@ -4,127 +4,184 @@
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
 from __future__ import annotations
 
+import json
 import re
 import sys
+import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "catlass-cpp-design/scripts"))
 
-from validate_design import REQUIRED_SECTIONS, validate, workflow_alignment_errors
-
-
-TEMPLATE = ROOT / "catlass-cpp-design/templates/design.md.template"
-STAGE_BODY = """公式：score[32,32] = q[32,16] @ k[32,16]^T。
-输入 shape=[32,16]，dtype=FP16，layout=ND；输出 dtype=FP32。
-生命周期：q/k 在 MMAD 读完后释放，score 保留到消费者读完。
-task/head 映射：每个 head 分配给一个 AIC 及其两个 AIV。
-执行顺序：搬入 q/k，执行矩阵乘，写出 score，通知消费方。
-tail 使用有效行 mask，varlen partial 和空任务按同步协议闭合 token。
-同步依赖：Fixpipe 写出后发送 score_ready flag，复用前等待 score_free。
-地址布局如下，并通过首次写入、最后消费和释放条件闭合生命周期。
-
-| 存储 | 绝对半开区间 | tensor/slot/bank | shape/dtype/layout | 单份/总大小与对齐 | 首次写入 | 最后消费 | 释放/复用条件 |
-|---|---|---|---|---|---|---|---|
-| L1 | [0,2048) | q/k slot0 | [32,16]/FP16/ND | 2 KiB/2 KiB/32 B | MTE2 搬入 | MTE1 末次读取 | MMAD 装载后释放 |
-| UB | [0,4096) | score bank0 | [32,32]/FP32/ND | 4 KiB/4 KiB/32 B | Fixpipe 写入 | AIV 末次读取 | score_free 后复用 |
-"""
-SYNC_CODE = """```text
-Initialize():
-  allocate event flag Mutex resources and initialize score_free for every slot
-for work in work_items:
-  if work is tail: use valid rows
-  if work is empty: participate in paired notification without data access
-  Producer(slot):
-    wait score_free[slot]
-    write score[slot]
-    set score_ready[slot] flag
-  Consumer(slot):
-    wait score_ready[slot] flag
-    read score[slot]
-    set score_free[slot]
-DrainAndRelease():
-  wait final score_free state and drain all slots
-  release event flag Mutex resources
-```
-"""
-STAGE_ROW = "| Stage 0 | AIC owner | score=q@k.T | 无前驱，无并行Stage | q/k GM | score GM | 每head一个work，共8个 | L1与UB |"
-SYNC_RESOURCE_ROW = (
-    "| score_ready/free | AIC-AIV跨核 | CrossCore双向 | score slot | 2组/free初始可用 | "
-    "producer set ready，consumer wait ready并set free | "
-    "free后复用，最终排空后释放 | 不超过平台flag上限 |"
+from validate_design import (
+    ARCHITECTURE_STAGE_RULES,
+    REQUIRED_SECTIONS,
+    main,
+    validate,
+    workflow_alignment_errors,
 )
 
 
-def valid_design() -> str:
-    return f"""# Score 设计
-`workflow_id`: `catlass-linear-attention-v1`
-`design_rule_version`: `V1`
-`target_architecture`: `atlas_a2_a3`
-开发期实测证据统一写入 docs/validation.md。
-## 1. 目标与数学语义
-### 1.1 目标、融合范围与目标场景
-按 docs/api.md 的接口融合 score 计算，以纯 PyTorch CPU 标杆验收。
-- 目标 SoC：Ascend910B。
-- CATLASS 架构标识：target_architecture=atlas_a2_a3，CATLASS_ARCH=2201，ArchTag=Arch::AtlasA2。
-- Vector 执行模型：MemBase，使用 TPipe/TQue/TBuf 分段流水。
-- Cube→Vector 数据路径：L0C -> Fixpipe -> GM -> UB。
-- Vector→Cube 数据路径：UB -> MTE3 -> GM workspace -> MTE2 -> L1。
-| 模型 case | 关键 shape/属性 | 同口径基线 | 目标值 | 测量配置与统计口径 | 可达性分析 |
-|---|---|---|---|---|---|
-| case0 | B=1,H=8,S=32,D=16 | 20 us | 16 us | 预热10次后取50次中位数 | 搬运与计算可重叠 |
-### 1.2 API 契约引用与内部映射
-公开接口和 shape 以 docs/api.md 为唯一契约；q/k 映射到 kernel 参数，score 写正式 GM 输出。
-### 1.3 完整数学语义与数值边界
-score[32,32] = q[32,16] @ k[32,16]^T，与 CPU 标杆公式一致。
-| 中间量/高风险运算 | CPU 标杆公式 | 实现运算序列 | 计算 dtype | 输入/中间值范围 | NaN/Inf 风险 | mask/cast/保护时机 |
-|---|---|---|---|---|---|---|
-| score | q @ k.T | MTE2→MMAD→Fixpipe | FP32 | 有限 FP16 输入与 FP32 累加 | 输入有限时无非有限值 | tail 在 MMAD 前 mask，写出时 cast |
-## 2. Stage 总览与完整详设
-### 2.1 全局符号、任务域与模型 case 代入
-| 符号 | 定义 | 单位/取值域 | 来源或约束 |
-|---|---|---|---|
-| S | 序列长度 | token/正整数 | docs/api.md |
-| CG | 每个 work 的 head 数 | head/1 | 容量与负载推导 |
-| 模型 case | Nbase | CG | Nwork | blockDim | wave | 每核任务范围 | 尾 work/尾 head |
-|---|---|---|---|---|---|---|---|
-| case0 | 8 | 1 | 8 | 8 | 1 | 每核1个work | 无尾work，head完整 |
-work_id 通过 grid-stride 映射到 batch/chunk/head，AIC/AIV owner 地址不重叠。
-可达 TilingKey=0，适用于 FP16 完整块和 tail，空任务闭合通知。
-### 2.2 依赖图与 Stage 结果
-q/k -> Stage 0 -> score，依赖、生命周期、执行单元和 AIC/AIV 映射均在表中定义。
-| Stage | 执行单元/owner | 功能与公式 | 前驱/可并行 Stage | 输入来源 | 输出落点 | 任务映射/任务数 | 主要空间 |
-|---|---|---|---|---|---|---|---|
-{STAGE_ROW}
-| 数据 | shape/dtype/layout | 生产 Stage/owner | 消费 Stage/最后消费者 | 存放位置与份数依据 | 释放/复用条件 |
-|---|---|---|---|---|---|
-| score | [32,32]/FP32/ND | Stage 0/AIC | AIV/最后校验消费者 | UB slot，每活跃head一份 | score_free 后复用 |
-### 2.3 Stage 0：计算 score
-{STAGE_BODY}
-### 2.4 数据搬运汇总
-| tensor | GM 读/写次数 | 每次/每 work 字节数 | GM→L1/UB 路径 | L1/UB/L0 驻留与复用 | 批量搬运/stride | L2 Cache 策略 | 最后消费者 |
-|---|---|---|---|---|---|---|---|
-| q/k | 各读1次 | 每work各1 KiB | GM→L1→L0 | L1驻留到MMAD装载结束 | 连续二维搬运/无stride | 一次性输入关闭L2 | Stage 0 MTE1 |
-### 2.5 Stage 间同步方案
-| 数据边 | 生产 Stage/owner/pipe | 消费 Stage/owner/pipe | 存放位置/slot | ready 条件 | free 条件 | 空任务参与方式 |
-|---|---|---|---|---|---|---|
-| score | Stage 0/AIC/PIPE_FIX | Stage 0/AIV/PIPE_V | UB/score slot | Fixpipe写完set ready | AIV读完set free | 只通知不访问数据 |
-| 同步资源 | 所属核/范围 | 类型与方向 | 保护的数据和 slot | 数量/初始状态 | set/wait 或 lock/unlock 顺序 | 复用/释放条件 | 硬件上限依据 |
-|---|---|---|---|---|---|---|---|
-{SYNC_RESOURCE_ROW}
-{SYNC_CODE}
-### 2.6 Kernel 组件与调用
-按目标平台选择 BlockMmad；Host 通过直调入口启动。
-### 2.7 Workspace 总量
-本算子不使用外部中间区，明确设置 workspace_size=0；框架保留空间不属于算子中间量。
+TEMPLATE = ROOT / "catlass-cpp-design/templates/design.md.template"
+STAGE_BODY = """```text
+score[32,32] = q[32,16] @ k[32,16]^T
+```
+
+**本 Stage 产生/写出**
+
+| 对象 | 存储位置 | 分配地址 | L2Cache | 功能 |
+|---|---|---|---|---|
+| `score` | GM（用户 workspace） | `score_slot+work*4 KiB` | 使能 | shape=`[32,32]` FP32；物理2份、实际1份；S0 FIX写入，S0 AIV最后消费；`score_free` 后复用 |
+
+**其它 Stage 提供、当前 Stage 读取或需保护**
+
+| 对象 | 存储位置 | 分配地址 | L2Cache | 功能 |
+|---|---|---|---|---|
+| `q/k` | L1 | `[0,1) / [1,2) KiB` | 使能 | 各shape=`[32,16]` FP16；各1份；API输入搬入，MMAD末次读取后复用 |
+
+**本 Stage 临时/固定**
+
+| 对象 | 存储位置 | 分配地址 | L2Cache | 功能 |
+|---|---|---|---|---|
+| `qTile` | L0A | `L0A[0,1) KiB` | 不涉及 | shape=`[32,16]` FP16；1份；MTE1写入，MMAD末次读取后复用 |
+| `kTile` | L0B | `L0B[0,1) KiB` | 不涉及 | shape=`[16,32]` FP16；1份；MTE1写入，MMAD末次读取后复用 |
+| `scoreAcc` | L0C | `L0C[0,4) KiB` | 不涉及 | shape=`[32,32]` FP32；1份；MMAD写入，FIX末次读取后复用 |
 """
+
+ATLAS_A2_A3_RULE_ROWS = """| R01 | 已应用 | 第4章 S0 以 Cube/Vector 混合计算类型实现 |
+| R02 | 已应用 | 第3章和第4章将完整依赖链划为 S0 |
+| R03 | 已应用 | 第2章按 logical core 连续推进多个 work |
+| R04 | 已应用 | 第4章 score 由 AIC 生产并由 AIV 消费 |
+| R05 | 不适用 | 当前方案没有同一执行单元跨 Stage 复用的中间结果 |
+| R06 | 已应用 | 第4章和第5章为 score 配置双槽轮转 |
+| R07 | 已应用 | 第4章列出 L1、L0A、L0B、L0C 的容量区间 |
+| R08 | 已应用 | 第4章对 GM score relay 明确启用 L2 Cache |
+| R09 | 已应用 | 第1章固定 FP32 累加和跨 Stage 交接类型 |"""
+
+ASCEND950_RULE_ROWS = """| R01 | 已应用 | 第4章 S0 以 Cube/Vector 混合计算类型实现 |
+| R02 | 已应用 | 第3章和第4章将完整依赖链划为 S0 |
+| R03 | 不适用 | 当前 Vector 计算没有可合并的 VF 子流程 |
+| R04 | 已应用 | 第2章按 logical core 连续推进多个 work |
+| R05 | 已应用 | 第4章 score 由 AIC 生产并由 AIV 消费 |
+| R06 | 不适用 | 当前方案没有同一执行单元跨 Stage 驻留的中间结果 |
+| R07 | 已应用 | 第4章和第5章为 score 配置双槽轮转 |
+| R08 | 已应用 | 第4章列出 L1、L0A、L0B、L0C 的容量区间 |
+| R09 | 已应用 | 第4章对 GM score relay 明确启用 L2 Cache |
+| R10 | 已应用 | 第1章固定 FP32 累加和跨 Stage 交接类型 |"""
+
+
+def valid_design() -> str:
+    return f"""# Score Atlas A2系列产品设计方案
+
+## 1. 目标
+
+主模型 case：B=1,H=8,S=32,D=16。
+性能目标：BasicInfo Task Duration < 16 us，预热10次后取50次中位数。
+
+### 1.1 数据类型
+
+| 范围 | 数据 | 数据类型 |
+|---|---|---|
+| API 输入 | q/k | FP16 |
+| API 输出 | score | FP32 |
+| Vector 计算 | mask | FP32 |
+| Cube 输入与累加 | q/k；scoreAcc | FP16；FP32 |
+| 跨 Stage 交接 | score | FP32 |
+
+### 1.2 理论性能上限分析
+
+| 约束来源 | 工作量/数据量 | 峰值或带宽依据 | 理论最低耗时 | 重叠/依赖关系 | 证据 |
+|---|---|---|---:|---|---|
+| AIC/Cube | q/k MMAD | AIC 峰值 | 4 us | 与 AIV 重叠 | A2 计算峰值 |
+| AIV/Vector | mask vector | AIV 峰值 | 3 us | 与 AIC 重叠 | A2 Vector 峰值 |
+| GM/MTE | score relay | GM 带宽 | 2 us | 与计算重叠 | A2 GM 带宽 |
+| 必要依赖链 | score 生产到消费 | ready/free | 5 us | 不可重叠部分 | CrossCore 依赖 |
+
+理论最低耗时：`5 us`。
+目标耗时：`16 us`。
+理论可达性：`理论可达`。
+
+## 2. 变量与任务映射
+
+| 符号 | 含义 |
+|---|---|
+| `S` | 序列长度 |
+| `CG` | 每个 logical core 同时推进的 head 数，本方案为1 |
+
+```text
+work = logicalCore + iteration*blockDim
+head = work mod H
+```
+
+每个 core 连续处理分配到的 work，尾任务由 `head < H` 保护。
+
+## 3. Stage 总览
+
+| Stage | 执行单元 | 主要动作 | 并行与流水关系 | 结束条件 |
+|---|---|---|---|---|
+| S0 | AIC+AIV | 计算并消费 score | 多 work 并行，流水推进 | `score_free` |
+
+### 3.1 芯片规则应用检查
+
+| 规则 | 结论 | 设计证据/不适用原因 |
+|---|---|---|
+{ATLAS_A2_A3_RULE_ROWS}
+
+## 4. Stage 详细设计
+
+### S0 · Cube/Vector：计算并消费 score
+
+{STAGE_BODY}
+
+## 5. 用户额外 workspace
+
+只计算算子执行期间额外占用的 GM，不包含 API 输入、最终输出、片上空间和固定系统 workspace。
+
+```text
+scoreBytes    = blockDim * 2 * 4 KiB
+workspace_size = Align512(scoreBytes)
+```
+
+| 区域 | 数量与单份大小 | 主模型 case 大小 |
+|---|---|---:|
+| score relay | `blockDim*2` 个槽，每槽 `4 KiB` | `0.065536 MB` |
+| 用户额外 workspace | 上述区域按 `512 B` 对齐 | **`0.065536 MB`** |
+
+容量只由并发 logical core 数和槽深度决定，不随序列长度线性增长；`score_free` 后轮转复用。
+
+## 6. 跨 Stage 同步契约
+
+模式0x2覆盖一个AIC及两个AIV；空任务仍参与同代事件。
+
+| 数据边 | Producer | Consumer | ready | free/复用条件 | 本地 pipe 完成 | 回绕/退出处理 |
+|---|---|---|---|---|---|---|
+| score relay | AIC/FIX | AIV/MTE2 | `score_ready` | `score_free` 后复用 | FIX 完成、MTE2 完成 | 空任务配对，退出 drain |
+
+执行顺序：
+
+```text
+AIC: wait score_free -> MMAD/FIX -> set score_ready
+AIV: wait score_ready -> consume score -> set score_free
+```
+"""
+
+
+def a5_design() -> str:
+    return (
+        valid_design()
+        .replace("Atlas A2系列产品", "Ascend 950PR&950DT系列产品")
+        .replace(ATLAS_A2_A3_RULE_ROWS, ASCEND950_RULE_ROWS)
+    )
 
 
 class DesignValidatorTests(unittest.TestCase):
@@ -132,368 +189,427 @@ class DesignValidatorTests(unittest.TestCase):
         errors = validate(text)
         self.assertTrue(any(message in error for error in errors), errors)
 
-    def test_complete_two_chapter_design_passes(self) -> None:
+    def test_complete_six_chapter_design_passes(self) -> None:
         self.assertEqual([], validate(valid_design()))
 
-    def test_template_and_validator_require_exactly_two_chapters(self) -> None:
+    def test_template_and_validator_require_six_chapters(self) -> None:
         titles = re.findall(
             r"^## \d+\. (.+)$", TEMPLATE.read_text(encoding="utf-8"), re.MULTILINE
         )
         self.assertEqual(list(REQUIRED_SECTIONS), titles)
-        self.assertEqual(["目标与数学语义", "Stage 总览与完整详设"], titles)
+        template = TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("### 3.1 芯片规则应用检查", template)
+        self.assertIn("{stage_rule_decision}", template)
 
     def test_extra_or_missing_top_level_chapter_fails(self) -> None:
         self.assert_fails_with(
-            valid_design() + "\n## 3. 风险\n内容\n", "exactly the two"
+            valid_design() + "\n## 7. 附录\n内容\n", "exactly the six"
         )
         self.assert_fails_with(
-            valid_design().replace("## 1. 目标与数学语义", "目标与数学语义"),
-            "expected one required section",
+            valid_design().replace("## 1. 目标", "目标", 1), "expected one"
         )
 
-    def test_heading_in_code_does_not_count(self) -> None:
+    def test_official_product_title_and_dtype_table_are_required(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace(
+                "# Score Atlas A2系列产品设计方案", "# Score 设计方案"
+            ),
+            "official product series",
+        )
+        self.assert_fails_with(
+            valid_design().replace("### 1.1 数据类型", "### 1.1 类型"), "数据类型"
+        )
+
+    def test_theoretical_bound_accepts_initial_estimate_above_target(self) -> None:
         text = valid_design().replace(
-            "## 1. 目标与数学语义", "```text\n## 1. 目标与数学语义\n```"
-        )
-        self.assert_fails_with(text, "expected one required section")
-
-    def test_metadata_and_evidence_boundary_are_required(self) -> None:
-        self.assert_fails_with(
-            valid_design().replace("`workflow_id`: `catlass-linear-attention-v1`", ""),
-            "workflow_id",
-        )
-        self.assert_fails_with(
-            valid_design().replace(
-                "`design_rule_version`: `V1`", "`design_rule_version`: `V2`"
-            ),
-            "design_rule_version",
-        )
-        self.assert_fails_with(
-            valid_design().replace("docs/validation.md", "validation record"),
-            "docs/validation.md",
-        )
-
-        self.assert_fails_with(
-            valid_design().replace("`target_architecture`: `atlas_a2_a3`", ""),
-            "target_architecture",
-        )
-
-    def test_architecture_specific_paths_are_validated(self) -> None:
-        self.assert_fails_with(
-            valid_design().replace("L0C -> Fixpipe -> GM -> UB", "L0C -> AIV UB"),
-            "A2/A3 Cube→Vector",
-        )
-        self.assert_fails_with(
-            valid_design().replace(
-                "Vector 执行模型：MemBase", "Vector 执行模型：RegBase/VF"
-            ),
-            "A2/A3 Vector execution model",
-        )
-        a5 = (
-            valid_design()
-            .replace(
-                "`target_architecture`: `atlas_a2_a3`",
-                "`target_architecture`: `ascend950`",
-            )
-            .replace(
-                "target_architecture=atlas_a2_a3，CATLASS_ARCH=2201，ArchTag=Arch::AtlasA2",
-                "target_architecture=ascend950，CATLASS_ARCH=3510，ArchTag=Arch::Ascend950",
-            )
-            .replace(
-                "Vector 执行模型：MemBase，使用 TPipe/TQue/TBuf 分段流水",
-                "Vector 执行模型：RegBase/VF，完整公式使用一次 VF",
-            )
-            .replace("L0C -> Fixpipe -> GM -> UB", "L0C -> Fixpipe -> AIV UB")
-            .replace(
-                "UB -> MTE3 -> GM workspace -> MTE2 -> L1",
-                "AIV UB -> AIC L1",
-            )
-        )
-        self.assertEqual([], validate(a5))
-        no_vector = (
-            valid_design()
-            .replace(
-                "Vector 执行模型：MemBase，使用 TPipe/TQue/TBuf 分段流水",
-                "Vector 执行模型：不适用：本算子没有 Vector Stage",
-            )
-            .replace(
-                "Cube→Vector 数据路径：L0C -> Fixpipe -> GM -> UB",
-                "Cube→Vector 数据路径：不适用：不存在 Cube 到 Vector 数据边",
-            )
-            .replace(
-                "Vector→Cube 数据路径：UB -> MTE3 -> GM workspace -> MTE2 -> L1",
-                "Vector→Cube 数据路径：不适用：不存在 Vector 到 Cube 数据边",
-            )
-        )
-        self.assertEqual([], validate(no_vector))
-
-    def test_design_and_workflow_architecture_must_match(self) -> None:
-        marker = {
-            "workflow_id": "catlass-linear-attention-v1",
-            "target_architecture": "ascend950",
-        }
-        errors = workflow_alignment_errors(valid_design(), marker)
-        self.assertTrue(any("does not match" in error for error in errors), errors)
-
-    def test_sparse_design_identity_and_architecture_match_marker(self) -> None:
-        marker = {
-            "algorithm_family": "sparse_flash_mla",
-            "workflow_id": "catlass-sparse-flash-mla-v1",
-            "target_architecture": "atlas_a2_a3",
-        }
-        design = valid_design().replace(
-            "catlass-linear-attention-v1", "catlass-sparse-flash-mla-v1"
-        )
-        self.assertEqual([], validate(design))
-        self.assertEqual([], workflow_alignment_errors(design, marker))
-        self.assertTrue(
-            any(
-                "workflow_id does not match" in error
-                for error in workflow_alignment_errors(valid_design(), marker)
-            )
-        )
-        self.assertTrue(
-            any(
-                "atlas_a2_a3 only" in error
-                for error in workflow_alignment_errors(
-                    design, {**marker, "target_architecture": "ascend950"}
-                )
-            )
-        )
-
-    def test_bsa_design_identity_and_architecture_match_marker(self) -> None:
-        marker = {
-            "algorithm_family": "block_sparse_attention",
-            "workflow_id": "catlass-block-sparse-attention-arch22-v1",
-            "target_architecture": "atlas_a2_a3",
-        }
-        design = valid_design().replace(
-            "catlass-linear-attention-v1", marker["workflow_id"]
-        )
-        self.assertEqual([], validate(design))
-        self.assertEqual([], workflow_alignment_errors(design, marker))
-        self.assertTrue(
-            workflow_alignment_errors(
-                design,
-                {
-                    **marker,
-                    "workflow_id": "catlass-sparse-flash-mla-v1",
-                },
-            )
-        )
-        self.assertTrue(
-            any(
-                "atlas_a2_a3 only" in error
-                for error in workflow_alignment_errors(
-                    design, {**marker, "target_architecture": "ascend950"}
-                )
-            )
-        )
-
-    def ascend950_design(self, workflow_id: str) -> str:
-        return (
-            valid_design()
-            .replace("`target_architecture`: `atlas_a2_a3`", "`target_architecture`: `ascend950`")
-            .replace(
-                "target_architecture=atlas_a2_a3，CATLASS_ARCH=2201，ArchTag=Arch::AtlasA2",
-                "target_architecture=ascend950，CATLASS_ARCH=3510，ArchTag=Arch::Ascend950",
-            )
-            .replace(
-                "Vector 执行模型：MemBase，使用 TPipe/TQue/TBuf 分段流水",
-                "Vector 执行模型：RegBase/VF，完整公式使用一次 VF",
-            )
-            .replace("L0C -> Fixpipe -> GM -> UB", "L0C -> Fixpipe -> AIV UB")
-            .replace("UB -> MTE3 -> GM workspace -> MTE2 -> L1", "AIV UB -> AIC L1")
-            .replace("catlass-linear-attention-v1", workflow_id)
-        )
-
-    def test_gradient_family_design_identity_and_architecture_match_marker(self) -> None:
-        for family, workflow_id in (
-            ("block_sparse_attention_grad", "catlass-block-sparse-attention-grad-v1"),
-            ("flash_attention_grad", "catlass-flash-attention-grad-v1"),
-        ):
-            with self.subTest(family=family):
-                marker = {
-                    "algorithm_family": family,
-                    "workflow_id": workflow_id,
-                    "target_architecture": "ascend950",
-                }
-                design = self.ascend950_design(workflow_id)
-                self.assertEqual([], validate(design))
-                self.assertEqual([], workflow_alignment_errors(design, marker))
-                self.assertTrue(
-                    any(
-                        "workflow_id does not match" in error
-                        for error in workflow_alignment_errors(
-                            design,
-                            {**marker, "workflow_id": "catlass-sparse-flash-mla-v1"},
-                        )
-                    )
-                )
-                self.assertTrue(
-                    any(
-                        "ascend950 only" in error
-                        for error in workflow_alignment_errors(
-                            design, {**marker, "target_architecture": "atlas_a2_a3"}
-                        )
-                    )
-                )
-
-    def test_fa_design_identity_and_architecture_match_marker(self) -> None:
-        marker = {
-            "algorithm_family": "flash_attention",
-            "workflow_id": "catlass-flash-attention-v1",
-            "target_architecture": "atlas_a2_a3",
-        }
-        design = valid_design().replace(
-            "catlass-linear-attention-v1", "catlass-flash-attention-v1"
-        )
-        self.assertEqual([], validate(design))
-        self.assertEqual([], workflow_alignment_errors(design, marker))
-        self.assertTrue(
-            any(
-                "workflow_id does not match" in error
-                for error in workflow_alignment_errors(
-                    design,
-                    {**marker, "workflow_id": "catlass-flash-attention-grad-v1"},
-                )
-            )
-        )
-        self.assertTrue(
-            any(
-                "atlas_a2_a3 only" in error
-                for error in workflow_alignment_errors(
-                    design, {**marker, "target_architecture": "ascend950"}
-                )
-            )
-        )
-
-    def test_model_case_and_tiling_require_quantified_evidence(self) -> None:
-        row = "| case0 | 8 | 1 | 8 | 8 | 1 | 每核1个work | 无尾work，head完整 |"
-        self.assert_fails_with(
-            valid_design().replace(row, "|  |  |  |  |  |  |  |  |"),
-            "model case scheduling",
-        )
-        self.assert_fails_with(
-            valid_design().replace("TilingKey=0", "dispatch key=0"), "TilingKey"
-        )
-
-    def test_each_stage_requires_a_structured_address_map(self) -> None:
-        text = re.sub(
-            r"(?s)\n\| 存储 \| 绝对半开区间 .*?\n\| UB \| \[0,4096\).*?\n",
-            "\n地址将在实现阶段决定。\n",
-            valid_design(),
-            count=1,
-        )
-        self.assert_fails_with(text, "missing structured address map")
-
-    def test_data_movement_and_sync_tables_require_complete_rows(self) -> None:
-        movement = "| q/k | 各读1次 | 每work各1 KiB | GM→L1→L0 | L1驻留到MMAD装载结束 | 连续二维搬运/无stride | 一次性输入关闭L2 | Stage 0 MTE1 |"
-        sync_resource = SYNC_RESOURCE_ROW
-        for row, label, count in (
-            (movement, "data movement summary", 8),
-            (sync_resource, "synchronization resources", 8),
-        ):
-            with self.subTest(label=label):
-                self.assert_fails_with(
-                    valid_design().replace(row, "|" + "  |" * count), label
-                )
-
-    def test_sync_pseudocode_requires_full_lifecycle(self) -> None:
-        for phrase, expected in (
-            ("if work is tail: use valid rows", "tail|partial|尾"),
-            (
-                "if work is empty: participate in paired notification without data access",
-                "empty|空任务|无效任务",
-            ),
-            ("release event flag Mutex resources", r"release\s+"),
-        ):
-            with self.subTest(phrase=phrase):
-                self.assert_fails_with(
-                    valid_design().replace(phrase, "compute current work"), expected
-                )
-
-    def test_workspace_zero_is_valid_and_unquantified_workspace_fails(self) -> None:
-        self.assertEqual([], validate(valid_design()))
-        self.assert_fails_with(
-            valid_design().replace("workspace_size=0", "workspace is decided later"),
-            "workspace total",
-        )
-
-    def test_nonzero_workspace_requires_table_and_total_formula(self) -> None:
-        zero = "本算子不使用外部中间区，明确设置 workspace_size=0；框架保留空间不属于算子中间量。"
-        nonzero = """| Workspace 区域 | offset/索引公式 | record/bank 数 | 单份大小与对齐 | 总量贡献 | 生产者与最后消费者 | 释放条件 |
-|---|---|---|---|---|---|---|
-| score | block_idx*8192 | blockDim 个 record | 8 KiB/512 B | blockDim*8192 | AIV生产/AIC最后消费 | free 后释放 |
-workspace_size = AlignUp(blockDim*8192, 512)。"""
-        self.assertEqual([], validate(valid_design().replace(zero, nonzero)))
-        self.assert_fails_with(
-            valid_design().replace(
-                zero, nonzero.replace("workspace_size =", "total =")
-            ),
-            "define workspace_size",
-        )
-
-    def test_workspace_must_be_final_subsection(self) -> None:
-        text = valid_design().replace(
-            "### 2.7 Workspace 总量",
-            "### 2.7 Workspace 总量\nworkspace_size=0\n### 2.8 附加说明",
-        )
-        self.assert_fails_with(text, "final Stage detail subsection")
-
-    def test_multiple_stages_and_summary_rows_pass(self) -> None:
-        stage_one = "| Stage 1 | AIV owner | 校验score | Stage 0 | score UB | score GM | 每head一个work，共8个 | UB |"
-        text = (
-            valid_design()
-            .replace(STAGE_ROW, f"{STAGE_ROW}\n{stage_one}")
-            .replace(
-                "### 2.4 数据搬运汇总",
-                f"### 2.4 Stage 1：写出 score\n{STAGE_BODY}\n### 2.5 数据搬运汇总",
-            )
+            "理论最低耗时：`5 us`。\n目标耗时：`16 us`。",
+            "理论最低耗时：`5 us`。\n目标耗时：`16 us`。\n工程初版估算：`40 us`。",
         )
         self.assertEqual([], validate(text))
 
-    def test_stage_summary_must_cover_every_detailed_stage(self) -> None:
-        text = valid_design().replace(
-            "### 2.4 数据搬运汇总",
-            f"### 2.4 Stage 1：写出 score\n{STAGE_BODY}\n### 2.5 数据搬运汇总",
-        )
-        self.assert_fails_with(text, "Stage result summary missing row for Stage 1")
-
-    def test_stage_content_cannot_come_from_a_sibling_section(self) -> None:
+    def test_theoretical_bound_rejects_target_below_lower_bound(self) -> None:
         self.assert_fails_with(
-            valid_design().replace(STAGE_BODY, f"### 2.25 地址附注\n{STAGE_BODY}"),
-            "Stage section",
+            valid_design().replace("理论最低耗时：`5 us`。", "理论最低耗时：`20 us`。"),
+            "below the theoretical minimum",
         )
 
-    def test_hidden_content_is_not_evidence(self) -> None:
+    def test_stage_parallel_relation_is_required(self) -> None:
+        text = valid_design().replace("多 work 并行，流水推进", "逐 work 串行执行")
+        self.assert_fails_with(text, "parallelism or overlap")
+
+    def test_final_design_requires_rule_check_but_not_workflow_metadata(
+        self,
+    ) -> None:
+        text = valid_design()
+        for term in (
+            "workflow_id",
+            "design_rule_version",
+            "target_architecture",
+            "TilingKey",
+        ):
+            self.assertNotIn(term, text)
+        for rule in ARCHITECTURE_STAGE_RULES["atlas_a2_a3"]:
+            self.assertIn(f"| {rule} |", text)
+        self.assertNotIn("| R10 |", text)
+        self.assertIn("| R10 |", a5_design())
+        self.assertEqual([], validate(text))
+        self.assertEqual([], validate(a5_design()))
+
+    def test_rule_application_check_rejects_missing_duplicate_or_extra_rule(
+        self,
+    ) -> None:
+        text = valid_design()
+        start = text.index("### 3.1 芯片规则应用检查")
+        end = text.index("## 4. Stage 详细设计")
         self.assert_fails_with(
-            valid_design().replace(STAGE_BODY, f"<!--\n{STAGE_BODY}\n-->"),
-            "Stage section",
+            text[:start] + text[end:], "missing chip rule application table"
+        )
+        r03 = "| R03 | 已应用 | 第2章按 logical core 连续推进多个 work |"
+        self.assert_fails_with(
+            valid_design().replace(f"{r03}\n", ""),
+            "missing chip rule application decision: R03",
+        )
+        self.assert_fails_with(
+            valid_design().replace(r03, f"{r03}\n{r03}"),
+            "duplicate chip rule application decision: R03",
+        )
+        self.assert_fails_with(
+            valid_design().replace(
+                "| R09 | 已应用 | 第1章固定 FP32 累加和跨 Stage 交接类型 |",
+                "| R09 | 已应用 | 第1章固定 FP32 累加和跨 Stage 交接类型 |\n"
+                "| R10 | 不适用 | A2/A3 规则文件没有 R10 |",
+            ),
+            "unexpected chip rule application decision: R10",
         )
 
-    def test_sync_code_cannot_come_from_workspace(self) -> None:
-        text = (
+    def test_rule_application_check_rejects_invalid_decision_or_empty_evidence(
+        self,
+    ) -> None:
+        self.assert_fails_with(
+            valid_design().replace("| R03 | 已应用 |", "| R03 | 部分应用 |"),
+            "invalid chip rule application decision: R03",
+        )
+        self.assert_fails_with(
+            valid_design().replace(
+                "| R03 | 已应用 | 第2章按 logical core 连续推进多个 work |",
+                "| R03 | 已应用 | |",
+            ),
+            "missing evidence or inapplicable reason: R03",
+        )
+
+    def test_ascend950_rule_check_requires_r10(self) -> None:
+        self.assert_fails_with(
+            a5_design().replace(
+                "| R10 | 已应用 | 第1章固定 FP32 累加和跨 Stage 交接类型 |", ""
+            ),
+            "missing chip rule application decision: R10",
+        )
+
+    def test_design_title_and_workflow_architecture_must_match(self) -> None:
+        marker = {
+            "algorithm_family": "linear_attention",
+            "target_architecture": "ascend950",
+            "stage": "design",
+            "issue_type": None,
+        }
+        errors = workflow_alignment_errors(valid_design(), marker)
+        self.assertTrue(
+            any("title product series does not match" in error for error in errors),
+            errors,
+        )
+        self.assertEqual([], workflow_alignment_errors(a5_design(), marker))
+
+    def test_design_requires_design_or_later_workflow_state(self) -> None:
+        marker = {
+            "algorithm_family": "linear_attention",
+            "target_architecture": "atlas_a2_a3",
+            "stage": "interface",
+            "issue_type": None,
+        }
+        errors = workflow_alignment_errors(valid_design(), marker)
+        self.assertTrue(any("stage=design" in error for error in errors), errors)
+
+    def test_cli_runs_the_full_workflow_validator(self) -> None:
+        workflow = {
+            "algorithm_family": "linear_attention",
+            "target_architecture": "atlas_a2_a3",
+            "stage": "design",
+            "issue_type": "precision_debug",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            design_path = root / "design.md"
+            workflow_path = root / "workflow.json"
+            design_path.write_text(valid_design(), encoding="utf-8")
+            workflow_path.write_text(json.dumps(workflow), encoding="utf-8")
+            with (
+                patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "validate_design.py",
+                        "--design",
+                        str(design_path),
+                        "--workflow",
+                        str(workflow_path),
+                    ],
+                ),
+                redirect_stdout(StringIO()),
+            ):
+                self.assertEqual(1, main())
+
+    def test_variables_require_symbols_and_mapping(self) -> None:
+        no_symbols = (
             valid_design()
-            .replace(SYNC_CODE, "")
-            .replace("### 2.7 Workspace 总量", f"### 2.7 Workspace 总量\n{SYNC_CODE}")
+            .replace("| `S` | 序列长度 |", "|  |  |")
+            .replace(
+                "| `CG` | 每个 logical core 同时推进的 head 数，本方案为1 |", "|  |  |"
+            )
         )
-        self.assert_fails_with(text, "pseudocode")
-
-    def test_sync_terms_in_prose_cannot_replace_code(self) -> None:
-        text = valid_design().replace(
-            SYNC_CODE, "wait ready free set event\n```text\ncompute()\n```\n"
+        self.assert_fails_with(no_symbols, "global symbols")
+        self.assert_fails_with(
+            valid_design().replace(
+                "```text\nwork = logicalCore + iteration*blockDim\nhead = work mod H\n```",
+                "",
+            ),
+            "task mapping",
         )
-        self.assert_fails_with(text, "pseudocode missing")
 
-    def test_empty_and_unclosed_sync_blocks_fail(self) -> None:
-        for replacement in ("```text\n```\n", SYNC_CODE.removesuffix("```\n")):
-            with self.subTest(replacement=replacement):
+    def test_each_stage_requires_formula_and_three_space_tables(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace(
+                "```text\nscore[32,32] = q[32,16] @ k[32,16]^T\n```", ""
+            ),
+            "missing formula block",
+        )
+        for title in (
+            "本 Stage 产生/写出",
+            "其它 Stage 提供、当前 Stage 读取或需保护",
+            "本 Stage 临时/固定",
+        ):
+            with self.subTest(title=title):
                 self.assert_fails_with(
-                    valid_design().replace(SYNC_CODE, replacement), "pseudocode"
+                    valid_design().replace(f"**{title}**", f"**{title}缺失**"),
+                    "three bold space subsections",
                 )
 
-    def test_tilde_fenced_pseudocode_passes(self) -> None:
+    def test_stage_space_table_uses_fixed_columns_and_storage_order(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace(
+                "| 对象 | 存储位置 | 分配地址 | L2Cache | 功能 |",
+                "| 对象 | 地址 | L2Cache | 功能 |",
+                1,
+            ),
+            "missing Stage space table",
+        )
+        out_of_order = (
+            valid_design()
+            .replace(
+                "| `qTile` | L0A | `L0A[0,1) KiB`",
+                "| `qTile` | L0C | `L0C[0,1) KiB`",
+            )
+            .replace(
+                "| `scoreAcc` | L0C | `L0C[0,4) KiB`",
+                "| `scoreAcc` | L0A | `L0A[0,4) KiB`",
+            )
+        )
+        self.assert_fails_with(out_of_order, "storage order")
+        self.assert_fails_with(
+            valid_design().replace("| `qTile` | L0A |", "| `qTile` | DDR |"),
+            "unsupported storage location",
+        )
+        self.assert_fails_with(
+            valid_design().replace("| `qTile` | L0A |", "| `qTile` | L0A/L0B |"),
+            "one storage location per row",
+        )
+
+    def test_stage_space_table_rejects_unknown_l2_cache_value(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace("| 使能 |", "| bypass |", 1),
+            "L2Cache must be one of",
+        )
+
+    def test_stage_space_table_allocation_address_exposes_size(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace(
+                "`score_slot+work*4 KiB`",
+                "`s=workOrdinal mod 2`",
+            ),
+            "allocation address must expose size",
+        )
+
+    def test_stage_space_table_rejects_vague_component_bank(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace(
+                "`L0A[0,1) KiB`",
+                "组件 bank；双 bank 共 `2 KiB`",
+                1,
+            ),
+            "vague component-managed buffer wording",
+        )
+
+    def test_stage_l0_space_row_requires_buffering_mode(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace(
+                "shape=`[32,16]` FP16；1份；MTE1写入",
+                "shape=`[32,16]` FP16；MTE1写入",
+            ),
+            "must state single buffering, ping/pong, or an explicit slot count",
+        )
+
+    def test_stage_l0_address_uses_storage_qualified_ranges(self) -> None:
+        for invalid_address in (
+            "相对基址 0；`[0,1) KiB`",
+            "`[0,1) KiB`",
+            "`L0B[0,1) KiB`",
+        ):
+            with self.subTest(address=invalid_address):
+                self.assert_fails_with(
+                    valid_design().replace("`L0A[0,1) KiB`", invalid_address, 1),
+                    "must qualify every interval with its storage space (L0A)",
+                )
+
+    def test_design_supports_each_target_architecture(self) -> None:
+        designs = {
+            "atlas_a2_a3": valid_design(),
+            "ascend950": a5_design(),
+        }
+        for target_architecture, design in designs.items():
+            with self.subTest(target_architecture=target_architecture):
+                marker = {
+                    "algorithm_family": "linear_attention",
+                    "target_architecture": target_architecture,
+                    "stage": "design",
+                    "issue_type": None,
+                }
+                self.assertEqual([], validate(design))
+                self.assertEqual([], workflow_alignment_errors(design, marker))
+
+    def test_design_checks_title_architecture(self) -> None:
+        marker = {
+            "algorithm_family": "flash_attention",
+            "target_architecture": "ascend950",
+            "stage": "design",
+            "issue_type": None,
+        }
+        self.assertTrue(
+            any(
+                "title product series does not match" in error
+                for error in workflow_alignment_errors(valid_design(), marker)
+            )
+        )
+
+    def test_stage_api_io_requires_explicit_offset_and_size(self) -> None:
+        vague_api_address = valid_design().replace(
+            "| `score` | GM（用户 workspace） | `score_slot+work*4 KiB` |",
+            "| `score` | GM（API 输入） | API tensor+work offset；`4 KiB` |",
+        )
+        self.assert_fails_with(
+            vague_api_address,
+            "must replace placeholder addressing with tensor base, offset, and transfer size",
+        )
+        missing_offset = valid_design().replace(
+            "| `score` | GM（用户 workspace） | `score_slot+work*4 KiB` |",
+            "| `score` | GM（API 输入） | `score_base`；`4 KiB` |",
+        )
+        self.assert_fails_with(
+            missing_offset,
+            "must expose tensor base and offset",
+        )
+
+    def test_stages_are_continuous_and_space_subsections_are_exact(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace("### S0 · Cube/Vector", "### S1 · Cube/Vector"),
+            "numbered continuously from S0",
+        )
+        self.assert_fails_with(
+            valid_design().replace(
+                "**本 Stage 临时/固定**",
+                "**额外汇总**\n\n说明。\n\n**本 Stage 临时/固定**",
+            ),
+            "exactly the three bold space subsections in order",
+        )
+
+    def test_stage_summary_must_cover_every_detailed_stage(self) -> None:
+        text = valid_design().replace(
+            "## 5. 用户额外 workspace",
+            f"### S1 · Vector：写出结果\n\n{STAGE_BODY}\n\n## 5. 用户额外 workspace",
+        )
+        self.assert_fails_with(text, "Stage summary missing row for S1")
+
+    def test_workspace_zero_and_nonzero_forms(self) -> None:
+        self.assertEqual([], validate(valid_design()))
+        start = valid_design().index("## 5. 用户额外 workspace")
+        end = valid_design().index("## 6. 跨 Stage 同步契约")
+        zero = (
+            "## 5. 用户额外 workspace\n\n"
+            "只计算算子执行期间额外占用的 GM，不包含 API 输入、最终输出、片上空间和固定系统 "
+            "workspace；本算子 workspace=0。\n\n"
+        )
+        zero_design = valid_design()[:start] + zero + valid_design()[end:]
+        self.assertEqual([], validate(zero_design))
+        self.assertEqual(
+            [], validate(valid_design().replace("workspace_size =", "workspace ="))
+        )
+        self.assert_fails_with(
+            valid_design().replace("workspace_size =", "workspaceTotal ="),
+            "define workspace or workspace_size",
+        )
+        self.assert_fails_with(
+            valid_design().replace("0.065536 MB", "按运行时决定"),
+            "concrete model-case value",
+        )
+        self.assert_fails_with(
+            valid_design().replace(
+                "workspace_size = Align512(scoreBytes)",
+                "workspace_size = Align512(system_workspace + scoreBytes)",
+            ),
+            "only contain user extra workspace regions",
+        )
+        contradictory_zero = valid_design().replace(
+            "只计算算子执行期间额外占用的 GM，不包含 API 输入、最终输出、片上空间和固定系统 workspace。",
+            "workspace_size = 0\n只计算算子执行期间额外占用的 GM，不包含 API 输入、最终输出、片上空间和固定系统 workspace。",
+            1,
+        )
+        self.assert_fails_with(
+            contradictory_zero,
+            "cannot be combined with workspace regions",
+        )
+
+    def test_workspace_scope_is_explicit(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace(
+                "不包含 API 输入、最终输出", "不包含外部输入、最终输出"
+            ),
+            "API\\s*输入",
+        )
+
+    def test_sync_contract_requires_table_and_execution_order(self) -> None:
+        self.assert_fails_with(
+            valid_design().replace(
+                "| 数据边 | Producer | Consumer | ready | free/复用条件 | 本地 pipe 完成 | 回绕/退出处理 |",
+                "| 资源 | 说明 |",
+            ),
+            "synchronization contract",
+        )
+        self.assert_fails_with(
+            valid_design().replace(
+                "```text\n"
+                "AIC: wait score_free -> MMAD/FIX -> set score_ready\n"
+                "AIV: wait score_ready -> consume score -> set score_free\n"
+                "```",
+                "",
+            ),
+            "execution-order pseudocode",
+        )
+
+    def test_hidden_formula_is_not_evidence(self) -> None:
+        formula = "```text\nscore[32,32] = q[32,16] @ k[32,16]^T\n```"
+        self.assert_fails_with(
+            valid_design().replace(formula, f"<!--\n{formula}\n-->"), "formula block"
+        )
+
+    def test_tilde_fenced_blocks_pass(self) -> None:
         self.assertEqual([], validate(valid_design().replace("```", "~~~")))
 
     def test_every_template_placeholder_is_rejected(self) -> None:
@@ -503,7 +619,6 @@ workspace_size = AlignUp(blockDim*8192, 512)。"""
             )
         )
         self.assertTrue(placeholders)
-        placeholders.add("{stage_12_name}")
         for placeholder in placeholders:
             with self.subTest(placeholder=placeholder):
                 self.assert_fails_with(
@@ -517,27 +632,9 @@ workspace_size = AlignUp(blockDim*8192, 512)。"""
         )
         self.assertEqual([], validate(text))
 
-    def test_pipe_barrier_in_design_sync_is_rejected(self) -> None:
-        text = valid_design().replace(
-            "Producer(slot):", "PipeBarrier<PIPE_V>()\nProducer(slot):"
-        )
-        self.assert_fails_with(text, "paired HardEvent/CrossCore")
-
-    def test_kernel_pipe_barrier_is_rejected(self) -> None:
-        from tempfile import TemporaryDirectory
-        from validate_design import validate_kernel
-
-        with TemporaryDirectory() as directory:
-            kernel = Path(directory) / "kernel.cpp"
-            kernel.write_text(
-                "void Kernel() { PipeBarrier<PIPE_V>(); }", encoding="utf-8"
-            )
-            self.assertEqual(
-                [
-                    "kernel synchronization must use paired HardEvent/CrossCore notifications"
-                ],
-                validate_kernel(kernel),
-            )
+    def test_local_pipe_barrier_is_allowed_in_design(self) -> None:
+        text = valid_design().replace("AIC: wait", "AIC: PipeBarrier<PIPE_V>() -> wait")
+        self.assertEqual([], validate(text))
 
 
 if __name__ == "__main__":

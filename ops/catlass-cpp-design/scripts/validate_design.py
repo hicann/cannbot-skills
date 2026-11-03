@@ -13,26 +13,38 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 
+ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_SECTIONS = (
-    "目标与数学语义",
-    "Stage 总览与完整详设",
+    "目标",
+    "变量与任务映射",
+    "Stage 总览",
+    "Stage 详细设计",
+    "用户额外 workspace",
+    "跨 Stage 同步契约",
 )
-DESIGN_RULE_VERSION = "V1"
 TARGET_ARCHITECTURES = ("atlas_a2_a3", "ascend950")
-REQUIRED_STAGE_SECTIONS = (
-    "全局符号、任务域与模型 case 代入",
-    "依赖图与 Stage 结果",
-    "数据搬运汇总",
-    "Stage 间同步方案",
-    "Kernel 组件与调用",
-    "Workspace 总量",
+ARCHITECTURE_PRODUCTS = {
+    "atlas_a2_a3": ("Atlas A2系列产品", "Atlas A3系列产品"),
+    "ascend950": ("Ascend 950PR&950DT系列产品",),
+}
+ARCHITECTURE_STAGE_RULES = {
+    "atlas_a2_a3": tuple(f"R{index:02d}" for index in range(1, 10)),
+    "ascend950": tuple(f"R{index:02d}" for index in range(1, 11)),
+}
+STAGE_RULE_DECISIONS = {"已应用", "不适用"}
+REQUIRED_STAGE_SPACE_SECTIONS = (
+    "本 Stage 产生/写出",
+    "其它 Stage 提供、当前 Stage 读取或需保护",
+    "本 Stage 临时/固定",
 )
 PLACEHOLDERS = (
     "{operator_name}",
@@ -47,6 +59,10 @@ PLACEHOLDERS = (
     "{write_shared_record}",
     "{target_architecture}",
     "{not_applicable_reason}",
+    "{official_product_series}",
+    "{stage_rule_id}",
+    "{stage_rule_decision}",
+    "{stage_rule_evidence_or_inapplicable_reason}",
     "TODO",
     "TBD",
     "待补充",
@@ -59,33 +75,23 @@ SYNC_TERMS = (
     r"set|设置",
     r"event|flag|Mutex|互斥",
 )
-SYNC_FLOW_TERMS = (
-    r"initialize|初始化|allocate|分配",
-    r"for\s|while\s|稳态|循环",
-    r"slot|bank|ping|pong|回绕|复用",
-    r"tail|partial|尾",
-    r"empty|空任务|无效任务",
-    r"drain|final|排空|最终",
-    r"release\s+(?:event|flag|Mutex|resources?)|释放.*(?:event|flag|Mutex|资源)|资源释放",
+STAGE_HEADING = r"S(\d+)(?:\b|\s*[·:：])"
+STORAGE_ORDER = ("UB", "L1", "L0A", "L0B", "L0C", "GM")
+L2_CACHE_VALUES = {"使能", "不使能", "不涉及"}
+DURATION_RE = re.compile(
+    r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>ns|us|[μµ]s|ms|s|纳秒|微秒|毫秒|秒)\b",
+    re.IGNORECASE,
 )
-STAGE_TERMS = (
-    r"公式",
-    r"shape",
-    r"dtype",
-    r"地址",
-    r"生命周期",
-    r"task|head|映射",
-    r"执行顺序",
-    r"tail|partial|varlen|空任务",
-    r"同步|依赖",
-)
-ARCHITECTURE_TERMS = (
-    r"依赖",
-    r"生命周期",
-    r"执行单元",
-    r"AIC|AIV",
-    r"映射",
-)
+
+
+def _load(name: str, path: Path) -> ModuleType:
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load validator: {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 @dataclass
@@ -119,8 +125,8 @@ def markdown_parts(
                     visible.append("")
                     prose.append("")
                     continue
-                content_start = end + 3
-                line, in_comment = line[content_start:], False
+                comment_end = end + 3
+                line, in_comment = line[comment_end:], False
             while "<!--" in line:
                 prefix, comment = line.split("<!--", 1)
                 if "-->" in comment:
@@ -164,8 +170,10 @@ def sections(text: str) -> list[Section]:
             (item[2] for item in headings[next_index:] if item[0] <= level),
             len(lines) + 1,
         )
-        body_end = end - 1
-        result.append(Section(level, title, line, end, "\n".join(lines[line:body_end])))
+        content_end = end - 1
+        result.append(
+            Section(level, title, line, end, "\n".join(lines[line:content_end]))
+        )
     return result
 
 
@@ -224,172 +232,54 @@ def _filled(value: str) -> bool:
     }
 
 
-def target_architecture(text: str) -> tuple[str | None, list[str]]:
-    match = re.search(r"`target_architecture`\s*:\s*`([^`]+)`", text)
-    if match is None:
-        return None, ["missing target_architecture"]
-    value = match.group(1).strip()
-    if value not in TARGET_ARCHITECTURES:
-        return value, [
-            "target_architecture must be one of: " + ", ".join(TARGET_ARCHITECTURES)
-        ]
-    return value, []
-
-
-def _field_value(body: str, label: str) -> str | None:
-    match = re.search(rf"(?mi)^\s*-\s*{label}\s*[：:]\s*(.*?)\s*$", body)
-    if match is None or not _filled(match.group(1)):
-        return None
-    return match.group(1).strip()
-
-
-def _ordered(value: str, terms: tuple[str, ...]) -> bool:
-    cursor = 0
-    for term in terms:
-        match = re.search(term, value[cursor:], re.IGNORECASE)
-        if match is None:
-            return False
-        cursor += match.end()
-    return True
-
-
-def _not_applicable_with_reason(value: str) -> bool:
-    match = re.search(r"不适用\s*[：:]\s*(.+)", value)
-    return bool(match and match.group(1).strip())
-
-
-def architecture_errors(body: str, architecture: str | None) -> list[str]:
-    errors: list[str] = []
-    fields = {
-        "soc": _field_value(body, r"目标\s*SoC"),
-        "arch": _field_value(body, r"CATLASS\s*架构标识"),
-        "vector": _field_value(body, r"Vector\s*执行模型"),
-        "cube_to_vector": _field_value(body, r"Cube\s*(?:→|->)\s*Vector\s*数据路径"),
-        "vector_to_cube": _field_value(body, r"Vector\s*(?:→|->)\s*Cube\s*数据路径"),
-    }
-    labels = {
-        "soc": "目标 SoC",
-        "arch": "CATLASS 架构标识",
-        "vector": "Vector 执行模型",
-        "cube_to_vector": "Cube→Vector 数据路径",
-        "vector_to_cube": "Vector→Cube 数据路径",
-    }
-    for key, value in fields.items():
-        if value is None:
-            errors.append(f"missing architecture field: {labels[key]}")
-    if architecture not in TARGET_ARCHITECTURES or any(
-        value is None for value in fields.values()
+def design_title(text: str) -> tuple[str | None, list[str]]:
+    titles = [title for level, title, _ in markdown_parts(text)[0] if level == 1]
+    if len(titles) != 1:
+        return None, ["design must contain exactly one document title"]
+    title = titles[0]
+    products = tuple(
+        product for values in ARCHITECTURE_PRODUCTS.values() for product in values
+    )
+    if not title.endswith("设计方案") or not any(
+        product in title for product in products
     ):
-        return errors
+        return title, [
+            "design title must contain an official product series and end with 设计方案"
+        ]
+    return title, []
 
-    arch = fields["arch"] or ""
-    vector = fields["vector"] or ""
-    cube_to_vector = fields["cube_to_vector"] or ""
-    vector_to_cube = fields["vector_to_cube"] or ""
-    if architecture == "atlas_a2_a3":
-        if (
-            not re.search(r"CATLASS_ARCH\s*=\s*2201", arch)
-            or "Arch::AtlasA2" not in arch
-        ):
-            errors.append("atlas_a2_a3 requires CATLASS_ARCH=2201 and Arch::AtlasA2")
-        if re.search(r"3510|Arch::Ascend950", arch):
-            errors.append(
-                "atlas_a2_a3 architecture field must not contain A5 identifiers"
-            )
-        if "MemBase" not in vector and not _not_applicable_with_reason(vector):
-            errors.append(
-                "A2/A3 Vector execution model must select MemBase or explain why it is not applicable"
-            )
-        if not _not_applicable_with_reason(cube_to_vector) and not _ordered(
-            cube_to_vector, (r"L0C", r"GM", r"UB")
-        ):
-            errors.append(
-                "A2/A3 Cube→Vector path must be L0C -> GM -> UB or explain why it is not applicable"
-            )
-        if not _not_applicable_with_reason(vector_to_cube) and not _ordered(
-            vector_to_cube, (r"UB", r"GM", r"L1")
-        ):
-            errors.append(
-                "A2/A3 Vector→Cube path must be UB -> GM workspace -> L1 or explain why it is not applicable"
-            )
-    elif architecture == "ascend950":
-        if (
-            not re.search(r"CATLASS_ARCH\s*=\s*3510", arch)
-            or "Arch::Ascend950" not in arch
-        ):
-            errors.append("ascend950 requires CATLASS_ARCH=3510 and Arch::Ascend950")
-        if re.search(r"2201|Arch::AtlasA2", arch):
-            errors.append(
-                "ascend950 architecture field must not contain A2/A3 identifiers"
-            )
-        if not re.search(
-            r"MemBase|RegBase|VF", vector
-        ) and not _not_applicable_with_reason(vector):
-            errors.append(
-                "A5 Vector execution model must select MemBase or RegBase/VF, or explain why it is not applicable"
-            )
-        if not _not_applicable_with_reason(cube_to_vector) and not _ordered(
-            cube_to_vector, (r"L0C", r"UB")
-        ):
-            errors.append(
-                "A5 Cube→Vector path must connect L0C to UB or explain why it is not applicable"
-            )
-        if not _not_applicable_with_reason(vector_to_cube) and not _ordered(
-            vector_to_cube, (r"UB", r"L1")
-        ):
-            errors.append(
-                "A5 Vector→Cube path must connect UB to L1 or explain why it is not applicable"
-            )
-    return errors
+
+def target_architecture_from_title(title: str | None) -> str | None:
+    if title is None:
+        return None
+    matches = [
+        architecture
+        for architecture, products in ARCHITECTURE_PRODUCTS.items()
+        if any(product in title for product in products)
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def workflow_alignment_errors(text: str, workflow: dict[str, object]) -> list[str]:
     errors: list[str] = []
-    expected_ids = {
-        "general": "catlass-general-v1",
-        "linear_attention": "catlass-linear-attention-v1",
-        "block_sparse_attention": "catlass-block-sparse-attention-arch22-v1",
-        "sparse_flash_mla": "catlass-sparse-flash-mla-v1",
-        "block_sparse_attention_grad": "catlass-block-sparse-attention-grad-v1",
-        "flash_attention_grad": "catlass-flash-attention-grad-v1",
-        "flash_attention": "catlass-flash-attention-v1",
-    }
-    family = workflow.get("algorithm_family")
-    if (
-        family not in expected_ids
-        or workflow.get("workflow_id") != expected_ids[family]
+    if workflow.get("stage") not in (
+        "design",
+        "implementation",
+        "validation",
+        "complete",
     ):
         errors.append(
-            "workflow_id and algorithm_family must identify the same registered workflow"
+            "design validation requires workflow stage=design or a later stage"
         )
-    design_id = re.search(r"`workflow_id`\s*:\s*`([^`]+)`", markdown_parts(text)[4])
-    if design_id is not None and design_id.group(1) != workflow.get("workflow_id"):
-        errors.append("design workflow_id does not match workflow marker")
-    design_architecture, _ = target_architecture(text)
+    title, _ = design_title(text)
     workflow_architecture = workflow.get("target_architecture")
     if workflow_architecture not in TARGET_ARCHITECTURES:
         errors.append("workflow target_architecture must be frozen before design")
-    elif (
-        family in {"sparse_flash_mla", "block_sparse_attention"}
-        and workflow_architecture != "atlas_a2_a3"
-    ):
-        errors.append(f"{family} design currently supports atlas_a2_a3 only")
-    elif (
-        family in {"block_sparse_attention_grad", "flash_attention_grad"}
-        and workflow_architecture != "ascend950"
-    ):
-        errors.append(f"{family} design currently supports ascend950 only")
-    elif (
-        family == "flash_attention"
-        and workflow_architecture != "atlas_a2_a3"
-    ):
-        errors.append(f"{family} design currently supports atlas_a2_a3 only")
-    elif (
-        design_architecture in TARGET_ARCHITECTURES
-        and workflow_architecture != design_architecture
+    elif title is not None and not any(
+        product in title for product in ARCHITECTURE_PRODUCTS[workflow_architecture]
     ):
         errors.append(
-            "design target_architecture does not match workflow target_architecture"
+            "design title product series does not match workflow target_architecture"
         )
     return errors
 
@@ -425,12 +315,291 @@ def table_errors(body: str, label: str, header_patterns: tuple[str, ...]) -> lis
     return []
 
 
-def table_or_na_errors(
-    body: str, label: str, header_patterns: tuple[str, ...], na_pattern: str
+def _duration_us(value: str) -> float | None:
+    match = DURATION_RE.search(value.replace("`", ""))
+    if not match:
+        return None
+    number = float(match.group("value"))
+    unit = match.group("unit").lower()
+    if unit == "ns" or unit == "纳秒":
+        return number / 1000.0
+    if unit in {"ms", "毫秒"}:
+        return number * 1000.0
+    if unit in {"s", "秒"}:
+        return number * 1_000_000.0
+    return number
+
+
+def theoretical_performance_errors(body: str) -> list[str]:
+    table, indexes = _find_table(
+        body,
+        (
+            r"^约束来源$",
+            r"工作量|数据量",
+            r"峰值|带宽",
+            r"理论最低耗时",
+            r"重叠|依赖",
+            r"^证据$",
+        ),
+    )
+    if table is None:
+        return ["missing structured table: theoretical performance upper bound"]
+
+    errors: list[str] = []
+    source_index, _, _, duration_index, _, evidence_index = indexes
+    required_sources = {
+        "AIC/Cube": r"AIC|Cube",
+        "AIV/Vector": r"AIV|Vector",
+        "GM/MTE": r"GM|MTE",
+        "dependency": r"依赖",
+    }
+    for name, pattern in required_sources.items():
+        if not any(
+            re.search(pattern, row[source_index], re.IGNORECASE) for row in table.rows
+        ):
+            errors.append(f"theoretical performance table missing bound: {name}")
+    for row in table.rows:
+        if not _filled(row[duration_index]):
+            errors.append("theoretical performance row missing lower-bound duration")
+        elif _duration_us(row[duration_index]) is None:
+            errors.append(
+                "theoretical performance lower-bound duration must include a supported unit"
+            )
+        if not _filled(row[evidence_index]):
+            errors.append("theoretical performance row missing evidence")
+
+    lower_match = re.search(r"理论最低耗时\s*[:：]\s*`?([^`\n]+)", body, re.IGNORECASE)
+    target_match = re.search(r"目标耗时\s*[:：]\s*`?([^`\n]+)", body, re.IGNORECASE)
+    feasibility_match = re.search(
+        r"理论可达性\s*[:：]\s*`?([^`\n]+)", body, re.IGNORECASE
+    )
+    if not lower_match or _duration_us(lower_match.group(1)) is None:
+        errors.append(
+            "theoretical performance summary must provide numeric theoretical minimum duration"
+        )
+    if not target_match or _duration_us(target_match.group(1)) is None:
+        errors.append(
+            "theoretical performance summary must provide numeric target duration"
+        )
+    if not feasibility_match or feasibility_match.group(1).strip() not in {
+        "理论可达",
+        "理论不可达",
+    }:
+        errors.append(
+            "theoretical performance summary must state 理论可达 or 理论不可达"
+        )
+    if lower_match and target_match:
+        lower = _duration_us(lower_match.group(1))
+        target = _duration_us(target_match.group(1))
+        if lower is not None and target is not None and target < lower:
+            errors.append("target duration is below the theoretical minimum duration")
+        if (
+            lower is not None
+            and target is not None
+            and target >= lower
+            and feasibility_match
+            and feasibility_match.group(1).strip() == "理论不可达"
+        ):
+            errors.append(
+                "theoretical feasibility contradicts the lower-bound comparison"
+            )
+    return errors
+
+
+def stage_parallel_relation_errors(body: str) -> list[str]:
+    table, indexes = _find_table(
+        body,
+        (r"^Stage$", r"^执行单元$", r"^主要动作$", r"并行.*流水", r"^结束条件$"),
+    )
+    if table is None:
+        return ["missing structured table: Stage parallel and pipeline relation"]
+    relation_index = indexes[3]
+    errors: list[str] = []
+    for row in table.rows:
+        relation = row[relation_index]
+        if not _filled(relation) or not re.search(r"并行|流水", relation):
+            errors.append(
+                "Stage parallel and pipeline relation must describe parallelism or overlap"
+            )
+        if re.search(r"正式.*串行|串行.*正式|逐\s*work.*串行", relation, re.IGNORECASE):
+            errors.append("formal Stage design cannot use per-work serial execution")
+    return errors
+
+
+def synchronization_contract_errors(body: str) -> list[str]:
+    headers = (
+        r"^数据边$",
+        r"^Producer$",
+        r"^Consumer$",
+        r"^ready$",
+        r"free.*复用",
+        r"本地\s*pipe",
+        r"回绕.*退出",
+    )
+    table, indexes = _find_table(body, headers)
+    if table is None:
+        return ["missing structured table: synchronization producer-consumer closure"]
+    errors: list[str] = []
+    for row in table.rows:
+        if not all(_filled(row[index]) for index in indexes):
+            errors.append(
+                "synchronization contract rows must close producer, consumer, "
+                "ready, free, local pipe and drain"
+            )
+    return errors
+
+
+def stage_rule_application_errors(
+    body: str, target_architecture: str | None
 ) -> list[str]:
-    if re.search(na_pattern, body, re.IGNORECASE):
+    if target_architecture not in ARCHITECTURE_STAGE_RULES:
         return []
-    return table_errors(body, label, header_patterns)
+    table, indexes = _find_table(body, (r"^规则$", r"^结论$", r"^设计证据/不适用原因$"))
+    if table is None:
+        return ["missing chip rule application table"]
+
+    rule_index, decision_index, evidence_index = indexes
+    expected = ARCHITECTURE_STAGE_RULES[target_architecture]
+    counts = {rule: 0 for rule in expected}
+    errors: list[str] = []
+    for row in table.rows:
+        rule = row[rule_index].strip().upper()
+        if rule not in counts:
+            errors.append(
+                f"unexpected chip rule application decision: {rule or '<empty>'}"
+            )
+            continue
+        counts[rule] += 1
+        decision = row[decision_index].strip()
+        evidence = row[evidence_index].strip()
+        if decision not in STAGE_RULE_DECISIONS:
+            errors.append(f"invalid chip rule application decision: {rule}")
+        if not _filled(evidence):
+            errors.append(f"missing evidence or inapplicable reason: {rule}")
+
+    for rule, count in counts.items():
+        if count == 0:
+            errors.append(f"missing chip rule application decision: {rule}")
+        elif count > 1:
+            errors.append(f"duplicate chip rule application decision: {rule}")
+    return errors
+
+
+def stage_formula_errors(stage: Section) -> list[str]:
+    """Require a formula/order code block before the Stage space subsections."""
+    marker = re.search(r"(?m)^\*\*本 Stage 产生/写出\*\*\s*$", stage.body)
+    prefix = stage.body[: marker.start()] if marker else stage.body
+    _, blocks, _, unclosed, _ = markdown_parts(prefix)
+    if unclosed or not any(block.strip() for block in blocks):
+        return [
+            f"Stage section near line {stage.line} missing formula block before space tables"
+        ]
+    return []
+
+
+def stage_space_table_errors(section: Section, stage: Section) -> list[str]:
+    headers = (r"^对象$", r"^存储位置$", r"^分配地址$", r"^L2Cache$", r"^功能$")
+    table, indexes = _find_table(section.body, headers)
+    label = f"{stage.title}/{section.title}"
+    if table is None:
+        return [f"missing Stage space table: {label}"]
+    if not any(all(_filled(row[index]) for index in indexes) for row in table.rows):
+        return [f"Stage space table has no complete data row: {label}"]
+
+    object_index = indexes[0]
+    storage_index = indexes[1]
+    address_index = indexes[2]
+    l2_cache_index = indexes[3]
+    errors: list[str] = []
+    positions: list[int] = []
+    for row in table.rows:
+        storage = row[storage_index].upper().replace(" ", "")
+        matched = [index for index, name in enumerate(STORAGE_ORDER) if name in storage]
+        if not matched:
+            if not re.fullmatch(r"(?:不适用|N/?A)", storage, re.IGNORECASE):
+                errors.append(
+                    f"Stage space table has unsupported storage location: {label}"
+                )
+        elif len(matched) > 1:
+            errors.append(
+                "Stage space table must use one storage location per row: "
+                f"{label}/{row[object_index]}"
+            )
+        else:
+            positions.append(matched[0])
+
+        address = row[address_index].replace("`", "")
+        l2_cache = row[l2_cache_index].strip().strip("`* ")
+        if l2_cache not in L2_CACHE_VALUES:
+            errors.append(
+                "Stage space table L2Cache must be one of 使能、不使能、不涉及: "
+                f"{label}/{row[object_index]}"
+            )
+        address_is_unused = re.fullmatch(
+            r"(?:不适用|N/?A)", address.strip(), re.IGNORECASE
+        )
+        size_is_explicit = re.search(
+            r"(?:\[[^\]]+?\)|\d+(?:\.\d+)?)\s*(?:KiB|MiB|GiB|KB|MB|GB|B)\b",
+            address,
+            re.IGNORECASE,
+        )
+        if not address_is_unused and not size_is_explicit:
+            errors.append(
+                "Stage space table allocation address must expose size with B/KiB/MiB: "
+                f"{label}/{row[object_index]}"
+            )
+        row_text = " | ".join(row)
+        if re.search(r"组件\s*(?:bank|分配|管理)", row_text, re.IGNORECASE):
+            errors.append(
+                "Stage space table must replace vague component-managed buffer wording "
+                "with explicit buffering mode, addresses, count, and size: "
+                f"{label}/{row[object_index]}"
+            )
+        uses_l0 = any(name in storage for name in ("L0A", "L0B", "L0C"))
+        buffering_mode_is_explicit = re.search(
+            r"(?:单缓冲|双缓冲|ping\s*/\s*pong|(?:\d+|N)\s*(?:份|slot))",
+            row_text,
+            re.IGNORECASE,
+        )
+        if uses_l0 and not address_is_unused and not buffering_mode_is_explicit:
+            errors.append(
+                "Stage L0 space row must state single buffering, ping/pong, or an "
+                f"explicit slot count: {label}/{row[object_index]}"
+            )
+        if uses_l0 and not address_is_unused:
+            l0_storage = next(name for name in ("L0A", "L0B", "L0C") if name in storage)
+            intervals = re.findall(r"\[[^\]]+?\)", address)
+            qualified_intervals = re.findall(
+                rf"\b{l0_storage}\s*\[[^\]]+?\)", address, re.IGNORECASE
+            )
+            if (
+                re.search(r"相对基址\s*0", address)
+                or not intervals
+                or len(qualified_intervals) != len(intervals)
+            ):
+                errors.append(
+                    "Stage L0 allocation address must qualify every interval with "
+                    f"its storage space ({l0_storage}): {label}/{row[object_index]}"
+                )
+        if re.search(r"(?:API\s*tensor|work\s*offset)", row_text, re.IGNORECASE):
+            errors.append(
+                "Stage API input/output row must replace placeholder addressing with "
+                f"tensor base, offset, and transfer size: {label}/{row[object_index]}"
+            )
+        is_api_io = re.search(r"API\s*(?:输入|输出)", storage, re.IGNORECASE)
+        api_offset_is_explicit = re.search(
+            r"(?:\+|offset|偏移)", address, re.IGNORECASE
+        )
+        if is_api_io and not api_offset_is_explicit:
+            errors.append(
+                "Stage API input/output address must expose tensor base and offset: "
+                f"{label}/{row[object_index]}"
+            )
+    if positions != sorted(positions):
+        errors.append(
+            f"Stage space table storage order must be UB,L1,L0A,L0B,L0C,GM: {label}"
+        )
+    return errors
 
 
 def child_section(
@@ -448,81 +617,34 @@ def child_section(
     return matches[0] if len(matches) == 1 else None
 
 
-def subsection_errors(
-    document: list[Section], parent: Section | None, titles: tuple[str, ...], group: str
-) -> tuple[dict[str, Section], list[str]]:
+def stage_space_sections(stage: Section) -> tuple[dict[str, Section], list[str]]:
+    visible = markdown_parts(stage.body)[4]
+    matches = list(re.finditer(r"(?m)^\*\*(.+?)\*\*\s*$", visible))
+    titles = [match.group(1).strip() for match in matches]
+    if titles != list(REQUIRED_STAGE_SPACE_SECTIONS):
+        return {}, [
+            f"Stage section must contain exactly the three bold space subsections in order: {stage.title}"
+        ]
     found: dict[str, Section] = {}
-    errors: list[str] = []
-    for title in titles:
-        section = child_section(document, parent, title)
-        if section is None:
-            errors.append(f"missing {group} subsection: {title}")
-        else:
-            found[title] = section
-    return found, errors
-
-
-def has_structured_address_map(body: str) -> bool:
-    table, indexes = _find_table(
-        body,
-        (
-            r"存储",
-            r"绝对半开区间|地址区间",
-            r"tensor|slot|bank",
-            r"shape|dtype|layout",
-            r"大小|对齐",
-            r"首次写入",
-            r"最后消费",
-            r"释放|复用条件",
-        ),
-    )
-    if table is not None and any(
-        all(_filled(row[index]) for index in indexes) for row in table.rows
-    ):
-        return True
-
-    _, blocks, _, _, _ = markdown_parts(body)
-    address_pattern = r"(?:L1|UB|L0A|L0B|L0C|GM|workspace)\s*\[[^,\n]+,[^\]\)\n]+[\]\)]"
-    required = (
-        r"KiB|MiB|字节|bytes?|大小",
-        r"写入|搬入|生产",
-        r"最后|末次|消费",
-        r"释放|复用|保留至",
-    )
-    return any(
-        re.search(address_pattern, block, re.IGNORECASE)
-        and all(re.search(term, block, re.IGNORECASE) for term in required)
-        for block in blocks
-    )
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(visible)
+        line = stage.line + visible[: match.start()].count("\n") + 1
+        title = titles[index]
+        found[title] = Section(0, title, line, stage.end, visible[start:end])
+    return found, []
 
 
 def validate(text: str) -> list[str]:
     errors: list[str] = []
     text = markdown_parts(text)[4]
-    if not re.search(
-        r"`workflow_id`\s*:\s*`catlass-"
-        r"(?:general|linear-attention|block-sparse-attention-arch22|sparse-flash-mla|"
-        r"block-sparse-attention-grad|flash-attention-grad|"
-        r"flash-attention)-v1`",
-        text,
-    ):
-        errors.append("workflow_id must identify a registered CATLASS C++ workflow")
-    version = re.search(r"`design_rule_version`\s*:\s*`([^`]+)`", text)
-    if version is None:
-        errors.append("missing design_rule_version")
-    elif version.group(1) != DESIGN_RULE_VERSION:
-        errors.append(f"design_rule_version must be {DESIGN_RULE_VERSION}")
-    architecture, architecture_metadata_errors = target_architecture(text)
-    errors.extend(architecture_metadata_errors)
-    if "docs/api.md" not in text:
-        errors.append("design must reference docs/api.md as the interface contract")
-    if "docs/validation.md" not in text:
-        errors.append("design must route development evidence to docs/validation.md")
-
+    title, title_errors = design_title(text)
+    errors.extend(title_errors)
+    target_architecture = target_architecture_from_title(title)
     document = sections(text)
     top_level = [section.title for section in document if section.level == 2]
     if top_level != list(REQUIRED_SECTIONS):
-        errors.append("design must contain exactly the two required chapters in order")
+        errors.append("design must contain exactly the six required chapters in order")
     chapters: dict[str, Section] = {}
     for title in REQUIRED_SECTIONS:
         matches = [
@@ -540,15 +662,58 @@ def validate(text: str) -> list[str]:
             ):
                 errors.append(f"empty required section: {title}")
 
-    stage_chapter = chapters.get(REQUIRED_SECTIONS[1])
-    if stage_chapter:
-        for term in ARCHITECTURE_TERMS:
-            if not re.search(term, stage_chapter.body, re.IGNORECASE):
-                errors.append(f"Stage overview missing architecture evidence: {term}")
-        if "PipeBarrier" in stage_chapter.body:
-            errors.append(
-                "synchronization design must use paired HardEvent/CrossCore notifications"
+    objective = chapters.get("目标")
+    if objective:
+        data_types = child_section(document, objective, "数据类型")
+        if data_types is None:
+            errors.append("missing objective subsection: 数据类型")
+        else:
+            errors.extend(
+                table_errors(
+                    data_types.body,
+                    "data types",
+                    (r"^范围$", r"^数据$", r"^数据类型$"),
+                )
             )
+        for term in (r"主模型\s*case", r"性能目标"):
+            if not re.search(term, objective.body, re.IGNORECASE):
+                errors.append(f"target section missing: {term}")
+        theory = child_section(document, objective, "理论性能上限分析")
+        if theory is None:
+            errors.append("missing objective subsection: 理论性能上限分析")
+        else:
+            errors.extend(theoretical_performance_errors(theory.body))
+
+    variables = chapters.get("变量与任务映射")
+    if variables:
+        errors.extend(
+            table_errors(
+                variables.body,
+                "global symbols",
+                (r"^符号$", r"^含义$"),
+            )
+        )
+        _, mapping_blocks, _, _, _ = markdown_parts(variables.body)
+        if not any(block.strip() for block in mapping_blocks):
+            errors.append("task mapping must contain a formula or pseudocode block")
+
+    overview = chapters.get("Stage 总览")
+    summary_table: Table | None = None
+    summary_indexes: list[int] = []
+    if overview:
+        summary_headers = (
+            r"^Stage$",
+            r"^执行单元$",
+            r"^主要动作$",
+            r"并行.*流水",
+            r"^结束条件$",
+        )
+        errors.extend(table_errors(overview.body, "Stage summary", summary_headers))
+        summary_table, summary_indexes = _find_table(overview.body, summary_headers)
+        errors.extend(stage_parallel_relation_errors(overview.body))
+        errors.extend(stage_rule_application_errors(overview.body, target_architecture))
+
+    stage_chapter = chapters.get("Stage 详细设计")
     children = [
         section
         for section in document
@@ -557,240 +722,119 @@ def validate(text: str) -> list[str]:
     stages = [
         section
         for section in children
-        if section.level == 3 and re.match(r"Stage\s+\d+(?:\b|[：:])", section.title)
+        if section.level == 3 and re.match(STAGE_HEADING, section.title)
     ]
     if not stages:
         errors.append("at least one detailed Stage section is required")
+    stage_ids = [int(re.match(STAGE_HEADING, stage.title).group(1)) for stage in stages]
+    if stage_ids and stage_ids != list(range(len(stage_ids))):
+        errors.append(
+            "detailed Stage sections must be ordered and numbered continuously from S0"
+        )
     for stage in stages:
-        for term in STAGE_TERMS:
-            if not re.search(term, stage.body, re.IGNORECASE):
-                errors.append(f"Stage section near line {stage.line} missing: {term}")
-        if not has_structured_address_map(stage.body):
-            errors.append(
-                f"Stage section near line {stage.line} missing structured address map"
-            )
-
-    objective_chapter = chapters.get(REQUIRED_SECTIONS[0])
-    objective_sections, detail_errors = subsection_errors(
-        document,
-        objective_chapter,
-        (
-            "目标、融合范围与目标场景",
-            "API 契约引用与内部映射",
-            "完整数学语义与数值边界",
-        ),
-        "objective",
-    )
-    errors.extend(detail_errors)
-    objective = objective_sections.get("目标、融合范围与目标场景")
-    if objective:
-        errors.extend(architecture_errors(objective.body, architecture))
-        errors.extend(
-            table_or_na_errors(
-                objective.body,
-                "performance target cases",
-                (
-                    r"模型\s*case",
-                    r"shape|属性",
-                    r"基线",
-                    r"目标值",
-                    r"测量|统计口径",
-                    r"可达性",
-                ),
-                r"性能目标.*不适用|不适用\s*[：:].*(?:性能目标|性能基线)",
-            )
-        )
-    math = objective_sections.get("完整数学语义与数值边界")
-    if math:
-        errors.extend(
-            table_or_na_errors(
-                math.body,
-                "numerical risk mapping",
-                (
-                    r"中间量|高风险",
-                    r"CPU.*标杆",
-                    r"实现运算序列",
-                    r"计算\s*dtype",
-                    r"输入|中间值范围",
-                    r"NaN|Inf",
-                    r"mask|cast|保护",
-                ),
-                r"高风险运算.*不适用|不适用\s*[：:].*(?:高风险|数值风险)",
-            )
-        )
-
-    stage_sections, detail_errors = subsection_errors(
-        document, stage_chapter, REQUIRED_STAGE_SECTIONS, "Stage detail"
-    )
-    errors.extend(detail_errors)
-    symbols = stage_sections.get("全局符号、任务域与模型 case 代入")
-    if symbols:
-        errors.extend(
-            table_errors(
-                symbols.body,
-                "global symbols",
-                (r"符号", r"定义", r"单位|取值域", r"来源|约束"),
-            )
-        )
-        errors.extend(
-            table_errors(
-                symbols.body,
-                "model case scheduling",
-                (
-                    r"模型\s*case",
-                    r"Nbase",
-                    r"CG",
-                    r"Nwork",
-                    r"blockDim",
-                    r"wave",
-                    r"每核任务",
-                    r"尾",
-                ),
-            )
-        )
-        if not re.search(r"TilingKey", symbols.body, re.IGNORECASE):
-            errors.append(
-                "global task domain must enumerate reachable TilingKey conditions"
-            )
-    overview = stage_sections.get("依赖图与 Stage 结果")
-    if overview:
-        summary_headers = (
-            r"Stage",
-            r"执行单元|owner",
-            r"功能|公式",
-            r"前驱|可并行",
-            r"输入来源",
-            r"输出落点",
-            r"任务映射|任务数",
-            r"主要空间",
-        )
-        errors.extend(
-            table_errors(
-                overview.body,
-                "Stage result summary",
-                summary_headers,
-            )
-        )
-        summary_table, summary_indexes = _find_table(overview.body, summary_headers)
+        errors.extend(stage_formula_errors(stage))
+        stage_spaces, detail_errors = stage_space_sections(stage)
+        errors.extend(detail_errors)
+        for space in stage_spaces.values():
+            errors.extend(stage_space_table_errors(space, stage))
         if summary_table is not None:
-            for stage in stages:
-                number = re.match(r"Stage\s+(\d+)", stage.title)
-                if number and not any(
-                    re.search(
-                        rf"\bStage\s+{number.group(1)}\b", row[summary_indexes[0]]
-                    )
-                    for row in summary_table.rows
-                ):
-                    errors.append(
-                        f"Stage result summary missing row for Stage {number.group(1)}"
-                    )
-        errors.extend(
-            table_errors(
-                overview.body,
-                "cross-Stage data",
-                (
-                    r"数据",
-                    r"shape|dtype|layout",
-                    r"生产\s*Stage|owner",
-                    r"消费\s*Stage|最后消费者",
-                    r"存放位置|份数",
-                    r"释放|复用条件",
-                ),
-            )
-        )
-    movement = stage_sections.get("数据搬运汇总")
-    if movement:
-        errors.extend(
-            table_errors(
-                movement.body,
-                "data movement summary",
-                (
-                    r"tensor",
-                    r"GM.*读|写次数",
-                    r"字节",
-                    r"GM.*L1|UB",
-                    r"驻留|复用",
-                    r"批量搬运|stride",
-                    r"L2.*Cache",
-                    r"最后消费者",
-                ),
-            )
-        )
+            number = re.match(STAGE_HEADING, stage.title)
+            if number and not any(
+                re.search(rf"\bS{number.group(1)}\b", row[summary_indexes[0]])
+                for row in summary_table.rows
+            ):
+                errors.append(f"Stage summary missing row for S{number.group(1)}")
 
-    sync_section = stage_sections.get("Stage 间同步方案")
-    if sync_section is None:
-        errors.append("missing Stage synchronization section")
-    else:
+    workspace = chapters.get("用户额外 workspace")
+    if workspace:
+        zero_workspace = bool(
+            re.search(
+                r"workspace(?:_size)?\s*=\s*0(?:\D|$)", workspace.body, re.IGNORECASE
+            )
+        )
+        if zero_workspace:
+            has_workspace_table = bool(markdown_tables(workspace.body))
+            has_nonzero_assignment = bool(
+                re.search(
+                    r"workspace(?:_size)?\s*=\s*(?!0(?:\D|$))\d",
+                    workspace.body,
+                    re.IGNORECASE,
+                )
+            )
+            has_concrete_size = bool(
+                re.search(r"\b\d+(?:\.\d+)?\s*MB\b", workspace.body, re.IGNORECASE)
+            )
+            if has_workspace_table or has_nonzero_assignment or has_concrete_size:
+                errors.append(
+                    "workspace_size=0 cannot be combined with workspace regions or nonzero totals"
+                )
+        else:
+            errors.extend(
+                table_errors(
+                    workspace.body,
+                    "workspace total",
+                    (r"^区域$", r"数量.*单份大小", r"主(?:模型)?\s*case.*大小"),
+                )
+            )
+            if not re.search(r"workspace(?:_size)?\s*=", workspace.body, re.IGNORECASE):
+                errors.append("workspace total must define workspace or workspace_size")
+            if not re.search(r"\b\d+(?:\.\d+)?\s*MB\b", workspace.body, re.IGNORECASE):
+                errors.append(
+                    "workspace total must provide a concrete model-case value in MB"
+                )
+            _, workspace_blocks, _, _, _ = markdown_parts(workspace.body)
+            if re.search(
+                r"system_workspace", "\n".join(workspace_blocks), re.IGNORECASE
+            ):
+                errors.append(
+                    "workspace_size must only contain user extra workspace regions"
+                )
+        for term in (r"API\s*输入", r"最终输出", r"系统\s*workspace"):
+            if not re.search(term, workspace.body, re.IGNORECASE):
+                errors.append(f"workspace scope missing: {term}")
+
+    sync_section = chapters.get("跨 Stage 同步契约")
+    if sync_section:
         errors.extend(
             table_errors(
                 sync_section.body,
-                "cross-Stage synchronization edges",
+                "synchronization contract",
                 (
                     r"数据边",
-                    r"生产\s*Stage|owner|pipe",
-                    r"消费\s*Stage|owner|pipe",
-                    r"存放位置|slot",
+                    r"Producer",
+                    r"Consumer",
                     r"ready",
-                    r"free",
-                    r"空任务",
+                    r"free.*复用",
+                    r"本地\s*pipe",
+                    r"回绕.*退出",
                 ),
             )
         )
-        errors.extend(
-            table_errors(
-                sync_section.body,
-                "synchronization resources",
-                (
-                    r"同步资源",
-                    r"所属核|范围",
-                    r"类型|方向",
-                    r"保护的数据|slot",
-                    r"数量|初始状态",
-                    r"set|wait|lock|unlock",
-                    r"复用|释放条件",
-                    r"硬件上限",
-                ),
-            )
-        )
+        errors.extend(synchronization_contract_errors(sync_section.body))
         _, blocks, _, _, _ = markdown_parts(sync_section.body)
         pseudocode = "\n".join(blocks)
         if not pseudocode.strip():
-            errors.append("synchronization section must contain pseudocode")
-        for term in SYNC_TERMS:
-            if not re.search(term, pseudocode, re.IGNORECASE):
-                errors.append(f"synchronization pseudocode missing: {term}")
-        for term in SYNC_FLOW_TERMS:
-            if not re.search(term, pseudocode, re.IGNORECASE):
-                errors.append(
-                    f"synchronization pseudocode missing workflow coverage: {term}"
-                )
-
-    workspace = stage_sections.get("Workspace 总量")
-    stage_level_sections = [section for section in children if section.level == 3]
-    if stage_level_sections and stage_level_sections[-1].title != "Workspace 总量":
-        errors.append("Workspace 总量 must be the final Stage detail subsection")
-    if workspace and not re.search(
-        r"workspace_size\s*=\s*0", workspace.body, re.IGNORECASE
-    ):
-        errors.extend(
-            table_errors(
-                workspace.body,
-                "workspace total",
-                (
-                    r"Workspace\s*区域",
-                    r"offset|索引公式",
-                    r"record|bank",
-                    r"单份大小|对齐",
-                    r"总量贡献",
-                    r"生产者|最后消费者",
-                    r"释放条件",
-                ),
+            errors.append(
+                "synchronization contract must contain execution-order pseudocode"
             )
-        )
-        if not re.search(r"workspace_size\s*=", workspace.body, re.IGNORECASE):
-            errors.append("workspace total must define workspace_size")
+        elif not re.search(r"wait|等待", pseudocode, re.IGNORECASE):
+            errors.append(
+                "synchronization execution order must contain producer/consumer waits"
+            )
 
-    for placeholder in (*PLACEHOLDERS, *re.findall(r"\{stage_\d+_name\}", text)):
+    generated_placeholders = re.findall(
+        r"\{(?:operator_name|official_product_series|target_[A-Za-z0-9_]*|catlass_[A-Za-z0-9_]*|"
+        r"arch_tag|vector_[A-Za-z0-9_]*|cube_[A-Za-z0-9_]*|api_[A-Za-z0-9_]*|main_[A-Za-z0-9_]*|"
+        r"performance_[A-Za-z0-9_]*|relay_[A-Za-z0-9_]*|symbol_\d+[A-Za-z0-9_]*|work_[A-Za-z0-9_]*|"
+        r"tiling_[A-Za-z0-9_]*|supported_[A-Za-z0-9_]*|cg_[A-Za-z0-9_]*|tile_[A-Za-z0-9_]*|"
+        r"buffer_[A-Za-z0-9_]*|selection_[A-Za-z0-9_]*|architecture_[A-Za-z0-9_]*|stage_\d+_[A-Za-z0-9_]*|"
+        r"workspace_[A-Za-z0-9_]*|collective_[A-Za-z0-9_]*|sync_[A-Za-z0-9_]*|theoretical_[A-Za-z0-9_]*|"
+        r"aic_[A-Za-z0-9_]*|aiv_[A-Za-z0-9_]*|gm_[A-Za-z0-9_]*|dependency_[A-Za-z0-9_]*|first_[A-Za-z0-9_]*|"
+        r"stage_\d+_parallel_[A-Za-z0-9_]*|sync_[A-Za-z0-9_]*|"
+        r"reused_[A-Za-z0-9_]*|protected_[A-Za-z0-9_]*|producer_[A-Za-z0-9_]*)\}",
+        text,
+    )
+    for placeholder in (*PLACEHOLDERS, *generated_placeholders):
         if placeholder in text:
             errors.append(f"unresolved placeholder: {placeholder}")
     if markdown_parts(text)[3]:
@@ -798,47 +842,32 @@ def validate(text: str) -> list[str]:
     return errors
 
 
-def validate_kernel(path: Path) -> list[str]:
-    """Check generated device code for the workflow's synchronization contract."""
-    if not path.is_file():
-        return [f"kernel file not found: {path}"]
-    text = path.read_text(encoding="utf-8")
-    if "PipeBarrier" in text:
-        return [
-            "kernel synchronization must use paired HardEvent/CrossCore notifications"
-        ]
-    return []
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--design", required=True, type=Path)
-    parser.add_argument("--workflow", type=Path)
-    parser.add_argument(
-        "--kernel",
-        type=Path,
-        help="optional device kernel source to validate synchronization",
-    )
+    parser.add_argument("--workflow", required=True, type=Path)
     args = parser.parse_args()
     if not args.design.is_file():
         print(f"ERROR: design file not found: {args.design}")
         return 1
     text = args.design.read_text(encoding="utf-8")
     errors = validate(text)
-    if args.workflow:
-        if not args.workflow.is_file():
-            errors.append(f"workflow file not found: {args.workflow}")
-        else:
-            try:
-                workflow = json.loads(args.workflow.read_text(encoding="utf-8"))
-                if not isinstance(workflow, dict):
-                    errors.append("workflow JSON must be an object")
-                else:
-                    errors.extend(workflow_alignment_errors(text, workflow))
-            except json.JSONDecodeError as exc:
-                errors.append(f"invalid workflow JSON: {exc}")
-    if args.kernel:
-        errors.extend(validate_kernel(args.kernel))
+    if not args.workflow.is_file():
+        errors.append(f"workflow file not found: {args.workflow}")
+    else:
+        try:
+            workflow = json.loads(args.workflow.read_text(encoding="utf-8"))
+            if not isinstance(workflow, dict):
+                errors.append("workflow JSON must be an object")
+            else:
+                workflow_validator = _load(
+                    "catlass_workflow_validator",
+                    ROOT / "catlass-cpp-interface/scripts/validate_workflow.py",
+                )
+                errors.extend(workflow_validator.validate_workflow(workflow))
+                errors.extend(workflow_alignment_errors(text, workflow))
+        except json.JSONDecodeError as exc:
+            errors.append(f"invalid workflow JSON: {exc}")
     if errors:
         print("FAIL")
         print("\n".join(f"- {error}" for error in errors))

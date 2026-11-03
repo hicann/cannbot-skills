@@ -3,15 +3,71 @@
   "evals": [
     {
       "id": 4,
-      "title": "统一工作流与工程衔接",
+      "title": "验收与性能优化闭环",
       "config": {
         "max_tokens": 20000,
         "eval_mode": "text"
       },
-      "prompt": "线性 Attention 和普通 CATLASS 算子如何共用五阶段开发流程，并在设计阶段读取迁移后的知识？",
-      "expected_output": "回复应说明先按数学语义确认注意力家族，普通 CATLASS 算子使用 general；统一执行 interface、reference、design、implementation、validation。设计阶段通过 catlass-cpp-knowledge 查询 cannbot-knowledge 的 guides 和 Operator 卡，再按返回路径读取正文。",
+      "prompt": "CATLASS C++ 工程进入 validation 后，如何完成全量验收和性能优化闭环？什么时候允许进入 complete？",
+      "expected_output": "严格按 V1 全量验收、V2 性能验收、V3 流水分析、V4 候选选择推进，结果和证据以 docs/validation.md 为准。V1 按 references/full_case_validation.md 补齐工程原生用例，记录支持项和运行分支到用例的覆盖关系，并执行正式验收集中的全部用例；不要求引入 ATK。V1 通过后才能进入 V2；V2 未达标时，V3 根据流水证据维护候选池，凡能够改善任一 Stage/Pipe 的候选都保留，并按当前整体收益分为 active 或 deferred。V4 从 active 中选择预计整体耗时收益最大的一个，通过 performance_candidate 返回 design/performance_optimize，再经 implementation 实现和快速精度验证，最后回到 validation/V1 重跑全量用例和同口径性能。只有 V1 和 V2 均通过时才能进入 complete/null。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "性能采集与候选重排",
+      "config": {
+        "max_tokens": 20000,
+        "eval_mode": "text"
+      },
+      "prompt": "性能未达标时，请说明性能采样统计、流水指标解释、优化候选入池条件、active/deferred 的区分，以及每轮如何选择和验证候选。上一个候选保留或回退后，baseline、流水证据和全部候选排序应如何处理？只说明完整流程，不实际采集或修改工程。",
+      "expected_output": "回复应读取 references/performance_validation.md，固定 SoC、物理设备、输入和构建产物，使用普通 msprof 采样 5 次，以 BasicInfo Task Duration(us) 中位数比较。采集 AIC/AIV、Cube、Vector、MTE、GM 带宽、等待和冲突指标并映射到实际生产消费关系；各 pipe 可重叠，比例和时间不能直接相加。能够改善任一 Stage/Pipe 的候选都进入候选池；当前能够缩短整体耗时的标记 active，被其它关键路径掩盖的标记 deferred 并跨轮保留。每次从 active 中选择预计整体收益最大的一个返回 03，再经 04、V1、V2 验证；候选保留或回退后以当前代码为新 baseline，重新采集流水并重新评估全部 active 和 deferred，不能沿用旧状态或排序。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "完成态复核最终验收记录",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "恢复一个 workflow.json 中 stage=complete 的 CATLASS C++ 工程时，是否可以直接认定任务完成？应该执行什么校验，校验失败后如何恢复？",
+      "expected_output": "不能只根据 stage=complete 认定完成。加载 catlass-cpp-test，只对已有 docs/validation.md 和 docs/workflow.json 运行 validate_validation.py，不重复执行 V1/V2。校验通过后保持 complete；缺少或不满足 V1/V2 最终证据时，执行 complete_evidence_invalid 返回 validation/null，重新进入 05 修复记录或验收。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "validate_validation.py"},
+        {"type": "contains", "pattern": "stage=validation"},
+        {"type": "contains", "pattern": "不重复执行 V1/V2"}
+      ]
+    },
+    {
+      "id": 7,
+      "title": "验收阶段内部失败处理",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "validation 阶段分别遇到性能采集环境故障，以及性能未达标但所有有证据的候选均已淘汰时，应该如何处理 workflow 状态和后续动作？",
+      "expected_output": "采集环境故障时在 validation 阶段修复并重跑失败环节；当前环境无法恢复时记录阻塞原因并停止本次验收。没有 active 候选时，记录性能结果、瓶颈证据、deferred 候选和候选淘汰原因，停止本轮性能优化且不得标记 complete；deferred 候选跨轮保留但不触发 performance_candidate。两种情况都没有触发转移事件，因此 workflow 保持 validation/null。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "局部收益候选保留与执行排序",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "流水分析得到两个优化点：A 能降低当前关键路径 30 us，B 能降低 MTE 20 us 但当前完全被 Cube 掩盖。候选池应如何记录，本轮选择哪个？下一轮怎么处理 B？",
+      "expected_output": "A 和 B 都应进入候选池，因为保留门槛是能改善任一 Stage/Pipe。A 标记为 active，预计整体收益 30 us；B 标记为 deferred，当前预计整体收益 0 us，并记录 MTE 局部收益依据及被 Cube 掩盖的原因。本轮从 active 中选择整体收益最大的 A 并标记 selected。A 验证后以当前代码为新 baseline 重新采集流水，重新评估包括 B 在内的全部 active 和 deferred；如果 MTE 进入关键路径，B 转为 active 参与新的整体收益排序。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "deferred"},
+        {"type": "contains", "pattern": "整体收益"},
+        {"type": "contains", "pattern": "重新评估"}
+      ]
     }
   ],
   "skill_name": "catlass-cpp-test"

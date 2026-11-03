@@ -1,49 +1,65 @@
 ---
 name: catlass-cpp-design
-description: CATLASS C++ 通用算子与已登记注意力家族五阶段工作流的 03 方案设计。用于按完整参考完成设计推演，再交付两章 docs/design.md，并应用 R01-R21 与 Stage/同步规则。触发条件：算子工作流处于 design 阶段，operator contract 与 golden contract 均已冻结。
+description: CATLASS C++ 算子五阶段工作流的 03 方案设计。用于根据已验收接口、标杆和目标架构规则生成可实现的 Stage 设计。触发：workflow 处于 design 时。
 ---
 
 # 03 方案设计
 
-进入条件：两个 contract 均为 `frozen` 且 workflow 状态为 `design`。
+## 阶段说明
 
-必须通过 `catlass-cpp-knowledge` 完整读取：
+| 输入 | 本阶段处理 | 输出 |
+|---|---|---|
+| 已验收接口和标杆、精度策略、性能目标、目标 SoC 能力；性能优化返回时还包括当前代码、`docs/design.md` 和 `docs/validation.md` | 确定 Stage、任务映射、tiling、数据类型、片上空间、数据通路和同步 | 通过校验和评审的 `docs/design.md` |
 
-- `guides/solution_design_reference.md`
-- `guides/stage_design_rules.md`
-- `guides/kernel_stage_sync_patterns.md`
+## 准入规则
 
-对于已登记的注意力家族，随后按 `docs/workflow.json` 中已确认的 `algorithm_family` 执行
-`catlass-cpp-knowledge` 的 `query --type operators --family <family> --compact`，
-用返回的完整 `path` 执行 `get`，读取与当前算法和设计问题有关的 Operator 卡。
-显式家族查询会返回该家族的 draft 卡；使用前核对其状态、平台和固定来源。
-`general` 家族没有预设 Operator 卡，按实际 CATLASS 组件查询 `apis/`，并核对目标 checkout。
+- 仅 `stage=design`，且 `issue_type` 为 `null` 或 `performance_optimize` 时进入本阶段。精度策略、性能目标和目标架构必须齐备。
+- 设计的计算语义和芯片规则必须分别与 `docs/workflow.json` 中的 `algorithm_family` 和 `target_architecture` 一致，不能因 Stage 划分或任务映射改变而切换家族或架构。
 
-仅当当前公式包含单位下三角矩阵求逆时，读取
-`operators/direct/transformer/attention/linear_attention_matrix_inverse_patterns.md`；不涉及该算法时不得把其 Stage 或布局带入设计。
+## 执行规则
 
-`sparse_flash_mla` 查询并读取家族索引中的 `computation.md`、`interface.md`、
-`metadata.md`、`development.md` 和 `validation.md`；普通 SWA 还完整读取
-`pipeline.md`、`performance.md`，并核对接口中的一般合法域、开发中的工程与实现门槛。
-长 prefill 同时应用 `performance.md` 的连续窗口推导及 case2 机制。设计主核和 metadata 的生产/消费、独立入口、动态调度与资源同步，
-不能把 case2 常量当一般 SWA 合法域。
+- 通过 `npu-arch` 获取目标 SoC 能力；通过 `catlass-cpp-knowledge` 按 `target_architecture`
+  查询并完整读取唯一对应的芯片规则文件，完整读完后再推导，不用其它架构兜底。
+  专门家族查询 Operator 卡；`general` 不查询 Operator 卡。两者都按实际组件查询 API 卡，
+  并核对目标版本 CATLASS/CANN 组件源码中的接口、能力与约束。
+- 将所选芯片规则文件中的全部 `Rxx` 逐条写入“芯片规则应用检查”：每条规则恰好出现一次，
+  结论只能是“已应用”或“不适用”。“已应用”必须指向当前设计中的具体落点；“不适用”必须说明
+  与当前算子不匹配的原因。存在缺项、重复项、空证据或空原因时不得定稿。
+- 按公式、数据依赖、计算类型、生命周期和精度观察点划分逻辑 Stage，再确定 AIC/AIV 任务映射、tiling、同步和边界处理。
+  同一 AIV 可以顺序执行多个逻辑 Stage，Stage 不与核或 pipe 一一对应。任务映射必须从当前接口、完整支持域、计算图和目标芯片资源推导，不能直接沿用参考代码的分工；输入不足时说明待确认条件，不臆造计算语义。
+- 在进入实现前完成理论性能上限分析。按 AIC/Cube、AIV/Vector、GM/MTE 和不可重叠依赖链分别推导理论最低耗时，
+  用关键路径而不是各 pipe 时间简单求和，并按当前 case 的工作量换算理论最大吞吐。设计阶段判断目标是否理论可达，不要求初版实现已经达到目标；只有目标低于理论最低耗时，
+  或并行度、资源和依赖证据不足时，才判定设计不可行。
+- 正式设备方案必须通过跨 work 并行和 Stage 流水表达；不得把逐 work 串行生产、计算、消费作为正式设计。串行路径只能用于 CPU
+  reference 或临时诊断，不能作为实现准出或性能 baseline。
+- 跨 Stage 同步契约必须分别写清数据边的 Producer、Consumer、ready、free/复用、本地 pipe 完成以及 slot 回绕、空任务和退出 drain；
+  明确完整数据范围、参与方和通知次数；已进入协同流程的空任务保持通知配对，复用通知 ID 或退出前排空上一轮通知，不能只写事件编号或“等待完成”。
+  同一 pipe 按实际依赖使用程序顺序或必要的 PipeBarrier，本地跨 pipe 使用目标版本支持的 HardEvent、Queue 或等价机制；跨 AIC/AIV 使用 CrossCore 通知，并单独闭合本地 pipe 完成条件。不存在异步依赖时不额外增加同步。
+- 当 `issue_type=performance_optimize` 时，读取 `docs/validation.md` 中最新一轮性能结果、流水分析和已选优化候选。以当前代码和当前 `docs/design.md` 为 baseline，本轮只设计该候选；候选验证完成后，以保留或回退后的当前代码作为下一轮 baseline，并将最终采用的设计同步收敛到 `docs/design.md`。
+- 按 `templates/design.md.template` 生成 `docs/design.md`。
+- 候选推导可写入 `docs/design.full.md`，`docs/design.md` 只保留最终方案。
 
-先读取 `docs/workflow.json` 的 `target_architecture`，并在 `docs/design.md` 中写入相同值、
-CATLASS 编译标识、ArchTag、Vector 执行模型以及 Cube→Vector、Vector→Cube 的完整数据路径。
-按所需组件查询 `apis/`（读取 draft API 卡时显式传入 `--include-draft`），再回到当前工作区固定 CATLASS 源码、文档和 example 核对真实签名。
-先严格按照 `guides/solution_design_reference.md` 的完整内容完成 Stage 划分和具体详设，不得因最终交付件
-只有两章而跳过资源、精度、性能、测试、风险或 R01-R21 检查。完整设计推演可以保存为
-`docs/design.full.md` 中间产物；该文件用于保留推导和评审过程，不替代最终交付件。
+## 准出规则
 
-再将已完成的设计结论投影到 `templates/design.md.template`，生成仅含两章的 `docs/design.md`；
-将模板 `workflow_id` 替换为当前 `docs/workflow.json` 中的值。
-写清公式、shape、地址和生命周期、AIC/AIV owner、CrossCore/HardEvent 配对、tiling、
-workspace 总量、精度观察点和性能目标；每个 L1、UB、L0、GM workspace 资源条目必须用 `tensor[N]` 显式写出物理预留份数，单份对象也写 `[1]`；同一条目分别写 dtype、shape/layout、实际激活份数或条件、每份大小、总大小、首次写入或搬入、最后消费者以及释放/复用条件。多份预留但按 leader、`valid_r` 或 ping/pong 选择性使用时，必须区分物理预留份数与当前 work 实际激活份数，不得只在“份数依据”中笼统描述。
+### 验收
 
-R01-R21 作为完整推演与评审规则使用，不在最终文档中
-生成独立检查表章节。测试、profiling、sanitizer 和实测结果进入 `docs/validation.md`。
+执行设计校验：
 
-运行 `scripts/validate_design.py --design <design> --workflow <workflow>`；有 kernel 时同时传
-`--kernel`。校验器必须确认设计与 workflow 的架构一致：A2/A3 使用 `2201/AtlasA2/MemBase`
-和 GM 中转路径；A5 使用 `3510/Ascend950`，并显式选择 MemBase 或 RegBase/VF 及数据路径。
-结构校验和整体设计评审都通过后才设置 `stage=implementation`。
+```bash
+python scripts/validate_design.py \
+  --design <docs/design.md> --workflow <docs/workflow.json>
+```
+
+芯片规则应用检查完整、设计校验和整体评审必须全部通过。
+
+设计校验或评审未通过时，根据失败结果修正 `docs/design.md` 后重新验收。
+
+### 状态更新
+
+| 检查结果 | 转移事件 | 下一状态 |
+|---|---|---|
+| 发现接口问题 | `interface_problem` | `interface / null` |
+| 发现公式或标杆问题 | `reference_problem` | `reference / null` |
+| 设计验收通过 | `design_accepted` | `implementation / null` |
+
+通过 `catlass-cpp-interface/scripts/transition_workflow.py` 执行表中的转移；状态更新成功后才进入 04。

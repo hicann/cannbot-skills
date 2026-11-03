@@ -1,35 +1,56 @@
 ---
 name: catlass-cpp-interface
-description: CATLASS C++ 通用算子和已登记注意力家族五阶段工作流的 01 接口确认。触发：开始开发 CATLASS C++ 算子、恢复接口阶段或接口语义变更时，用于初始化工程、确认并冻结 operator contract，以及创建和校验 workflow.json。
+description: CATLASS C++ 五阶段工作流的 01 接口确认。用于确认公开接口、目标架构和计算语义，并初始化或恢复 workflow。触发：开始 CATLASS C++ 算子，或 workflow 处于 interface 时。
 ---
 
 # 01 接口确认
 
-开始前根据已确认的数学语义选择 `algorithm_family`；普通 CATLASS 算子使用 `general`。新工程运行
-`scripts/init_operator_project.sh <operator_name> [--algorithm-family <family>]`；继续工程先运行
-`scripts/validate_workflow.py --workflow <operator>/docs/workflow.json`。
+## 阶段说明
 
-读取 `guides/interface_and_golden_contract.md`。已登记的注意力家族还要使用
-`catlass-cpp-knowledge query --type operators --family <对应家族> --compact` 查询对应 Operator 卡；
-普通算子按实际组件查询 `apis/`，必要时显式加入 draft 卡。知识是核对材料，不替代用户说明。
+| 输入 | 本阶段处理 | 输出 |
+|---|---|---|
+| 用户需求、接口资料、测试或参考实现、目标产品和性能目标 | 确认公开接口、支持范围和计算语义 | `docs/api.md`、已确认的 `algorithm_family` 和 `target_architecture` |
 
-`sparse_flash_mla` 先完整读取 `operators/direct/transformer/attention/sparse_flash_mla_computation.md`、
-`operators/direct/transformer/attention/sparse_flash_mla_interface.md`、
-`operators/direct/transformer/attention/sparse_flash_mla_metadata.md`；普通 SWA 同时核对接口卡中的一般 SWA 合法域。
-主算子与独立 metadata 的接口、输出、ValueDepend 和真实输入依赖分别冻结；用户已提供明确
-golden/测试脚本时据此完成契约，无需重复征求同一授权。该家族目前只冻结
-`target_architecture=atlas_a2_a3`。
+## 准入规则
 
-确认目标设备代际，并把 `docs/workflow.json` 的 `target_architecture` 从 `pending` 设置为
-`atlas_a2_a3`（A2/A3）或 `ascend950`（A5）。该字段是后续设计与实现的架构分支权威；
-设备代际尚未确认时不得进入 reference；`block_sparse_attention` 的 Arch22 知识同样仅支持 `atlas_a2_a3`。
+- 新工程运行 `scripts/init_operator_project.sh`；已有工程仅在 `stage=interface`、`issue_type=null` 时进入本阶段。进入后先校验 `docs/workflow.json`。
 
-完成 `docs/api.md`，覆盖入口、输入输出顺序、shape、dtype、layout、state、属性、默认值、
-mask、fixed/varlen、chunk、tail、padding、head ratio 和非法输入行为。分别记录
-`operator_contract` 与 `golden_contract`；材料冲突按公开接口/用户明确说明、测试和示例、
-参考实现、论文或相邻实现的优先级请求用户裁决。
+## 执行规则
 
-只有用户确认接口后才把 `operator_contract` 设为 `frozen`，并原子更新状态为：
-`stage=reference`、`golden_contract=provisional`、`issue_type=null`、
-`resume_from=null`、`validation_scope=full`，并保留已确认的非 `pending`
-`target_architecture`。更新后必须再次运行 validator。
+- 按数学语义选择 `algorithm_family`；普通 CATLASS 算子使用 `general`，已登记家族通过 `catlass-cpp-knowledge` 查询 Operator 卡。
+- 在 `docs/api.md` 的“接口签名”“支持范围”“边界行为”三个章节记录对应内容；公开文档、host、TilingData、kernel 入口和测试的签名必须一致。
+- 同一公开接口在不同 SoC 上保持一致；预留参数需明确类型、当前行为、host 校验和兼容方式。
+- 资料冲突按“用户明确说明和公开接口 → 测试与示例 → 参考实现 → 其他资料”裁决，未裁决内容不得冻结。
+- 所有 `algorithm_family` 均支持 `atlas_a2_a3`（Atlas A2系列产品、Atlas A3系列产品）和 `ascend950`（Ascend 950PR&950DT系列产品）。用户使用的 A2、A3 归一为 `atlas_a2_a3`，A5、950 归一为 `ascend950`。
+
+## 准出规则
+
+### 验收
+
+先校验接口文档已完成：
+
+```bash
+python scripts/validate_interface.py --api <operator>/docs/api.md
+```
+
+校验通过后，由用户确认 `docs/api.md` 的接口、支持范围和计算语义，且
+`algorithm_family` 和 `target_architecture` 已确定。
+
+接口校验或评审未通过时，修正 `docs/api.md` 或目标架构后重新验收。
+
+### 状态更新
+
+| 检查结果 | 转移事件 | 下一状态 |
+|---|---|---|
+| 接口验收通过 | `interface_accepted` | `reference / null` |
+
+接口验收通过后执行：
+
+```bash
+python scripts/transition_workflow.py \
+  --workflow <docs/workflow.json> --event interface_accepted \
+  --algorithm-family <algorithm_family> \
+  --target-architecture <target_architecture>
+```
+
+该事件同时写入已确认的算法家族和目标架构。状态更新成功后才进入 02。

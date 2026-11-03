@@ -8,20 +8,20 @@
         "max_tokens": 20000,
         "eval_mode": "text"
       },
-      "prompt": "Linear Attention 进入方案设计时，R01 到 R21 如何在 CANNBot 中执行？",
-      "expected_output": "回复应说明从 cannbot-knowledge 的 knowledge/ops/catlass/guides 完整读取方案设计与 Stage 设计规则，并按数学家族查询 Operator 卡；先完成 Stage 划分再做具体详设，逐条应用 R01-R21；完整推演可保存为 docs/design.full.md，最终按模板投影为仅含两章的 docs/design.md。",
+      "prompt": "请说明 Linear Attention 在 CANNBot 中执行 03 方案设计的完整流程：准入状态与官方产品/架构映射、芯片规则查询与完整读取、每次处理的任务量与流水中同时推进的任务数、Stage/任务映射/tiling/空间/数据通路的推导、理论最低耗时与最大吞吐及目标可达性、设计文档的六章结构及各 Stage 空间表、Rxx 检查、同步契约和准出转移。不同芯片的规则集如何选择？这是 text 流程问答，只说明步骤和检查要求，不实际读取工程、生成设计或更新状态。",
+      "expected_output": "回答应说明以下流程要求，而非实际执行：先确认 stage=design、issue_type 为 null 或 performance_optimize，以及 target_architecture；atlas_a2_a3 对应 Atlas A2系列产品、Atlas A3系列产品，ascend950 对应 Ascend 950PR&950DT系列产品。通过 catlass-cpp-knowledge 完整读取唯一匹配的芯片规则，不混用其它架构规则。根据当前算子重新推导每次处理的任务量、流水中同时推进的任务数、Stage、任务映射、TileShape、片上空间、数据通路和同步。设计阶段还要按 AIC/Cube、AIV/Vector、GM/MTE 和不可重叠依赖链推导理论最低耗时与理论最大吞吐，只判断目标是否理论可达，不要求初版实测达到目标。最终 docs/design.md 按目标、变量与任务映射、Stage 总览、Stage 详细设计、用户额外 workspace、跨 Stage 同步契约六章交付；Stage 总览中逐条列出所选芯片规则文件的全部 Rxx，每条结论只能是已应用或不适用，并给出具体设计证据或不适用原因；Stage 总览还要明确并行与流水关系；每个 Stage 先写公式，再写产生/写出、读取/保护、临时/固定三个空间表。同步契约明确 Producer、Consumer、ready、free、local pipe 和回绕/退出处理。规则无缺项或重复项、理论目标不低于理论最低耗时且校验和评审通过后，执行 design_accepted 进入 implementation。只评估回复是否讲清这些要求，不要求实际工程文件、规则读取日志、校验结果或状态转移证据。",
       "files": [],
       "expectations": []
     },
     {
       "id": 7,
-      "title": "Kernel Stage 与同步模式",
+      "title": "跨 Stage 同步实现",
       "config": {
         "max_tokens": 20000,
         "eval_mode": "text"
       },
-      "prompt": "一个本地 finalize 代码参考按 head 分配 AIV 任务。当前算子独立 head 较少，部分 shape 的完整 head 工作集超出单个 AIV 的 UB，应如何选择分工并完成 Stage 和同步实现？",
-      "expected_output": "回复应按容量与依赖判据在逐 head 分配与同 head 分片之间选择，说明分片的有效区划分、对齐与尾块处理、跨片归约与空片处理，并说明使用跨核同步机制完成 ready/free 握手（API 命名不限）；参数化说明分工与工作集参数即可。",
+      "prompt": "一个本地 finalize 代码参考按 head 分配 AIV 任务。当前算子独立 head 较少，部分 shape 的完整 head 工作集超出单个 AIV 的 UB。请说明应依据哪些资料选择任务分工，以及如何把跨 Stage 数据边落实为同步协议，覆盖参与方、数据范围、通知配对、地址与通知 ID 复用、空任务、退出和正式流水。题目未提供具体公式、shape 或目标芯片，只需说明条件化的设计方法，不假定算法，不编造分块数值，也不实际生成工程。",
+      "expected_output": "回答应说明：根据当前接口、完整支持域、计算图、目标芯片规则和资源选择任务映射，芯片数据路径和 Vector 执行模型只从选中的完整规则集取得。映射确定后，将每条跨 Stage 生产消费边落实为同步协议，明确完整数据范围、可见条件、AIC/AIV 参与方、通知次数和地址复用条件。跨 AIC/AIV 交接时，跨核通知和本地 pipe 完成条件分别闭合；已进入协同流程的空任务保持通知配对，复用通知 ID 或退出前排空上一轮通知。正式设备方案保持跨 work 并行和 Stage 流水，不能用逐 work 串行方案替代。评估是否讲清这些设计要求，不要求实际工程、芯片卡读取记录、具体字节区间或通知 ID；未给出的算法与硬件条件应列为待确认项，不得臆造。",
       "files": [],
       "expectations": []
     },
@@ -32,10 +32,37 @@
         "max_tokens": 12000,
         "eval_mode": "text"
       },
-      "prompt": "一个算子的所有计算都由同一个 AIV 顺序执行，Stage 应如何划分？Stage 之间如何设计同步？",
-      "expected_output": "回复应先依据数据依赖、计算类型、生命周期和精度观察点划分 Stage，再映射 AIC/AIV；同一 AIV 可以顺序执行多个逻辑 Stage。同步应按实际 producer-consumer 边使用成对 HardEvent/CrossCore 通知，同一执行管线的连续计算按程序顺序组织，并在设计和代码校验中保持一致。回复能说明设计需与工程 marker 的 algorithm_family/workflow_id/target_architecture 对齐（如 flash_attention 为 catlass-flash-attention-v1、atlas_a2_a3）属加分项，不作为硬性判分点。",
+      "prompt": "一个算子中，同一 work 的多个计算步骤由同一个 AIV 顺序执行，不同 work 仍可并行。是否只能划成一个 Stage？请说明 Stage 划分依据、Stage 与执行单元的关系，以及同步如何按同 pipe、本地跨 pipe、跨 AIC/AIV 的实际依赖选择；不存在异步依赖时如何处理？设计与 workflow 的 algorithm_family、target_architecture 应保持什么关系？这是概念问答，只说明规则，不实际读取或生成工程。",
+      "expected_output": "回复应先依据数据依赖、计算类型、生命周期和精度观察点划分 Stage，再映射 AIC/AIV；同一 AIV 可以顺序执行多个逻辑 Stage。同步方式由实际 producer-consumer 边决定：同一 pipe 使用程序顺序或必要的 PipeBarrier，本地跨 pipe 使用 HardEvent、Queue 或等价机制，跨 AIC/AIV 使用 CrossCore 通知并单独闭合本地 pipe 完成条件；不存在异步依赖时不增加同步。设计必须与 workflow 的 algorithm_family 和 target_architecture 一致。只评估这些规则的说明，不要求实际 workflow、任务映射产物或芯片规则读取证据。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 11,
+      "title": "性能候选返回设计阶段",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "workflow 以 stage=design、issue_type=performance_optimize 恢复，docs/validation.md 已记录最新性能结果、流水分析和选中的优化候选。方案设计能否继续沿用最初 baseline 和候选排序？请说明本轮应读取的证据、baseline 与设计范围，以及候选保留或回退后代码和设计文档如何收敛。只解释完整处理流程，不实际读取工程或修改文件。",
+      "expected_output": "不可以。03 应读取 docs/validation.md 中最新一轮性能结果、流水分析和已选优化候选，以当前代码和当前 docs/design.md 校准 baseline，本轮只设计该候选；候选验证后，无论保留还是回退，都要以当时的当前代码作为下一轮 baseline，采用的设计同步收敛到 docs/design.md。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 12,
+      "title": "通用算子知识查询边界",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "workflow 处于 design，algorithm_family=general。是否应执行 --family general 查询 Operator 卡？应读取哪些知识？",
+      "expected_output": "general 不查询 Operator 卡。应按 target_architecture 读取唯一对应的芯片 Stage 规则，并按实际使用的 CATLASS/CANN 组件查询 API 卡和源码。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "不查询 Operator 卡"},
+        {"type": "contains", "pattern": "API"}
+      ]
     }
   ],
   "skill_name": "catlass-cpp-design"

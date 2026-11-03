@@ -4,11 +4,11 @@
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-"""Validate registered CATLASS C++ workflow state and recovery routing."""
+"""Validate the CATLASS C++ workflow routing state."""
 
 from __future__ import annotations
 
@@ -18,23 +18,26 @@ from pathlib import Path
 from typing import Any
 
 
-WORKFLOWS = {
-    "general": "catlass-general-v1",
-    "linear_attention": "catlass-linear-attention-v1",
-    "block_sparse_attention": "catlass-block-sparse-attention-arch22-v1",
-    "sparse_flash_mla": "catlass-sparse-flash-mla-v1",
-    "block_sparse_attention_grad": "catlass-block-sparse-attention-grad-v1",
-    "flash_attention_grad": "catlass-flash-attention-grad-v1",
-    "flash_attention": "catlass-flash-attention-v1",
+ALGORITHM_FAMILIES = (
+    "general",
+    "linear_attention",
+    "block_sparse_attention",
+    "sparse_flash_mla",
+    "block_sparse_attention_grad",
+    "flash_attention_grad",
+    "flash_attention",
+)
+TARGET_ARCHITECTURES = {
+    "atlas_a2_a3": "Atlas A2系列产品、Atlas A3系列产品",
+    "ascend950": "Ascend 950PR&950DT系列产品",
 }
-TARGET_ARCHITECTURE_BY_FAMILY = {
-    "sparse_flash_mla": ("atlas_a2_a3",),
-    "block_sparse_attention": ("atlas_a2_a3",),
-    "block_sparse_attention_grad": ("ascend950",),
-    "flash_attention_grad": ("ascend950",),
-    "flash_attention": ("atlas_a2_a3",),
+TARGET_ARCHITECTURE_VALUES = ("pending", *TARGET_ARCHITECTURES)
+WORKFLOW_FIELDS = {
+    "algorithm_family",
+    "target_architecture",
+    "stage",
+    "issue_type",
 }
-TARGET_ARCHITECTURES = ("pending", "atlas_a2_a3", "ascend950")
 STAGES = (
     "interface",
     "reference",
@@ -43,86 +46,46 @@ STAGES = (
     "validation",
     "complete",
 )
-CONTRACT_STATES = ("provisional", "frozen")
-ISSUE_TO_RESUME = {
-    "precision_debug": "implementation",
-    "design_issue": "design",
-    "reference": "reference",
-    "interface": "interface",
-    "performance_optimize": "validation",
+VALID_STATES = {
+    ("interface", None),
+    ("reference", None),
+    ("design", None),
+    ("design", "performance_optimize"),
+    ("implementation", None),
+    ("implementation", "precision_debug"),
+    ("validation", None),
+    ("complete", None),
 }
 
 
 def validate_workflow(data: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    missing = sorted(WORKFLOW_FIELDS - data.keys())
+    unexpected = sorted(data.keys() - WORKFLOW_FIELDS)
+    if missing:
+        errors.append(f"workflow is missing fields: {', '.join(missing)}")
+    if unexpected:
+        errors.append(f"workflow contains unsupported fields: {', '.join(unexpected)}")
+
     family = data.get("algorithm_family")
-    if family not in WORKFLOWS:
+    if family not in ALGORITHM_FAMILIES:
         errors.append("algorithm_family must be a registered CATLASS C++ family")
-    elif data.get("workflow_id") != WORKFLOWS[family]:
-        errors.append(f"workflow_id must be {WORKFLOWS[family]}")
 
     stage = data.get("stage")
-    if stage not in STAGES:
-        errors.append(f"stage must be one of: {', '.join(STAGES)}")
+    issue_type = data.get("issue_type")
+    if (stage, issue_type) not in VALID_STATES:
+        errors.append(
+            "stage and issue_type must form a registered CATLASS C++ workflow state"
+        )
 
     target_architecture = data.get("target_architecture")
-    if target_architecture not in TARGET_ARCHITECTURES:
-        errors.append(
-            "target_architecture must be one of: " + ", ".join(TARGET_ARCHITECTURES)
+    if target_architecture not in TARGET_ARCHITECTURE_VALUES:
+        supported = "; ".join(
+            f"{name} ({products})" for name, products in TARGET_ARCHITECTURES.items()
         )
-    elif stage in STAGES[1:] and target_architecture == "pending":
-        errors.append(f"{stage} requires a frozen target_architecture")
-    allowed_architectures = TARGET_ARCHITECTURE_BY_FAMILY.get(family)
-    if (
-        allowed_architectures
-        and target_architecture not in ("pending", *allowed_architectures)
-    ):
-        errors.append(
-            f"{family} knowledge currently covers "
-            f"{' and '.join(allowed_architectures)} only"
-        )
-
-    for field in ("operator_contract", "golden_contract"):
-        if data.get(field) not in CONTRACT_STATES:
-            errors.append(f"{field} must be provisional or frozen")
-
-    issue_type = data.get("issue_type")
-    resume_from = data.get("resume_from")
-    if issue_type is not None and issue_type not in ISSUE_TO_RESUME:
-        errors.append(f"unsupported issue_type: {issue_type}")
-    if resume_from is not None and resume_from not in STAGES[:-1]:
-        errors.append(f"resume_from must be one of: {', '.join(STAGES[:-1])}")
-    if issue_type in ISSUE_TO_RESUME and resume_from != ISSUE_TO_RESUME[issue_type]:
-        errors.append(
-            f"issue_type={issue_type} requires resume_from={ISSUE_TO_RESUME[issue_type]}"
-        )
-    if issue_type in ISSUE_TO_RESUME and stage != ISSUE_TO_RESUME[issue_type]:
-        errors.append(
-            f"issue_type={issue_type} requires stage={ISSUE_TO_RESUME[issue_type]}"
-            f"; current stage={stage}"
-        )
-    if issue_type is None and resume_from is not None:
-        errors.append("resume_from requires issue_type")
-
-    scope = data.get("validation_scope")
-    if scope not in ("full", "precision_targeted"):
-        errors.append("validation_scope must be full or precision_targeted")
-    if scope == "precision_targeted" and issue_type != "precision_debug":
-        errors.append("precision_targeted requires issue_type=precision_debug")
-    if issue_type == "design_issue" and scope != "full":
-        errors.append("design_issue must reset validation_scope to full")
-
-    if stage in ("design", "implementation", "validation", "complete"):
-        if data.get("operator_contract") != "frozen":
-            errors.append(f"{stage} requires operator_contract=frozen")
-        if data.get("golden_contract") != "frozen":
-            errors.append(f"{stage} requires golden_contract=frozen")
-    if stage == "complete" and (issue_type is not None or resume_from is not None):
-        errors.append(
-            "complete stage cannot contain an unresolved issue or recovery route"
-        )
-    if stage == "complete" and scope != "full":
-        errors.append("complete stage requires validation_scope=full")
+        errors.append(f"target_architecture must be one of: pending; {supported}")
+    elif stage != "interface" and target_architecture == "pending":
+        errors.append(f"{stage} requires a selected target_architecture")
     return errors
 
 
@@ -146,7 +109,7 @@ def main() -> int:
         print("FAIL")
         print("\n".join(f"- {error}" for error in errors))
         return 1
-    print("PASS: workflow state and recovery route are valid")
+    print("PASS: workflow routing state is valid")
     return 0
 
 
