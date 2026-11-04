@@ -71,7 +71,7 @@
 | **Multi-kernel** | stats + apply 双 kernel（BatchNorm/LayerNorm/GroupNorm/InstanceNorm/RMSNorm 等归一化算子） | 5, 7, 8, 14, 17 | 继承 Tiled Reduction 全部瓶颈 + kernel 分裂 |
 | **Broadcast EW** | `add/sub/mul/div` 逐元素操作，存在 shape 不等需广播 | 1, 2, 8, 12 | 入参静态化、tiling、多路径调度是关键 |
 | **Scatter/Gather** | 通过随机/不可预测索引访问全局内存 | 4, 5 | 离散访存和 scatter-add 并行轴选择 |
-| **Sparse Attention (SFA/BSA)** | sparse_indices 作为算子输入（上游 topk，行内随机/升序），KV 全 Q 头共享（KV_N=1），MLA-absorb 语义（`q_nope@K̃_nope^T + q_rope@K̃_rope^T → softmax → @K̃_nope`） | 4, 22, 2 | 随机访存为主场景，无块规则可跳过；**先做 stage/consume 阶段拆解**（stage=带宽地板，consume=trans/PV 布局转换地板）；主路径=内核内 gather 连续化暂存；device-side workspace 方案已实测劣化 27%~49%；multibuffer/双缓冲无效。详见 `references/operators/sparse-flash-attention-optimization.md`（KB 暂未收录，保留本地） |
+| **Sparse Attention (SFA/BSA)** | `sparse_indices` 已作为输入给定，按 token 随机读取 KV，KV 全 Q 头共享（KV_N=1），采用 MLA-absorb 语义 | 4, 22, 2 | 按输入与目标工具链比较暂存候选；历史实测及适用边界见 `KB:ops/triton/optimizations/operator_optimization/sparse_flash_attention_optimization.md` |
 | **Histogram-like / Small-output-table** | histc / bincount / scatter_reduce 等小输出表规约 | 3, 29, 1 | 核数扩展优先；禁止全局 atomic；IR 诊断 match-matrix 标量降级 |
 | **MatMul** | 矩阵乘法 | 2, 25 | tiling；转置 matmul 需检查专用优化（autotune 由主流程终止步骤 7 统一执行） |
 | **Memory-bound Copy** | Split/Concat/Pad/Chunk 等纯访存算子 | 15 | 连续拷贝聚合 |
@@ -130,7 +130,7 @@
 | CV 融合-Batch 流水线 | `KB:ops/triton/optimizations/operator_optimization/cv_fusion_pingpong.md` | CV 融合算子 PIPE_STAGES 调度、T0-T5 逐拍交错、Buffer 分配策略 |
 | Attention/FA 专用优化 | `KB:ops/triton/optimizations/operator_optimization/flash_attention_optimization.md` | FA 类算子瓶颈判别、迭代数目标函数、有效方向与**证伪方向全表**、profiling 字段误导案例、天花板估算模板 |
 | Attention/MLA 专用优化 | `references/operators/mla-paged-attention-optimization.md`（KB 暂未收录，保留本地） | MLA 类算子瓶颈判别、仿射 store 修复（`BLOCK_QO=1`）、`P_SPLIT` 精度补偿、KV 共享与 split-KV、**证伪方向全表** |
-| Attention/SFA 专用优化 | `references/operators/sparse-flash-attention-optimization.md`（KB 暂未收录，保留本地） | SparseFlashAttention（随机 topk 索引）阶段拆解、内核内 gather 连续化暂存主路径、有效方向与**证伪方向全表**、天花板估算模板 |
+| Attention/SFA 专用优化 | `KB:ops/triton/optimizations/operator_optimization/sparse_flash_attention_optimization.md` | 随机索引 SFA 的暂存候选、选型反例及精度和编译边界 |
 | CV 融合-Tiling | `KB:ops/triton/optimizations/operator_optimization/cv_fusion_tiling.md` | CV 融合算子 On-Chip 容量估算、候选验证、Autotune 自动化搜索 |
 | IR分析优化 | `KB:ops/triton/guides/ir/ir_analysis_workflow.md` | IR分析优化 |
 | Histogram-like / Small-output-table 优化 | `KB:ops/triton/optimizations/operator_optimization/histogram_like_table_reduction.md` | 小输出表规约类算子专用优化经验 |
