@@ -815,25 +815,6 @@
         "./shmem-ops-code-review",
         "./shmem-ops-torch-bind"
       ]
-    },
-    {
-      "name": "shmem-ops-generator",
-      "source": "./plugins-community/shmem-ops-generator",
-      "description": "基于 SHMEM 的 Ascend 自定义集体通信算子端到端开发插件，涵盖需求到性能优化的完整工作流。",
-      "version": "0.1.0",
-      "author": {
-        "name": "CANNBot Community"
-      },
-      "keywords": [
-        "shmem",
-        "communication",
-        "collective",
-        "operator"
-      ],
-      "category": "development",
-      "dependencies": [
-        "shmem-ops-skills"
-      ]
     }
   ]
 }

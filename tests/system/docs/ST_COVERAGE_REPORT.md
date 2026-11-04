@@ -10,6 +10,8 @@
 
 > **2026-10-30 模型推理迁出增量**：删除 `model-infer-optimize` 旧副本，Team 减少 1，7 个启用用例由 cannbot 应用仓保留；本仓不再发现该 Team，原子 Skill 数不变。下表保留历史统计，不表示应用仓动态评测已执行。
 
+> **2026-11-04 SHMEM 迁出增量**：删除 `shmem-ops-generator` 旧插件副本，Team 减少 1；该副本没有 `evals/evals.json`，启用用例变化为 0，`community/ops/` 下的 10 个 SHMEM Skill 保留。下表保留历史条目并标注迁出，未重新生成全量报告。
+
 > **统计口径**：统计代码仓内所有符合结构要求的 Skill（`skill_dirs` 下含 `SKILL.md`）与 Team（`team_dirs` 下含 `AGENTS.md` + `.claude-plugin/plugin.json`），与是否携带 `evals/evals.json` 无关——无 evals 的实体用例数计 0。
 
 ## 1. 五维看护说明
@@ -196,6 +198,6 @@
 | catlass-dsl-generator | 0 |   |   |   |   |   |
 | ops-perf-evolution | 0 |   |   |   |   |   |
 | [ops-perf-optimize（2026-10-29 已迁出）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-perf-optimize) | 0 |   |   |   |   |   |
-| shmem-ops-generator | 0 |   |   |   |   |   |
+| [shmem-ops-generator（2026-11-04 已迁出）](https://gitcode.com/cann/cannbot/tree/master/plugins-community/shmem-ops-generator) | 0 |   |   |   |   |   |
 | tilelang2ascendc-ops-generator | 0 |   |   |   |   |   |
 | triton-optimizer | 0 |   |   |   |   |   |

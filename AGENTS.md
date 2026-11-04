@@ -111,6 +111,8 @@ cannbot-skills/
 
 > 模型推理优化插件 `model-infer-optimize` 的基础优化与 SOTA 探索工作流已从本仓迁出，入口与角色定义见 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize)；原子 Skill 继续在本仓 `model/` 维护。
 
+> SHMEM 算子开发插件 `shmem-ops-generator` 已从本仓迁出，入口与安装说明见 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-community/shmem-ops-generator)；10 个原子 Skill 继续在本仓 `community/ops/shmem-ops-*/` 维护。
+
 ## Skills 分类
 
 项目 skills 目录按功能分类，包括：
