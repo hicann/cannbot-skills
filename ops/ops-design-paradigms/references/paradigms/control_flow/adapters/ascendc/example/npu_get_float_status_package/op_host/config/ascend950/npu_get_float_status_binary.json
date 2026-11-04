@@ -1,0 +1,34 @@
+{
+  "op_type": "NPUGetFloatStatus",
+  "op_list": [
+    {
+      "bin_filename": "NPUGetFloatStatus_3848434ab352dfec19c386dbd79c5caf",
+      "inputs": [
+        {
+          "name": "addr",
+          "index": 0,
+          "dtype": "float32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "data",
+          "index": 0,
+          "dtype": "float32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ]
+    }
+  ]
+}
