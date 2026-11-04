@@ -13,10 +13,10 @@ on:
   pull_request_comment:
     types: [created]
     branches: [ '**' ]
-    comments: [ '^(?:\/)?compile*' ]
+    comments: [ '^/?compile(@[A-Za-z0-9._-]+)?$' ]
   pr_comment:
     types: [ created ]
-    keyword: '^(?:\/)?compile*'
+    keyword: '^/?compile(@[A-Za-z0-9._-]+)?$'
 
 env:
   org_name: ${{ vars.ORG_NAME }}
