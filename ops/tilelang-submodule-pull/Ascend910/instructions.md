@@ -11,6 +11,14 @@ This skill provides automatic pulling of tilelang repository and its third-party
 - **Real-time Output**: Pull process printed to terminal and log file in real-time
 - **Timeout Protection**: Automatically stops after 10 hours of background running to prevent forgetting to close
 
+## 核心行为要点
+
+- **输出落盘**：拉取与重试的全过程实时输出到终端，并同步写入日志 `logs_DIR/git_pull.log`（脚本内所有输出均通过 `tee -a "$LOG_FILE"` 落盘留痕）。
+- **超时保护**：后台运行满 10 小时（36000 秒）自动停止并记录日志，用于防止后台任务被忘记关闭。
+- **失败重试**：任一拉取命令命中错误关键词即判本轮失败，等待 1 小时（3600 秒）后重试整轮，不会无限重试。
+- **成功即停**：`git submodule update --init --recursive` 与 `git pull --recurse-submodules` 两条命令均无错误才判定成功并停止脚本。
+- **仓库缺失先说明**：用户询问拉取流程、或目标仓库暂不存在/未 clone 时，先完整说明两条命令、镜像加速配置、前台/后台运行方式与日志路径，再定位实际仓库；不得仅因仓库缺失停止作答。
+
 ## Script Paths
 
 Resolve `SUBMODULE_SKILL_DIR` to the real directory containing this `instructions.md`. Script paths are relative to that directory; output paths follow the script's own configuration.
@@ -68,6 +76,12 @@ The script automatically detects the following errors:
 - `fatal`: Fatal error
 - `Failed to clone`: Clone failed
 - `unable to access`: Cannot access URL
+
+**命中错误后的行为**（检测与重试的全过程实时输出到终端，并通过 `tee -a "$LOG_FILE"` 同步写入日志 `logs_DIR/git_pull.log` 留痕）：
+
+- 任一命令输出命中上述关键词即判定本轮失败：等待 1 小时（3600 秒）后重试整轮；重试过程持续输出到终端与日志文件，不会无限重试。
+- 后台运行满 10 小时（36000 秒）自动停止，并把停止时间与运行时长记录到日志；超时保护的目的就是防止后台任务被忘记关闭。
+- `git submodule update --init --recursive` 与 `git pull --recurse-submodules` 两条命令均未命中错误关键词，才判定成功并停止脚本。
 
 ## Script Content
 

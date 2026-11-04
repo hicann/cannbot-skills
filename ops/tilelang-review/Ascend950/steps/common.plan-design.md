@@ -57,6 +57,8 @@ python3 {skill_base}/scripts/workflow.create_review_dir.py --type pr --id {revie
 
 条例只能针对正式检视文件安排。上下文文件可以作为防御或调用证据，但不得自动加入检视范围。
 
+概要标注“文件不存在”的正式检视文件不作为条例依据：不为它分配条例分组，写入跳过清单并记录“输入文件不存在”；格式检查与报告阶段照常执行，全部正式检视文件均缺失时分组为空。
+
 枚举 `{skill_base}/references/*.md`。计划阶段只读取每个 reference 的以下部分：
 
 - `<适用>...</适用>`；
