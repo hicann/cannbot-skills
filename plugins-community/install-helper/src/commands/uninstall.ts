@@ -9,13 +9,13 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { existsSync, unlinkSync, rmdirSync, readdirSync, readFileSync } from "fs";
-import { resolve, basename, sep, join } from "path";
+import { resolve, basename, sep, join, relative, isAbsolute } from "path";
 import chalk from "chalk";
 import { select, checkbox, Separator, confirm } from "@inquirer/prompts";
 import { findPlugin } from "../core/registry.js";
 import { findSkill } from "../core/skill-registry.js";
 import { uninstallSkills, interactiveSkillUnselect } from "../core/skill-installer.js";
-import { readRecord, deleteRecord, getInstalledSkills, getLastBatchSkills, scanInstalledFiles, readSkillRecord } from "../core/record.js";
+import { readRecord, readRecords, deleteRecord, getInstalledSkills, getLastBatchSkills, scanInstalledFiles, readSkillRecord } from "../core/record.js";
 import { scanCannbotInstalled, uninstallCannbotPlugin } from "../core/cannbot-registry.js";
 import { removeInstalledPlugin } from "../utils/config.js";
 import { isSymlink } from "../utils/fs-helpers.js";
@@ -98,7 +98,10 @@ export async function uninstallCommand(
   }
 
   await uninstallCannbotPlugins(cannbotPlugins);
-  await uninstallPlugins(plugins, options.yes || false);
+  // #797: when the user names a tool (--tool), uninstall must act on that
+  // tool's records only — a same-name install for another tool in the same
+  // directory must survive.
+  await uninstallPlugins(plugins, options.yes || false, userSpecifiedTool ? tool : undefined);
   await uninstallSkillsByName(skills, tool, level);
 }
 
@@ -445,18 +448,18 @@ async function interactivePluginUninstall(tool: AITool, level: InstallLevel): Pr
   logger.blank();
 }
 
-async function uninstallPlugins(pluginIds: string[], batchMode: boolean): Promise<void> {
+async function uninstallPlugins(pluginIds: string[], batchMode: boolean, tool?: AITool): Promise<void> {
   for (const pluginId of pluginIds) {
-    await uninstallPluginById(pluginId, batchMode);
+    await uninstallPluginById(pluginId, batchMode, tool);
   }
 }
 
-async function uninstallPluginById(pluginId: string, batchMode: boolean): Promise<void> {
+async function uninstallPluginById(pluginId: string, batchMode: boolean, tool?: AITool): Promise<void> {
   let plugin = findPlugin(pluginId);
   if (!plugin) {
     // Community plugin not in the embedded registry — recover display info
     // from the install record so it can still be uninstalled by name.
-    const record = readRecord(pluginId);
+    const record = tool ? readRecords(pluginId).find((r) => r.tool === tool) ?? null : readRecord(pluginId);
     if (record) {
       plugin = {
         id: pluginId,
@@ -472,11 +475,18 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
   }
   if (!plugin) return;
 
-  let record = readRecord(plugin.id);
+  // #797: the location-keyed store holds one record per tool×level×path —
+  // filter to the requested tool first, so a same-name install for another
+  // tool in the same directory is never removed. Without --tool keep the
+  // legacy cwd-preference resolution.
+  let record = tool
+    ? readRecords(plugin.id).find((r) => r.tool === tool) ?? null
+    : readRecord(plugin.id);
 
   if (!record) {
-    // Fallback: scan all tool×level for manifest-based cleanup
-    for (const toolName of VALID_TOOLS) {
+    // Fallback: scan all tool×level for manifest-based cleanup, scoped to
+    // the requested tool when --tool was given.
+    for (const toolName of tool ? [tool] : VALID_TOOLS) {
       for (const lvl of ["project", "global"] as InstallLevel[]) {
         const configRoot = getConfigRoot(toolName, lvl);
         const manifestPath = join(configRoot, `${pluginId}-manifest.json`);
@@ -547,13 +557,24 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
     (filePath) => !preservedPaths.has(resolve(filePath))
   );
 
+  // Display path: disambiguate same-named files at different roots (e.g. the
+  // project-root AGENTS.md vs the config-root AGENTS.md both logged as
+  // "AGENTS.md" before). Prefer the path relative to the project root, then
+  // to the config root, and fall back to the absolute path.
+  const displayPath = (p: string): string => {
+    for (const base of [record.installPath, configRoot]) {
+      const rel = relative(base, p);
+      if (rel && !rel.startsWith("..") && !isAbsolute(rel)) return rel;
+    }
+    return p;
+  };
+
   for (const filePath of allFiles) {
     if (!isSafePath(filePath)) continue;
     try {
       if (existsSync(filePath) || isSymlink(filePath)) {
         unlinkSync(filePath);
-        const name = basename(filePath);
-        logger.step(`  ${t("uninstall_remove_label")}: ${name}`);
+        logger.step(`  ${t("uninstall_remove_label")}: ${displayPath(filePath)}`);
         removedFiles++;
       }
     } catch {
@@ -571,8 +592,7 @@ async function uninstallPluginById(pluginId: string, batchMode: boolean): Promis
         const entries = readdirSync(dirPath);
         if (entries.length === 0) {
           rmdirSync(dirPath);
-          const name = basename(dirPath);
-          logger.step(`  ${t("uninstall_clean_empty_dir")}: ${name}/`);
+          logger.step(`  ${t("uninstall_clean_empty_dir")}: ${displayPath(dirPath)}/`);
           removedDirs++;
         }
       }

@@ -10,7 +10,7 @@
 
 import { select, Separator } from "@inquirer/prompts";
 import chalk from "chalk";
-import type { AITool, InstallLevel, PluginSource, WizardAnswers } from "../types/index.js";
+import type { AITool, InstallLevel, PluginEntry, PluginSource, WizardAnswers } from "../types/index.js";
 import { getAllPlugins } from "../core/registry.js";
 import { detectTools, getToolDisplayName } from "../core/detector.js";
 import { readAllManifests } from "../core/manifest.js";
@@ -40,6 +40,32 @@ export async function selectToolWithDetection(): Promise<AITool | "back" | "canc
 // legacy entries stay distinguishable through selection, confirm and install.
 export function encodePluginChoice(id: string, source?: PluginSource): string {
   return source === "cannbot" ? `cannbot::${id}` : `skills::${id}`;
+}
+
+/**
+ * One entry per plugin id for the wizard's install-selection list.
+ * getAllPlugins() intentionally lists dual-source plugins once per source
+ * (frozen local copy + cannbot entry — the doctor/list badge design); in the
+ * wizard a plugin that can be installed two ways is still one choice. The
+ * cannbot entry wins (same routing as findPlugin's default resolution), and
+ * the friendlier display name of the non-cannbot entry is kept when present.
+ */
+export function dedupeForWizardSelection(plugins: PluginEntry[]): PluginEntry[] {
+  const seen = new Map<string, PluginEntry>();
+  for (const p of plugins) {
+    const existing = seen.get(p.id);
+    if (!existing) {
+      seen.set(p.id, { ...p });
+      continue;
+    }
+    // cannbot source wins the routing; keep the friendlier display name.
+    if (p.source === "cannbot" && existing.source !== "cannbot") {
+      seen.set(p.id, { ...p, displayName: p.displayName === p.id ? existing.displayName : p.displayName });
+    } else if (p.source !== "cannbot" && existing.source === "cannbot" && existing.displayName === existing.id) {
+      existing.displayName = p.displayName;
+    }
+  }
+  return [...seen.values()];
 }
 
 export function decodePluginChoice(value: string): { id: string; source: PluginSource } {
@@ -217,7 +243,7 @@ export async function stepLevel(lastLevel?: InstallLevel): Promise<InstallLevel 
 async function stepPlugins(tool: AITool, level: InstallLevel): Promise<string[] | typeof BACK | typeof CANCEL> {
   printBoxTitle(t("wizard_step_3_title"));
 
-  const plugins = getAllPlugins();
+  const plugins = dedupeForWizardSelection(getAllPlugins());
   const configRoot = getConfigRoot(tool, level);
   const manifests = readAllManifests(configRoot);
   const installedSet = new Set(manifests.map((m) => m.team));

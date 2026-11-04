@@ -29,14 +29,20 @@ vi.mock("../src/ui/backup-prompts.js", () => ({
 }));
 
 let testDir: string;
+let savedHome: string | undefined;
 
 function setup() {
   testDir = join(tmpdir(), `ih-qoder-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(testDir, { recursive: true });
+  // Sandbox the install bookkeeping (records + config.yaml live under
+  // getCannbotConfigDir() → HOME); keep the real ~/.cannbot untouched.
+  savedHome = process.env.HOME;
+  process.env.HOME = testDir;
 }
 
 function teardown() {
   rmSync(testDir, { recursive: true, force: true });
+  process.env.HOME = savedHome;
 }
 
 function makeFixture() {

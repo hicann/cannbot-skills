@@ -105,6 +105,19 @@ describe("publish integrity — lockfile sync", () => {
     }
   });
 
+  it("lockfile contains all five platform sub-package entries at the package version", () => {
+    // npm prunes optionalDependencies entries whose registry resolution
+    // fails — e.g. when `npm install` runs before large freshly published
+    // platform tarballs have propagated. A pruned lockfile still passes the
+    // "no wrong version" checks above (they only inspect entries that
+    // exist), so completeness must be asserted explicitly.
+    for (const plat of ["linux-x64", "linux-arm64", "darwin-x64", "darwin-arm64", "windows-x64"]) {
+      const entry = lock.packages && lock.packages[`node_modules/@cannbot-ai/install-helper-${plat}`];
+      expect(entry, `missing lockfile entry for ${plat}`).toBeDefined();
+      expect((entry as any).version).toBe(pkg.version);
+    }
+  });
+
   it("lockfile contains no version newer or different from package.json for platform sub-packages", () => {
     for (const [p, entry] of Object.entries(lock.packages || {})) {
       if (p.startsWith("node_modules/@cannbot-ai/install-helper-")) {

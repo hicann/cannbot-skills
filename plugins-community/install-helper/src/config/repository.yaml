@@ -20,6 +20,7 @@ scanDirs:
   - infra
   - runtime
   - tools
+  - communication
 
 # install-helper 当前仅适配官方插件；社区插件迭代较快暂不纳入，
 # 待稳定后在下方 pluginDirs 恢复 plugins-community 即可。

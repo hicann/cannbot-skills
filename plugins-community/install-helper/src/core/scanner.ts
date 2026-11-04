@@ -71,7 +71,7 @@ function loadScanConfig(): { skillDirs: string[]; pluginDirs: string[]; cacheTtl
       if (!config) continue;
       const ttlHours = config.scanCacheTtlHours || 24;
       return {
-        skillDirs: config.scanDirs || ["ops", "model", "graph", "infra", "runtime"],
+        skillDirs: config.scanDirs || ["ops", "model", "graph", "infra", "runtime", "tools", "communication"],
         pluginDirs: config.pluginDirs || ["plugins-official", "plugins-community"],
         cacheTtlMs: ttlHours * 60 * 60 * 1000,
       };
@@ -90,7 +90,7 @@ function loadScanConfig(): { skillDirs: string[]; pluginDirs: string[]; cacheTtl
     };
   }
   return {
-    skillDirs: ["ops", "model", "graph", "infra", "runtime"],
+    skillDirs: ["ops", "model", "graph", "infra", "runtime", "tools", "communication"],
     pluginDirs: ["plugins-official", "plugins-community"],
     cacheTtlMs: 24 * 60 * 60 * 1000,
   };

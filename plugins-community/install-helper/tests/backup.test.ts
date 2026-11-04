@@ -14,14 +14,20 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 let testDir: string;
+let savedHome: string | undefined;
 
 function setup() {
   testDir = join(tmpdir(), `ih-bk-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(testDir, { recursive: true });
+  // Sandbox the record store (same reason as record.test.ts): writeRecord
+  // lands under getCannbotConfigDir() → HOME; keep it off the real ~/.cannbot.
+  savedHome = process.env.HOME;
+  process.env.HOME = testDir;
 }
 
 function teardown() {
   rmSync(testDir, { recursive: true, force: true });
+  process.env.HOME = savedHome;
 }
 
 describe("backup", () => {

@@ -14,14 +14,22 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 let testDir: string;
+let savedHome: string | undefined;
 
 function setup() {
   testDir = join(tmpdir(), `ih-rec-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(testDir, { recursive: true });
+  // Sandbox the record store: getCannbotConfigDir() resolves ~/.cannbot from
+  // HOME, and skill-installer / uninstall tests write skills.json in parallel
+  // workers — without a per-file HOME the read-modify-writes race (flaky
+  // assertions) and the real ~/.cannbot/installs gets polluted.
+  savedHome = process.env.HOME;
+  process.env.HOME = testDir;
 }
 
 function teardown() {
   rmSync(testDir, { recursive: true, force: true });
+  process.env.HOME = savedHome;
 }
 
 describe("record", () => {

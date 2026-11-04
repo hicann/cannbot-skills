@@ -187,4 +187,41 @@ describe("cannbot-installer", () => {
     expect(plugin?.source).toBeUndefined();
     expect(plugin?.dir).toContain("plugins-official");
   });
+
+  it("discoverMainlinePlugins reads the cannbot mainline repo layout", async () => {
+    const { discoverMainlinePlugins, ensureCannbotRepoCache, getCannbotRepoCachePath, ensureCannbotDiscovery } = await import(
+      "../src/core/cannbot-installer.js"
+    );
+    const { findPlugin, setCannbotPlugins } = await import("../src/core/registry.js");
+    const { createFakeInstaller } = await import("./helpers/fake-cannbot.js");
+
+    // Fake a cannbot mainline repo layout under the discovery stamp TTL:
+    // the cache clone is skipped by pre-seeding the cache directory.
+    const repoPath = getCannbotRepoCachePath();
+    const official = join(repoPath, "plugins-official", "mainline-fixture");
+    mkdirSync(join(official, ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      join(official, ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "mainline-fixture", description: "mainline plugin", version: "9.9.9", skills: [], agents: [] })
+    );
+    writeFileSync(join(official, "plugin-sources.json"), JSON.stringify({ skills: ["a", "b"] }));
+    mkdirSync(join(repoPath, "plugins-community", "community-fixture"), { recursive: true });
+
+    ensureCannbotRepoCache(); // TTL probe only — seeded cache stays as-is
+    const entries = discoverMainlinePlugins(repoPath);
+    expect(entries.map((e) => e.id)).toContain("mainline-fixture");
+    expect(entries.find((e) => e.id === "mainline-fixture")!.version).toBe("9.9.9");
+    expect(entries.find((e) => e.id === "mainline-fixture")!.skillsCount).toBe(2);
+    // a directory without .claude-plugin/plugin.json is not a plugin
+    expect(entries.map((e) => e.id)).not.toContain("community-fixture");
+
+    // and the merged discovery routes the mainline-only plugin to cannbot
+    setCannbotPlugins([]);
+    process.env.CANNBOT_INSTALLER_PATH = createFakeInstaller(testDir, "fake-cb-plugin");
+    const ok = await ensureCannbotDiscovery();
+    expect(ok).toBe(true);
+    const found = findPlugin("mainline-fixture");
+    expect(found?.source).toBe("cannbot");
+    expect(found?.version).toBe("9.9.9");
+  });
 });

@@ -15,7 +15,7 @@
 // `npx @cannbot-plugin/cannbot install`. install-helper only wraps discovery,
 // boundaries, bookkeeping and (uninstall/list/status) around it.
 
-import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync, readdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync, readdirSync, mkdirSync } from "fs";
 import { join, resolve } from "path";
 import { execa } from "execa";
 import type { AITool, InstallLevel, InstallOptions, InstallResult, PluginEntry, PluginSource } from "../types/index.js";
@@ -195,6 +195,13 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
   );
   const target = previous ? resolve(previous.installPath) : requestedTarget;
 
+  // The delegated installer (and runDelegate's cwd) need the target to exist.
+  try {
+    mkdirSync(target, { recursive: true });
+  } catch {
+    // surfaced by the delegate spawn when truly unusable
+  }
+
   // 2. Node.js runtime is required to run the cannbot installer
   if (!hasNodeRuntime()) {
     result.errors.push(t("cannbot_node_required"));
@@ -214,21 +221,19 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
     return result;
   }
 
-  // 4. the plugin must exist in the bundled release; if it is missing from a
-  //    cached installer, force one refresh before giving up (handles newly
-  //    published cannbot plugins). Migrated tombstone plugins are exempt:
-  //    the installer follows the cannbot git mainline at install time and
-  //    can install plugins its own discovery snapshot does not list yet
-  //    (the snapshot only refreshes on npm releases).
+  // 4. discovery precheck — bootstrap semantics (fail-open). The npm package
+  //    is only a bootstrap: every delegated install follows the cannbot git
+  //    mainline at install time, so the local discovery snapshot is a
+  //    routing hint, not a gate. A plugin the snapshot does not list may
+  //    still exist upstream (new plugins land on the mainline before any npm
+  //    release). Refresh the cached installer once opportunistically, then
+  //    delegate regardless — the mainline installer is authoritative and
+  //    reports a precise "plugin not found" when the id truly does not exist.
   if (!isMigratedPlugin(pluginId) && !discoverCannbotPlugins().some((p) => p.id === pluginId)) {
     try {
       await ensureCannbotInstaller({ force: true });
     } catch {
-      // fall through to the not-found error below
-    }
-    if (!discoverCannbotPlugins().some((p) => p.id === pluginId)) {
-      result.errors.push(t("cannbot_plugin_not_found").replace("{plugin}", pluginId));
-      return result;
+      // opportunistic refresh — continue to the delegated install
     }
   }
 
@@ -268,6 +273,15 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
         run.exitCode !== undefined ? String(run.exitCode) : "?"
       )
     );
+    // Bootstrap semantics (fail-open precheck): the delegate no longer gates
+    // on the local snapshot — the authoritative installer reports the precise
+    // not-found reason, surfaced from its stdout/stderr tail.
+    const reason = (run.stdout || run.stderr || "")
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .pop();
+    if (reason) result.errors.push(reason);
     return result;
   }
 

@@ -93,6 +93,40 @@ describe("manifest", () => {
         process.chdir(origCwd);
       }
     });
+
+    it("reads a dual-source plugin's per-plugin manifest exactly once", async () => {
+      const { readAllManifests } = await import("../src/core/manifest.js");
+      const { getConfigRoot } = await import("../src/utils/paths.js");
+
+      const origCwd = process.cwd();
+      process.chdir(testDir);
+      try {
+        const configRoot = getConfigRoot("opencode", "project");
+        mkdirSync(configRoot, { recursive: true });
+
+        // ops-registry-invoke is dual-source: the MIGRATED_PLUGINS tombstone
+        // and the frozen plugins.d copy both list the id. The per-plugin
+        // manifest path is id-keyed, so it must be read exactly once — not
+        // once per registry entry.
+        writeFileSync(join(configRoot, "ops-registry-invoke-manifest.json"), JSON.stringify({
+          brand: "CANNBot",
+          version: "1.0.0",
+          team: "ops-registry-invoke",
+          level: "project",
+          tool: "opencode",
+          installed_skills: [],
+          installed_agents: [],
+          brand_dir: configRoot,
+          install_time: "",
+        }));
+
+        const manifests = readAllManifests(configRoot);
+        const count = manifests.filter((m) => m.team === "ops-registry-invoke").length;
+        expect(count).toBe(1);
+      } finally {
+        process.chdir(origCwd);
+      }
+    });
   });
 
   describe("writeCannbotManifest", () => {

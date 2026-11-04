@@ -8,8 +8,10 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { resolve, sep } from "path";
+import { mkdirSync, rmSync } from "fs";
+import { tmpdir } from "os";
 
 vi.mock("../src/ui/backup-prompts.js", () => ({
   showOverwriteWarning: vi.fn(async () => "overwrite" as const),
@@ -96,7 +98,8 @@ describe("codex uninstall safety (source verification)", () => {
     const __dirname = dirname(fileURLToPath(import.meta.url));
     const src = readFileSync(join(__dirname, "..", "src", "commands", "uninstall.ts"), "utf-8");
     expect(src).toContain("if (readRecord(name))");
-    expect(src).toMatch(/const record = readRecord\(pluginId\);[\s\S]*?displayName: record\.displayName/);
+    // #797: the record fallback honors the requested tool when --tool is given.
+    expect(src).toMatch(/const record = tool \? readRecords\(pluginId\)\.find\(\(r\) => r\.tool === tool\) \?\? null : readRecord\(pluginId\);[\s\S]*?displayName: record\.displayName/);
   });
 });
 
@@ -147,6 +150,22 @@ describe("skill uninstall by name via install record", () => {
   // Seed pattern: append unique installPath keys instead of whole-file
   // backup/restore — record.test.ts clobbers skills.json in a parallel file,
   // and restore-writes would race with it (clobbering its state).
+  // Both files now sandbox HOME per test (below), so each worker owns its
+  // own skills.json; the unique-key seeding is kept as defense in depth.
+  let sandboxDir: string;
+  let savedHome: string | undefined;
+
+  beforeEach(() => {
+    savedHome = process.env.HOME;
+    sandboxDir = join(tmpdir(), `ih-un-rec-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(sandboxDir, { recursive: true });
+    process.env.HOME = sandboxDir;
+  });
+
+  afterEach(() => {
+    process.env.HOME = savedHome;
+    rmSync(sandboxDir, { recursive: true, force: true });
+  });
 
   it("isRecordedSkill detects skills across tool/level/path records", async () => {
     const { isRecordedSkill } = await import("../src/commands/uninstall.js");
@@ -276,6 +295,24 @@ describe("skill uninstall by name via install record", () => {
 });
 
 describe("unowned AGENTS.md backup restore on uninstall", () => {
+  // Same HOME sandbox as the record describe above: installPlugin /
+  // uninstallCommand write records and config.yaml under
+  // getCannbotConfigDir() → HOME; keep the real ~/.cannbot untouched.
+  let sandboxDir: string;
+  let savedHome: string | undefined;
+
+  beforeEach(() => {
+    savedHome = process.env.HOME;
+    sandboxDir = join(tmpdir(), `ih-un-bak-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(sandboxDir, { recursive: true });
+    process.env.HOME = sandboxDir;
+  });
+
+  afterEach(() => {
+    process.env.HOME = savedHome;
+    rmSync(sandboxDir, { recursive: true, force: true });
+  });
+
   it("restores a replaced project-root AGENTS.md to its original location", async () => {
     const { installPlugin } = await import("../src/core/installer.js");
     const { showUnownedFileWarning, showRestorePrompt } = await import("../src/ui/backup-prompts.js");
@@ -403,5 +440,182 @@ describe("unowned AGENTS.md backup restore on uninstall", () => {
       deleteRecord(PLUGIN_ID);
       rmSync(W, { recursive: true, force: true });
     }
+  });
+});
+
+describe("uninstall removal log shows disambiguated paths (display guard)", () => {
+  // Two same-named files at different roots (project-root AGENTS.md vs
+  // config-root AGENTS.md) previously logged as two identical
+  // "移除: AGENTS.md" lines. The display fix renders installPath/configRoot
+  // relative paths; guard that the two lines stay distinguishable.
+  let savedHome: string | undefined;
+  let sandboxDir: string;
+  let projectDir: string;
+
+  beforeEach(() => {
+    const { mkdirSync, writeFileSync } = require("fs") as typeof import("fs");
+    const { join } = require("path") as typeof import("path");
+    const { tmpdir } = require("os") as typeof import("os");
+    savedHome = process.env.HOME;
+    sandboxDir = join(tmpdir(), `ih-un-disp-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    projectDir = join(sandboxDir, "project");
+    const configRoot = join(projectDir, ".opencode");
+    mkdirSync(join(configRoot, "skills"), { recursive: true });
+    writeFileSync(join(projectDir, "AGENTS.md"), "# user config\n");
+    writeFileSync(join(configRoot, "AGENTS.md"), "# plugin config\n");
+    process.env.HOME = sandboxDir;
+  });
+
+  afterEach(() => {
+    process.env.HOME = savedHome;
+    const { rmSync } = require("fs") as typeof import("fs");
+    rmSync(sandboxDir, { recursive: true, force: true });
+  });
+
+  it("logs project-root and config-root AGENTS.md as distinct relative paths", async () => {
+    const { join } = require("path") as typeof import("path");
+    const { writeRecord } = await import("../src/core/record.js");
+    const { uninstallCommand } = await import("../src/commands/uninstall.js");
+    const configRoot = join(projectDir, ".opencode");
+
+    writeRecord({
+      pluginId: "torch-compile",
+      displayName: "Torch Compile",
+      tool: "opencode",
+      level: "project",
+      installPath: projectDir,
+      configRoot,
+      installTime: new Date().toISOString(),
+      files: [join(projectDir, "AGENTS.md"), join(configRoot, "AGENTS.md")],
+      directories: [join(configRoot, "skills")],
+    });
+
+    const lines_out: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      lines_out.push(args.map(String).join(" "));
+    });
+    try {
+      await uninstallCommand(["torch-compile"], { tool: "opencode", level: "project", yes: true });
+    } finally {
+      spy.mockRestore();
+    }
+
+    const removeLines = lines_out.filter((l) => l.includes("AGENTS.md") && l.includes("移除"));
+    expect(removeLines.length).toBe(2);
+    expect(removeLines.some((l) => l.includes(".opencode/AGENTS.md") || l.includes(".opencode" + require("path").sep + "AGENTS.md"))).toBe(true);
+    expect(removeLines.some((l) => !l.includes(".opencode"))).toBe(true);
+  });
+});
+
+describe("uninstall --tool isolation (#797)", () => {
+  let savedHome: string | undefined;
+  let projectDir: string;
+  const vkey = process.env.CANNBOT_AUTH_VKEY;
+
+  beforeEach(() => {
+    const { mkdirSync, writeFileSync } = require("fs") as typeof import("fs");
+    const { join } = require("path") as typeof import("path");
+    const { tmpdir } = require("os") as typeof import("os");
+    savedHome = process.env.HOME;
+    projectDir = join(tmpdir(), `ih-un-tool-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    mkdirSync(join(projectDir, ".opencode", "skills"), { recursive: true });
+    mkdirSync(join(projectDir, ".claude", "skills"), { recursive: true });
+    for (const root of [".opencode", ".claude"]) {
+      writeFileSync(join(projectDir, root, "AGENTS.md"), `# ${root} config\n`);
+      for (const s of ["sk-a", "sk-b"]) {
+        const d = join(projectDir, root, "skills", s);
+        mkdirSync(d, { recursive: true });
+        writeFileSync(join(d, "SKILL.md"), `---\nname: ${s}\n---\n`);
+      }
+    }
+    process.env.HOME = join(projectDir, "..", "ih-un-tool-home-" + Math.random().toString(36).slice(2));
+  });
+
+  afterEach(() => {
+    process.env.HOME = savedHome;
+    const { rmSync } = require("fs") as typeof import("fs");
+    rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  it("uninstall --tool opencode removes only the opencode location of a same-name dual-tool install", async () => {
+    const { join } = require("path") as typeof import("path");
+    const { existsSync } = require("fs") as typeof import("fs");
+    const { writeRecord } = await import("../src/core/record.js");
+    const { uninstallCommand } = await import("../src/commands/uninstall.js");
+
+    // Same-name plugin installed for opencode AND claude at the same
+    // installPath — claude installed later (its record wins readRecord's
+    // byLatest preference, reproducing the #797 removal of the wrong side).
+    writeRecord({
+      pluginId: "torch-compile",
+      displayName: "torch.compile 图模式",
+      tool: "opencode",
+      level: "project",
+      installPath: projectDir,
+      configRoot: join(projectDir, ".opencode"),
+      installTime: "2026-01-01T00:00:00.000Z",
+      files: [join(projectDir, ".opencode", "AGENTS.md")],
+      directories: [join(projectDir, ".opencode", "skills")],
+    });
+    writeRecord({
+      pluginId: "torch-compile",
+      displayName: "torch.compile 图模式",
+      tool: "claude",
+      level: "project",
+      installPath: projectDir,
+      configRoot: join(projectDir, ".claude"),
+      installTime: "2026-01-02T00:00:00.000Z",
+      files: [join(projectDir, ".claude", "AGENTS.md")],
+      directories: [join(projectDir, ".claude", "skills")],
+    });
+
+    const origCwd = process.cwd();
+    process.chdir(projectDir);
+    try {
+      await uninstallCommand(["torch-compile"], { tool: "opencode", level: "project", yes: true });
+    } finally {
+      process.chdir(origCwd);
+    }
+
+    // opencode side removed
+    expect(existsSync(join(projectDir, ".opencode", "AGENTS.md"))).toBe(false);
+    // claude side MUST survive (#797)
+    expect(existsSync(join(projectDir, ".claude", "AGENTS.md"))).toBe(true);
+    expect(existsSync(join(projectDir, ".claude", "skills", "sk-a"))).toBe(true);
+
+    // and the surviving record is claude's
+    const { readRecords } = await import("../src/core/record.js");
+    const remaining = readRecords("torch-compile");
+    expect(remaining.map((r) => r.tool)).toEqual(["claude"]);
+  });
+
+  it("without --tool the legacy cwd-preference resolution is preserved", async () => {
+    const { join } = require("path") as typeof import("path");
+    const { existsSync } = require("fs") as typeof import("fs");
+    const { writeRecord } = await import("../src/core/record.js");
+    const { uninstallCommand } = await import("../src/commands/uninstall.js");
+
+    writeRecord({
+      pluginId: "torch-compile",
+      displayName: "torch.compile 图模式",
+      tool: "opencode",
+      level: "project",
+      installPath: projectDir,
+      configRoot: join(projectDir, ".opencode"),
+      installTime: "2026-01-01T00:00:00.000Z",
+      files: [join(projectDir, ".opencode", "AGENTS.md")],
+      directories: [join(projectDir, ".opencode", "skills")],
+    });
+
+    const origCwd = process.cwd();
+    process.chdir(projectDir);
+    try {
+      await uninstallCommand(["torch-compile"], { yes: true });
+    } finally {
+      process.chdir(origCwd);
+    }
+
+    // no --tool: the latest matching record (opencode) is removed as before
+    expect(existsSync(join(projectDir, ".opencode", "AGENTS.md"))).toBe(false);
   });
 });

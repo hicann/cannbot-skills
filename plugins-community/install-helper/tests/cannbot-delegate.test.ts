@@ -140,6 +140,9 @@ describe("cannbot-delegate", () => {
       target: testDir,
     });
     expect(result.success).toBe(false);
+    // bootstrap semantics (fail-open precheck): the delegate no longer gates
+    // on the local snapshot — the authoritative mainline installer reports
+    // the precise not-found reason, surfaced from its stdout.
     expect(result.errors.join(" ")).toContain("not-in-release");
   });
 

@@ -14,14 +14,21 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 let testDir: string;
+let savedHome: string | undefined;
 
 function setup() {
   testDir = join(tmpdir(), `ih-si-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(testDir, { recursive: true });
+  // Sandbox the record store (same reason as record.test.ts): skills.json
+  // lives under getCannbotConfigDir() → HOME; parallel files race and pollute
+  // the real ~/.cannbot/installs otherwise.
+  savedHome = process.env.HOME;
+  process.env.HOME = testDir;
 }
 
 function teardown() {
   rmSync(testDir, { recursive: true, force: true });
+  process.env.HOME = savedHome;
 }
 
 describe("skill-installer", () => {

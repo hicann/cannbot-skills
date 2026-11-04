@@ -132,7 +132,12 @@ export function printEnhancedSummary(
     const plugin = findPlugin(successResults[0].pluginId, {
       source: successResults[0].source,
     });
-    const docsPath = plugin ? `${plugin.dir}/quickstart.md` : `${successResults[0].pluginId}/quickstart.md`;
+    // Migrated tombstones carry dir: "" — `${dir}/quickstart.md` would render
+    // an unreachable "/quickstart.md". Fall back to a plugin-id-relative hint
+    // instead of an empty prefix.
+    const docsPath = plugin && plugin.dir
+      ? `${plugin.dir}/quickstart.md`
+      : `${successResults[0].pluginId}/quickstart.md`;
     lines.push(
       `  ${chalk.dim(t("install_enhanced_docs"))}: ${chalk.dim(docsPath)}`
     );

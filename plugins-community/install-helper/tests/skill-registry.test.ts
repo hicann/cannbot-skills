@@ -70,11 +70,27 @@ describe("skill-registry", () => {
       expect(runtimeCat!.skills.some((s) => s.id === "runtime_migration")).toBe(true);
     });
 
-    it("includes science-model-npu-migration", () => {
+    it("categories mirror repository scanDirs — skills grouped by source directory", () => {
       const categories = getAllCategories();
-      const modelCat = categories.find((c) => c.id === "model");
-      expect(modelCat).toBeDefined();
-      expect(modelCat!.skills.some((s) => s.id === "science-model-npu-migration")).toBe(true);
+      // A domain skill must be in the category named after its directory.
+      const opsCat = categories.find((c) => c.id === "ops");
+      expect(opsCat).toBeDefined();
+      expect(opsCat!.skills.every((s) => s.source === "ops")).toBe(true);
+      expect(opsCat!.skills.some((s) => s.id === "ascendc-tiling-design")).toBe(true);
+      expect(opsCat!.skills.some((s) => s.id === "cannbot-dsl-best-practice")).toBe(true);
+      expect(opsCat!.skills.some((s) => s.id === "pypto-op-plan")).toBe(true);
+
+      const commCat = categories.find((c) => c.id === "communication");
+      expect(commCat).toBeDefined();
+      expect(commCat!.skills.some((s) => s.id === "hccl-aicpu-design")).toBe(true);
+    });
+
+    it("skills with a source outside the scanDirs land in the Other catch-all, never dropped", () => {
+      const categories = getAllCategories();
+      const otherCat = categories.find((c) => c.id === "other");
+      // science-model-npu-migration's source is a plugins-community path
+      expect(otherCat).toBeDefined();
+      expect(otherCat!.skills.some((s) => s.id === "science-model-npu-migration")).toBe(true);
     });
 
     it("does NOT include ops-easyasc-dsl", () => {
@@ -113,5 +129,47 @@ describe("skill-registry", () => {
       const skills = getAllSkills();
       expect(skills.find((s) => s.id === "ascendc-registry-invoke-to-direct-invoke")).toBeDefined();
     });
+  });
+});
+
+describe("subgroup separators (wizard ordering hints)", () => {
+  it("getSkillSubgroup returns the semantic subgroup when known", async () => {
+    const { getSkillSubgroup } = await import("../src/core/skill-registry.js");
+    expect(getSkillSubgroup("cannbot-dsl-best-practice")).toBe("cannbot-dsl");
+    expect(getSkillSubgroup("hccl-aicpu-design")).toBe("hccl");
+    expect(getSkillSubgroup("ops-easyasc-dsl")).toBeUndefined();
+  });
+});
+
+describe("getCategorySubgroups (wizard second level)", () => {
+  it("aggregates the ops category into semantic subgroups sorted by size", async () => {
+    const { getCategorySubgroups, getAllCategories } = await import("../src/core/skill-registry.js");
+    const groups = getCategorySubgroups("ops");
+    expect(groups.length).toBeGreaterThan(5);
+    // sorted by size, descending
+    for (let i = 1; i < groups.length; i++) {
+      expect(groups[i - 1].skills.length).toBeGreaterThanOrEqual(groups[i].skills.length);
+    }
+    // every group's skills belong to the ops category
+    const opsIds = new Set(getAllCategories().find((c) => c.id === "ops")!.skills.map((s) => s.id));
+    for (const g of groups) {
+      expect(g.name).toBeTruthy();
+      for (const s of g.skills) expect(opsIds.has(s.id)).toBe(true);
+    }
+    // subgroups partition the category: no skill appears in two groups
+    const all = groups.flatMap((g) => g.skills.map((s) => s.id));
+    expect(new Set(all).size).toBe(all.length);
+  });
+
+  it("single-subgroup categories return exactly one group (no extra level)", async () => {
+    const { getCategorySubgroups } = await import("../src/core/skill-registry.js");
+    const groups = getCategorySubgroups("runtime");
+    expect(groups.length).toBe(1);
+    expect(groups[0].skills.length).toBeGreaterThan(0);
+  });
+
+  it("unknown category returns empty", async () => {
+    const { getCategorySubgroups } = await import("../src/core/skill-registry.js");
+    expect(getCategorySubgroups("no-such-dir")).toEqual([]);
   });
 });

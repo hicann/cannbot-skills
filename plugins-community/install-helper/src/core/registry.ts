@@ -165,6 +165,10 @@ export function findPlugin(
  * embedded legacy registry, and migrated tombstones. A tombstone whose id
  * the installer snapshot already lists is deduplicated (the snapshot entry
  * is authoritative once the npm release catches up with the migration).
+ * Dual-source plugins (a migrated id whose frozen local copy still exists in
+ * plugins.d) intentionally appear once per source: the tombstone bridges
+ * cannbot discovery while the frozen copy stays installable via
+ * --source skills (see migrated-plugins.test.ts).
  */
 export function getAllPlugins(): PluginEntry[] {
   const tombstones = MIGRATED_PLUGINS.filter((t) => !CANNBOT_PLUGINS.some((c) => c.id === t.id));

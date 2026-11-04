@@ -39,6 +39,7 @@ function teardown() {
 
 interface FakeRecord {
   plugin: string;
+  pluginVersion?: string;
   tool?: string;
   skills?: string[];
   agents?: string[];
@@ -68,7 +69,7 @@ function writeRegistry(target: string, tool: string, records: FakeRecord[], sche
         schemaVersion,
         plugins: records.map((r) => ({
           plugin: r.plugin,
-          pluginVersion: "1.0.0",
+          pluginVersion: r.pluginVersion ?? "1.0.0",
           sourcePackage: "@cannbot-plugin/cannbot@9.9.9",
           source: { kind: "package", package: "@cannbot-plugin/cannbot@9.9.9" },
           tool: r.tool ?? tool,
@@ -169,6 +170,30 @@ describe("cannbot-registry", () => {
 
     expect(findCannbotRecord("beta", testDir)?.tool).toBe("claude");
     expect(findCannbotRecord("missing", testDir)).toBeNull();
+  });
+
+  it("scanCannbotInstalled resolves placeholder 0.0.0 versions via fallbacks", async () => {
+    // The cannbot installer writes the real version only when installing
+    // from its bundled dist snapshot; mainline-installed plugins get the
+    // "0.0.0" placeholder. Display resolution must fall back to the
+    // MIGRATED_PLUGINS tombstone version, then the installer package's
+    // bundled plugin.json, then render no version at all.
+    writeRegistry(testDir, "opencode", [
+      { plugin: "catlass-op-generator", pluginVersion: "0.0.0" },
+      { plugin: "torch-compile", pluginVersion: "1.2.3" },
+      { plugin: "ops-direct-invoke", pluginVersion: "0.0.0" },
+    ]);
+    const { scanCannbotInstalled } = await import("../src/core/cannbot-registry.js");
+
+    const installed = scanCannbotInstalled(testDir);
+    const byId = (id: string) => installed.find((e) => e.id === id);
+    // tombstone fallback: MIGRATED_PLUGINS carries catlass-op-generator 0.1.0
+    expect(byId("catlass-op-generator")!.version).toBe("0.1.0");
+    // a recorded real version passes through untouched
+    expect(byId("torch-compile")!.version).toBe("1.2.3");
+    // no tombstone version and no bundled snapshot in the sandbox → empty
+    // (status renders no suffix rather than a wrong "v0.0.0")
+    expect(byId("ops-direct-invoke")!.version).toBe("");
   });
 
   it("removeMarkerBlock strips only the target plugin's block", async () => {

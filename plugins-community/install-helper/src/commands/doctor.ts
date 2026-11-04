@@ -63,14 +63,18 @@ export async function doctorCommand(options: { fix?: boolean } = {}): Promise<vo
   const installedMap = new Map(installed.map((p) => [p.id, p]));
 
   for (const plugin of plugins) {
+    // Dual-source plugins appear once per source (cannbot tombstone/snapshot
+    // + frozen local copy); the badge keeps the status lines distinguishable
+    // instead of rendering as identical duplicate rows.
+    const badge = plugin.source === "cannbot" ? chalk.magenta(" [cannbot]") : "";
     const inst = installedMap.get(plugin.id);
     if (inst) {
       console.log(
         chalk.green("  ✓") +
-          ` ${plugin.id.padEnd(30)} ${inst.skillsCount} skills, ${inst.agentsCount} agents`
+          ` ${plugin.id.padEnd(30)}${badge} ${inst.skillsCount} skills, ${inst.agentsCount} agents`
       );
     } else {
-      console.log(chalk.dim("  —") + ` ${plugin.id.padEnd(30)} — ${t("doctor_not_installed")}`);
+      console.log(chalk.dim("  —") + ` ${plugin.id.padEnd(30)}${badge} — ${t("doctor_not_installed")}`);
     }
   }
 

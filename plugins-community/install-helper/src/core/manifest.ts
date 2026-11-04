@@ -36,6 +36,7 @@ export function readManifest(configRoot: string): CannbotManifest | null {
 export function readAllManifests(configRoot: string): CannbotManifest[] {
   const manifests: CannbotManifest[] = [];
   const plugins = getAllPlugins();
+  const seenPluginIds = new Set<string>();
 
   const standardPath = getManifestPath(configRoot);
   if (existsSync(standardPath)) {
@@ -48,6 +49,11 @@ export function readAllManifests(configRoot: string): CannbotManifest[] {
   }
 
   for (const plugin of plugins) {
+    // Dual-source plugins appear once per source in the registry; the
+    // per-plugin manifest path is id-keyed, so read each id's manifest
+    // exactly once instead of pushing the same file twice.
+    if (seenPluginIds.has(plugin.id)) continue;
+    seenPluginIds.add(plugin.id);
     const pluginManifestPath = join(configRoot, `${plugin.id}-manifest.json`);
     if (existsSync(pluginManifestPath)) {
       try {

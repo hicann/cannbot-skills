@@ -620,4 +620,117 @@ describe("plugins consistency — single source of truth", () => {
       expect(genModule).toBeDefined();
     });
   });
+
+  describe("repo-state consistency guards", () => {
+    const YAML_CONFIG = join(INSTALL_HELPER_ROOT, "src", "config", "repository.yaml");
+
+    function readScanDirs(): string[] {
+      const { parse } = require("yaml");
+      const config = parse(readFileSync(YAML_CONFIG, "utf-8"));
+      return config.scanDirs as string[];
+    }
+
+    it("every plugins.d yml points at a plugin dir that exists on disk (stale-yml guard)", () => {
+      // V1 treats a missing plugin dir as a WARN (agents discovery falls back
+      // to the init.sh pattern), so a yml whose plugin dir was removed can
+      // slip through validation when no agent triggers V2. A removed dir
+      // with a leftover yml is always a repo-state bug (observed with
+      // catlass-op-generator): fail fast instead.
+      const yaml = require("yaml");
+      for (const f of readdirSync(join(INSTALL_HELPER_ROOT, "plugins.d"))) {
+        if (!f.endsWith(".yml") || f === "_defaults.yml") continue;
+        const content = yaml.parse(readFileSync(join(INSTALL_HELPER_ROOT, "plugins.d", f), "utf-8"));
+        expect(existsSync(join(REPO_ROOT, content.dir)), `${f}: dir ${content.dir} missing`).toBe(true);
+      }
+    });
+
+    it("repository.yaml scanDirs == scanner.ts hardcoded defaults (no drift)", () => {
+      // scanner.ts documents its defaults as "must not drift from
+      // repository.yaml" — this promotes that comment into a tested
+      // invariant (the tools/communication domains each drifted once).
+      const source = readFileSync(join(INSTALL_HELPER_ROOT, "src", "core", "scanner.ts"), "utf-8");
+      const arrays = [...source.matchAll(/skillDirs:\s*\[([^\]]*)\]/g)].map((m) =>
+        m[1].split(",").map((s) => s.trim().replace(/^"|"$/g, "")).filter(Boolean)
+      );
+      expect(arrays.length).toBeGreaterThan(0);
+      for (const arr of arrays) {
+        expect(arr, "scanner.ts default skillDirs drifted from repository.yaml").toEqual(readScanDirs());
+      }
+    });
+
+    it("every scanDirs entry is a real skill domain on disk", () => {
+      for (const dir of readScanDirs()) {
+        const root = join(REPO_ROOT, dir);
+        expect(existsSync(root), `scanDir ${dir} does not exist`).toBe(true);
+        const skills = readdirSync(root).filter((s) =>
+          existsSync(join(root, s, "SKILL.md"))
+        );
+        expect(skills.length, `scanDir ${dir} contains no skills`).toBeGreaterThan(0);
+      }
+    });
+
+    it("top-level skill domains outside scanDirs are explicitly excluded (new-domain guard)", () => {
+      // A newly added official skill domain must be added to scanDirs (the
+      // communication/ domain shipped unscanned once). Anything with
+      // <dir>/<skill>/SKILL.md that is deliberately not scanned must be
+      // listed below so the exclusion is a conscious decision.
+      const EXCLUDED = new Set([
+        "community", // community skills container (community/<domain>/<skill>);
+        // excluded for the same reason as community pluginDirs: fast-moving.
+        "plugins-community", // plugin dirs, not a scan domain (their top-level
+        "plugins-official", // SKILL.md files are plugin docs, not skills)
+      ]);
+      const scanDirs = new Set(readScanDirs());
+      const unscannedDomains: string[] = [];
+      for (const e of readdirSync(REPO_ROOT, { withFileTypes: true })) {
+        if (!e.isDirectory() || e.name.startsWith(".") || EXCLUDED.has(e.name) || scanDirs.has(e.name)) continue;
+        const hasSkills = readdirSync(join(REPO_ROOT, e.name)).some((s) =>
+          existsSync(join(REPO_ROOT, e.name, s, "SKILL.md"))
+        );
+        if (hasSkills) unscannedDomains.push(e.name);
+      }
+      expect(
+        unscannedDomains,
+        "top-level skill domains missing from scanDirs (add them to repository.yaml + scanner.ts defaults, or list them in EXCLUDED with a reason)"
+      ).toEqual([]);
+    });
+
+    it("embedded-plugins.json ids match plugins.d yml ids (stale-artifact guard)", () => {
+      // Tests read src/embedded-plugins.json (a gitignored build artifact).
+      // When plugins.d changes without regenerating the artifact the suite
+      // silently runs against stale registry data. Assert the artifact ids
+      // equal the current yml ids so a stale artifact fails loudly.
+      const yaml = require("yaml");
+      const ymlIds = readdirSync(join(INSTALL_HELPER_ROOT, "plugins.d"))
+        .filter((f) => f.endsWith(".yml") && f !== "_defaults.yml")
+        .map((f) => yaml.parse(readFileSync(join(INSTALL_HELPER_ROOT, "plugins.d", f), "utf-8")).id)
+        .sort();
+      const embeddedPath = join(INSTALL_HELPER_ROOT, "src", "embedded-plugins.json");
+      expect(existsSync(embeddedPath), "embedded-plugins.json not generated; run node scripts/gen-embedded.cjs").toBe(true);
+      const embeddedIds = readJson(embeddedPath).map((p: any) => p.id).sort();
+      expect(embeddedIds).toEqual(ymlIds);
+    });
+  });
+});
+
+describe("skill registry category structure", () => {
+  it("category defs cover every repository scanDir (category == directory)", () => {
+    // Categories mirror the repository's scanDirs 1:1 and group skills by
+    // their `source` (the skill's directory), so no per-skill registration
+    // is needed. This guard fails when a new scanDir lands without a
+    // matching CATEGORY_DEFS entry — those skills would silently fall into
+    // the "Other Skills" catch-all.
+    const registrySrc = readFileSync(join(INSTALL_HELPER_ROOT, "src", "core", "skill-registry.ts"), "utf-8");
+    const defs = [...registrySrc.matchAll(/\{ id: "([^"]+)", name: "[^"]*", nameEn: "[^"]*" \},/g)]
+      .map((m) => m[1])
+      .filter((id) => id !== "other");
+
+    const scanDirs = ["ops", "model", "graph", "infra", "runtime", "tools", "communication"];
+    const missing = scanDirs.filter((dir) => !defs.includes(dir));
+    expect(
+      missing,
+      "scanDirs without a matching CATEGORY_DEFS entry (their skills would land in 'Other Skills') — add the domain to CATEGORY_DEFS"
+    ).toEqual([]);
+    expect(new Set(defs).size).toBe(defs.length);
+  });
 });

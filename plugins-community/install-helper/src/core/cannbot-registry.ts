@@ -22,9 +22,11 @@ import type { CannbotInstalledEntry, CannbotRegistryFile, CannbotRegistryRecord 
 import { deleteRecord, readRecords } from "./record.js";
 import { removeInstalledPlugin } from "../utils/config.js";
 import { getCannbotConfigDir } from "../utils/paths.js";
+import { getCannbotPackageRoot } from "./cannbot-installer.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 import { isSameDirectory, isSymlink } from "../utils/fs-helpers.js";
+import { MIGRATED_PLUGINS } from "./migrated-plugins.js";
 
 // Mirror of cannbot installer TOOL_DIRECTORIES (script/bin/cannbot.js) for
 // the tools install-helper delegates to. configDirs are probed in order; the
@@ -88,7 +90,7 @@ export function readCannbotRegistry(target: string, tool: string): CannbotRegist
 function toInstalledEntry(target: string, registryPath: string, record: CannbotRegistryRecord): CannbotInstalledEntry {
   return {
     id: record.plugin,
-    version: record.pluginVersion || "",
+    version: resolveCannbotPluginVersion(record),
     tool: record.tool,
     target,
     registryPath,
@@ -96,6 +98,44 @@ function toInstalledEntry(target: string, registryPath: string, record: CannbotR
     agentsCount: Array.isArray(record.agents) ? record.agents.length : 0,
     record,
   };
+}
+
+/**
+ * Resolves the display version for a cannbot-installed plugin.
+ *
+ * The installer writes the real version only when it installs from its
+ * bundled dist snapshot; plugins installed by following the cannbot git
+ * mainline (missing from the snapshot) get the "0.0.0" placeholder in the
+ * registry record. Fall back to the MIGRATED_PLUGINS tombstone version and
+ * then to the installer package's bundled plugin.json before giving up —
+ * an empty version renders no suffix, which beats showing a wrong "v0.0.0".
+ */
+function resolveCannbotPluginVersion(record: CannbotRegistryRecord): string {
+  const recorded = (record.pluginVersion || "").trim();
+  if (recorded && recorded !== "0.0.0") return recorded;
+
+  const tombstone = MIGRATED_PLUGINS.find((p) => p.id === record.plugin);
+  const tombstoneVersion = (tombstone?.version || "").trim();
+  if (tombstoneVersion && tombstoneVersion !== "0.0.0") return tombstoneVersion;
+
+  try {
+    const pkgJson = join(
+      getCannbotPackageRoot(),
+      "dist",
+      "plugins",
+      record.plugin,
+      ".claude-plugin",
+      "plugin.json"
+    );
+    if (existsSync(pkgJson)) {
+      const bundled = ((JSON.parse(readFileSync(pkgJson, "utf-8")) as { version?: string }).version || "").trim();
+      if (bundled && bundled !== "0.0.0") return bundled;
+    }
+  } catch {
+    // unreadable/missing snapshot metadata — fall through
+  }
+
+  return "";
 }
 
 /**

@@ -420,3 +420,38 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
     }
   }, 420_000);
 });
+
+describe.skipIf(!isLinux || !scriptAvailable)("interactive skill install — subgroup level (real PTY)", () => {
+  beforeAll(() => {
+    if (!existsSync(join(SRC_DIR, "embedded-plugins.json"))) {
+      execSync("node scripts/gen-embedded.cjs", { cwd: PKG_DIR, timeout: 120_000 });
+    }
+    if (distNeedsBuild()) {
+      execSync("npx tsup", { cwd: PKG_DIR, timeout: 240_000, stdio: "pipe" });
+    }
+    expect(existsSync(CLI_PATH)).toBe(true);
+  }, 300_000);
+
+  it("F: skill install runtime (single subgroup) → no subgroup level, straight to checkbox", async () => {
+    const { sandbox, project, env } = makeProject("f");
+    const session = new PtySession(process.execPath, [CLI_PATH], { cwd: project, env });
+    try {
+      await pickIndexed(session, "选择安装类型", "安装 Skill");
+      await pickOpenCode(session);
+      await pickIndexed(session, "选择安装位置", "project");
+
+      // Single-subgroup domain: category → checkbox directly (no second
+      // "选择 Skill 类别" frame for subgroups). The checkbox options
+      // render after the message — wait for the actual skill row.
+      await pickIndexed(session, "选择 Skill 类别", "runtime — Runtime 迁移");
+      await session.expect("选择要安装的 Skills", 60_000);
+      await session.expect("runtime_migration", 60_000);
+      // abort the flow — coverage of the navigation is what matters here
+      session.send("\x1b"); // Esc — cancel checkbox
+    } finally {
+      session.close();
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  }, 420_000);
+
+});

@@ -561,10 +561,12 @@ describe("migrated plugins — delegated install (snapshot precheck bypass)", ()
       target,
     });
 
-    // the failure is the snapshot precheck, not the mainline bin
+    // bootstrap semantics (fail-open precheck): the delegate delegates
+    // regardless of the local snapshot, and the authoritative mainline
+    // installer reports the precise not-found reason from its stdout.
     expect(result.success).toBe(false);
-    expect(result.errors.join(" ")).toContain("cannbot 安装器包中未找到插件");
     expect(result.errors.join(" ")).toContain("ghost-plugin");
+    expect(result.errors.join(" ")).toMatch(/not found|未找到/i);
     expect(existsSync(join(target, ".opencode", "cannbot-plugin.json"))).toBe(false);
   });
 });
@@ -635,5 +637,15 @@ describe("migrated plugins — update rerouting (end-to-end)", () => {
     expect(output).toContain("Installed triton-op-generator");
     expect(existsSync(join(projectDir, ".opencode", "cannbot-plugin.json"))).toBe(true);
     expect(existsSync(join(projectDir, ".agents", "skills", "triton-op-coding", "SKILL.md"))).toBe(true);
+  });
+
+  it("MIGRATED_PLUGINS contains no duplicate ids (rebase auto-merge guard)", async () => {
+    // A rebase can auto-merge an upstream tombstone addition with our own,
+    // yielding two entries for the same id (observed when upstream adopted
+    // the catlass tombstone). getAllPlugins/findPlugin would then list the
+    // plugin twice. Guard: ids inside MIGRATED_PLUGINS are unique.
+    const { MIGRATED_PLUGINS } = await import("../src/core/migrated-plugins.js");
+    const ids = MIGRATED_PLUGINS.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 });

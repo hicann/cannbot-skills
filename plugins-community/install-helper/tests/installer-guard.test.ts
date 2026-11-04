@@ -24,14 +24,21 @@ vi.mock("../src/ui/backup-prompts.js", () => ({
 }));
 
 let testDir: string;
+let savedHome: string | undefined;
 
 function setup() {
   testDir = join(tmpdir(), `ih-gd-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   mkdirSync(testDir, { recursive: true });
+  // Sandbox the install bookkeeping: installPlugin() writes records and
+  // config.yaml under getCannbotConfigDir() → HOME; without this the real
+  // ~/.cannbot gets polluted and parallel files race on shared stores.
+  savedHome = process.env.HOME;
+  process.env.HOME = testDir;
 }
 
 function teardown() {
   rmSync(testDir, { recursive: true, force: true });
+  process.env.HOME = savedHome;
 }
 
 describe("installer tool guard", () => {

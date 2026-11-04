@@ -19,7 +19,7 @@ import { isSymlink, removePath } from "../utils/fs-helpers.js";
 import { BACK, CANCEL } from "../utils/constants.js";
 import { logger, printBoxTitle, showOperationHints } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
-import { getAllCategories, findSkill, getAllSkills } from "./skill-registry.js";
+import { getAllCategories, findSkill, getAllSkills, getSkillSubgroup, getCategorySubgroups, SkillEntry } from "./skill-registry.js";
 import { addSkillsToRecord, removeSkillsFromRecord, getInstalledSkills } from "./record.js";
 import { instantiateIssueHandlerConfig, shouldInitializeIssueHandlerConfig } from "./plugin-installer.js";
 import { selectTheme, checkboxTheme } from "../ui/theme.js";
@@ -186,6 +186,36 @@ export async function uninstallSkills(
 
 const SELECT_ALL = "__select_all__";
 const SELECT_ALL_CATEGORY = "__select_all_category__";
+
+/** Builds the checkbox choices for a category's skills, inserting a
+ * separator row whenever the semantic subgroup changes (the registry
+ * derives subgroups from the legacy semantic categories; they are ordering
+ * hints only). Skills without a subgroup sort to the end. */
+function insertSubgroupSeparators<T extends SkillEntry>(
+  skills: T[],
+  toChoice: (skill: T) => { name: string; value: string; checked: boolean; description?: string }
+): Array<{ name: string; value: string; checked: boolean; description?: string } | Separator> {
+  const withGroup = skills
+    .map((s) => ({ skill: s, group: getSkillSubgroup(s.id) }))
+    .sort((a, b) => (a.group ?? "\uffff").localeCompare(b.group ?? "\uffff") || a.skill.id.localeCompare(b.skill.id));
+  const out: Array<{ name: string; value: string; checked: boolean; description?: string } | Separator> = [];
+  let lastGroup: string | undefined;
+  let first = true;
+  for (const { skill, group } of withGroup) {
+    if (group && group !== lastGroup && !first) {
+      out.push(new Separator(`── ${group} ──`));
+    }
+    lastGroup = group;
+    first = false;
+    out.push(toChoice(skill));
+  }
+  return out;
+}
+
+function makeSkillSuffixFn(installedSet: Set<string>, accumulatedSet: Set<string>) {
+  return (id: string): string =>
+    installedSet.has(id) ? ` [${t("skill_already_installed")}]` : (accumulatedSet.has(id) ? " [+]" : "");
+}
 const CONTINUE_SELECT = "__continue_select__";
 const UNSELECT_ALL = "__unselect_all__";
 
@@ -199,6 +229,11 @@ export async function interactiveSkillSelect(
   let accumulated: string[] = [];
   let step = 0;
   let selectedCategoryId = "";
+  // Active skill list shown in the checkbox step — the whole category, or
+  // one semantic subgroup of it when the category is large (ops: 95 skills
+  // over 10 subgroups) and the user picked a subgroup first.
+  let activeSkills: SkillEntry[] = [];
+  let activeCategorySkills: SkillEntry[] = [];
 
   while (true) {
     switch (step) {
@@ -243,6 +278,57 @@ export async function interactiveSkillSelect(
         if (selectedCategoryId === "install") {
           return accumulated;
         }
+        // Large categories (multiple semantic subgroups) get a subgroup
+        // selection level first; single-subgroup categories go straight to
+        // the skill checkbox.
+        activeCategorySkills = categories.find((c) => c.id === selectedCategoryId)?.skills ?? [];
+        const subgroups = getCategorySubgroups(selectedCategoryId);
+        if (subgroups.length > 1) {
+          step = 2;
+          break;
+        }
+        activeSkills = activeCategorySkills;
+        step = 1;
+        break;
+      }
+      case 2: {
+        // Subgroup selection: "all" keeps the whole category, a specific
+        // subgroup narrows the checkbox to that subgroup's skills.
+        const category = categories.find((c) => c.id === selectedCategoryId);
+        if (!category) return [];
+        const subgroups = getCategorySubgroups(selectedCategoryId);
+
+        printBoxTitle(t("wizard_step_4_skill_title").replace("{category}", category.name));
+
+        const subgroupChoices: Array<{ name: string; value: string } | Separator> = [
+          {
+            name: `>> ${t("skill_select_all").replace("{count}", String(activeCategorySkills.length))}`,
+            value: SELECT_ALL,
+          },
+          new Separator("──────────────"),
+          ...subgroups.map((g) => ({
+            name: `> ${g.name} (${g.skills.length} skills)`,
+            value: g.id,
+          })),
+          new Separator("──────────────"),
+          { name: "<- " + t("wizard_back"), value: BACK },
+          { name: "x  " + t("wizard_cancel"), value: CANCEL },
+        ];
+        showOperationHints();
+        const chosen = await select({
+          message: t("skill_select_category"),
+          choices: subgroupChoices,
+          loop: false,
+          theme: selectTheme,
+          pageSize: 15,
+        });
+        if (chosen === BACK) { step = 0; break; }
+        if (chosen === CANCEL) return "cancel";
+        if (chosen === SELECT_ALL) {
+          activeSkills = activeCategorySkills;
+        } else {
+          activeSkills = subgroups.find((g) => g.id === chosen)?.skills ?? activeCategorySkills;
+        }
         step = 1;
         break;
       }
@@ -250,33 +336,36 @@ export async function interactiveSkillSelect(
         const category = categories.find((c) => c.id === selectedCategoryId);
         if (!category) return [];
 
-        printBoxTitle(t("wizard_step_4_skill_title").replace("{category}", category.name));
+        printBoxTitle(
+          t("wizard_step_4_skill_title").replace("{category}", category.name) +
+          (activeSkills.length !== activeCategorySkills.length
+            ? ` — ${activeSkills.length} skills`
+            : "")
+        );
 
         const installPath = level === "project" ? process.cwd() : getConfigRoot(tool, level);
         const installedSkills = getInstalledSkills(tool, level, installPath);
         const installedSet = new Set(installedSkills);
-        const categorySkillIds = new Set(category.skills.map((s) => s.id));
+        const skillSuffix = makeSkillSuffixFn(installedSet, new Set(accumulated));
+        const categorySkillIds = new Set(activeSkills.map((s) => s.id));
         const accumulatedInCategory = new Set(accumulated.filter((id) => categorySkillIds.has(id)));
 
         const skillChoices: Array<{ name: string; value: string; checked: boolean; description?: string } | Separator> = [
           {
             name: `>> ${t("skill_select_all_category")}`,
             value: SELECT_ALL_CATEGORY,
-            checked: accumulatedInCategory.size === category.skills.length,
+            checked: accumulatedInCategory.size === activeSkills.length,
             description: t("skill_select_all_category"),
           },
           new Separator("──────────────"),
-          ...category.skills.map((skill) => {
-            const isInstalled = installedSet.has(skill.id);
-            const isAccumulated = accumulatedInCategory.has(skill.id);
-            const suffix = isInstalled ? ` [${t("skill_already_installed")}]` : (isAccumulated ? " [+]" : "");
-            return {
-              name: `${chalk.cyan(skill.id)}${suffix}`,
-              value: skill.id,
-              checked: isAccumulated,
-              description: skill.description,
-            };
-          }),
+          // Semantic subgroup separators keep large categories (ops holds 95+
+          // skills) scannable; skills without a known subgroup sort last.
+          ...insertSubgroupSeparators(activeSkills, (skill) => ({
+            name: `${chalk.cyan(skill.id)}${skillSuffix(skill.id)}`,
+            value: skill.id,
+            checked: accumulatedInCategory.has(skill.id),
+            description: skill.description,
+          })),
         ];
         showOperationHints(true);
         const selectedSkills = await checkbox({
@@ -290,7 +379,7 @@ export async function interactiveSkillSelect(
 
         let skillIds: string[];
         if (selectedSkills.includes(SELECT_ALL_CATEGORY)) {
-          skillIds = category.skills.map((s) => s.id);
+          skillIds = activeSkills.map((s) => s.id);
         } else {
           skillIds = selectedSkills.filter((id) => id !== SELECT_ALL_CATEGORY);
         }
@@ -316,7 +405,10 @@ export async function interactiveSkillSelect(
             theme: selectTheme,
           });
           if (action === "install") return accumulated;
-          if (action === "back") { step = 0; break; }
+          if (action === "back") {
+            step = activeSkills.length !== activeCategorySkills.length ? 2 : 0;
+            break;
+          }
           return "cancel";
         }
 
@@ -343,7 +435,7 @@ export async function interactiveSkillSelect(
           return accumulated;
         }
         if (action === CONTINUE_SELECT) {
-          step = 0;
+          step = activeSkills.length !== activeCategorySkills.length ? 2 : 0;
           break;
         }
         return "cancel";
