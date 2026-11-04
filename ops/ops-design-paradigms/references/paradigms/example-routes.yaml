@@ -29,3 +29,6 @@ routes:
     Broadcast:
       ascendc:
         - references/paradigms/broadcast/adapters/ascendc/example/xdivy_custom_package
+    IndexGather:
+      ascendc:
+        - references/paradigms/indexgather/adapters/ascendc/example/examples-custom-gather-code
