@@ -27,6 +27,9 @@
 - 【算子】`ascendc-tensor-api-best-practice` 新增 L3 算法实现路由、本地官方源码仓映射、路径一致性检查与 cannbot-knowledge 检索证据规则，并澄清 A5 UB 容量口径与默认 .asc 工程结构。
 - 【模型推理】删除 model-infer-optimize 旧插件及本地入口，基础优化与 SOTA 探索工作流统一由 cannbot 维护；保留原子 Skill、插件名和别名，安装范围以应用仓及 install-helper 的支持范围为准，不再回退旧副本。
 
+#### 缺陷修复 Bug Fixes
+- 【评测归档】将归档提交限定在 eval_delivery/，防止无关已暂存修改混入归档分支，并保留调用前的用户暂存状态与工作内容。
+
 ### 【2026-10-29】
 #### 变更 Changes
 - 【插件清理】删除 `plugins-official/ops-perf-optimize` 旧副本与本地市场、安装清单入口，统一由 cannbot 应用仓维护；保留公共性能 Skills，安装助手保留原插件名及别名并委托 cannbot 安装，同步迁移说明与 ST 统计。

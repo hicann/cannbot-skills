@@ -1206,6 +1206,146 @@ class TestArchiveSubmoduleCleanup:
         )
 
 
+class TestArchiveCommitScope:
+    """Exercise the complete archive runner against real, local Git fixtures."""
+
+    @pytest.mark.parametrize(
+        "mode", ["clean", "unstaged", "modified", "added", "deleted", "mixed"]
+    )
+    def test_user_changes_remain_local(self, tmp_path, mode):
+        bench, remote, staging = self._prepare(tmp_path)
+        path = bench / ("new-user-file.txt" if mode == "added" else "unrelated.txt")
+        if mode == "deleted":
+            self._git(bench, "rm", path.name)
+        elif mode != "clean":
+            path.write_text("synthetic user bytes\n")
+            if mode != "unstaged":
+                self._git(bench, "add", path.name)
+            if mode == "mixed":
+                path.write_text("newer unstaged bytes\n")
+        before = self._state(bench, path)
+        assert (
+            archive_run.archive_submodule(
+                str(bench), "owned-archive", str(remote), str(staging), ["foo"]
+            )
+            is True
+        )
+        self._check_archive(bench, remote, path, before)
+
+    def test_dry_run_keeps_index_and_creates_no_ref(self, tmp_path):
+        bench, remote, staging = self._prepare(tmp_path)
+        path = bench / "unrelated.txt"
+        path.write_text("synthetic staged bytes\n")
+        self._git(bench, "add", path.name)
+        before = self._state(bench, path)
+        assert (
+            archive_run.archive_submodule(
+                str(bench),
+                "owned-archive",
+                str(remote),
+                str(staging),
+                ["foo"],
+                dry_run=True,
+            )
+            is True
+        )
+        assert self._state(bench, path) == before
+        assert self._git(remote, "for-each-ref", "refs/heads/owned-archive") == ""
+
+    def test_existing_tracked_delivery_is_restored(self, tmp_path):
+        bench, remote, staging = self._prepare(tmp_path, tracked_delivery=True)
+        path = bench / "unrelated.txt"
+        before = self._state(bench, path)
+        tracked = bench / archive_run.ARCHIVE_ROOT / "old.txt"
+        original = tracked.read_bytes()
+        assert (
+            archive_run.archive_submodule(
+                str(bench), "owned-archive", str(remote), str(staging), ["foo"]
+            )
+            is True
+        )
+        self._check_archive(bench, remote, path, before)
+        assert tracked.read_bytes() == original
+        assert self._git(bench, "status", "--porcelain") == ""
+
+    def test_push_error_keeps_staged_changes_and_error_type(self, tmp_path):
+        bench, _, staging = self._prepare(tmp_path)
+        path = bench / "unrelated.txt"
+        path.write_text("synthetic staged bytes\n")
+        self._git(bench, "add", path.name)
+        before = self._state(bench, path)
+        with pytest.raises(subprocess.CalledProcessError):
+            archive_run.archive_submodule(
+                str(bench),
+                "owned-archive",
+                str(tmp_path / "missing-local.git"),
+                str(staging),
+                ["foo"],
+            )
+        assert self._state(bench, path) == before
+        assert self._git(bench, "for-each-ref", "refs/heads/owned-archive") == ""
+
+    @staticmethod
+    def _git(root, *args):
+        return subprocess.check_output(
+            ["git", *args], cwd=root, text=True, stderr=subprocess.STDOUT
+        ).strip()
+
+    def _prepare(self, tmp_path, tracked_delivery=False):
+        bench = tmp_path / "bench"
+        remote = tmp_path / "local-remote.git"
+        staging = tmp_path / "staging"
+        bench.mkdir()
+        self._git(bench, "init", "-q")
+        self._git(bench, "symbolic-ref", "HEAD", "refs/heads/main")
+        self._git(bench, "config", "user.name", "Synthetic fixture")
+        self._git(bench, "config", "user.email", "fixture@example.invalid")
+        (bench / "unrelated.txt").write_text("original synthetic bytes\n")
+        if tracked_delivery:
+            tracked = bench / archive_run.ARCHIVE_ROOT / "old.txt"
+            tracked.parent.mkdir()
+            tracked.write_text("old tracked delivery\n")
+        self._git(bench, "add", ".")
+        self._git(bench, "commit", "-qm", "synthetic fixture base")
+        self._git(tmp_path, "init", "--bare", "-q", str(remote))
+        template = tmp_path / "template"
+        template.mkdir()
+        _make_template(template)
+        ops_root = tmp_path / "operators"
+        _make_persisted_op(ops_root, "foo")
+        delivery = staging / archive_run.ARCHIVE_ROOT
+        delivery.mkdir(parents=True)
+        payload = archive_run.stage_delivery_project(
+            "foo", str(ops_root), str(template), str(delivery)
+        )
+        errors, warnings = archive_run.validate_delivery_project(str(payload), "foo")
+        assert errors == warnings == []
+        return bench, remote, staging
+
+    def _state(self, bench, path):
+        return {
+            "head": self._git(bench, "rev-parse", "HEAD"),
+            "branch": self._git(bench, "branch", "--show-current"),
+            "index": self._git(bench, "diff", "--cached", "--binary", "--", path.name),
+            "bytes": path.read_bytes() if path.exists() else None,
+        }
+
+    def _check_archive(self, bench, remote, path, before):
+        assert self._state(bench, path) == before
+        paths = self._git(
+            remote,
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "refs/heads/owned-archive",
+        ).splitlines()
+        assert paths and all(
+            p.startswith(archive_run.ARCHIVE_ROOT + "/") for p in paths
+        )
+        assert self._git(bench, "for-each-ref", "refs/heads/owned-archive") == ""
+
+
 class TestScanAllOps:
     """--all 扫描与 config example_path 对齐 (修复 --all/config 模板分裂)。"""
 
