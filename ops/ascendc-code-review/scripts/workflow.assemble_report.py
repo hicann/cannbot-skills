@@ -13,14 +13,15 @@
 
 由主 Agent 在阶段3（common.report-write.md 薄壳内）调用。读取指定目录下
 所有 clause 类 yaml（含 category: clause / style / sunset），组装成
-「检视概览 + 检视意见单一大表」两章节报告。
+「检视概览 + 检视意见（按严重级别分节）」两章节报告。
 
 报告形式:
   - 检视概览: 检视文件数（{{FILE_COUNT}} 占位符）/ 代码行数（{{TOTAL_LINES}} 占位符）
               由主 Agent 替换；发现问题总数与高/中/低计数由脚本统计
-  - 检视意见: 单一大表（条例编号 | 严重级别 | 问题描述 | 代码位置 | 修改建议），
-              按严重级别（高→中→低）→ 文件路径 → 行号排序；SUSPICIOUS 在问题描述
-              尾部标注「疑似」，out_of_range 项在代码位置尾部标注
+  - 检视意见: 按严重级别分节的段落形式——### {高/中/低}（N 个）小节（空级别省略），
+              每条发现一个自包含段落块（#### {条例ID} {条款名称} + 严重级别/问题描述/
+              代码位置/修改建议 字段要点）；组内按文件路径 → 行号排序；SUSPICIOUS
+              在问题描述尾部标注「疑似」，out_of_range 项在代码位置尾部标注
               「PR检视场景，非PR提交的相关代码」
   - 计入问题数: FAIL + SUSPICIOUS + style/sunset 违规 + 范围外；PASS 不渲染不计数
   - 严重级别取 yaml 的 severity 字段（条款声明的 高/中/低）；缺失时按置信度兜底
@@ -46,13 +47,6 @@ import yaml
 
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger(__name__)
-
-
-def _md_cell(val) -> str:
-    """转义 markdown 表格单元格中的 | 字符与换行，防止破坏表格结构"""
-    if val is None:
-        return ""
-    return str(val).replace("|", "\\|").replace("\n", " ")
 
 
 # 判定违规的自信值阈值（自信值 ≥ 本值 → 判定违规），口径见 core/methodology.md
@@ -371,16 +365,22 @@ def render_problem_desc(d: dict) -> str:
     return desc
 
 
-def render_finding_row(d: dict) -> str:
-    """渲染单个发现的大表行：条例编号 | 严重级别 | 问题描述 | 代码位置 | 修改建议"""
-    cells = [
-        _md_cell(d.get("clause_id", "")),
-        _md_cell(resolve_severity(d)),
-        _md_cell(render_problem_desc(d)),
-        _md_cell(render_code_location(d)),
-        _md_cell(d.get("fix_suggestion", "")),
+def render_finding_block(d: dict) -> List[str]:
+    """渲染单个发现的段落块：#### {条例ID} {条款名称} + 字段要点
+
+    每个发现自包含（含严重级别行），行内评论等下游摘录单条意见时
+    不依赖分组标题推断。
+    """
+    title = str(d.get("clause_title", "") or "")
+    return [
+        f"#### {d.get('clause_id', '')} {title}".rstrip(),
+        "",
+        f"- **严重级别**：{resolve_severity(d)}",
+        f"- **问题描述**：{render_problem_desc(d)}",
+        f"- **代码位置**：{render_code_location(d)}",
+        f"- **修改建议**：{str(d.get('fix_suggestion', '') or '')}",
+        "",
     ]
-    return f"| {cells[0]} | {cells[1]} | {cells[2]} | {cells[3]} | {cells[4]} |"
 
 
 # ─── 报告组装 ───────────────────────────────────────────────────
@@ -410,7 +410,7 @@ def _render_header(lines: List[str], findings: List[dict], unreadable=None):
 
 
 def assemble_report(clause_list: List[dict], unreadable=None) -> str:
-    """组装完整报告 md：检视概览 + 检视意见单一大表"""
+    """组装完整报告 md：检视概览 + 检视意见（按严重级别分节的段落形式）"""
     lines: List[str] = []
 
     findings = collect_findings(clause_list)
@@ -419,18 +419,23 @@ def assemble_report(clause_list: List[dict], unreadable=None) -> str:
     # 头部（检视概览）
     _render_header(lines, findings, unreadable)
 
-    # 检视意见（单一大表）
+    # 检视意见（按严重级别分节；组内维持 文件路径 → 行号 排序，空级别小节省略）
     lines.append("## 检视意见")
     lines.append("")
     if not findings:
         lines.append("本次检视未发现问题。")
         lines.append("")
     else:
-        lines.append("| 条例编号 | 严重级别 | 问题描述 | 代码位置 | 修改建议 |")
-        lines.append("|---------|---------|---------|---------|---------|")
-        for d in findings:
-            lines.append(render_finding_row(d))
-        lines.append("")
+        _, high, med, low = compute_stats(findings)
+        for sev, cnt in (("高", high), ("中", med), ("低", low)):
+            if cnt == 0:
+                continue
+            lines.append(f"### {sev}（{cnt} 个）")
+            lines.append("")
+            for d in findings:
+                if resolve_severity(d) != sev:
+                    continue
+                lines.extend(render_finding_block(d))
 
     return "\n".join(lines)
 
