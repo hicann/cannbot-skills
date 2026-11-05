@@ -30,7 +30,7 @@ description: 当需要设计或修订 Broadcast、Reduction、Contraction 等算
 
 | 当前问题 | 入口 |
 |---|---|
-| Broadcast、Reduction、Contraction、IndexGather 方案与资源规划 | [范式索引表](references/paradigms/routes.yaml) |
+| Broadcast、Reduction、Contraction、IndexGather、ScatterUpdate 方案与资源规划 | [范式索引表](references/paradigms/routes.yaml) |
 | Ascend C regbase 开发方法 | [开发指导](references/knowledge/regbase_development_guide.md) |
 | Ascend C API、实现模式、精度风险或开发经验 | [知识分类索引](references/knowledge/index.md) |
 | 缺少专用范式或语言适配层 | [Ascend C 通用方法](references/paradigms/general-methodology.md)、[DSL 通用方法](references/paradigms/general-methodology-dsl.md) |

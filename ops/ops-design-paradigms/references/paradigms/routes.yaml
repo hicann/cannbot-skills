@@ -23,7 +23,7 @@
 # Ascend C 使用 references/paradigms/general-methodology.md；DSL 使用 references/paradigms/general-methodology-dsl.md。
 #
 # 未配置路由的 paradigm（按 fallback 走通用方法论）：
-#   Padding, ScatterUpdate, AtomicUpdate, Interpolation,
+#   Padding, AtomicUpdate, Interpolation,
 #   SortSelect, Histogram, SlidingWindow,
 #   Spectral,
 #   CollectiveCommunication, FusedComposite,
@@ -41,6 +41,8 @@ routes:
       - references/paradigms/contraction/patterns.md
     IndexGather:
       - references/paradigms/indexgather/patterns.md
+    ScatterUpdate:
+      - references/paradigms/scatterupdate/patterns.md
     Histogram:
       - references/paradigms/histogram/patterns.md
     RandomSampling:

@@ -32,3 +32,6 @@ routes:
     IndexGather:
       ascendc:
         - references/paradigms/indexgather/adapters/ascendc/example/examples-custom-gather-code
+    ScatterUpdate:
+      ascendc:
+        - references/paradigms/scatterupdate/adapters/ascendc/example/examples-tensor-scatter-nd-update-code
