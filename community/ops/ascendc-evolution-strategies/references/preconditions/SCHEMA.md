@@ -161,11 +161,11 @@ checks:
 2. 把适用性条件翻译成 grep 模式或 profiling metric
 3. 每条 check 写一个 `fail_msg`，包含建议替代策略
 4. 在本目录写 `{ID}.yaml`
-5. 测试：
+5. 测试（以下命令需在**仓库根目录**执行，`community/...` 路径以仓库根为基准；`--kernel-dir` 传算子工程根目录，脚本会在其下查找 op_kernel/ 与 op_host/ 两类子目录）：
    ```bash
-   python3 community/ops/ascendc-ops-evaluation/scripts/check_preconditions.py \
+   python3 community/ops/ascendc-evolution-strategies/scripts/check_preconditions.py \
        --strategy-ids {ID} \
-       --kernel-files /path/to/kernel/*.cpp
+       --kernel-dir /path/to/operator_root
    ```
 6. 提交前确保 Playbook 和 Preconditions 的 ID 一致
 
