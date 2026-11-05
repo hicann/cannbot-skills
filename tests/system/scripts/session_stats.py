@@ -325,7 +325,8 @@ class SessionStats:
         part_time = part.get("time", {})
 
         if part_type == "tool":
-            cls._process_tool_part(part, part_time, stats)
+            tool_time = part.get("state", {}).get("time", part_time)
+            cls._process_tool_part(part, tool_time, stats)
         elif part_type == "reasoning":
             stats.reasoning_time_ms += cls._calc_duration(part_time)
         elif part_type == "text":
