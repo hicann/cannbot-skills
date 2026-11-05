@@ -97,7 +97,7 @@ AscendC::Adds<float>(yLocal, yLocal, b_val, count_spatial);    // y = y + b_val
 | `Muls<T>` | `Muls(dst, src, scalar, len)` | `y[i] = x[i] * c` |
 | `Subs<T>` | `Subs(dst, src, scalar, len)` | `y[i] = x[i] - c` (需 AscendC 版本支持) |
 | `Relu<T>` | `Relu(dst, src, len)` | `y[i] = max(0, x[i])` |
-| `Abs<T>` | `Abs(dst, src, len)` | `y[i] = |x[i]|` |
+| `Abs<T>` | `Abs(dst, src, len)` | `y[i] = \|x[i]\|` |
 | `Exp<T>` | `Exp(dst, src, len)` | `y[i] = exp(x[i])` |
 | `Sqrt<T>` | `Sqrt(dst, src, len)` | `y[i] = sqrt(x[i])` |
 | `Rsqrt<T>` | `Rsqrt(dst, src, len)` | `y[i] = 1/sqrt(x[i])` |
@@ -419,12 +419,12 @@ PipeBarrier<PIPE_V>();
 
 | # | 检查项 | grep 命令 | 若命中则 |
 |---|--------|----------|---------|
-| 1 | 标量归约循环 | `grep -nE "for.*\+\+.*\{.*\+=|for.*\+\+.*\{.*sum" *.cpp` | 用 ReduceSum/WholeReduceSum 替代（模式 1） |
-| 2 | raw pointer + 循环 | `grep -nE "GetPhyAddr|reinterpret_cast" *.cpp` | 用 LocalTensor + Vector API 替代 |
-| 3 | 嵌套比较交换循环 | `grep -nE "for.*for.*swap|bubble|selection.sort" *.cpp` | 用 Sort32/MrgSort 替代（模式 3） |
+| 1 | 标量归约循环 | `grep -nE "for.*\+\+.*\{.*\+=\|for.*\+\+.*\{.*sum" *.cpp` | 用 ReduceSum/WholeReduceSum 替代（模式 1） |
+| 2 | raw pointer + 循环 | `grep -nE "GetPhyAddr\|reinterpret_cast" *.cpp` | 用 LocalTensor + Vector API 替代 |
+| 3 | 嵌套比较交换循环 | `grep -nE "for.*for.*swap\|bubble\|selection.sort" *.cpp` | 用 Sort32/MrgSort 替代（模式 3） |
 | 4 | 逐元素 gather scatter | `grep -nE "for.*\[order\[" *.cpp` | 用 Cycle Permutation 或 Sort+Extract 替代 |
-| 5 | 逐行标量循环 + Muls | `grep -nE "for.*GetValue.*Muls|for.*GetValue.*Adds" *.cpp` | 用 BroadCast + 批量 Mul/Add 替代（模式 6） |
-| 6 | 逐元素 SetValue/GetValue | `grep -nE "for.*SetValue.*GetValue|for.*GetValue.*SetValue" *.cpp` | 用 GatherMask 替代（模式 7） |
+| 5 | 逐行标量循环 + Muls | `grep -nE "for.*GetValue.*Muls\|for.*GetValue.*Adds" *.cpp` | 用 BroadCast + 批量 Mul/Add 替代（模式 6） |
+| 6 | 逐元素 SetValue/GetValue | `grep -nE "for.*SetValue.*GetValue\|for.*GetValue.*SetValue" *.cpp` | 用 GatherMask 替代（模式 7） |
 | 7 | 除 AscendC API 外的 for 循环 | `grep -n "for\s*(" *.cpp \| grep -v "for.*BlockIdx\|for.*tile\|for.*group\|for.*batch"` | 逐一审查是否可向量化 |
 
 ## 性能预期

@@ -243,7 +243,7 @@ if ((iter0 + 1) % scaleKL1Ratio_ == 0 || iter0 == kL1Iter_ - 1) {
 | 问题 | 现象 | 解决 |
 |------|------|------|
 | **精度错误（最常见）** | 输出 C 局部明显偏离 golden；尾部 K 段错得更严重 | 检查 `scaleKL1IterOffset = (iter0 % scaleKL1Ratio_) × kL1_` 是否在 L0 拷贝的 `MakeCoord` 里加上；尾轮 `curScaleKL1 = k_ - scaleKL1Offset` 是否正确裁剪 |
-| **AIV/AIC hang** | K 不是 `scaleKL1` 整数倍时卡死 | 检查末轮 flag 释放：`if ((iter0+1) % scaleKL1Ratio_ == 0 || iter0 == kL1Iter_ - 1)` 的 `||` 必须保留 |
+| **AIV/AIC hang** | K 不是 `scaleKL1` 整数倍时卡死 | 检查末轮 flag 释放：`if ((iter0+1) % scaleKL1Ratio_ == 0 \|\| iter0 == kL1Iter_ - 1)` 的 `\|\|` 必须保留 |
 | **L1 溢出** | 编译期或运行期报 L1 overflow | 回退 `SCALE_L1_BUFFER_NUM`（16→8→4→2）；或先校验 §3.1 的 L1 预算公式 |
 | **合并后性能反而劣化** | MTE2 时间下降有限甚至上升 | 检查是否 MTE2 总量本来就够大（A/B 已 32 KB+）；合并只对 <20KB 的小块有效 |
 | **`scaleKL1 % kL1 ≠ 0`** | `iter0 % scaleKL1Ratio_` 永远非 0 或错位 | 强制 `scaleKL1 = ratio × kL1`，Host Tiling 在搜索 `SCALE_L1_BUFFER_NUM` 时保证整除 |
