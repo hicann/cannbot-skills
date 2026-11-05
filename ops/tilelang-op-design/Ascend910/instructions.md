@@ -114,13 +114,20 @@
      - 纯 Cube（仅 matmul）→ 需要 L1 + L0A/L0B/L0C
      - 混合（matmul + element-wise 后处理）→ 核间流水线，需要 CV 融合
      - **Host 预处理**：如 im2col 等 Python 侧预处理步骤，标明在 design 的 §1 和 §4 中
+     - **im2col 设计记号**：可用 `T.tile.im2col(dst_l0a, src_l1, image_shape, kernel, stride, dilation, padding, pos_m, pos_k, valid_m, valid_k)` 表达 NC1HWC0 L1 → L0A tile
+     - **实现门禁**：`T.tile.im2col` 仅供 design 使用，当前未注册、不可编译或执行；实现阶段不得视为可用 API
+     - **Conv 类算子（conv2d / img2col+GEMM）强制分支**：
+       - **结构选型优先级**：direct 1x1 flipped GEMM（1x1 conv 的 im2col 是恒等变换，x NCHW 本身即 `[K=Ci, M=H*W]` 操作数；适用 `kH=kW=1, s=1, p=0, Ci%C0==0, (H*W)%C0==0`——对齐约束源于 B 操作数 raw x `[Ci, H*W]` Nd2Nz 加载的 32B 行对齐（C0=32B/元素宽，fp16/bf16=16），H*W 非对齐须回落 normal/fused；命中即省 wrepack + im2col 两级发射，重叠场景严格优于 fused）> fused img2col（LoadData3D 随路展开，用 `T.tile.im2col` 设计记号表达；适用 `Ci%C0==0` 且 xNz+B 面板 ≤ 480KB）> normal im2col 物化；判定顺序与 `examples/conv2d-template.md` `select_mode` 一致：先判 direct → 再判 fused → 否则 normal；满足 fused/direct 条件却退回 normal 时，必须在 design.md「风险点」中写明理由
+       - **禁止默认标量逐元素 gather** 的 im2col 设计；k'=(ci,kh,kw) 解码必须按段连续块/向量化表达，标量仅限平台限制豁免场景且须注明理由
+       - **dtype 适配强制声明**：fp32 走原生 fp32 cube / bf16 拆分替代等适配时，design.md 必须含「保留的优化结构清单」——fused/normal 模式、零标量、批量转置、epilogue 跨行块处理逐项标注 保留/丢弃+理由；该清单是 AscendC 转译阶段的强制输入
+       - **权重 repack 可缓存**：repack 结果是（weight 内容, shape, dtype）的确定函数，design.md 中标注可由 host 侧 LRU 缓存，推理场景跳过重复 repack
    - **复杂度级别**：
      - 单步（如 element-wise add）→ 无循环、单次搬运
      - 多步（如 softmax = max + sub + exp + sum + div）→ 多次计算、可能需要中间缓冲
      - 融合（如 flash attention = GEMM + softmax + GEMM）→ 核间协作、流水线
    - **动态 shape 判定**：是否存在运行时才确定的维度
 4. **非整除场景预判**：检查输入 shape 是否可能不被 block size 整除。`T.ceildiv(M, block_M)` 对非整除或 `M < block_M` 返回 ≥1（非零），`T.copy` 已支持动态 shape 切片自动处理尾块，**不需要 host padding**。用 `T.ceildiv` + 动态切片 `T.copy(A[m:m+valid, ...])`，参考 `examples/chunk_gated_delta_rule/expert_chunk_gated_delta_rule.py:107-108`。仅当多个 group 共享同一输出 buffer 时需注意尾块写入竞态——用 metadata 的 valid_m 字段限制写入范围 `T.copy(C_L0, Y[m:m+valid_m, ...])`
-5. **多 group 输出竞态约束**（grouped 类算子）：当多个 group 共享同一输出 buffer（紧凑排列，不 padding）时，尾块按 block_M 整块写会溢出到隔壁 group 的区域，导致竞态条件（执行顺序不确定→结果不确定）。解法：metadata 记录 valid_m，kernel 用 `T.copy(C_L0, Y[m_start : m_start + valid_m, ...])` 只写有效行。参考 `examples/grouped_gemm/example_grouped_gemm_fwd.py` 的 block_metadata[2]（valid_m 字段，当前未使用，应启用）。
+5. **多 group 输出竞态约束**（grouped 类算子）：当多个 group 共享同一输出 buffer（紧凑排列，不 padding）时，尾块按 block_M 整块写会溢出到隔壁 group 的区域，导致竞态条件（执行顺序不确定→结果不确定）。解法：metadata 记录每组 valid_m，kernel 用 `T.copy(C_L0, Y[m_start : m_start + valid_m, ...])` 只写有效行（分组尾块必须启用 valid_m 限定写入范围，禁止整块直写）。metadata 任务表字段约定参考 `examples/grouped_gemm/example_grouped_gemm_fwd.py` 的 block_metadata[2]（valid_m 字段）。
 6. **数据重排成本建模**：按 [references/ascend-constraints.md](references/ascend-constraints.md) §4.2 为每条路径和最大/关键 case 计算 DMA/GM
    标量访问/地址解码/并行度；不能只给 tile shape，不计算 transaction 数量。
 
@@ -133,7 +140,10 @@
 > **⚠️ 生成 design.md 时必须遵守 [references/ascend-constraints.md](references/ascend-constraints.md) §5「Host 侧 Buffer 操作约束」**。下游
 > `tilelang-op-develop` 会再次校验；违规设计在 Stage 2 返回 `[DESIGN_ERROR]`。
 
-基于 [examples/design-template.md](examples/design-template.md) 模板，填充所有章节：
+基于 [examples/design-template.md](examples/design-template.md) 模板，填充所有章节。
+**以下 11 节必须全部填充。核心设计环节四件套的具名清单：编程模式选型（§2）、
+API 映射设计（§3）、数据规格与内存规划（§4）、Tiling 策略（§5）——缺一不可；
+其中 API 映射设计（§3）是连接数学公式与 TileLang 原语的核心章节，不得省略：**
 
 1. 概述
 2. 编程模式选型

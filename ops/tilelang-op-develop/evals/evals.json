@@ -41,7 +41,7 @@
         "eval_mode": "text"
       },
       "prompt": "design.md 很长，包含多轮模式推理、未量化风险和“待确认”内容。开发阶段应该全部照搬吗？",
-      "expected_output": "回复应只提取公式/算法、API映射/伪代码、shape/dtype、block、pass_configs、golden、L0计划、按 dtype 精度标准，以及有具体 shape/dtype/超时/GM-DMA 成本或回退路径的量化约束；忽略推理过程、纯文件清单、待确认和无量化笼统风险。",
+      "expected_output": "1. 回复应只提取公式/算法、API映射/伪代码、shape/dtype、block、pass_configs、golden、L0计划、按 dtype 精度标准。\n2. 回复应说明有具体 shape/dtype/超时/GM-DMA 成本或回退路径的量化约束必须提取，不算笼统风险。\n3. 回复应说明忽略推理过程、纯文件清单、待确认和无量化笼统风险。",
       "expectations": [],
       "files": []
     },
@@ -55,7 +55,7 @@
         "eval_mode": "text"
       },
       "prompt": "为了实现 transpose 和 BF16 fallback，想在 host 侧对 NPU tensor 调 .contiguous().to(fp16)，再把新 buffer 传 kernel。可以吗？",
-      "expected_output": "回复应禁止 host 侧真实重排、dtype 转换、改写或替换 buffer；只允许证明不物理化的 metadata view、数据准备、kernel 调用和验证。重排与 dtype fallback 必须移入 kernel，优先块/二维 T.copy、同宽 reinterpret 或 kernel 内 cast，并检查生成源码无大张量 GM 标量路径。",
+      "expected_output": "1. 回复应禁止 host 侧真实重排、dtype 转换、改写或替换 buffer。\n2. 回复应说明 host 侧只允许证明不物理化的 metadata view、数据准备、kernel 调用和验证。\n3. 回复应说明重排与 dtype fallback 必须移入 kernel，优先块/二维 T.copy、同宽 reinterpret 或 kernel 内 cast。",
       "expectations": [],
       "files": []
     },
@@ -69,7 +69,7 @@
         "eval_mode": "text"
       },
       "prompt": "数据重排实现精度看起来正确，但 REORDER-COST-AUDIT 估算最大 case 有百万次短 DMA 和 numel 级 GM 标量访问。能否先进入精度验收？",
-      "expected_output": "回复应禁止进入精度验收：必须按连续 record、成本选路、聚合搬运、UB-local reorder、必要分阶段、数字验收的配方重设计。审计需量化 GM pass、DMA 数与平均字节、GM 标量访问、div/mod、active cores、每核任务和 timeout。",
+      "expected_output": "1. 回复应禁止进入精度验收：numel 级 GM 标量访问或海量短 DMA 命中数据重排门禁，必须先重设计搬运路径，精度正确不代表搬运路径可接受。\n2. 回复应按正向配方重设计：识别连续 record 并聚合成大块/二维 T.copy 搬运，标量循环仅用于 UB-local reorder，必要时按成本选路分阶段。\n3. 回复应要求复核与重写审计：用 get_kernel_source() 确认 GetValue/SetValue 不按 numel 展开、DMA transaction 降至可接受量级，并重写 REORDER-COST-AUDIT 量化 GM pass、DMA、GM 标量访问等关键指标。",
       "expectations": [],
       "files": []
     },
@@ -84,7 +84,7 @@
         "timeout": 1800
       },
       "prompt": "python test_op.py --level l0 已通过，design 的最大 dtype/最大任务数 case 标为 large/L1。可以把它留给后续测试设计吗？",
-      "expected_output": "1. 回复应说明不能留给后续：性能可行性哨兵（design 中最大 dtype/最大任务数 case）即使在 design 中标为 large/L1，也必须在开发阶段（L0 通过后）实际运行，不得因标记 large/L1 而 skip 后宣称完成。\n2. 回复应说明须为每个 case 设置明确 timeout，且用户明确给出的失败或超时 case 必须全部实际运行。\n3. 回复应说明任一哨兵超时不得宣称生成完成，应修复搬运路径；现有 API 无法满足时返回 [DESIGN_ERROR] 并附 GM/DMA 成本证据。",
+      "expected_output": "1. 回复应说明不能留给后续：性能可行性哨兵（design 中最大 dtype/最大任务数 case）即使在 design 中标为 large/L1，也必须在开发阶段（L0 通过后）实际运行，不得因标记 large/L1 而 skip 后宣称完成。\n2. 回复应说明须为哨兵 case 设置明确 timeout。\n3. 回复应说明任一哨兵超时不得宣称生成完成，应修复搬运路径；现有 API 无法满足时可返回 [DESIGN_ERROR]。",
       "expectations": [],
       "files": []
     },
@@ -98,7 +98,7 @@
         "eval_mode": "text"
       },
       "prompt": "特殊值测试只用全 NaN 输入，并用 torch.allclose(equal_nan=True)。这能发现重排错位吗？",
-      "expected_output": "回复应说明不能：应在 CPU 固定 seed 生成有限值与稀疏 NaN/正Inf/负Inf 混合输入，保证特殊值和有限值都存在；先严格比较三种特殊值 mask 的位置，再只对有限位置算混合容差。全特殊值只能补充，不能作为唯一门禁。",
+      "expected_output": "1. 回复应说明不能：全 NaN 输入在 equal_nan=True 下任何错位排列都能通过校验，无法发现重排错位。\n2. 回复应说明需混合有限值与稀疏特殊值输入，先比对特殊值位置 mask，再只对有限位置算容差。\n3. 回复应说明全特殊值用例只能作为补充，不能作为唯一门禁。",
       "expectations": [],
       "files": []
     }

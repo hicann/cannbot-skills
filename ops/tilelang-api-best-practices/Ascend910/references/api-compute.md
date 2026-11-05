@@ -705,3 +705,14 @@ for i, j in T.Parallel(block_M // VEC_NUM, block_N):
 # 方式二：T.tile 扩展原语（Expert / 混合模式，直接触发硬件指令）
 T.tile.exp(b_ub, a_ub)
 ```
+
+### 4.14 T.tile.im2col（仅设计占位）
+ 
+`T.tile.im2col(dst_l0a, src_l1, image_shape, kernel, stride, dilation, padding, pos_m, pos_k, valid_m, valid_k)`
+表示从 NC1HWC0 `src_l1` 提取 im2col tile 到 `dst_l0a`。
+ 
+参数：`image_shape`、`kernel`、`stride`、`dilation`、`padding` 描述卷积；
+`pos_m`、`pos_k` 指定输出 tile 起点；`valid_m`、`valid_k` 指定有效范围。
+ 
+**重要**：这是 design-only 记号，当前未注册，不能编译或执行。
+实现阶段不得将其视为可用 API，必须改用已注册原语或先完成 API 实现与注册。

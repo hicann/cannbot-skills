@@ -95,6 +95,7 @@ TileLang 中有多少个 `T.prim_func`，AscendC 侧就至少要有多少个独�
 - 纯 Vector 算子：`@references/dsl2Ascendc_compute_vector.md`
 - 纯 Cube 算子：`@references/dsl2Ascendc_compute_cube.md`
 - C/V 融合算子：先看 `@references/dsl2Ascendc_compute_cv.md`，再结合 `@references/dsl2Ascendc_compute_cube.md` 和 `@references/dsl2Ascendc_compute_vector.md`
+- 卷积类算子（conv2d / img2col+GEMM / LoadData3D 随路展开）：`@references/dsl2Ascendc_compute_conv.md`
 
 **常见陷阱速查表**：
 

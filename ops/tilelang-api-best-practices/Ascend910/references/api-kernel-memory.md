@@ -147,6 +147,8 @@ print(kernel.get_kernel_source())
 
 TileLang 对存储层级进行了抽象，分为 global、shared 和 fragment 三个级别。在 Ascend 平台中，shared 层级对应 L1 Buffer（TIR scope `shared.l1`）和 Unified Buffer/UB（TIR scope `shared.ub`），fragment 层级对应 L0A/L0B/L0C Buffer。Developer 模式下 `T.alloc_shared` 默认使用动态 scope `shared`，由编译器推断为 `shared.l1` 或 `shared.ub`。用户无需指定具体硬件存储，TileLang 编译器会根据程序上下文自动识别。
 
+**Developer 模式内存 API 三件套**：`T.alloc_shared`（动态 shared，编译器推断 L1/UB）、`T.alloc_fragment`（fragment，对应 L0A/L0B/L0C）、`T.alloc_var(dtype, init, scope='local.var')`（标量变量）——均由编译器推断层级，用户无需指定物理存储。
+
 #### T.alloc_shared(shape, dtype)
 
 分配 shared 层级的存储空间。

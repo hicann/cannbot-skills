@@ -8,8 +8,8 @@
 
 | 文档 | 涵盖内容 | 典型场景 |
 |------|---------|---------|
-| [api-kernel-memory.md](references/api-kernel-memory.md) | Kernel 定义（T.prim_func, T.Kernel, @jit）、内存分配（Developer: T.alloc_shared/fragment/var, Expert: T.alloc_ub/L1/L0x）、数据搬运（T.copy） | Kernel 编写、片上存储管理、数据搬运 |
-| [api-compute.md](references/api-compute.md) | 矩阵计算（T.gemm_v0, T.mma）、归约（T.reduce_sum/max/min）、Element-wise（T.Parallel + 符号 API）、Tile 扩展原语（T.tile.xxx，含 T.tile.atomic_add） | GEMM、Softmax、逐元素计算、排序、原子累加 |
+| [api-kernel-memory.md](references/api-kernel-memory.md) | Kernel 定义（T.prim_func, T.Kernel, @jit）、内存分配（Developer: T.alloc_shared/fragment/var, Expert: T.alloc_ub/L1/L0x，两套功能可互换、常规 kernel 默认 Developer）、数据搬运（T.copy） | Kernel 编写、片上存储管理、数据搬运 |
+| [api-compute.md](references/api-compute.md) | 矩阵计算（T.gemm_v0, T.mma）、归约（T.reduce_sum/max/min）、Element-wise（T.Parallel + 符号 API）、Tile 扩展原语（含 T.tile.atomic_add）及 design-only `T.tile.im2col` | GEMM、Softmax、逐元素计算、排序、原子累加、im2col 设计 |
 | [api-schedule-sync.md](references/api-schedule-sync.md) | 循环（T.serial, T.unroll）、流水线（T.Pipelined）、持久化调度（T.Persistent）、同步（T.set_flag/wait_flag, T.barrier_all, T.set_cross_flag）、调试（T.printf, T.dump_tensor） | 流水线优化、多核均衡、同步、调试 |
 
 ---
@@ -58,6 +58,7 @@
 |-----|------|
 | `T.copy(src, dst)` | GM/L1/UB/L0 之间搬运数据 |
 | `T.tile.atomic_add(dst_gm, src_local)` | 将本地 tensor 原子累加到 GM；V1 支持 local/UB → GM |
+| `T.tile.im2col(...)` | 仅供设计表达 NC1HWC0 L1 → L0A tile；未注册，不可编译或执行 |
 | `T.gemm_v0(A, B, C, transpose_A, transpose_B, init)` | 标准 GEMM |
 | `T.mma(A, B, C, init)` | NPU MMA 指令 |
 | `T.reduce_sum/max/min(buffer, out, dim)` | 按维度归约 |

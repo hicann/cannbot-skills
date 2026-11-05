@@ -125,7 +125,7 @@ argument-hint: >
 
 ## 流程
 
-🛑 **执行以下各步骤前，必须先完成步骤 0 的强制查阅。未完成步骤 0 全部 checklist 前，禁止 Edit/Write 任何 `{output_dir}/design/` 下的代码文件。**
+🛑 **执行以下各步骤前，必须先完成步骤 0（Attention 类）与步骤 0.5（Conv 类）的强制查阅（按算子类型各取其一）。未完成对应步骤全部 checklist 前，禁止 Edit/Write 任何 `{output_dir}/design/` 下的代码文件。**
 
 ---
 
@@ -179,6 +179,63 @@ argument-hint: >
 
 ---
 
+### 🛑 步骤 0.5: Conv 算子结构选型路由（Conv 类强制执行）
+ 
+```
+⚠️ 本步骤是硬性门禁。如果 model.py 是 Conv 类算子，
+   必须逐个完成以下 checklist 后才能进入步骤 1。禁止跳过。
+```
+ 
+**触发条件**：`{output_dir}/model.py` 的 forward() 为卷积计算（`nn.Conv1d/2d/3d`、`F.conv1d/2d/3d`，或类名含 `Conv`）。
+ 
+**强制执行清单**：
+ 
+```
+0.5.1 🛑 Read .claude/skills/tilelang2ascend-translator/references/dsl2Ascendc_compute_conv.md（全文）:
+    conv 结构与优化知识的权威来源。本阶段只取结构选型与设计约束；
+    LoadData3D 等 AscendC API 细节供 Phase 4 转译参考。
+ 
+0.5.2 🛑 GEMM 结构三模式显式选型（结论写入 PERF_DESIGN.md）:
+    | 模式 | 适用 | 省去 |
+    | normal（im2col 物化） | 通用回退 | — |
+    | direct 1x1 flipped GEMM | kH=kW=1, s=1, p=0, Ci%C0==0, (H*W)%C0==0 | wrepack + im2col 两级发射 |
+    | fused img2col LoadData3D 随路展开 | Ci%C0==0（真实 Ci 不吃 pad 通道）且 xNz+B 面板 ≤ 480KB | im2col GM 物化（最大收益） |
+    满足 fused/direct 条件却退回 normal 必须在 PERF_DESIGN.md 写明理由。
+    注：C0 = 32B/元素宽（fp16/bf16=16，fp32=8）；现行实现 fused/direct 只路由
+    fp16/bf16，gate 硬编码 16；窗口化 band 路径经 xtrans_pad 上片 CiPad，不受
+    Ci 对齐限制。
+    注：direct 的 `(H*W)%C0==0` 源于 B 操作数（raw x NCHW `[Ci, H*W]`）GM→L1
+    Nd2Nz 加载的 32B 行对齐（fp16/bf16 下 = 16 元素）；H*W 非对齐时 raw x
+    行宽无法 32B 对齐、Nd2Nz 失效，须回落 normal/fused（xpad UB-relay 补齐
+    方案正确但实测 net negative，见 conv2d_base.cpp P0-b）。
+    注：`T.tile.im2col` 当前未注册不可执行；fused 模式作为结构意图记录，
+    由 Phase 4 AscendC 转译落实（compute_conv.md 第四章）。
+ 
+0.5.3 🛑 标量约束:
+    禁止默认标量逐元素 gather 的 im2col 设计；k'=(ci,kh,kw) 解码必须按段
+    连续块/向量化表达。标量豁免仅限占比 <5% 的偶发小尾块（如 <32B k' 尾块），
+    主数据路径（im2col gather 主体、epilogue 主写出、wrepack 主存储）不属于豁免范围。
+ 
+0.5.4 🛑 dtype 适配声明:
+    fp32 走原生 fp32 cube / bf16 拆分替代等适配时，PERF_DESIGN.md 必须含
+    「保留的优化结构清单」——fused/normal 模式、零标量、批量转置、
+    epilogue 跨行块处理逐项标注 保留/丢弃+理由。该清单是 Phase 4 转译的强制输入。
+    （fp32 精度适配路线演进定稿见 compute_conv.md 第八章：3-chain 已退役，
+    原生 fp32 cube 为默认。）
+ 
+0.5.5 🛑 权重 repack 可缓存:
+    repack 结果是（weight 内容, shape, dtype）的确定函数，设计中标注
+    由 host 侧 LRU 缓存（key = data_ptr + sizes + dtype + version）。
+```
+ 
+**门禁规则**：
+- 触发条件满足但 0.5.1-0.5.5 未完成 → **禁止**进入步骤 1，**禁止**生成任何 design/ 下的代码
+- "archive 先例 / 与 archive conv2d_base 同结构"论断必须附 grep 证据
+  （archive conv2d_base 主数据路径——im2col gather 主体、GEMM 主计算、
+  epilogue 主写出——零标量逐元素访问；行内标量 bias Adds 与调试标志属
+  豁免形态；含 xtrans/fused 结构），无证据视为未验证
+- 禁止凭记忆或经验跳过本步骤直接设计
+ 
 ### 🛑 步骤 0-A: 归约 / 重排类设计模式路由（命中特征时强制执行）
 
 ```
@@ -340,6 +397,7 @@ Read `ops/tilelang-perf-optimization/references/optimization-guide.md` §一（�
 3. Cube / CV 融合型：选用的高级策略，或在 block 级设计中预留的扩展空间（如 Split-K 切分维度、pingpong/swat 适配点）
 4. CV 融合型：锁步风险结论（流水结构如何避免 C/V 串行乒乓）
 5. `## 性能迭代待验证清单` 章节（见下方格式；1e 阶段无待验证项时写"暂无"，章节本身不可缺）
+6. Conv 类：步骤 0.5 的三模式选型结论（含退回 normal 的理由）；dtype 适配时另含「保留的优化结构清单」（fused/normal 模式、零标量、批量转置、epilogue 跨行块处理逐项 保留/丢弃+理由）
 
 **性能迭代待验证清单（标准化格式，供步骤 4 消费）**：所有"设计期保留、待实测验证"的项（如保留的疑似冗余同步、暂不启用的高级策略、可扩大的 tile 配置）必须结构化为下表，禁止散落在正文描述中：
 

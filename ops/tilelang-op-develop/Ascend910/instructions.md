@@ -55,6 +55,7 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 | 归一化（softmax/layernorm/rmsnorm） | `examples/softmax/`、`examples/normalization/` |
 | Pooling（avg_pool/max_pool） | [tilelang-op-design/references/pooling/](../../tilelang-op-design/Ascend910/references/pooling)（5 篇设计模式参考: 布局策略、行粒度 tile、reduce_d 快路径、自适应池化经验、反向梯度语义；转译/实现篇在 tilelang2ascend-translator Pooling 类别 `references/pooling-patterns/`） |
 | GEMM | `examples/gemm/`、`examples/developer_mode/gemm_developer.py` |
+| 卷积（conv2d/img2col+GEMM） | 以 design.md 的 Conv 强制分支结构选型为准；`T.tile.im2col` 未注册不可执行（仅设计记号），TileLang 侧按 normal 结构表达，但 k'=(ci,kh,kw) 解码必须段连续块/向量化表达，**禁止默认标量逐元素 gather**；fused img2col 优化由 AscendC 转译阶段落实 |
 | 融合算子 | `examples/flash_attention/`、`examples/pipeline/`、`examples/developer_mode/matmul_add_developer.py` |
 | Developer 模式 | `examples/developer_mode/` |
 | transpose / layout transform | `examples/transpose/transpose.py`（提取结构谓词、
@@ -102,10 +103,12 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 | pass_configs | | | |
 | CV 交互 ⭐（Developer 默认 threads=2 片上直连 / 回退 workspace+vid） | | | |
 
-**冲突处理**：当 design.md 与参考实现冲突时：
-- **优先参考实现**：参考实现已验证通过，可信度高
-- **记录差异**：在代码注释中说明为何偏离 design.md
-- **询问用户**：重大差异需确认
+**冲突处理**（当 design.md 与参考实现冲突时，以下三条均为强制交付要求）：
+
+1. **优先参考实现**：参考实现已验证通过，可信度高
+2. **在代码注释中记录差异**：说明为何偏离 design.md（⚠️ 不是只在内部对比表中记录——
+   对比表是工作过程记录，差异注释必须落到生成代码的注释里，供审查者溯源）
+3. **重大差异询问用户确认**
 
 ### 步骤 3：生成实现代码
 
@@ -144,6 +147,8 @@ GM 标量访问、逐元素 div/mod、active cores、每核串行任务和最大
 基于 design.md 的 API 映射 + 参考示例的代码风格，生成**两个文件**：`{op}.py`（纯 kernel）与 `test_{op}.py`（golden + L0 + main，L1/L2/Boundary 留桩，从 `{op}.py` import kernel）。完整文件结构骨架与融合算子注意事项见 [examples/code-skeleton.md](examples/code-skeleton.md)。
 
 > **写代码时遇到**具体编码规范问题（Buffer 分配 / 索引一致性 / 同步 / 广播 / 测试模板）查 [references/coding-conventions.md](references/coding-conventions.md)。
+>
+> **Conv 类算子**：严格遵循 design.md 的 Conv 强制分支结构选型与「保留的优化结构清单」；k' 解码禁止退化为标量逐元素 gather（标量仅限平台限制豁免且须注释理由）
 >
 > **V 核并行化**（按行切分、中间 buffer 索引一致性、CV 融合 V 核切分）查 [references/vector-parallelism.md](references/vector-parallelism.md)。
 >
