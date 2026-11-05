@@ -70,13 +70,13 @@ def _read_text(path: Path) -> str:
 
 
 INDEX_TABLE_RE_4COL = re.compile(
-    r'\|\s*([\d.]+|RB-[\d.]+|SEC-[\d.]+|API-[\d.]+|PERF-[\d.]+|TOPK-[\d.]+'
-    r'|SIMT-[\d.]+|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+)'
+    r'\|\s*(RB-[\d.]+|SEC-[\d.]+|API-[\d.]+|PERF-[\d.]+|TOPK-[\d.]+|SIMT-[\d.]+'
+    r'|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+|HOST-[\d.]+|RED-[\d.]+)'
     r'\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|'
 )
 INDEX_TABLE_RE_3COL = re.compile(
-    r'\|\s*([\d.]+|RB-[\d.]+|SEC-[\d.]+|API-[\d.]+|PERF-[\d.]+|TOPK-[\d.]+'
-    r'|SIMT-[\d.]+|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+)'
+    r'\|\s*(RB-[\d.]+|SEC-[\d.]+|API-[\d.]+|PERF-[\d.]+|TOPK-[\d.]+|SIMT-[\d.]+'
+    r'|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+|HOST-[\d.]+|RED-[\d.]+)'
     r'\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|'
 )
 SIDE_TAG_RE = re.compile(r'\[适用:\s*(All|Kernel|Tiling|Host)\]')
@@ -294,7 +294,9 @@ def match_references(refs: List[dict], language: str, side: str,
             if 'All' not in ref_sides and not any(s in ref_sides for s in ['Kernel', 'Tiling', 'Host']):
                 continue
         if ref['domain']:
-            if ref['triggers']:
+            if '必须触发' in ref['triggers']:
+                pass  # 无条件激活，不做关键词命中检查
+            elif ref['triggers']:
                 hit = any(t in keywords_hit for t in ref['triggers'])
                 if not hit:
                     continue

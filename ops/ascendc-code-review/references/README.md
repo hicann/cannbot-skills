@@ -2,6 +2,10 @@
 
 > **声明**：本表**仅供人读**，用于快速了解全部规则文件的分类与定位。机器路由（规则加载、侧别过滤、触发匹配）依赖各规则文件自身的「适用」声明头，**不依赖本表**。任何检视流程不得以「确认文件清单」为由读取本表；主题文件清单以各文件 `<适用>` 声明为准，本概览仅导航不参与判定。新增或修改规则文件时须同步更新本表（见 `docs/architecture.md` 5.1 节）。
 >
+> 最后更新：2026-11-05（ascendc-red-line.md 修复评测用例 4 漏列 Host 侧 RED-8 的枚举缺失：快速索引由「分组子标题+三张子表」改为规范单表 10 行×5 列——[适用: X] 随行标注、规范名称统一为正文标题全称，侧别信息随行不再依赖组标题；适用声明头清理（删 适用场景/介绍/类别(All/Host/Kernel) 装饰字段及 TOPK 残留说明行，按门序重排并加围栏包裹）；deterministic_routing.py 索引前缀白名单补 RED-，基准路由恢复 red-line 10 条款可见（7 All/1 Host/2 Kernel）；RED-2 标题层级异常（####）与条款正文 CLS 整改留待后续独立任务）
+>
+> 最后更新：2026-11-05（ascendc-host-rules.md 立为规则集标杆样例：适用声明头精简为 5 个路由字段并按决策门序重排（语言/侧别/默认启用/领域/触发，环境门与内容门空行分组），删除装饰字段 适用场景 与 介绍；触发机制由关键词触发（9 个）改为 必须触发（C++/Host 侧别即无条件纳入），总表该行触发机制列与特殊机制注记同步（注记行补齐 ascendc-error-code.md 存量漏列并新增 ascendc-host-rules.md）；配套修复 evals/reviewer_bench/scripts/deterministic_routing.py 对 必须触发 保留值的特判缺失——match_references 命中该保留值时跳过关键词命中检查，5 个 必须触发 规则文件在基准路由中由被丢弃恢复为正常纳入）
+>
 > 最后更新：2026-10-31（负载均衡机制下线：删除全部 <检视负载> 容量声明头，检视改为单波派发——每个子 Agent 负责一个规则文件的全部条款；派发方式列同步更新）
 >
 > 最后更新：2026-10-27（SIMT 文件合并：simt-api-analysis.md（16 条）+ simt-constraints.md（知识参考，无声明头）合并为 ascendc-simt.md，条款 16→15（SIMT-1-1~SIMT-1-15，原 UintDiv 保留条款移除），触发词更新为 Simt/simt_api/asc_simt.h，侧别 Kernel、领域 true、通用分组容量 5，原约束清单（头文件位置/变量名冲突/参数传递/启动方式/UB/线程数/VF 调用）并入「执行流程」章节并新增检视前置要求（先经 /ascendc-docs-search 查 SIMT 头文件核实）；本表原 #10/#11 两行合并为一行，特殊机制注记删除 simt-constraints.md 条目，总表行号重排为连续 1-13；依据 commit 77fdc791）
@@ -24,7 +28,7 @@
 | 2 | cpp-general.md | C++通用编码 | GEN | C++ | All | 语言+侧别匹配即启用 | 单波单文件 | 39 | 代码设计、头文件、数据类型、常量、表达式、函数使用等通用编码规范 |
 | 3 | cpp-style.md | 代码风格 | STYLE | C++ | All | 默认启用 | 专项子 agent 独立托管（组名 style） | 16 | 命名/格式/注释风格，结果以 yaml category: style 输出，违反计入报告问题数（severity 取条款声明） |
 | 4 | ascendc-sunset-api.md | AscendC 日落检查 | SUNSET | C++ | All | 关键词触发（aclnn、aclrt、aclop） | 单波单文件 | 2 | 跨侧别日落（废弃）API/头文件/库检查，预研报告驱动 + clause.get_sunset_api.py fallback |
-| 5 | ascendc-host-rules.md | AscendC工程约定 | HOST | C++ | Host | 关键词触发（InferDataType、IMPL_OP、REG_OP、IMPL_OP_INFERSHAPE、GetPlatformInfo、GetCoreNumAic/Aiv、GetUbBlockSize、TilingParse） | 单波单文件 | 4 | HOST-1 InferDataType 须放 op_graph 目录（禁 op_host 链式写法）；HOST-2 REG_OP 算子必须实现 InferDataType（互斥分工）；HOST-3 platform 参数须校验取值合法性（判空+类型匹配零值拦截）；HOST-4 platform 参数须在 Tiling 方法中直接获取（禁 TilingParse→compileInfo→Tiling 传递） |
+| 5 | ascendc-host-rules.md | AscendC工程约定 | HOST | C++ | Host | 必须触发（无条件启用，不参与内容筛查） | 单波单文件 | 4 | HOST-1 InferDataType 须放 op_graph 目录（禁 op_host 链式写法）；HOST-2 REG_OP 算子必须实现 InferDataType（互斥分工）；HOST-3 platform 参数须校验取值合法性（判空+类型匹配零值拦截）；HOST-4 platform 参数须在 Tiling 方法中直接获取（禁 TilingParse→compileInfo→Tiling 传递） |
 | 6 | ascendc-log.md | AscendC日志 | LOG | C++ | Host | 关键词触发（OP_LOGE、OP_LOGI、OP_LOGW、OP_LOGD） | 单波单文件 | 2 | LOG-1 基于 cann-error-code-standard 核验实际入口，禁止推荐废弃宏，与 ERR 同根因合并；LOG-2 检查算子名来自上下文，保留判空分支豁免 |
 | 7 | ascendc-error-code.md | CANN错误码 | ERR | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 单波单文件 | 4 | ERR-1 检测 EZ0001、EZ0002、EZ0003、EZ0005、EZ0006、EZ0007 及旧宏；ERR-2 语义/注册/Arglist；ERR-3 首报唯一性；ERR-4 失败返回诊断；唯一基准 cann-error-code-standard |
 | 8 | ascendc-red-line.md | 高频问题清单 | RED | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 单波单文件，**最高优先级** | 10 | 生产环境总结的红线问题（除零/越界/溢出/未初始化/数据竞争等） |
@@ -51,12 +55,12 @@
 |------|---------|
 | ascendc-red-line.md / ascendc-topk.md | 最高优先级规则文件，无条件激活 |
 | cpp-style.md | 专项组（组名 style），全文 Read，结果以 yaml `category: style` 字段输出（无文本前缀），不走假设检验，违反计入报告问题数（severity 取条款声明） |
-| cpp-secure.md / ascendc-red-line.md / ascendc-topk.md | `触发: 必须触发` = 不依赖代码命中关键词，无条件激活（文件级匹配即纳入） |
+| cpp-secure.md / ascendc-red-line.md / ascendc-topk.md / ascendc-error-code.md / ascendc-host-rules.md | `触发: 必须触发` = 不依赖代码命中关键词，无条件激活（文件级匹配即纳入） |
 | mc2-specific.md | 总览提供主题导航；四份主题文件声明适用与排除条件，plan-design Step 3 按关键词或已确认的调用、注册、构建关系选规 |
 
 ## 维护说明
 
-- **新增规则文件**：放入 `references/` + 写适用声明头即自动注册；同时在本表追加一行（按分类归位排序）
+- **新增规则文件**：先读 `docs/rule-writing-standard.md` 并走完其提交前自查清单；放入 `references/` + 写适用声明头即自动注册；同时在本表追加一行（按分类归位排序）
 - **修改规则文件**（条款增删、触发词变化、侧别调整）：同步更新本表对应行的条款数/触发机制/侧别等列
 - **删除规则文件**：同步删除本表对应行
 - 各列取值须与文件实际声明头和快速索引一致，禁止凭记忆填写

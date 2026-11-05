@@ -59,4 +59,5 @@ permission:
 | 错误码检测 | references/ascendc-error-code.md | ERR-1~4 默认纳入 C/C++ 检视；引用相邻 cann-error-code-standard 的规范与码表，检查废弃码、注册契约、首报与失败返回 |
 | 废弃码扫描 | scripts/clause.check_error_codes.py | 只读扫描被检代码中的废弃码及旧宏，作为 ERR-1 的检测证据 |
 | Skill 自身规范 | docs/architecture.md | 目录结构、各类文件格式规范、扩展方式（维护本 skill 时读） |
+| 规则集写作规范 | docs/rule-writing-standard.md | 新增/修改规则文件的逐条写作约束与提交前自查清单（维护规则集时读） |
 | 常用算子仓 | ops-transformer / ops-math / ops-nn / ops-cv | gitcode.com/cann/{repo}，PR 检视时优先从完整 URL 推断 repo 名 |

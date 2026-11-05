@@ -308,6 +308,8 @@ FAIL/SUSPICIOUS必须附：问题描述 + 代码片段（≥10行） + 修复建
 
 ## 四、规则文档规范（references/）
 
+> 写作层的逐条细则（字段值域、布局、快速索引列序、条款章节形态、同步义务与提交前自查清单）见 [rule-writing-standard.md](rule-writing-standard.md)；本节定义规则文件的架构与注册机制。
+
 ### 4.1 `<适用>` 声明头
 
 每个 `references/{id}.md` 文件开头必须有 `<适用>` 声明，定义规则的适用条件。计划设计子Agent在检视时自动扫描 `references/` 目录，读取每个文件的 `<适用>` 头进行匹配。
