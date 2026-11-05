@@ -176,6 +176,10 @@ def get_pr_meta(pr_branch: str, work_dir: str) -> tuple[str, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # ERROR_LOGGER 是模块全局：run_git/clone_repo 等模块级函数引用它，须在 main()
+    # 开头（任何 git 调用前）赋值才能消掉 NameError；初始化保留在调用点而非模块级，
+    # 避免 import 即建 handler 的副作用，且维持 output 先、error 后的原有次序。
+    global ERROR_LOGGER
     OUTPUT_LOGGER = init_output_logger()
 
     parser = argparse.ArgumentParser(
