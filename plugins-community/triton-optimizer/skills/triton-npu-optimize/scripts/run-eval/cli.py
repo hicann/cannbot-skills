@@ -883,7 +883,7 @@ def _build_profile_report(
     top_count: int = 5,
     output_format: str = "markdown",
 ) -> str:
-    script = SCRIPT_DIR.parents[1] / "triton-npu-profile-operator" / "scripts" / "reporter.py"
+    script = SCRIPT_DIR.parent / "profile-operator" / "reporter.py"
     with _temporary_sys_path_entry(str(script.parent)):
         spec = importlib.util.spec_from_file_location("profile_reporter_runtime", script)
         if spec is None or spec.loader is None:
