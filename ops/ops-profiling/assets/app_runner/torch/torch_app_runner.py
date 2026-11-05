@@ -186,6 +186,7 @@ def main():
     parser.add_argument("--planned-topology", default=None)
     args = parser.parse_args()
 
+    torch_npu.npu.set_device(int(os.getenv("NPU_DEVICE_ID", os.getenv("ASCEND_DEVICE_ID", "0"))))
     if args.probe_warmup_op is not None:
         probe_warmup(args.probe_warmup_op)
         return 0
@@ -224,7 +225,6 @@ def main():
             parser.error("selected case missing from planned topology")
 
     device = "npu"
-    torch_npu.npu.set_device(int(os.getenv("NPU_DEVICE_ID", os.getenv("ASCEND_DEVICE_ID", "0"))))
     torch.npu.synchronize()
 
     if args.warmup_mode == "framework_ops":
