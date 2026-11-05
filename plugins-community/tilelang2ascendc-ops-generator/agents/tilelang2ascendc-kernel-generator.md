@@ -218,7 +218,7 @@ kernel 前**：
 - `ops/tilelang-op-design`：技术约束检测、编程模式决策树、信息收集、Block 级设计（Phase 3 Step 1）
 - `ops/tilelang-op-develop`：编码规范、GEMM/CV 融合、V 核并行化、TileLang 编程指南（Phase 3 Step 2）
 - `ops/tilelang-perf-optimization`：性能反模式清单、优化指南、CV 同步调试、Cube 高级策略（Phase 3 Step 1e/2e 设计门禁 + Phase 3 步骤 3.5 性能迭代本体）
-- `tilelang2ascend-translator`：dsl2Ascendc.md、TileLang-AscendC-API-Mapping.md、scalar-to-vector.md、AscendC_knowledge/、AscendCVerification.md、evaluate_ascendc.sh
+- `tilelang2ascend-translator`（源码位于 `community/ops/tilelang2ascend-translator/`）：dsl2Ascendc.md、TileLang-AscendC-API-Mapping.md、scalar-to-vector.md、check_scalar_residuals.py、AscendC_knowledge/、AscendCVerification.md、evaluate_ascendc.sh
 - `tilelang2ascend-operator-project-init`：templates/ascend-kernel/（完整项目模板）、scripts/detect_ascend_kernel_project.sh
 - `ops-profiling`：msprof_profile_run.sh --quick / msprof_perf_summary.py --quick
 - `tilelang2ascend-trace-recorder`：evaluate_tilelang.sh、evaluate_ascendc.sh

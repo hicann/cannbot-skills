@@ -21,7 +21,7 @@ argument-hint: >
 ## 关键限制
 - 必须将核心计算融合成单个算子实现，不要拆分成多个独立算子。
 - `model_new_ascendc.py` 中禁止使用 torch 算子；只允许进行张量创建，张量变换以及调用你实现的自定义算子。
-- 在 AscendC 实现中应尽可能避免标量逐元素写法，优先使用块级或向量化操作；只有在确实无法避免时才使用标量逻辑。
+- 在 AscendC 实现中应尽可能避免标量逐元素写法，优先使用块级或向量化操作；编写 Compute 前阅读 `references/scalar-to-vector.md`，修改后执行步骤 1.5。必要的控制循环和小 tile 回退应说明理由。
 - 只允许修改或新增 `{output_dir}/` 目录中的文件，不要改动其他目录中的文件。
 - 只允许读取当前工作区目录结构内的文件与子目录；禁止读取当前工作区之外的任何路径，包括父目录、兄弟目录、用户目录、绝对路径以及系统其他目录。
 - 禁止读取 `.claude/skills/tilelang2ascend-translator/references/TileLangAscendProgrammingGuide.md`；该文档是 TileLang 编程指南，仅供 TileLang 阶段使用，与本阶段无关。
@@ -95,6 +95,7 @@ argument-hint: >
 
 ## Skill 参考资料
 本 skill 提供以下参考资料：
+- `.claude/skills/tilelang2ascend-translator/references/scalar-to-vector.md` — 标量反模式、A2 Sort/GatherMask 的布局与同步、跨行循环审查及最小示例
 - `.claude/skills/tilelang2ascend-translator/references/dsl2Ascendc.md` — TileLang 转 AscendC 指南
 - `.claude/skills/tilelang2ascend-translator/references/TileLang-AscendC-API-Mapping.md` — TileLang 与 AscendC API 映射表
 - `.claude/skills/tilelang2ascend-translator/references/AscendCVerification.md` — AscendC 验证指南
@@ -898,6 +899,26 @@ DataCopyPad(bLocal, xGm[bBaseOffset], copyParams, padParams);  // bBaseOffset = 
        m.impl("<op_name>", TORCH_FN(ascend_kernel::<op_name>));
    }
    ```
+
+### 🛑 步骤 1.5: 标量残留审查（修改 kernel 后、编译前）
+
+1. 运行 `.claude/skills/tilelang2ascend-translator/scripts/check_scalar_residuals.py`，
+   参数为 `{output_dir}/kernel/op_kernel` 及包含 Compute/辅助实现的其他 C++ 文件或目录。
+   脚本跨行扫描循环和 raw-address 使用，输出 JSON；退出码 1 表示待审查，2 表示扫描失败。
+2. 对照 `references/scalar-to-vector.md` 七类检查项逐项审查。可向量化计算按对应模式修复；
+   第 7 项为循环清单，不能把所有循环视为错误。分块外层循环、阈值控制、小 tile 回退、
+   少量 padding/索引初始化与尾块可以保留，在相邻代码注释中记录 `scalar-review: 类别; 理由`。
+   说明适用边界，不得为消除报告而自动添加豁免。注释格式和合法类别见参考文档末尾。
+3. 新增 API 前回到步骤 0-B 核对本机版本：A2 旧版 Sort 默认降序、每 repeat 32 个 score，
+   sorted 与 concat 分离，索引通过 Extract 提取；Sort/Concat 的临时字节数分别用
+   `GetSortTmpSize` / `GetConcatTmpSize` 计算。不得混入 950 专用 SortConfig 重载。
+   GatherMask 的 1/2 是偶/奇固定掩码，不是步长；Normal 模式与 Counter 模式的计数不可混用。
+4. 同步按数据依赖检查：BroadCast→Mul 使用 PIPE_V barrier，Vector 结果被 GetValue 读取前
+   使用配对 V_S 事件；PIPE_V 不能替代跨流水同步。修复后重跑扫描，确认退出码 0，
+   并人工检查宏展开、被调函数及扫描器无法分析的语义。
+
+未完成审查或扫描失败时，不得将本门禁记为通过；每次修改相关 C++ 后重新执行。
+审查通过后进入编译、精度和性能验证，不能用注释豁免代替运行验证。
 
 ### 步骤 2: 编写 model_new_ascendc.py + 编译验证
 
