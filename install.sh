@@ -14,6 +14,21 @@ set -e
 # Channel selection: latest (default), beta, or explicit version
 CHANNEL="${1:-latest}"
 
+# 计算文件 sha512 的 base64 表示（用于 registry dist.integrity 校验，#832）
+compute_sha512_b64() {
+    if command -v openssl >/dev/null 2>&1; then
+        openssl dgst -binary -sha512 "$1" 2>/dev/null | openssl base64 -A 2>/dev/null
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 - "$1" <<'PYEOF'
+import base64, hashlib, sys
+with open(sys.argv[1], "rb") as f:
+    sys.stdout.write(base64.b64encode(hashlib.sha512(f.read()).digest()).decode())
+PYEOF
+    else
+        return 1
+    fi
+}
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -30,6 +45,12 @@ echo -e "${NC}"
 echo -e "${CYAN}🚀 CANNBot Install Helper 安装脚本${NC}"
 echo ""
 
+# CANNBOT_REGISTRY 为 http:// 明文地址时提示（P3-4：完整性校验链路可被中间人篡改）
+if [ -n "${CANNBOT_REGISTRY:-}" ] && [[ "${CANNBOT_REGISTRY}" == http://* ]]; then
+    echo -e "${YELLOW}⚠${NC}  CANNBOT_REGISTRY 为 http:// 明文地址，载荷完整性校验链路可被篡改，建议使用 https:// 镜像"
+    echo ""
+fi
+
 # ========================================
 # 路径 A: 有 Node.js 18+ → npm install
 # ========================================
@@ -43,6 +64,10 @@ if command -v node >/dev/null 2>&1; then
             "https://registry.npmjs.org"
             "https://registry.npmmirror.com"
         )
+        # 企业镜像/私有 registry 覆盖（优先于公共镜像）
+        if [ -n "${CANNBOT_REGISTRY:-}" ]; then
+            NPM_MIRRORS_A=("${CANNBOT_REGISTRY}" "${NPM_MIRRORS_A[@]}")
+        fi
         REMOTE_VERSION=""
         if [ "$CHANNEL" = "latest" ] || [ "$CHANNEL" = "beta" ]; then
             for REGISTRY in "${NPM_MIRRORS_A[@]}"; do
@@ -141,21 +166,39 @@ NPM_MIRRORS=(
     "https://registry.npmjs.org"
     "https://registry.npmmirror.com"
 )
+# 企业镜像/私有 registry 覆盖（优先于公共镜像）
+if [ -n "${CANNBOT_REGISTRY:-}" ]; then
+    NPM_MIRRORS=("${CANNBOT_REGISTRY}" "${NPM_MIRRORS[@]}")
+fi
 
 VERSION=""
 BEST_REGISTRY=""
+INTEGRITY=""
 if [ "$CHANNEL" = "latest" ] || [ "$CHANNEL" = "beta" ]; then
     for REGISTRY in "${NPM_MIRRORS[@]}"; do
-        TAG_VERSION=$(curl -fsSL "${REGISTRY}/${SUBPKG_NAME}/${CHANNEL}" 2>/dev/null | grep -o '"version":"[^"]*"' | sed 's/.*"version":"//;s/"//' | head -1)
+        PACKUMENT=$(curl -fsSL "${REGISTRY}/${SUBPKG_NAME}/${CHANNEL}" 2>/dev/null || true)
+        TAG_VERSION=$(printf '%s' "$PACKUMENT" | grep -o '"version":"[^"]*"' | sed 's/.*"version":"//;s/"//' | head -1)
         if [ -n "$TAG_VERSION" ]; then
             VERSION="$TAG_VERSION"
             BEST_REGISTRY="$REGISTRY"
+            INTEGRITY=$(printf '%s' "$PACKUMENT" | grep -o '"integrity":"sha512-[^"]*"' | sed 's/.*"integrity":"//;s/"//' | head -1)
             break
         fi
     done
 else
     VERSION="$CHANNEL"
     BEST_REGISTRY="${NPM_MIRRORS[0]}"
+    # 显式版本：遍历镜像取该版本 packument 的完整性元数据（#832 fail-closed；
+    # 与 latest 分支及 install.ps1 的镜像回退契约一致——npmjs 不可达时仍可
+    # 从 npmmirror 等镜像取到，修复机器人评审 P2-1 的单点依赖）
+    for REGISTRY in "${NPM_MIRRORS[@]}"; do
+        PACKUMENT=$(curl -fsSL "${REGISTRY}/${SUBPKG_NAME}/${VERSION}" 2>/dev/null || true)
+        INTEGRITY=$(printf '%s' "$PACKUMENT" | grep -o '"integrity":"sha512-[^"]*"' | sed 's/.*"integrity":"//;s/"//' | head -1)
+        if [ -n "$INTEGRITY" ]; then
+            BEST_REGISTRY="$REGISTRY"
+            break
+        fi
+    done
 fi
 
 if [ -n "$VERSION" ] && [ "$CHANNEL" != "latest" ]; then
@@ -212,8 +255,18 @@ mkdir -p "$INSTALL_DIR"
 
 TARBALL_FILENAME="${SUBPKG_NAME#*/}-${VERSION}.tgz"
 
-# 优先使用查询阶段确定的最优镜像
-rm -f /tmp/ih-tarball.tgz
+# fail-closed：registry 元数据缺少完整性校验值时中止下载（#832）
+if [ -z "$INTEGRITY" ]; then
+    echo -e "${RED}❌ 完整性校验失败: registry 元数据未提供 dist.integrity (sha512)，已中止${NC}"
+    echo ""
+    echo "可改用 npm 安装（npm 生态自带完整性校验）:"
+    echo "  npm install -g @cannbot-ai/install-helper"
+    exit 1
+fi
+
+# 优先使用查询阶段确定的最优镜像；tarball 落地用 mktemp（避免固定路径被预置）
+TARBALL_FILE="$(mktemp /tmp/cannbot-install-tarball.XXXXXX)"
+trap 'rm -f "$TARBALL_FILE"' EXIT
 TARBALL_URL=""
 DOWNLOAD_MIRRORS=("$BEST_REGISTRY")
 for REGISTRY in "${NPM_MIRRORS[@]}"; do
@@ -225,15 +278,16 @@ for REGISTRY in "${DOWNLOAD_MIRRORS[@]}"; do
     TARBALL_URL="${REGISTRY}/${SUBPKG_NAME}/-/${TARBALL_FILENAME}"
     echo ""
     echo -e "${CYAN}📦 正在下载...${NC}"
-    if curl -fL "$TARBALL_URL" -o /tmp/ih-tarball.tgz --progress-bar; then
+    if curl -fL "$TARBALL_URL" -o "$TARBALL_FILE" --progress-bar; then
         echo -e "${GREEN}✓${NC} 下载完成"
         break
     fi
     TARBALL_URL=""
 done
 
-if [ -z "$TARBALL_URL" ] || [ ! -f /tmp/ih-tarball.tgz ]; then
+if [ -z "$TARBALL_URL" ] || [ ! -s "$TARBALL_FILE" ]; then
     echo -e "${RED}❌ 下载失败${NC}"
+    rm -f "$TARBALL_FILE"
     echo ""
     echo "请安装 Node.js 18+ 后使用:"
     echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
@@ -242,13 +296,33 @@ if [ -z "$TARBALL_URL" ] || [ ! -f /tmp/ih-tarball.tgz ]; then
     exit 1
 fi
 
+# 4.5 完整性校验：下载的 tarball 必须与 registry 元数据 (dist.integrity, sha512) 匹配（#832 fail-closed）
+ACTUAL_B64="$(compute_sha512_b64 "$TARBALL_FILE")" || ACTUAL_B64=""
+if [ -z "$ACTUAL_B64" ]; then
+    echo -e "${RED}❌ 完整性校验失败: 缺少 sha512 计算工具 (openssl / python3)，已中止${NC}"
+    echo ""
+    echo "可改用 npm 安装（npm 生态自带完整性校验）:"
+    echo "  npm install -g @cannbot-ai/install-helper"
+    rm -f "$TARBALL_FILE"
+    exit 1
+fi
+if [ "sha512-${ACTUAL_B64}" != "$INTEGRITY" ]; then
+    echo -e "${RED}❌ 完整性校验失败: 下载的载荷与 registry 元数据 (dist.integrity) 不匹配，已中止${NC}"
+    echo ""
+    echo "下载内容可能被篡改或损坏，请重试；如持续失败请改用 npm 安装:"
+    echo "  npm install -g @cannbot-ai/install-helper"
+    rm -f "$TARBALL_FILE"
+    exit 1
+fi
+echo -e "${GREEN}✓${NC} 完整性校验通过 (sha512)"
+
 # 4. 解压
 echo -e "${CYAN}📦 正在安装...${NC}"
 TEMP_EXTRACT=$(mktemp -d)
-tar xzf /tmp/ih-tarball.tgz -C "$TEMP_EXTRACT" || { rm -rf "$TEMP_EXTRACT" /tmp/ih-tarball.tgz; exit 1; }
+tar xzf "$TARBALL_FILE" -C "$TEMP_EXTRACT" || { rm -rf "$TEMP_EXTRACT" "$TARBALL_FILE"; exit 1; }
 cp -f "${TEMP_EXTRACT}/package/${BINARY_NAME}" "${INSTALL_DIR}/install-helper"
 chmod +x "${INSTALL_DIR}/install-helper"
-rm -rf "$TEMP_EXTRACT" /tmp/ih-tarball.tgz
+rm -rf "$TEMP_EXTRACT" "$TARBALL_FILE"
 
 # 5. 自动添加 PATH
 SHELL_RC="$HOME/.bashrc"

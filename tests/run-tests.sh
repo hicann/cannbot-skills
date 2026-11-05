@@ -611,6 +611,7 @@ get_tests_for_category() {
             echo "unit/install/test-init-tool.sh --tool copilot:fast"
             echo "unit/install/test-init-tool.sh --tool codearts:fast"
             echo "unit/install/test-safe-install.sh:fast"
+            echo "unit/install/test-install-integrity.sh:fast"
             ;;
         behavior)
             # test-universal.sh contains all 9 behavior rules (B-TRIG, B-SAFE, B-INTA, B-BND)

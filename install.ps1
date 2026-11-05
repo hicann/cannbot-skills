@@ -61,9 +61,18 @@ $Mirrors = @(
     "https://registry.npmjs.org",
     "https://registry.npmmirror.com"
 )
+# 企业镜像/私有 registry 覆盖（优先于公共镜像）
+if ($env:CANNBOT_REGISTRY) {
+    $Mirrors = @($env:CANNBOT_REGISTRY) + $Mirrors
+    # P3-4：http:// 明文地址提示（完整性校验链路可被中间人篡改）
+    if ($env:CANNBOT_REGISTRY.StartsWith("http://")) {
+        Write-Host " [WARN] CANNBOT_REGISTRY 为 http:// 明文地址，载荷完整性校验链路可被篡改，建议使用 https:// 镜像" -ForegroundColor Yellow
+    }
+}
 
 $Version = $null
 $Registry = $null
+$Integrity = $null
 $Errors = @()
 
 if ($Channel -eq "latest" -or $Channel -eq "beta") {
@@ -73,6 +82,7 @@ if ($Channel -eq "latest" -or $Channel -eq "beta") {
             if ($resp.version) {
                 $Version = $resp.version
                 $Registry = $url
+                $Integrity = $resp.dist.integrity
             }
         } catch { $Errors += $_ }
         if ($Version) {
@@ -82,6 +92,16 @@ if ($Channel -eq "latest" -or $Channel -eq "beta") {
 } else {
     $Version = $Channel
     $Registry = $Mirrors[0]
+    # 显式版本：取该版本 packument 的完整性元数据（#832 fail-closed）
+    foreach ($url in $Mirrors) {
+        try {
+            $resp = Invoke-RestMethod "$url/$SubPkgName/$Version" -TimeoutSec 15
+            if ($resp.dist.integrity) {
+                $Integrity = $resp.dist.integrity
+                break
+            }
+        } catch { $Errors += $_ }
+    }
 }
 
 if ($Version) {
@@ -139,7 +159,7 @@ $TarballName = "$($SubPkgName.Split('/')[1])-$Version.tgz"
 Write-Host ""
 Write-Host " Downloading $TarballName ..." -ForegroundColor Cyan
 
-$TempFile = Join-Path $env:TEMP "ih-tarball.tgz"
+$TempFile = Join-Path $env:TEMP ("ih-" + [System.IO.Path]::GetRandomFileName() + ".tgz")
 $Downloaded = $false
 $DownloadMirrors = @($Registry) + ($Mirrors | Where-Object { $_ -ne $Registry })
 foreach ($url in $DownloadMirrors) {
@@ -162,7 +182,33 @@ if (-not $Downloaded) {
     return
 }
 
-# 5. Extract
+# 5. Verify tarball integrity (registry dist.integrity, sha512; fail-closed per #832)
+if (-not $Integrity) {
+    Write-Host " [ERROR] 完整性校验失败: registry 元数据未提供 dist.integrity (sha512)，已中止" -ForegroundColor Red
+    Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
+    Write-Host ""
+    Write-Host " Alternative (requires Node.js 18+):"
+    Write-Host "  npm install -g @cannbot-ai/install-helper"
+    return
+}
+
+$hashHex = (Get-FileHash -Path $TempFile -Algorithm SHA512).Hash
+$hashBytes = New-Object byte[] ($hashHex.Length / 2)
+for ($i = 0; $i -lt $hashHex.Length; $i += 2) {
+    $hashBytes[$i / 2] = [Convert]::ToByte($hashHex.Substring($i, 2), 16)
+}
+$actualIntegrity = "sha512-" + [Convert]::ToBase64String($hashBytes)
+if ($actualIntegrity -ne $Integrity) {
+    Write-Host " [ERROR] 完整性校验失败: 下载的载荷与 registry 元数据 (dist.integrity) 不匹配，已中止" -ForegroundColor Red
+    Write-Host ""
+    Write-Host " 下载内容可能被篡改或损坏，请重试；如持续失败请改用 npm 安装（npm 自带完整性校验）:"
+    Write-Host "  npm install -g @cannbot-ai/install-helper"
+    Remove-Item $TempFile -Force -ErrorAction SilentlyContinue
+    return
+}
+Write-Host " [OK] Integrity verified (sha512)" -ForegroundColor Green
+
+# 6. Extract
 Write-Host " Installing v$Version..." -ForegroundColor Cyan
 
 $TempExtract = Join-Path $env:TEMP "ih-extract-$(Get-Random)"
