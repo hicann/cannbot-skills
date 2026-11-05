@@ -108,11 +108,42 @@ export function getPluginDirs(): string[] {
   return [...PLUGIN_SCAN_DIRS];
 }
 
+/** Auto-discovers top-level skill domains: a non-hidden top-level directory
+ *  whose direct children include at least one SKILL.md. Plugin trees never
+ *  match (their skills live at plugins-official/<plugin>/skills/<skill>/SKILL.md,
+ *  three levels deep — no direct SKILL.md child of the top dir). A new domain
+ *  directory in the repository therefore shows up in the wizard without an
+ *  install-helper release; the configured scanDirs remain as a fallback
+ *  when discovery finds nothing (unusual layouts). */
+export function discoverSkillDomains(repoPath: string): string[] {
+  const pluginDirs = new Set(PLUGIN_SCAN_DIRS);
+  const domains: string[] = [];
+  for (const entry of safeReaddir(repoPath)) {
+    if (entry.startsWith(".")) continue;
+    if (pluginDirs.has(entry)) continue; // plugin trees are never skill domains
+    const domainPath = join(repoPath, entry);
+    if (!isDirectory(domainPath)) continue;
+    const hasDirectSkill = safeReaddir(domainPath).some((child) => {
+      const childPath = join(domainPath, child);
+      return isDirectory(childPath) && existsSync(join(childPath, "SKILL.md"));
+    });
+    if (hasDirectSkill) domains.push(entry);
+  }
+  return domains;
+}
+
 export function scanSkills(repoPath: string): ScannedSkill[] {
   const skills: ScannedSkill[] = [];
   const seen = new Set<string>();
 
-  for (const dir of SKILL_SCAN_DIRS) {
+  // Dynamic domain discovery (no scanDirs whitelist): known domains keep
+  // their configured order first, newly discovered domains follow sorted,
+  // and the configured list remains as fallback for unusual layouts.
+  const discovered = discoverSkillDomains(repoPath);
+  const ordered = [...SKILL_SCAN_DIRS, ...discovered.filter((d) => !SKILL_SCAN_DIRS.includes(d)).sort()];
+  const domainDirs = discovered.length > 0 ? ordered : SKILL_SCAN_DIRS;
+
+  for (const dir of domainDirs) {
     const fullPath = join(repoPath, dir);
     if (!existsSync(fullPath)) continue;
     scanDirectory(fullPath, repoPath, dir, skills, seen);

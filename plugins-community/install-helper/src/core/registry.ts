@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { readdirSync, existsSync } from "fs";
+import { readdirSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
 import type { PluginEntry, PluginSource } from "../types/index.js";
 import { isDirectory } from "../utils/fs-helpers.js";
@@ -40,14 +40,30 @@ export function getCannbotPlugins(): PluginEntry[] {
   return [...CANNBOT_PLUGINS];
 }
 
+/** Reads a plugin's self-maintained manifest for display metadata
+ *  (description / skills / agents counts). Returns null when absent. */
+function readDynamicManifest(pluginPath: string): {
+  description?: unknown;
+  skills?: unknown;
+  agents?: unknown;
+} | null {
+  try {
+    return JSON.parse(readFileSync(join(pluginPath, ".claude-plugin", "plugin.json"), "utf-8"));
+  } catch {
+    return null;
+  }
+}
+
 export function mergeDynamicPlugins(repoPath: string): void {
   if (!existsSync(repoPath)) return;
 
   const existingIds = new Set(PLUGIN_REGISTRY.map((p) => p.id));
   const dynamic: PluginEntry[] = [];
 
-  // Plugin discovery scope follows repository.yaml pluginDirs (currently
-  // official plugins only — community plugins are not adapted yet).
+  // Plugin discovery scope follows repository.yaml pluginDirs — official and
+  // community alike: every plugin the repository ships is installable.
+  // init.sh is the install mechanism; the plugin's own manifest enriches the
+  // display metadata (repo content is the display authority).
   for (const pluginDir of getPluginDirs()) {
     const parent = join(repoPath, pluginDir);
     if (!existsSync(parent)) continue;
@@ -70,15 +86,16 @@ export function mergeDynamicPlugins(repoPath: string): void {
       const pluginId = entry;
       if (existingIds.has(pluginId)) continue;
 
+      const manifest = readDynamicManifest(pluginPath);
       dynamic.push({
         id: pluginId,
         dir: `${pluginDir}/${entry}`,
         displayName: entry,
         script: "init.sh",
         aliases: [],
-        skills: 0,
-        agents: 0,
-        description: "",
+        skills: Array.isArray(manifest?.skills) ? manifest.skills.length : 0,
+        agents: Array.isArray(manifest?.agents) ? manifest.agents.length : 0,
+        description: typeof manifest?.description === "string" ? manifest.description : "",
       });
       existingIds.add(pluginId);
     }
@@ -128,8 +145,15 @@ export function findPlugin(
 
     // Migrated tombstones: exact/alias resolve before any prefix matching so
     // the historical alias (e.g. "triton") is not captured by a prefix match
-    // on a different cannbot plugin (e.g. triton-auto-evolve).
-    if (tombstone) return CANNBOT_PLUGINS.find((p) => p.id === tombstone.id) || tombstone;
+    // on a different cannbot plugin (e.g. triton-auto-evolve). When the
+    // tombstone's live cannbot identity is discovered (same id, or renamed
+    // manifest name matching a tombstone alias, e.g. cake), route to that
+    // entry — the delegation must use the name the installer knows.
+    if (tombstone) {
+      const covered = CANNBOT_PLUGINS.find((p) => p.id === tombstone.id || tombstone.aliases.includes(p.id));
+      // the bare tombstone (offline) still carries the repository identity
+      return covered || { ...tombstone, displayName: tombstone.id };
+    }
   }
 
   const exactMatch = PLUGIN_REGISTRY.find(
@@ -171,7 +195,18 @@ export function findPlugin(
  * --source skills (see migrated-plugins.test.ts).
  */
 export function getAllPlugins(): PluginEntry[] {
-  const tombstones = MIGRATED_PLUGINS.filter((t) => !CANNBOT_PLUGINS.some((c) => c.id === t.id));
+  // Tombstone visibility rule: once cannbot discovery is authoritative
+  // (live entries exist), the discovered set IS the offer — a tombstone left
+  // uncovered means upstream genuinely does not ship the plugin
+  // (mid-migration, removed), so its row would be a dead install target and
+  // stays out of the install list. Offline (no discovered entries),
+  // tombstones remain the fallback rows. Visible tombstone rows carry the
+  // repository identity (the id) — legacy friendly names must not leak into
+  // the wizard/list surfaces (repo-name-first display rule).
+  const tombstones =
+    CANNBOT_PLUGINS.length > 0
+      ? []
+      : MIGRATED_PLUGINS.map((t) => ({ ...t, displayName: t.id }));
   return [...CANNBOT_PLUGINS, ...PLUGIN_REGISTRY, ...tombstones].sort((a, b) =>
     a.displayName < b.displayName ? -1 : a.displayName > b.displayName ? 1 : 0
   );
@@ -187,5 +222,7 @@ export function getPluginById(id: string): PluginEntry | undefined {
   if (cannbot) return cannbot;
   const legacy = PLUGIN_REGISTRY.find((p) => p.id === id);
   if (legacy) return legacy;
-  return MIGRATED_PLUGINS.find((p) => p.id === id);
+  const tombstone = MIGRATED_PLUGINS.find((p) => p.id === id);
+  // tombstone rows display the repository identity (repo-name-first)
+  return tombstone ? { ...tombstone, displayName: tombstone.id } : undefined;
 }

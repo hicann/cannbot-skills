@@ -602,11 +602,11 @@ describe("plugins consistency — single source of truth", () => {
       expect(config.scanDirs).toContain("tools");
     });
 
-    it("repository.yaml pluginDirs is scoped to official plugins (community not adapted)", () => {
+    it("repository.yaml pluginDirs covers official and community plugins", () => {
       const { parse } = require("yaml");
       const config = parse(readFileSync(join(INSTALL_HELPER_ROOT, "src", "config", "repository.yaml"), "utf-8"));
       expect(config.pluginDirs).toContain("plugins-official");
-      expect(config.pluginDirs).not.toContain("plugins-community");
+      expect(config.pluginDirs).toContain("plugins-community");
     });
 
     it("validate-plugins.cjs loadScanDirs reads from repository.yaml", () => {

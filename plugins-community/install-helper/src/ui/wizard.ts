@@ -18,7 +18,7 @@ import { getConfigRoot, VALID_TOOLS } from "../utils/paths.js";
 import { t } from "../utils/i18n.js";
 import { logger, createSpinner, printBoxTitle, showOperationHints } from "../utils/logger.js";
 import { readConfig, updateConfig } from "../utils/config.js";
-import { selectTheme } from "./theme.js";
+import { selectTheme, truncateForDisplay } from "./theme.js";
 import { BACK, CANCEL } from "../utils/constants.js";
 
 export async function selectToolWithDetection(): Promise<AITool | "back" | "cancel"> {
@@ -47,8 +47,10 @@ export function encodePluginChoice(id: string, source?: PluginSource): string {
  * getAllPlugins() intentionally lists dual-source plugins once per source
  * (frozen local copy + cannbot entry — the doctor/list badge design); in the
  * wizard a plugin that can be installed two ways is still one choice. The
- * cannbot entry wins (same routing as findPlugin's default resolution), and
- * the friendlier display name of the non-cannbot entry is kept when present.
+ * cannbot entry wins wholesale (same routing as findPlugin's default
+ * resolution): the row shows the repository's own name and description —
+ * the cannbot manifest is the display authority, the frozen embedded
+ * name/description never shadows it.
  */
 export function dedupeForWizardSelection(plugins: PluginEntry[]): PluginEntry[] {
   const seen = new Map<string, PluginEntry>();
@@ -58,14 +60,20 @@ export function dedupeForWizardSelection(plugins: PluginEntry[]): PluginEntry[] 
       seen.set(p.id, { ...p });
       continue;
     }
-    // cannbot source wins the routing; keep the friendlier display name.
+    // cannbot source wins the routing — and the display: repo name + repo
+    // description, regardless of arrival order.
     if (p.source === "cannbot" && existing.source !== "cannbot") {
-      seen.set(p.id, { ...p, displayName: p.displayName === p.id ? existing.displayName : p.displayName });
-    } else if (p.source !== "cannbot" && existing.source === "cannbot" && existing.displayName === existing.id) {
-      existing.displayName = p.displayName;
+      seen.set(p.id, { ...p });
     }
   }
-  return [...seen.values()];
+  // Re-sort by the WINNING entry's displayName — the pre-dedupe sort
+  // positions entries by their source-specific names (e.g. a frozen yml
+  // "AscendC 算子注册调用" sorts at 'A' while the winning cannbot entry
+  // "ops-registry-invoke" belongs at 'o'); without re-sorting, the
+  // replaced entry stays at the frozen name's position.
+  return [...seen.values()].sort((a, b) =>
+    a.displayName < b.displayName ? -1 : a.displayName > b.displayName ? 1 : 0
+  );
 }
 
 export function decodePluginChoice(value: string): { id: string; source: PluginSource } {
@@ -240,6 +248,23 @@ export async function stepLevel(lastLevel?: InstallLevel): Promise<InstallLevel 
   return result as InstallLevel;
 }
 
+/** Inline description budget (display columns) for wizard choice rows. The
+ *  full description stays available on the inquirer focus line; the inline
+ *  part only identifies the plugin at a glance. */
+const CHOICE_DESCRIPTION_WIDTH = 40;
+
+/** Builds the wizard choice label for a plugin: friendly name, source badge,
+ *  installed marker and a width-aware truncated description. Pure function
+ *  so display behavior is unit-testable without a TTY. */
+export function pluginChoiceLabel(plugin: PluginEntry, installed: boolean): string {
+  const badge = plugin.source === "cannbot" ? chalk.magenta(" [cannbot]") : "";
+  const suffix = installed ? ` [${t("wizard_already_installed")}]` : "";
+  const hint = plugin.description
+    ? ` ${chalk.dim(`— ${truncateForDisplay(plugin.description, CHOICE_DESCRIPTION_WIDTH)}`)}`
+    : "";
+  return `> ${chalk.cyan(plugin.displayName)}${badge}${suffix}${hint}`;
+}
+
 async function stepPlugins(tool: AITool, level: InstallLevel): Promise<string[] | typeof BACK | typeof CANCEL> {
   printBoxTitle(t("wizard_step_3_title"));
 
@@ -250,10 +275,8 @@ async function stepPlugins(tool: AITool, level: InstallLevel): Promise<string[] 
 
   const choices: Array<{ name: string; value: string; description?: string } | Separator> = plugins.map((p) => {
     const isInstalled = installedSet.has(p.id);
-    const suffix  = isInstalled ? ` [${t("wizard_already_installed")}]` : "";
-    const badge = p.source === "cannbot" ? chalk.magenta(" [cannbot]") : "";
     return {
-      name: `> ${chalk.cyan(p.displayName)}${badge}${suffix}`,
+      name: pluginChoiceLabel(p, isInstalled),
       value: encodePluginChoice(p.id, p.source),
       description: p.description,
     };

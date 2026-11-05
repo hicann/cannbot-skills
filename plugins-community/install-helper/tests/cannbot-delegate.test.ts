@@ -115,6 +115,58 @@ describe("cannbot-delegate", () => {
     expect(result.errors[0]).toContain("cursor");
   });
 
+  it("follows the installed installer's declaration when it omits a tool (legacy names format)", async () => {
+    // a <= 1.9.x installer declares five tools and no codearts: the boundary
+    // must track the INSTALLED capability — allowing codearts here would be
+    // as wrong as blocking it under a 1.10.0 declaration
+    const installerRoot = join(testDir, "legacy-installer");
+    mkdirSync(join(installerRoot, "bin"), { recursive: true });
+    writeFileSync(
+      join(installerRoot, "package.json"),
+      JSON.stringify({ name: "@cannbot-plugin/cannbot", version: "1.9.1" }, null, 2)
+    );
+    writeFileSync(
+      join(installerRoot, "bin", "cannbot.js"),
+      `#!/usr/bin/env node
+const TOOL_NAMES = ['opencode', 'codex', 'claude', 'trae', 'dsh'];
+process.exit(0);
+`
+    );
+    process.env.CANNBOT_INSTALLER_PATH = installerRoot;
+
+    const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
+    const result = await delegateInstall({
+      pluginId: "fake-cb-plugin",
+      tool: "codearts",
+      level: "project",
+      target: testDir,
+    });
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toContain("codearts");
+    // "dsh" never appears in the legacy static prior — its presence proves
+    // the message list is derived from the installed declaration
+    expect(result.errors[0]).toContain("dsh");
+  });
+
+  it("falls back to the legacy prior when no installer is available", async () => {
+    // no CANNBOT_INSTALLER_PATH and no managed installer: derivation is
+    // undeterminable and the boundary must degrade to the pre-derivation
+    // hardcoded prior — never worse than the old behavior, and no npm
+    // bootstrap is attempted from the boundary preflight
+    const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
+    const result = await delegateInstall({
+      pluginId: "fake-cb-plugin",
+      tool: "codearts",
+      level: "project",
+      target: testDir,
+    });
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toContain("codearts");
+    // prior list: opencode/claude/trae/codex — derived-only tools (dsh)
+    // must not appear, proving this is the prior and not a derivation
+    expect(result.errors[0]).not.toContain("dsh");
+  });
+
   it("rejects global-level installs (upstream is project-only)", async () => {
     useFakeInstaller("fake-cb-plugin");
     const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
@@ -230,6 +282,39 @@ describe("cannbot-delegate", () => {
     expect(existsSync(join(target, ".agents/skills/fake-skill-a/SKILL.md"))).toBe(true);
     expect(existsSync(join(target, ".codex/agents/fake-agent.toml"))).toBe(true);
     expect(existsSync(join(target, ".codex/cannbot-plugin.json"))).toBe(true);
+  });
+
+  it("delegates a codearts install when the installed installer declares it", async () => {
+    useFakeInstaller("fake-cb-plugin");
+    const target = join(testDir, "codearts-project");
+    mkdirSync(target, { recursive: true });
+
+    const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
+    const result = await delegateInstall({
+      pluginId: "fake-cb-plugin",
+      tool: "codearts",
+      level: "project",
+      target,
+    });
+    expect(result.errors).toEqual([]);
+    expect(result.success).toBe(true);
+    expect(result.skillsCount).toBe(2);
+    expect(result.agentsCount).toBe(1);
+
+    // codearts layout from the installer's own declaration: .codeartsdoer root
+    expect(existsSync(join(target, ".codeartsdoer/skills/fake-skill-a/SKILL.md"))).toBe(true);
+    expect(existsSync(join(target, ".codeartsdoer/agents/fake-agent.md"))).toBe(true);
+    expect(existsSync(join(target, ".codeartsdoer/cannbot-plugin.json"))).toBe(true);
+    const registry = JSON.parse(readFileSync(join(target, ".codeartsdoer/cannbot-plugin.json"), "utf-8"));
+    expect(registry.plugins[0].tool).toBe("codearts");
+
+    // delegated record in install-helper bookkeeping (registry found via derived layout)
+    const recordFile = JSON.parse(
+      readFileSync(join(sandboxHome, ".cannbot/installs/fake-cb-plugin.json"), "utf-8")
+    );
+    const record = Object.values(recordFile.locations)[0] as any;
+    expect(record.kind).toBe("delegated");
+    expect(record.tool).toBe("codearts");
   });
 
   it("migrates a symlinked AGENTS.md to a real file before delegating", async () => {
@@ -392,7 +477,7 @@ describe("cannbot-delegate", () => {
   });
 
   it("installPluginRouted falls back to the local legacy entry when the tool is outside the delegation matrix", async () => {
-    // qoder is not in DELEGATE_TOOLS: an implicit cannbot-first resolution
+    // qoder is not declared by the installed (fake) installer: an implicit cannbot-first resolution
     // must fall back to the local copy and produce the legacy layout
     useFakeInstaller("torch-compile");
     const repo = makeLocalSkillsRepo();

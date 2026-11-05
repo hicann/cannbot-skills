@@ -20,6 +20,7 @@ const __dirname = dirname(__filename);
 let testDir: string;
 let sandboxHome: string;
 let savedHome: string | undefined;
+let savedInstallerPath: string | undefined;
 
 function setup() {
   testDir = join(tmpdir(), `ih-cbr-${Date.now()}-${Math.random().toString(36).slice(2)}`);
@@ -29,11 +30,16 @@ function setup() {
   mkdirSync(join(sandboxHome, ".cannbot"), { recursive: true });
   savedHome = process.env.HOME;
   process.env.HOME = sandboxHome;
+  // sandbox the installer override so toolConfigDir derivation stays hermetic
+  savedInstallerPath = process.env.CANNBOT_INSTALLER_PATH;
+  delete process.env.CANNBOT_INSTALLER_PATH;
 }
 
 function teardown() {
   if (savedHome === undefined) delete process.env.HOME;
   else process.env.HOME = savedHome;
+  if (savedInstallerPath === undefined) delete process.env.CANNBOT_INSTALLER_PATH;
+  else process.env.CANNBOT_INSTALLER_PATH = savedInstallerPath;
   rmSync(testDir, { recursive: true, force: true });
 }
 
@@ -58,6 +64,8 @@ function writeRegistry(target: string, tool: string, records: FakeRecord[], sche
     codex: ".codex",
     claude: ".claude",
     trae: ".trae",
+    codearts: ".codeartsdoer",
+    dsh: ".dsh",
   };
   const configDir = join(target, configDirs[tool]);
   mkdirSync(configDir, { recursive: true });
@@ -157,6 +165,62 @@ describe("cannbot-registry", () => {
       JSON.stringify({ schemaVersion: 2, plugins: [{ plugin: "t" }] })
     );
     expect(findCannbotRegistryPath(testDir, "trae")).toBe(join(testDir, ".trae-cn", "cannbot-plugin.json"));
+  });
+
+  it("scanCannbotInstalled covers tools declared by a names-only installer (dsh)", async () => {
+    // <= 1.9.x installers declare TOOL_NAMES only (no layouts). Every tool
+    // the delegation boundary allows must also be resolvable by the
+    // registry scan — otherwise a successful delegated install (e.g. dsh
+    // under 1.9.x) becomes permanently invisible to status/uninstall.
+    const installerRoot = join(testDir, "names-installer");
+    mkdirSync(join(installerRoot, "bin"), { recursive: true });
+    writeFileSync(
+      join(installerRoot, "bin", "cannbot.js"),
+      `#!/usr/bin/env node
+const TOOL_NAMES = ['opencode', 'codex', 'claude', 'trae', 'dsh'];
+process.exit(0);
+`
+    );
+    process.env.CANNBOT_INSTALLER_PATH = installerRoot;
+
+    writeRegistry(testDir, "dsh", [{ plugin: "dsh-plugin" }]);
+
+    const { scanCannbotInstalled, uninstallCannbotPlugin } = await import("../src/core/cannbot-registry.js");
+    const entries = scanCannbotInstalled(testDir);
+    expect(entries.some((e) => e.id === "dsh-plugin")).toBe(true);
+
+    // and uninstall can see and clean it
+    const result = uninstallCannbotPlugin("dsh-plugin", testDir);
+    expect(result.success).toBe(true);
+  });
+
+  it("toolConfigDir resolves a layout declared by the installed installer (codearts)", async () => {
+    // mirror of the @cannbot-plugin/cannbot 1.10.0 declaration: codearts lives
+    // under .codeartsdoer, not the .{tool} heuristic
+    const installerRoot = join(testDir, "installer");
+    mkdirSync(join(installerRoot, "bin"), { recursive: true });
+    writeFileSync(
+      join(installerRoot, "bin", "cannbot.js"),
+      `#!/usr/bin/env node
+const TOOL_DIRECTORIES = Object.freeze({
+  codearts: { configDirs: [".codeartsdoer"], defaultConfigDir: ".codeartsdoer" },
+});
+process.exit(0);
+`
+    );
+    process.env.CANNBOT_INSTALLER_PATH = installerRoot;
+    const { findCannbotRegistryPath } = await import("../src/core/cannbot-registry.js");
+
+    expect(findCannbotRegistryPath(testDir, "codearts")).toBeNull();
+
+    mkdirSync(join(testDir, ".codeartsdoer"), { recursive: true });
+    writeFileSync(
+      join(testDir, ".codeartsdoer", "cannbot-plugin.json"),
+      JSON.stringify({ schemaVersion: 2, plugins: [{ plugin: "ca" }] })
+    );
+    expect(findCannbotRegistryPath(testDir, "codearts")).toBe(
+      join(testDir, ".codeartsdoer", "cannbot-plugin.json")
+    );
   });
 
   it("scanCannbotInstalled collects records across tools", async () => {
@@ -407,6 +471,53 @@ describe("cannbot-registry", () => {
     expect(scanCannbotInstalled(testDir)).toEqual([]);
     expect(existsSync(join(testDir, ".opencode"))).toBe(false);
     expect(existsSync(join(testDir, ".agents"))).toBe(false);
+  });
+
+  it("uninstall cleans layout roots for a tool declared by the installed installer (codearts)", async () => {
+    // the cannbot installer creates <configDir>/skills even for 0-skill
+    // plugins — uninstall must remove it for tools it learns about at
+    // runtime (the static mirror does not know codearts)
+    const installerRoot = join(testDir, "installer");
+    mkdirSync(join(installerRoot, "bin"), { recursive: true });
+    writeFileSync(
+      join(installerRoot, "bin", "cannbot.js"),
+      `#!/usr/bin/env node
+const TOOL_DIRECTORIES = Object.freeze({
+  codearts: { configDirs: [".codeartsdoer"], defaultConfigDir: ".codeartsdoer" },
+});
+process.exit(0);
+`
+    );
+    process.env.CANNBOT_INSTALLER_PATH = installerRoot;
+
+    const record = {
+      plugin: "solo-ca",
+      skills: [],
+      agents: [".codeartsdoer/agents/solo-ca-agent.md"],
+      instructions: null,
+      assets: null,
+      dependencies: [".cannbot/dependencies/solo-ca/dep-repo"],
+    };
+    materializePlugin(testDir, "solo-ca", record);
+    // dependency content that step 6 removes, plus a skill symlink pointing
+    // into it (dependencyAssets-style install) — dangling after removal
+    mkdirSync(join(testDir, ".cannbot", "dependencies", "solo-ca", "dep-repo"), { recursive: true });
+    writeFileSync(join(testDir, ".cannbot", "dependencies", "solo-ca", "dep-repo", "dep.md"), "dep\n");
+    // the cannbot installer pre-creates per-skill directories even for
+    // 0-skill plugins; they carry no recorded entries and must be pruned
+    mkdirSync(join(testDir, ".codeartsdoer", "skills", "solo-ca-skill"), { recursive: true });
+    symlinkSync(
+      join(testDir, ".cannbot", "dependencies", "solo-ca", "dep-repo", "solo-ca-skill"),
+      join(testDir, ".codeartsdoer", "skills", "solo-ca-link")
+    );
+    writeRegistry(testDir, "codearts", [record]);
+
+    const { uninstallCannbotPlugin, scanCannbotInstalled } = await import("../src/core/cannbot-registry.js");
+    const result = uninstallCannbotPlugin("solo-ca", testDir);
+    expect(result.success).toBe(true);
+
+    expect(scanCannbotInstalled(testDir)).toEqual([]);
+    expect(existsSync(join(testDir, ".codeartsdoer"))).toBe(false);
   });
 
   it("uninstall strips the opencode plugin registration when the last cannbot plugin is removed", async () => {

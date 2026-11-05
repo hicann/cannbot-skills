@@ -37,8 +37,7 @@ function isEmoji(code: number): boolean {
 
 export function getDisplayWidth(str: string): number {
   let width = 0;
-  for (const ch of str) {
-    const code = ch.codePointAt(0)!;
+  for (const ch of str) {    const code = ch.codePointAt(0)!;
     if (isCJK(code) || isEmoji(code)) {
       width += 2;
     } else {
@@ -105,3 +104,20 @@ export const checkboxTheme = {
     description: (text: string) => wrapDescription(text),
   },
 };
+
+/** Truncates text to a display-width budget (CJK-aware), appending a single
+ *  ellipsis when content is cut. The ellipsis column is always reserved so
+ *  the result never exceeds `maxWidth`. */
+export function truncateForDisplay(text: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  if (getDisplayWidth(text) <= maxWidth) return text;
+  let width = 0;
+  let out = "";
+  for (const ch of text) {
+    const chWidth = getDisplayWidth(ch);
+    if (width + chWidth > maxWidth - 1) break;
+    out += ch;
+    width += chWidth;
+  }
+  return out + "…";
+}

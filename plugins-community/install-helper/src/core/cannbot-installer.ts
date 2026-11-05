@@ -26,6 +26,7 @@ import { execa, execaSync } from "execa";
 import { parse as parseYaml } from "yaml";
 import type { CannbotInstallerConfig, CannbotPluginManifest } from "../types/index.js";
 import { getCannbotConfigDir } from "../utils/paths.js";
+import { isDirectory } from "../utils/fs-helpers.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 import embeddedConfig from "../embedded-config.json" with { type: "json" };
@@ -46,6 +47,7 @@ const NPM_MIRRORS = [
 
 export interface CannbotPluginEntry {
   id: string;
+  displayName: string;
   version: string;
   description: string;
   skillsCount: number;
@@ -260,15 +262,47 @@ function readManifest(pluginDir: string): CannbotPluginManifest | null {
   }
 }
 
+/** Counts immediate subdirectories of a path (skills/ entries). */
+function countSubdirs(path: string): number {
+  try {
+    return readdirSync(path).filter((entry) => isDirectory(join(path, entry))).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Counts .md files in a directory (agents/ entries). */
+function countAgentFiles(path: string): number {
+  try {
+    return readdirSync(path).filter((entry) => entry.endsWith(".md")).length;
+  } catch {
+    return 0;
+  }
+}
+
+/** Whether a directory looks like a plugin (has at least a skills/ or
+ *  agents/ subdirectory) — filters test fixtures and incidental dirs. */
+function looksLikePlugin(pluginDir: string): boolean {
+  return existsSync(join(pluginDir, "skills")) || existsSync(join(pluginDir, "agents"));
+}
+
+/** Display name as declared by the plugin's own manifest; falls back to the
+ *  manifest name (the plugin id) when the field is absent — the display
+ *  surface tracks the repository declaration, no local copy to drift. */
+function manifestDisplayName(manifest: CannbotPluginManifest): string {
+  return typeof manifest.displayName === "string" && manifest.displayName.trim() ? manifest.displayName : manifest.name;
+}
+
 /**
  * Discovers cannbot-style plugins bundled inside the managed installer
  * package. Layouts probed (in order):
  *   - dist/plugins            — npm package layout (assemble output; stable
  *                               across the upstream plugins-official rename)
  *   - dist/plugins-official   — defensive: future npm layout change
- *   - plugins / plugins-official — repository checkout layouts, for
- *                               CANNBOT_INSTALLER_PATH pointing at a cannbot
- *                               repo clone (pre/post the e140ca6 rename)
+ *   - plugins / plugins-official / plugins-community — repository checkout
+ *                               layouts, for CANNBOT_INSTALLER_PATH pointing
+ *                               at a cannbot repo clone (pre/post the
+ *                               e140ca6 rename)
  * The npm package is self-contained: skills are copied into dist at pack
  * time, so no cannbot repository checkout or vendor/cannbot-skills
  * submodule is needed. Returns [] when the installer package is not
@@ -280,11 +314,17 @@ export function discoverCannbotPlugins(): CannbotPluginEntry[] {  if (!isCannbot
 
   const packageRoot = getCannbotPackageRoot();
   const entries: CannbotPluginEntry[] = [];
+  // Every layout the installer package may present: the flattened npm dist
+  // (dist/plugins), split dist variants and repository checkouts — official
+  // and community alike. No dir scope filter: whatever the cannbot installer
+  // ships is discoverable and installable.
   const parents = [
     join(packageRoot, "dist", "plugins"),
     join(packageRoot, "dist", "plugins-official"),
+    join(packageRoot, "dist", "plugins-community"),
     join(packageRoot, "plugins"),
     join(packageRoot, "plugins-official"),
+    join(packageRoot, "plugins-community"),
   ];
 
   for (const parent of parents) {
@@ -297,11 +337,32 @@ export function discoverCannbotPlugins(): CannbotPluginEntry[] {  if (!isCannbot
     }
     for (const name of names) {
       const pluginDir = join(parent, name);
+      if (!isDirectory(pluginDir)) continue;
       const manifest = readManifest(pluginDir);
-      if (!manifest || typeof manifest.name !== "string") continue;
+      if (!manifest || typeof manifest.name !== "string") {
+        // Layer 2: directory is a cannbot plugin but lacks a manifest
+        // declaration (e.g. ops-registry-invoke mid-migration upstream).
+        // Derive minimal identity from the directory structure — the entry
+        // still shows as [cannbot] with the repository directory name, and
+        // the frozen plugins.d yml copy no longer shadows it in dedupe.
+        if (looksLikePlugin(pluginDir)) {
+          if (entries.some((e) => e.id === name)) continue;
+          entries.push({
+            id: name,
+            displayName: name,
+            version: "",
+            description: "",
+            skillsCount: countSubdirs(join(pluginDir, "skills")),
+            agentsCount: countAgentFiles(join(pluginDir, "agents")),
+            dir: pluginDir,
+          });
+        }
+        continue;
+      }
       if (entries.some((e) => e.id === manifest.name)) continue;
       entries.push({
         id: manifest.name,
+        displayName: manifestDisplayName(manifest),
         version: manifest.version || "",
         description: manifest.description || "",
         skillsCount: Array.isArray(manifest.skills) ? manifest.skills.length : 0,
@@ -433,10 +494,26 @@ export function discoverMainlinePlugins(repoPath: string): CannbotPluginEntry[] 
     }
     for (const name of names) {
       const pluginDir = join(parentPath, name);
+      if (!isDirectory(pluginDir)) continue;
       const manifest = readManifest(pluginDir);
-      if (!manifest || typeof manifest.name !== "string") continue;
+      if (!manifest || typeof manifest.name !== "string") {
+        // Layer 2: manifest-less cannbot plugin (same as snapshot discovery)
+        if (looksLikePlugin(pluginDir)) {
+          entries.push({
+            id: name,
+            displayName: name,
+            version: "",
+            description: "",
+            skillsCount: countSubdirs(join(pluginDir, "skills")),
+            agentsCount: countAgentFiles(join(pluginDir, "agents")),
+            dir: pluginDir,
+          });
+        }
+        continue;
+      }
       entries.push({
         id: manifest.name,
+        displayName: manifestDisplayName(manifest),
         version: readMainlinePluginVersion(pluginDir),
         description: manifest.description || name,
         skillsCount: countMainlineSkills(pluginDir),
@@ -471,7 +548,7 @@ export async function ensureCannbotDiscovery(): Promise<boolean> {
     [...byId.values()].map((entry) => ({
       id: entry.id,
       dir: entry.dir,
-      displayName: entry.id,
+      displayName: entry.displayName,
       script: "cannbot",
       aliases: [],
       skills: entry.skillsCount,

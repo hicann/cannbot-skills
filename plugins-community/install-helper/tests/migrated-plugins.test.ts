@@ -359,18 +359,19 @@ describe("migrated plugins — snapshot/tombstone precedence", () => {
     expect(exactHit?.source).toBe("cannbot");
   });
 
-  it("getAllPlugins deduplicates tombstones once the snapshot lists the plugin", async () => {
+  it("getAllPlugins keeps uncovered tombstones out of the install list (discovery authoritative)", async () => {
     const { getAllPlugins, setCannbotPlugins } = await import("../src/core/registry.js");
 
-    // snapshot does not know the plugin yet — the tombstone is listed
+    // snapshot does not know the plugin yet — with live entries present the
+    // uncovered tombstone is a dead install target (upstream genuinely does
+    // not ship it yet) and stays out of the install list; the CLI by-name
+    // path still bridges via the tombstone + fail-open delegation
     setCannbotPlugins([cannbotEntry("triton-auto-evolve")]);
-    let entries = getAllPlugins().filter((p) => p.id === "triton-op-generator");
-    expect(entries).toHaveLength(1);
-    expect(entries[0].skills).toBe(8);
+    expect(getAllPlugins().some((p) => p.id === "triton-op-generator")).toBe(false);
 
-    // snapshot caught up with the migration — the snapshot entry wins
+    // snapshot caught up with the migration — the snapshot entry is the row
     setCannbotPlugins([cannbotEntry("triton-auto-evolve"), cannbotEntry("triton-op-generator")]);
-    entries = getAllPlugins().filter((p) => p.id === "triton-op-generator");
+    const entries = getAllPlugins().filter((p) => p.id === "triton-op-generator");
     expect(entries).toHaveLength(1);
     expect(entries[0].version).toBe("9.9.9");
   });
@@ -441,28 +442,32 @@ describe("migrated plugins — tombstones with a frozen local copy (ops-registry
     expect(snapshotHit?.version).toBe("9.9.9");
     expect(snapshotHit?.source).toBe("cannbot");
 
-    // the directory-name long form still resolves to the tombstone
+    // once the renamed identity is discovered, the directory-name long form
+    // routes to the LIVE entry — the delegation must use the name the
+    // cannbot installer actually knows; the tombstone alone (offline, no
+    // snapshot) still owns the long form
     const longForm = findPlugin("collaborative-agent-kernel-evolution");
-    expect(longForm?.id).toBe("collaborative-agent-kernel-evolution");
+    expect(longForm?.id).toBe("cake");
     expect(longForm?.script).toBe("cannbot");
   });
 
-  it("getAllPlugins dedupes the ops-registry-invoke tombstone once the snapshot lists it", async () => {
+  it("getAllPlugins keeps the ops-registry-invoke tombstone out once discovery is authoritative", async () => {
     const { getAllPlugins, setCannbotPlugins } = await import("../src/core/registry.js");
 
-    // snapshot predates the migration: the tombstone bridges discovery while
-    // the embedded frozen copy coexists (still installable via --source skills)
+    // snapshot predates the migration but live entries exist: the uncovered
+    // tombstone (dead delegation target — upstream does not ship the plugin
+    // yet) is out of the install list; the embedded frozen copy (skills
+    // source, locally installable) still coexists
     setCannbotPlugins([cannbotEntry("unrelated-plugin")]);
-    let entries = getAllPlugins().filter((p) => p.id === "ops-registry-invoke");
-    expect(entries.filter((p) => p.script === "cannbot" && p.skills === 7)).toHaveLength(1);
+    const entries = getAllPlugins().filter((p) => p.id === "ops-registry-invoke");
+    expect(entries.filter((p) => p.script === "cannbot" && p.skills === 7)).toHaveLength(0);
     expect(entries.some((p) => p.script === "init.sh")).toBe(true);
 
-    // snapshot caught up: the tombstone is deduplicated away and the
-    // snapshot entry (version 9.9.9) is authoritative for the cannbot source
+    // snapshot caught up: the snapshot entry (version 9.9.9) is authoritative
+    // for the cannbot source
     setCannbotPlugins([cannbotEntry("unrelated-plugin"), cannbotEntry("ops-registry-invoke")]);
-    entries = getAllPlugins().filter((p) => p.id === "ops-registry-invoke");
-    expect(entries.filter((p) => p.script === "cannbot" && p.skills === 7)).toHaveLength(0);
-    expect(entries.some((p) => p.version === "9.9.9")).toBe(true);
+    const caughtUp = getAllPlugins().filter((p) => p.id === "ops-registry-invoke");
+    expect(caughtUp.some((p) => p.version === "9.9.9")).toBe(true);
   });
 });
 

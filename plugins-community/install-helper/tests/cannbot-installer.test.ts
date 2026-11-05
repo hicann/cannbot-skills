@@ -14,6 +14,7 @@ import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
 import { createFakeInstaller } from "./helpers/fake-cannbot.js";
+import { seedMainlineCache } from "./helpers/seed-mainline-cache.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -33,6 +34,9 @@ function setup() {
     savedEnv[key] = process.env[key];
     delete process.env[key];
   }
+  // pre-seed a fresh mainline cache: discovery must not attempt a real
+  // git clone from unit tests
+  seedMainlineCache(testDir);
 }
 
 function teardown() {
@@ -113,6 +117,29 @@ describe("cannbot-installer", () => {
     expect(plugins[0].id).toBe("fake-cb-plugin");
   });
 
+  it("discovers plugins from the plugins-community checkout layout", async () => {
+    // every plugin the cannbot installer ships is installable — community
+    // layouts (checkout or dist) must be probed just like official ones
+    const installerRoot = join(testDir, "community-checkout");
+    createFakeInstaller(installerRoot, "fake-cb-plugin");
+    const { cpSync, rmSync, mkdirSync: mk } = await import("fs");
+    mk(join(installerRoot, "plugins-community"), { recursive: true });
+    cpSync(
+      join(installerRoot, "dist", "plugins", "fake-cb-plugin"),
+      join(installerRoot, "plugins-community", "fake-cb-plugin"),
+      { recursive: true }
+    );
+    rmSync(join(installerRoot, "dist"), { recursive: true, force: true });
+    mk(join(installerRoot, "bin"), { recursive: true });
+    writeFileSync(join(installerRoot, "bin", "cannbot.js"), "#!/usr/bin/env node\n");
+    process.env.CANNBOT_INSTALLER_PATH = installerRoot;
+
+    const { discoverCannbotPlugins } = await import("../src/core/cannbot-installer.js");
+    const plugins = discoverCannbotPlugins();
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0].id).toBe("fake-cb-plugin");
+  });
+
   it("ensureCannbotInstaller trusts a valid CANNBOT_INSTALLER_PATH without npm", async () => {
     createFakeInstaller(testDir, "fake-cb-plugin");
     process.env.CANNBOT_INSTALLER_PATH = testDir;
@@ -148,6 +175,27 @@ describe("cannbot-installer", () => {
     // findPlugin resolves the cannbot entry (fast path without legacy lookup)
     const found = findPlugin("fake-cb-plugin");
     expect(found?.source).toBe("cannbot");
+  });
+
+  it("discovery carries the manifest displayName and falls back to the plugin id", async () => {
+    createFakeInstaller(testDir, "fake-cb-plugin");
+    createFakeInstaller(testDir, "named-cb-plugin", { displayName: "PyPTO-Pro 算子开发" });
+    process.env.CANNBOT_INSTALLER_PATH = testDir;
+
+    const { ensureCannbotDiscovery } = await import("../src/core/cannbot-installer.js");
+    const { getAllPlugins } = await import("../src/core/registry.js");
+
+    await ensureCannbotDiscovery();
+
+    const merged = getAllPlugins();
+    // manifest-declared display name flows straight through (self-adapting:
+    // upstream adding displayName to plugin.json needs no install-helper
+    // release — same principle as the delegated tool-set derivation)
+    const named = merged.find((p) => p.id === "named-cb-plugin");
+    expect(named?.displayName).toBe("PyPTO-Pro 算子开发");
+    // manifests without the field keep the id fallback
+    const unnamed = merged.find((p) => p.id === "fake-cb-plugin");
+    expect(unnamed?.displayName).toBe("fake-cb-plugin");
   });
 
   it("findPlugin resolves same-name legacy ids via --source skills semantics", async () => {

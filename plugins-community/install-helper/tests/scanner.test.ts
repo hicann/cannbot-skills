@@ -110,14 +110,14 @@ describe("scanDirs / pluginDirs configuration", () => {
     }
   });
 
-  it("getPluginDirs only includes official plugins (community not adapted)", async () => {
+  it("getPluginDirs covers official and community plugins", async () => {
     const { getPluginDirs } = await import("../src/core/scanner.js");
     const dirs = getPluginDirs();
     expect(dirs).toContain("plugins-official");
-    expect(dirs).not.toContain("plugins-community");
+    expect(dirs).toContain("plugins-community");
   });
 
-  it("scanSkills discovers tools/ domain skills and skips community plugin skills", async () => {
+  it("scanSkills discovers tools/ domain skills and both official and community plugin skills", async () => {
     const { scanSkills } = await import("../src/core/scanner.js");
     const { mkdirSync, writeFileSync, rmSync } = await import("fs");
     const { join } = await import("path");
@@ -136,7 +136,43 @@ describe("scanDirs / pluginDirs configuration", () => {
       const ids = skills.map((s) => s.id);
       expect(ids).toContain("fake-tool-skill");
       expect(ids).toContain("official-skill");
-      expect(ids).not.toContain("community-skill");
+      // community plugin skills are exposed exactly like official ones —
+      // symmetric support for every plugin the repository ships
+      expect(ids).toContain("community-skill");
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("dynamic skill domain discovery", () => {
+  it("discovers a new top-level domain directory without the scanDirs whitelist", async () => {
+    const { scanSkills, discoverSkillDomains } = await import("../src/core/scanner.js");
+    const { mkdirSync, rmSync, writeFileSync } = await import("fs");
+    const { join } = await import("path");
+    const { tmpdir } = await import("os");
+
+    const repo = join(tmpdir(), `ih-dyn-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try {
+      // a brand-new domain the whitelist never knew about
+      mkdirSync(join(repo, "security", "threat-model"), { recursive: true });
+      writeFileSync(join(repo, "security", "threat-model", "SKILL.md"), "---\nname: threat-model\ndescription: threat modeling\n---\n# body\n");
+      // a top-level dir whose skills are NOT direct children (plugins tree) — must not match
+      mkdirSync(join(repo, "plugins-official", "some-plugin", "skills", "bundled-skill"), { recursive: true });
+      writeFileSync(join(repo, "plugins-official", "some-plugin", "skills", "bundled-skill", "SKILL.md"), "---\nname: bundled-skill\ndescription: bundled\n---\n# body\n");
+      // hidden dir — ignored
+      mkdirSync(join(repo, ".hidden-domain", "ghost-skill"), { recursive: true });
+      writeFileSync(join(repo, ".hidden-domain", "ghost-skill", "SKILL.md"), "---\nname: ghost-skill\ndescription: hidden\n---\n# body\n");
+
+      const domains = discoverSkillDomains(repo);
+      expect(domains).toContain("security");
+      expect(domains).not.toContain("plugins-official");
+      expect(domains).not.toContain(".hidden-domain");
+
+      const skills = scanSkills(repo);
+      expect(skills.map((s) => s.id)).toContain("threat-model");
+      expect(skills.find((s) => s.id === "threat-model")?.source).toBe("security");
+      expect(skills.map((s) => s.id)).not.toContain("ghost-skill");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }

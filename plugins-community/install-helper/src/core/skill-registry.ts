@@ -353,24 +353,36 @@ export function getAllSkills(): SkillEntry[] {
 export function getAllCategories(): SkillCategory[] {
   const skills = getActiveSkills();
   const isEn = t("list_name") === "Name";
-  return CATEGORY_DEFS.map((def) => ({
-    id: def.id,
-    name: isEn ? def.nameEn : def.name,
-    // Category == repository scanDir (the skill's `source`), decided
-    // automatically — no per-skill mapping. Skills with an unknown source
-    // (e.g. a plugin-bundled SKILL.md) are still shown, grouped last.
-    skills: skills.filter((s) => s.source === def.id),
-  })).filter((cat) => cat.skills.length > 0)
-    .concat(
-      // catch-all for sources outside the known scanDirs (plugin skills etc.)
-      (() => {
-        const known = new Set(CATEGORY_DEFS.map((d) => d.id));
-        const rest = skills.filter((s) => !known.has(s.source));
-        return rest.length > 0
-          ? [{ id: "other", name: isEn ? "Other Skills" : "其他 Skills", skills: rest }]
-          : [];
-      })()
-    );
+  // Categories are derived from the ACTIVE skills' sources — a new domain
+  // directory in the repository appears here automatically (id-named, after
+  // the known domains). Known domains keep their i18n display names; single
+  // segment sources are domains; multi-segment sources (plugin-bundled
+  // skills, e.g. plugins-official/<id>/skills) fall into the catch-all.
+  const knownOrder = new Map(CATEGORY_DEFS.map((def, index) => [def.id, index]));
+  const domainSources = [...new Set(skills.map((s) => s.source))]
+    .filter((source) => !source.includes("/"))
+    .sort((a, b) => {
+      const ai = knownOrder.get(a);
+      const bi = knownOrder.get(b);
+      if (ai !== undefined && bi !== undefined) return ai - bi;
+      if (ai !== undefined) return -1;
+      if (bi !== undefined) return 1;
+      return a.localeCompare(b);
+    });
+  const categories: SkillCategory[] = domainSources.map((source) => {
+    const def = CATEGORY_DEFS.find((d) => d.id === source);
+    return {
+      id: source,
+      name: def ? (isEn ? def.nameEn : def.name) : source,
+      skills: skills.filter((s) => s.source === source),
+    };
+  });
+  const knownIds = new Set(domainSources);
+  const rest = skills.filter((s) => !knownIds.has(s.source));
+  if (rest.length > 0) {
+    categories.push({ id: "other", name: isEn ? "Other Skills" : "其他 Skills", skills: rest });
+  }
+  return categories;
 }
 
 /** Returns the semantic subgroup of a skill (used for separator rows and

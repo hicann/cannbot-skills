@@ -20,6 +20,7 @@ import { join, resolve } from "path";
 import { execa } from "execa";
 import type { AITool, InstallLevel, InstallOptions, InstallResult, PluginEntry, PluginSource } from "../types/index.js";
 import { discoverCannbotPlugins, ensureCannbotInstaller, getCannbotBinPath, hasNodeRuntime } from "./cannbot-installer.js";
+import { delegateBoundaryTools } from "./cannbot-tools.js";
 import { findCannbotRegistryPath, readCannbotRegistry } from "./cannbot-registry.js";
 import { readRecords, writeRecord } from "./record.js";
 import { findPlugin } from "./registry.js";
@@ -29,8 +30,6 @@ import { addInstalledPlugin } from "../utils/config.js";
 import { getConfigFileName, getSkillsRoot } from "../utils/paths.js";
 import { isSameDirectory, isSymlink } from "../utils/fs-helpers.js";
 import { t } from "../utils/i18n.js";
-
-export const DELEGATE_TOOLS: AITool[] = ["opencode", "claude", "trae", "codex"];
 
 export interface DelegateInstallOptions {
   pluginId: string;
@@ -43,11 +42,15 @@ export interface DelegateInstallOptions {
 
 export function boundaryErrors(tool: AITool, level: InstallLevel): string[] {
   const errors: string[] = [];
-  if (!DELEGATE_TOOLS.includes(tool)) {
+  // The supported-tool set is owned by the installed cannbot installer and
+  // derived at runtime (core/cannbot-tools.ts); the legacy prior applies only
+  // when the declaration cannot be determined.
+  const supportedTools = delegateBoundaryTools();
+  if (!supportedTools.includes(tool)) {
     errors.push(
       t("cannbot_tool_unsupported")
         .replace("{tool}", tool)
-        .replace("{tools}", DELEGATE_TOOLS.join(", "))
+        .replace("{tools}", supportedTools.join(", "))
     );
   }
   if (level !== "project") {

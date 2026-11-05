@@ -159,6 +159,7 @@ export interface CannbotInstallerConfig {
 
 export interface CannbotPluginManifest {
   name: string;
+  displayName?: string;
   version?: string;
   description?: string;
   agents?: string[];

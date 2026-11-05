@@ -17,12 +17,17 @@ import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pkgRoot = dirname(dirname(fileURLToPath(import.meta.url)));
-const TOOL_LAYOUTS = {
+// Declaration mirrors @cannbot-plugin/cannbot 1.10.0 (TOOL_DIRECTORIES frozen
+// object literal): install-helper derives delegation boundaries and registry
+// layouts from this declaration at runtime.
+const TOOL_DIRECTORIES = Object.freeze({
   opencode: { configDirs: [".opencode"], defaultConfigDir: ".opencode", skillsDir: [".agents", "skills"] },
   codex: { configDirs: [".codex"], defaultConfigDir: ".codex", skillsDir: [".agents", "skills"] },
   claude: { configDirs: [".claude"], defaultConfigDir: ".claude" },
   trae: { configDirs: [".traecli", ".marscode", ".trae", ".trae-cn"], defaultConfigDir: ".trae" },
-};
+  dsh: { configDirs: [".dsh"], defaultConfigDir: ".dsh" },
+  codearts: { configDirs: [".codeartsdoer"], defaultConfigDir: ".codeartsdoer" },
+});
 
 `;
 
@@ -30,7 +35,7 @@ const TOOL_LAYOUTS = {
 // FAKE_CANNBOT_SIMULATE_RENAME_GAP simulation of installLatest failures.
 const LEGACY_PROLOGUE = `const [command, pluginId, ...rest] = process.argv.slice(2);
 if (command !== "install" || !pluginId) {
-  console.error("usage: cannbot install <plugin> --tool <tool> [--target <dir>] [--bundled]");
+  console.error("usage: cannbot install <plugin> --tool <" + Object.keys(TOOL_DIRECTORIES).join("|") + "> [--target <dir>] [--bundled]");
   process.exit(1);
 }
 const options = { target: process.cwd(), bundled: false };
@@ -57,7 +62,7 @@ if (process.env.FAKE_CANNBOT_BUNDLED_ALSO_FAILS === "1" && options.bundled) {
 
 const MODERN_PROLOGUE = `const [command, pluginId, ...rest] = process.argv.slice(2);
 if (command !== "install" || !pluginId) {
-  console.error("usage: cannbot install <plugin> --tool <tool> [--target <dir>] [--source <repository>] [--plugin-dir <dir>] [--override-skills <dir>]");
+  console.error("usage: cannbot install <plugin> --tool <" + Object.keys(TOOL_DIRECTORIES).join("|") + "> [--target <dir>] [--source <repository>] [--plugin-dir <dir>] [--override-skills <dir>]");
   process.exit(1);
 }
 // Modern installer (>= 1.8.0): installs from the bundled dist snapshot by
@@ -81,12 +86,12 @@ if (process.env.FAKE_CANNBOT_MODERN_NOT_FOUND === "1") {
 }
 `;
 
-const INSTALL_BODY = `if (!options.tool || !TOOL_LAYOUTS[options.tool]) {
-  console.error("--tool must be one of: " + Object.keys(TOOL_LAYOUTS).join(", "));
+const INSTALL_BODY = `if (!options.tool || !TOOL_DIRECTORIES[options.tool]) {
+  console.error("--tool must be one of: " + Object.keys(TOOL_DIRECTORIES).join(", "));
   process.exit(1);
 }
 
-const layout = TOOL_LAYOUTS[options.tool];
+const layout = TOOL_DIRECTORIES[options.tool];
 const configDir = layout.configDirs.map((n) => join(options.target, n)).find((p) => existsSync(p)) ?? join(options.target, layout.defaultConfigDir);
 const skillsDir = layout.skillsDir ? join(options.target, ...layout.skillsDir) : join(configDir, "skills");
 const agentsDir = join(configDir, "agents");
@@ -240,7 +245,7 @@ function teardown() {
 export function createFakeInstaller(
   root: string,
   pluginId: string,
-  options?: { skills?: string[]; agents?: string[]; modern?: boolean }
+  options?: { skills?: string[]; agents?: string[]; modern?: boolean; displayName?: string }
 ): string {
   mkdirSync(join(root, "bin"), { recursive: true });
   writeFileSync(
@@ -263,6 +268,7 @@ export function createFakeInstaller(
         name: pluginId,
         version: "3.1.0",
         description: `fake cannbot plugin ${pluginId}`,
+        ...(options?.displayName ? { displayName: options.displayName } : {}),
         agents: agents.map((a) => `./agents/${a}.md`),
         skills: skills.map((s) => `./skills/${s}`),
       },

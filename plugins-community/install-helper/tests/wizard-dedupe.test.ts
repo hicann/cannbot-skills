@@ -13,7 +13,7 @@ import { describe, it, expect } from "vitest";
 import type { PluginEntry } from "../src/types/index.js";
 import { dedupeForWizardSelection } from "../src/ui/wizard.js";
 
-function entry(id: string, source: "cannbot" | "skills", displayName = id): PluginEntry {
+function entry(id: string, source: "cannbot" | "skills", displayName = id, description = ""): PluginEntry {
   return {
     id,
     dir: "",
@@ -22,13 +22,13 @@ function entry(id: string, source: "cannbot" | "skills", displayName = id): Plug
     aliases: [],
     skills: 0,
     agents: 0,
-    description: "",
+    description,
     source,
   };
 }
 
 describe("wizard selection dedupe", () => {
-  it("lists each plugin id exactly once — cannbot source wins, friendly name kept", () => {
+  it("lists each plugin id exactly once — cannbot source wins, repository name shown", () => {
     const dual = [
       entry("ops-direct-invoke", "skills", "AscendC Kernel 直调"), // frozen local yml
       entry("ops-direct-invoke", "cannbot", "ops-direct-invoke"), // cannbot snapshot/mainline
@@ -36,7 +36,9 @@ describe("wizard selection dedupe", () => {
     const result = dedupeForWizardSelection(dual);
     expect(result).toHaveLength(1);
     expect(result[0].source).toBe("cannbot"); // routing matches findPlugin default
-    expect(result[0].displayName).toBe("AscendC Kernel 直调"); // friendlier name wins
+    // the repository's own name is the display authority — users map the
+    // wizard row straight onto the repo/PR/docs identity of the plugin
+    expect(result[0].displayName).toBe("ops-direct-invoke");
   });
 
   it("keeps the cannbot display name when it is friendlier than the id echo", () => {
@@ -46,6 +48,33 @@ describe("wizard selection dedupe", () => {
     ]);
     expect(result).toHaveLength(1);
     expect(result[0].displayName).toBe("Ops X（主线新版）");
+  });
+
+  it("prefers the cannbot-declared display name over the frozen local name", () => {
+    // once the cannbot repo manifests carry displayName, the declaration is
+    // the authority — the frozen embedded name must not shadow it
+    const result = dedupeForWizardSelection([
+      entry("pypto-pro-op-orchestrator", "skills", "PyPTO 旧冻结名"),
+      entry("pypto-pro-op-orchestrator", "cannbot", "PyPTO-Pro 算子开发"),
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0].displayName).toBe("PyPTO-Pro 算子开发");
+  });
+
+  it("follows the cannbot declaration for name and description (repo content wins)", () => {
+    // dual-source rows show the repository name and the manifest
+    // description — not the stale frozen snapshot
+    const frozen = "PyPTO Python API 算子全流程开发，覆盖需求理解、API 探索、实现与调优";
+    const manifest = "PyPTO 算子开发编排工作流：7 阶段状态机（需求规划→Golden→设计→验证准备→按模块编码→E2E 验证→性能调优）";
+    const result = dedupeForWizardSelection([
+      entry("pypto-op-orchestrator", "skills", "PyPTO 算子开发", frozen),
+      entry("pypto-op-orchestrator", "cannbot", "pypto-op-orchestrator", manifest),
+    ]);
+    expect(result).toHaveLength(1);
+    // repo identity: the sibling pypto-op / pypto-pro-op pair reads
+    // side-by-side in the wizard exactly as in the repository
+    expect(result[0].displayName).toBe("pypto-op-orchestrator");
+    expect(result[0].description).toBe(manifest);
   });
 
   it("leaves single-source plugins untouched", () => {

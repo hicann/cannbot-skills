@@ -23,13 +23,15 @@ import { deleteRecord, readRecords } from "./record.js";
 import { removeInstalledPlugin } from "../utils/config.js";
 import { getCannbotConfigDir } from "../utils/paths.js";
 import { getCannbotPackageRoot } from "./cannbot-installer.js";
+import { deriveCannbotTools } from "./cannbot-tools.js";
 import { logger } from "../utils/logger.js";
 import { t } from "../utils/i18n.js";
 import { isSameDirectory, isSymlink } from "../utils/fs-helpers.js";
 import { MIGRATED_PLUGINS } from "./migrated-plugins.js";
 
-// Mirror of cannbot installer TOOL_DIRECTORIES (script/bin/cannbot.js) for
-// the tools install-helper delegates to. configDirs are probed in order; the
+// Fallback mirror of the cannbot installer TOOL_DIRECTORIES (script/bin/cannbot.js),
+// used only when the installed installer's declaration cannot be derived at
+// runtime (see core/cannbot-tools.ts). configDirs are probed in order; the
 // first existing one wins, falling back to defaultConfigDir.
 export const CANNBOT_TOOL_LAYOUTS: Record<string, { configDirs: string[]; defaultConfigDir: string }> = {
   opencode: { configDirs: [".opencode"], defaultConfigDir: ".opencode" },
@@ -38,13 +40,33 @@ export const CANNBOT_TOOL_LAYOUTS: Record<string, { configDirs: string[]; defaul
   trae: { configDirs: [".traecli", ".marscode", ".trae", ".trae-cn"], defaultConfigDir: ".trae" },
 };
 
-export const CANNBOT_SUPPORTED_TOOLS = Object.keys(CANNBOT_TOOL_LAYOUTS);
+/** Registry layouts of the tools the installed cannbot installer declares;
+ *  falls back to the static mirror when the declaration cannot be derived.
+ *  Names-only declarations (<= 1.9.x TOOL_NAMES) carry no layouts — those
+ *  are synthesized per declared name (known tools take the static mirror,
+ *  the rest fall back to the .{tool} heuristic) so every tool the
+ *  delegation boundary allows stays resolvable by registry scans and
+ *  uninstall; the boundary set and the layout set never diverge. */
+export function cannbotToolLayouts(): Record<string, { configDirs: string[]; defaultConfigDir: string }> {
+  const derived = deriveCannbotTools();
+  if (derived.layouts) return derived.layouts;
+  if (derived.tools) {
+    const layouts: Record<string, { configDirs: string[]; defaultConfigDir: string }> = { ...CANNBOT_TOOL_LAYOUTS };
+    for (const name of derived.tools) {
+      if (!layouts[name]) {
+        layouts[name] = { configDirs: [`.${name}`], defaultConfigDir: `.${name}` };
+      }
+    }
+    return layouts;
+  }
+  return CANNBOT_TOOL_LAYOUTS;
+}
 
 export const CANNBOT_REGISTRY_SCHEMA_VERSION = 2;
 const REGISTRY_FILE_NAME = "cannbot-plugin.json";
 
 function toolConfigDir(target: string, tool: string): string {
-  const layout = CANNBOT_TOOL_LAYOUTS[tool];
+  const layout = cannbotToolLayouts()[tool];
   if (!layout) return join(target, `.${tool}`);
   return layout.configDirs
     .map((name) => join(target, name))
@@ -146,7 +168,7 @@ export function scanCannbotInstalled(target?: string): CannbotInstalledEntry[] {
   const root = resolve(target || process.cwd());
   const installed: CannbotInstalledEntry[] = [];
 
-  for (const tool of CANNBOT_SUPPORTED_TOOLS) {
+  for (const tool of Object.keys(cannbotToolLayouts())) {
     const result = readCannbotRegistry(root, tool);
     if (!result) continue;
     for (const record of result.registry.plugins) {
@@ -206,8 +228,55 @@ function removeIfSafe(pathToRemove: string, allowedBase: string): "removed" | "m
   }
 }
 
-function removeEmptyDirUpward(dirPath: string, stopAt: string): boolean {
-  let current = resolve(dirPath);
+/** Removes empty directories inside `dirPath` (post-order, deepest first).
+ *  Only empty directories are removed — rmdir refuses non-empty ones, so
+ *  recorded content always survives. The cannbot installer pre-creates
+ *  per-skill directories even for 0-skill plugins; they carry no recorded
+ *  entries and would otherwise block the layout-root cleanup. */
+function pruneEmptyDescendants(dirPath: string): boolean {
+  let removedAny = false;
+  let entries: string[];
+  try {
+    entries = readdirSync(dirPath);
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    const child = join(dirPath, entry);
+    let stat: ReturnType<typeof lstatSync>;
+    try {
+      stat = lstatSync(child);
+    } catch {
+      continue;
+    }
+    if (stat.isSymbolicLink()) {
+      // A dangling symlink (its target was already removed — e.g. a
+      // dependency-installed skill link after the .cannbot/dependencies
+      // clone was dropped): remove it so the layout root can be cleaned.
+      // Links whose target still exists are left in place.
+      if (!existsSync(child)) {
+        try {
+          unlinkSync(child);
+          removedAny = true;
+        } catch {
+          // unreadable — keep
+        }
+      }
+      continue;
+    }
+    if (!stat.isDirectory()) continue;
+    if (pruneEmptyDescendants(child)) removedAny = true;
+    try {
+      rmdirSync(child);
+      removedAny = true;
+    } catch {
+      // non-empty or unreadable — keep
+    }
+  }
+  return removedAny;
+}
+
+function removeEmptyDirUpward(dirPath: string, stopAt: string): boolean {  let current = resolve(dirPath);
   const stop = resolve(stopAt);
   let removedAny = false;
   while (current.startsWith(stop + sep)) {
@@ -378,7 +447,7 @@ export function uninstallCannbotPlugin(pluginId: string, target?: string): Cannb
   let read: CannbotRegistryReadResult | null = null;
   let record: CannbotRegistryRecord | undefined;
 
-  for (const tool of CANNBOT_SUPPORTED_TOOLS) {
+  for (const tool of Object.keys(cannbotToolLayouts())) {
     const candidate = readCannbotRegistry(root, tool);
     if (!candidate) continue;
     const found = candidate.registry.plugins.find((r) => r?.plugin === pluginId);
@@ -500,8 +569,10 @@ export function uninstallCannbotPlugin(pluginId: string, target?: string): Cannb
   }
 
   // 8b. clean layout roots the cannbot installer created but that carry no
-  // recorded entries (e.g. an empty agents/ dir for a 0-agent plugin)
-  if (CANNBOT_TOOL_LAYOUTS[record.tool]) {
+  // recorded entries (e.g. an empty agents/ dir for a 0-agent plugin) — gate
+  // on the derived layouts so tools the installer declares (codearts, ...) are
+  // covered, not just the static fallback mirror
+  if (cannbotToolLayouts()[record.tool]) {
     const configDir = dirname(registryPath);
     const layoutRoots = [join(configDir, "agents"), join(configDir, "skills")];
     if (record.tool === "opencode" || record.tool === "codex") {
@@ -509,6 +580,7 @@ export function uninstallCannbotPlugin(pluginId: string, target?: string): Cannb
       layoutRoots.push(join(root, ".agents", "skills"), join(root, ".agents"));
     }
     for (const dirPath of layoutRoots) {
+      pruneEmptyDescendants(dirPath);
       if (removeEmptyDirUpward(dirPath, allowedBase)) {
         result.removedDirs++;
       }
