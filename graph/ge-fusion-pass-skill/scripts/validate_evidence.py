@@ -17,6 +17,7 @@ The tool is intentionally offline. It compares artifacts produced by a real
 baseline/optimized run and records PASSED, FAILED, or NOT_RUN without inventing
 missing device evidence.
 """
+
 import argparse
 import csv
 import hashlib
@@ -32,12 +33,25 @@ from pathlib import Path
 
 
 EVENT_NAMES = {
-    "candidate", "matched", "guard_passed", "guard_rejected", "applied",
-    "replacement_failed", "skip", "pass_begin", "pass_end",
+    "candidate",
+    "matched",
+    "guard_passed",
+    "guard_rejected",
+    "applied",
+    "replacement_failed",
+    "skip",
+    "pass_begin",
+    "pass_end",
 }
 OUTPUT_CONTEXT_KEYS = (
-    "source_model_sha256", "input_sha256", "seed", "preprocess", "soc_version",
-    "compile_parameters", "run_parameters", "environment",
+    "source_model_sha256",
+    "input_sha256",
+    "seed",
+    "preprocess",
+    "soc_version",
+    "compile_parameters",
+    "run_parameters",
+    "environment",
 )
 PERFORMANCE_CONTEXT_KEYS = OUTPUT_CONTEXT_KEYS + ("warmup", "runs")
 OUTPUT_LOGGER = logging.getLogger(f"{__name__}.stdout")
@@ -68,7 +82,14 @@ def _write_markdown(path, title, status, sections):
         if isinstance(content, str):
             lines.extend([content, ""])
         else:
-            lines.extend(["```json", json.dumps(content, ensure_ascii=False, indent=2), "```", ""])
+            lines.extend(
+                [
+                    "```json",
+                    json.dumps(content, ensure_ascii=False, indent=2),
+                    "```",
+                    "",
+                ]
+            )
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     Path(path).write_text("\n".join(lines), encoding="utf-8")
 
@@ -99,7 +120,9 @@ def _input_hash_candidates(input_files):
     hashes = [item.get("sha256") for item in input_files]
     if any(not isinstance(value, str) or not value for value in hashes):
         return set()
-    canonical = "\n".join(f"{index}:{value}" for index, value in enumerate(hashes)).encode("utf-8")
+    canonical = "\n".join(
+        f"{index}:{value}" for index, value in enumerate(hashes)
+    ).encode("utf-8")
     candidates = {hashlib.sha256(canonical).hexdigest()}
     if len(hashes) == 1:
         candidates.add(hashes[0])
@@ -135,9 +158,15 @@ def _input_file_issues(item, index, label):
         return [f"{label}: execution.input_files[{index}] is not an object"], missing
     path = item.get("path")
     expected = item.get("sha256")
-    valid_record = item.get("index") == index and isinstance(path, str) and isinstance(expected, str)
+    valid_record = (
+        item.get("index") == index
+        and isinstance(path, str)
+        and isinstance(expected, str)
+    )
     if not valid_record:
-        return [f"{label}: execution.input_files[{index}] lacks a valid index/path/sha256"], missing
+        return [
+            f"{label}: execution.input_files[{index}] lacks a valid index/path/sha256"
+        ], missing
     input_path = Path(path)
     if not input_path.is_file():
         missing.append(f"{label}: input file is unavailable: {path}")
@@ -149,11 +178,15 @@ def _input_file_issues(item, index, label):
         missing.append(f"{label}: input file cannot be hashed: {exc}")
         return issues, missing
     if not input_matches:
-        issues.append(f"{label}: input file hash does not match execution record: {path}")
+        issues.append(
+            f"{label}: input file hash does not match execution record: {path}"
+        )
     if item.get("size") is None:
         missing.append(f"{label}: execution.input_files[{index}].size is missing")
     elif not size_matches:
-        issues.append(f"{label}: input file size does not match execution record: {path}")
+        issues.append(
+            f"{label}: input file size does not match execution record: {path}"
+        )
     return issues, missing
 
 
@@ -169,13 +202,19 @@ def _input_provenance_issues(execution, label):
     if not isinstance(actual_input_hash, str) or not actual_input_hash:
         missing.append(f"{label}: execution.input_sha256 is missing")
         return input_files, actual_input_hash, issues, missing
-    expected_scheme = "single-file-sha256-v1" if len(input_files) == 1 else "ordered-index-sha256-v1"
+    expected_scheme = (
+        "single-file-sha256-v1" if len(input_files) == 1 else "ordered-index-sha256-v1"
+    )
     if not isinstance(input_hash_scheme, str) or not input_hash_scheme:
         missing.append(f"{label}: execution.input_hash_scheme is missing")
     elif input_hash_scheme != expected_scheme:
-        issues.append(f"{label}: input_hash_scheme is {input_hash_scheme!r}, expected {expected_scheme!r}")
+        issues.append(
+            f"{label}: input_hash_scheme is {input_hash_scheme!r}, expected {expected_scheme!r}"
+        )
     if actual_input_hash not in _input_hash_candidates(input_files):
-        issues.append(f"{label}: execution input fingerprint is internally inconsistent")
+        issues.append(
+            f"{label}: execution input fingerprint is internally inconsistent"
+        )
     for index, item in enumerate(input_files):
         item_issues, item_missing = _input_file_issues(item, index, label)
         issues.extend(item_issues)
@@ -188,11 +227,18 @@ def _context_provenance_issues(manifest, label, source_hash, input_hash, input_f
     if not isinstance(context, dict):
         return [f"{label}: context is not an object"]
     issues = []
-    if isinstance(source_hash, str) and context.get("source_model_sha256") != source_hash:
+    if (
+        isinstance(source_hash, str)
+        and context.get("source_model_sha256") != source_hash
+    ):
         issues.append(f"{label}: context.source_model_sha256 differs from execution")
     if isinstance(input_hash, str):
         candidates = {input_hash}
-        if isinstance(input_files, list) and len(input_files) == 1 and isinstance(input_files[0], dict):
+        if (
+            isinstance(input_files, list)
+            and len(input_files) == 1
+            and isinstance(input_files[0], dict)
+        ):
             only_hash = input_files[0].get("sha256")
             if only_hash:
                 candidates.add(only_hash)
@@ -206,11 +252,19 @@ def _provenance_issues(manifest, label):
     execution = manifest.get("execution")
     if not isinstance(execution, dict):
         return [], [f"{label}: execution provenance is missing"]
-    source_hash, source_issues, source_missing = _source_provenance_issues(execution, label)
-    input_files, input_hash, input_issues, input_missing = _input_provenance_issues(execution, label)
+    source_hash, source_issues, source_missing = _source_provenance_issues(
+        execution, label
+    )
+    input_files, input_hash, input_issues, input_missing = _input_provenance_issues(
+        execution, label
+    )
     issues = source_issues + input_issues
     missing = source_missing + input_missing
-    issues.extend(_context_provenance_issues(manifest, label, source_hash, input_hash, input_files))
+    issues.extend(
+        _context_provenance_issues(
+            manifest, label, source_hash, input_hash, input_files
+        )
+    )
     return issues, missing
 
 
@@ -225,7 +279,9 @@ def _as_float(value):
     if value is None:
         return None
     try:
-        return float(str(value).replace(",", "").replace("us", "").replace("ms", "").strip())
+        return float(
+            str(value).replace(",", "").replace("us", "").replace("ms", "").strip()
+        )
     except (TypeError, ValueError):
         return None
 
@@ -236,12 +292,14 @@ def _find_fusion_results(value, path=""):
     if isinstance(value, dict):
         if "match_times" in value and "effect_times" in value:
             name = path.rsplit("/", 1)[-1] or "unknown_pass"
-            records.append({
-                "pass": name,
-                "match_times": _as_int(value.get("match_times")),
-                "effect_times": _as_int(value.get("effect_times")),
-                "source_path": path,
-            })
+            records.append(
+                {
+                    "pass": name,
+                    "match_times": _as_int(value.get("match_times")),
+                    "effect_times": _as_int(value.get("effect_times")),
+                    "source_path": path,
+                }
+            )
         for key, child in value.items():
             records.extend(_find_fusion_results(child, f"{path}/{key}"))
     elif isinstance(value, list):
@@ -257,7 +315,9 @@ def _read_self_events(events_path):
     event_count = 0
     if events_path is None:
         return by_pass, reasons, issues, event_count
-    for line_no, line in enumerate(events_path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_no, line in enumerate(
+        events_path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         if not line.strip():
             continue
         try:
@@ -268,7 +328,9 @@ def _read_self_events(events_path):
         event_name = event.get("event")
         pass_name = event.get("pass")
         if event_name not in EVENT_NAMES:
-            issues.append(f"events line {line_no} has unsupported event: {event_name!r}")
+            issues.append(
+                f"events line {line_no} has unsupported event: {event_name!r}"
+            )
             continue
         if not isinstance(pass_name, str) or not pass_name:
             issues.append(f"events line {line_no} lacks pass")
@@ -293,11 +355,17 @@ def _self_event_records(by_pass, issues):
         applied = counts.get("applied", 0)
         replacement_failed = counts.get("replacement_failed", 0)
         if matched > candidate:
-            issues.append(f"{pass_name}: matched ({matched}) exceeds candidate ({candidate})")
+            issues.append(
+                f"{pass_name}: matched ({matched}) exceeds candidate ({candidate})"
+            )
         if guard_passed > matched:
-            issues.append(f"{pass_name}: guard_passed ({guard_passed}) exceeds matched ({matched})")
+            issues.append(
+                f"{pass_name}: guard_passed ({guard_passed}) exceeds matched ({matched})"
+            )
         if applied + replacement_failed > guard_passed:
-            issues.append(f"{pass_name}: applied + replacement_failed exceeds guard_passed")
+            issues.append(
+                f"{pass_name}: applied + replacement_failed exceeds guard_passed"
+            )
         record = {"pass": pass_name}
         record.update({key: counts.get(key, 0) for key in sorted(counts)})
         records.append(record)
@@ -321,7 +389,11 @@ def _official_fusion_result(value):
         return {"status": "NOT_RUN", "records": []}, []
     fusion_path = Path(value)
     if not fusion_path.is_file():
-        result = {"status": "NOT_RUN", "reason": f"fusion_result.json 不存在: {fusion_path}", "records": []}
+        result = {
+            "status": "NOT_RUN",
+            "reason": f"fusion_result.json 不存在: {fusion_path}",
+            "records": [],
+        }
         return result, []
     try:
         records = _find_fusion_results(_load_json(fusion_path))
@@ -339,7 +411,10 @@ def _official_fusion_result(value):
 def _target_event_issues(args, event_count, self_records, official):
     issues = []
     if args.pass_name and (event_count or official.get("records")):
-        self_matches = [record for record in self_records if record.get("pass") == args.pass_name]
+        self_matches = []
+        for record in self_records:
+            if record.get("pass") == args.pass_name:
+                self_matches.append(record)
         official_matches = []
         for record in official.get("records", []):
             record_name = record.get("pass", "")
@@ -349,9 +424,13 @@ def _target_event_issues(args, event_count, self_records, official):
             issues.append(f"未找到目标 pass 的结构化证据: {args.pass_name}")
         if args.require_applied:
             applied = sum(record.get("applied", 0) for record in self_matches)
-            effect_times = sum(int(record.get("effect_times") or 0) for record in official_matches)
+            effect_times = sum(
+                int(record.get("effect_times") or 0) for record in official_matches
+            )
             if applied <= 0 and effect_times <= 0:
-                issues.append(f"目标 pass 未产生 applied/effect_times > 0: {args.pass_name}")
+                issues.append(
+                    f"目标 pass 未产生 applied/effect_times > 0: {args.pass_name}"
+                )
     return issues
 
 
@@ -374,7 +453,9 @@ def _write_event_result(args, result):
             ("Official Fusion Result", result.get("official_fusion_result", {})),
             ("Consistency Issues", result.get("consistency_issues", [])),
         ]
-        _write_markdown(args.out_md, "Pass Event Summary", result.get("status"), sections)
+        _write_markdown(
+            args.out_md, "Pass Event Summary", result.get("status"), sections
+        )
 
 
 def cmd_events(args):
@@ -383,7 +464,12 @@ def cmd_events(args):
         result = {"status": "NOT_RUN", "reason": f"事件文件不存在: {events_path}"}
         _write_json(args.out_json, result)
         if args.out_md:
-            _write_markdown(args.out_md, "Pass Event Summary", result.get("status"), [("Reason", result.get("reason"))])
+            _write_markdown(
+                args.out_md,
+                "Pass Event Summary",
+                result.get("status"),
+                [("Reason", result.get("reason"))],
+            )
         return 0
     by_pass, reasons, issues, event_count = _read_self_events(events_path)
     self_records = _self_event_records(by_pass, issues)
@@ -392,15 +478,22 @@ def cmd_events(args):
     issues.extend(_target_event_issues(args, event_count, self_records, official))
     status, reason = _event_status(args, event_count, official, issues)
     result = {
-        "status": status, "reason": reason, "event_schema_version": "1.0",
+        "status": status,
+        "reason": reason,
+        "event_schema_version": "1.0",
         "input_artifacts": {
             "events": str(Path(args.events).resolve()) if args.events else None,
-            "fusion_result": str(Path(args.fusion_result).resolve()) if args.fusion_result else None,
+            "fusion_result": str(Path(args.fusion_result).resolve())
+            if args.fusion_result
+            else None,
         },
-        "event_count": event_count, "self_counters": self_records,
+        "event_count": event_count,
+        "self_counters": self_records,
         "skip_or_failure_reasons": dict(sorted(reasons.items())),
-        "official_fusion_result": official, "consistency_issues": issues,
-        "pass_name": args.pass_name, "require_applied": args.require_applied,
+        "official_fusion_result": official,
+        "consistency_issues": issues,
+        "pass_name": args.pass_name,
+        "require_applied": args.require_applied,
     }
     _write_event_result(args, result)
     return 0
@@ -418,7 +511,9 @@ def _load_graph(path):
         input_type, reason = adapt_input.detect_input_type(path)
         parser = adapt_input.PARSERS.get(input_type)
         if parser is None:
-            raise RuntimeError(f"{reason}；仅 normalized JSON、ONNX 或 pbtxt 可用于图 diff")
+            raise RuntimeError(
+                f"{reason}；仅 normalized JSON、ONNX 或 pbtxt 可用于图 diff"
+            )
         graph = parser(path)
     if graph.get("status") == "NOT_RUN":
         raise RuntimeError(graph.get("reason", "normalized graph is NOT_RUN"))
@@ -459,14 +554,22 @@ def _edge_signature(graph, key):
 def _output_signature(graph):
     node_by_id = {node.get("id"): node.get("name") for node in graph.get("nodes", [])}
     return [
-        (output.get("name"), node_by_id.get(output.get("from_node")), output.get("from_port"))
+        (
+            output.get("name"),
+            node_by_id.get(output.get("from_node")),
+            output.get("from_port"),
+        )
         for output in graph.get("outputs", [])
     ]
 
 
 def _matches_node(spec, name, node):
     if isinstance(spec, str):
-        return spec == name or spec == node.get("op_type") or spec == node.get("original_op_type")
+        return (
+            spec == name
+            or spec == node.get("op_type")
+            or spec == node.get("original_op_type")
+        )
     if not isinstance(spec, dict):
         return False
     return all(node.get(key) == value for key, value in spec.items())
@@ -478,10 +581,18 @@ def _contains_spec(specs, name, node):
 
 def _node_changes(base, optimized):
     fields = (
-        "op_type", "original_op_type", "attrs", "shape", "shape_range", "dtype", "format",
+        "op_type",
+        "original_op_type",
+        "attrs",
+        "shape",
+        "shape_range",
+        "dtype",
+        "format",
         "optional_inputs_present",
     )
-    return [field for field in fields if base.get(field, {}) != optimized.get(field, {})]
+    return [
+        field for field in fields if base.get(field, {}) != optimized.get(field, {})
+    ]
 
 
 def _node_field_change_issues(name, changes, allowed_fields):
@@ -515,12 +626,18 @@ def _graph_node_changes(baseline, optimized, allow):
     added_names = sorted(set(opt_nodes) - set(base_nodes))
     common_names = sorted(set(base_nodes) & set(opt_nodes))
     unexpected_removed = [
-        name for name in removed_names
-        if not _contains_spec(allow.get("removed_nodes", []), name, base_nodes.get(name, {}))
+        name
+        for name in removed_names
+        if not _contains_spec(
+            allow.get("removed_nodes", []), name, base_nodes.get(name, {})
+        )
     ]
     unexpected_added = [
-        name for name in added_names
-        if not _contains_spec(allow.get("added_nodes", []), name, opt_nodes.get(name, {}))
+        name
+        for name in added_names
+        if not _contains_spec(
+            allow.get("added_nodes", []), name, opt_nodes.get(name, {})
+        )
     ]
     if unexpected_removed:
         issues.append(f"unallowed removed nodes: {unexpected_removed}")
@@ -557,9 +674,13 @@ def _graph_edge_changes(baseline, optimized, allow, base_nodes, opt_nodes):
         if unexpected_consumers:
             issues.append(f"unexpected new consumers: {sorted(unexpected_consumers)}")
     edges = {
-        "data": {"removed": sorted(base_data - opt_data), "added": sorted(opt_data - base_data)},
+        "data": {
+            "removed": sorted(base_data - opt_data),
+            "added": sorted(opt_data - base_data),
+        },
         "control": {
-            "removed": sorted(base_control - opt_control), "added": sorted(opt_control - base_control),
+            "removed": sorted(base_control - opt_control),
+            "added": sorted(opt_control - base_control),
         },
     }
     return edges, sorted(unexpected_consumers), issues
@@ -590,14 +711,23 @@ def _graph_output_check(baseline, optimized, preserve_outputs, issues):
     base_outputs = _output_signature(baseline)
     opt_outputs = _output_signature(optimized)
     if not baseline.get("outputs") or not optimized.get("outputs"):
-        return {"status": "NOT_RUN", "reason": "一侧 normalized graph 缺可靠 outputs 签名"}
+        return {
+            "status": "NOT_RUN",
+            "reason": "一侧 normalized graph 缺可靠 outputs 签名",
+        }
     if base_outputs != opt_outputs:
         if preserve_outputs:
             issues.append("graph outputs changed")
-            return {"status": "FAILED", "baseline": base_outputs, "optimized": opt_outputs}
+            return {
+                "status": "FAILED",
+                "baseline": base_outputs,
+                "optimized": opt_outputs,
+            }
         return {
-            "status": "PASSED", "allowed_change": True,
-            "baseline": base_outputs, "optimized": opt_outputs,
+            "status": "PASSED",
+            "allowed_change": True,
+            "baseline": base_outputs,
+            "optimized": opt_outputs,
         }
     return {"status": "PASSED", "outputs": base_outputs}
 
@@ -606,9 +736,11 @@ def _write_graph_result(args, result):
     _write_json(args.out_json, result)
     if args.out_md:
         sections = [
-            ("Checks", result.get("checks", {})), ("Node Changes", result.get("nodes", {})),
+            ("Checks", result.get("checks", {})),
+            ("Node Changes", result.get("nodes", {})),
             ("Data Edge Changes", result.get("data_edges", {})),
-            ("Control Edge Changes", result.get("control_edges", {})), ("Issues", result.get("issues", [])),
+            ("Control Edge Changes", result.get("control_edges", {})),
+            ("Issues", result.get("issues", [])),
         ]
         _write_markdown(args.out_md, "Graph Comparison", result.get("status"), sections)
 
@@ -621,31 +753,54 @@ def cmd_graph(args):
         result = {"status": "NOT_RUN", "reason": str(exc)}
         _write_json(args.out_json, result)
         if args.out_md:
-            _write_markdown(args.out_md, "Graph Comparison", result.get("status"), [("Reason", result.get("reason"))])
+            _write_markdown(
+                args.out_md,
+                "Graph Comparison",
+                result.get("status"),
+                [("Reason", result.get("reason"))],
+            )
         return 0
     rules = _load_json(args.rules) if args.rules else {}
     allow = rules.get("allow", {})
     require = rules.get("require", {})
     integrity_issues = _graph_integrity(baseline) + _graph_integrity(optimized)
-    base_nodes, opt_nodes, nodes, node_issues = _graph_node_changes(baseline, optimized, allow)
+    base_nodes, opt_nodes, nodes, node_issues = _graph_node_changes(
+        baseline, optimized, allow
+    )
     edges, unexpected_consumers, edge_issues = _graph_edge_changes(
-        baseline, optimized, allow, base_nodes, opt_nodes,
+        baseline,
+        optimized,
+        allow,
+        base_nodes,
+        opt_nodes,
     )
     issues = integrity_issues + node_issues + edge_issues
-    issues.extend(_required_node_issues(
-        require, base_nodes, opt_nodes, nodes.get("removed", []), nodes.get("added", []),
-    ))
-    output_check = _graph_output_check(baseline, optimized, require.get("preserve_outputs", True), issues)
+    issues.extend(
+        _required_node_issues(
+            require,
+            base_nodes,
+            opt_nodes,
+            nodes.get("removed", []),
+            nodes.get("added", []),
+        )
+    )
+    output_check = _graph_output_check(
+        baseline, optimized, require.get("preserve_outputs", True), issues
+    )
 
     status = _status_from_issues(issues)
     if status == "PASSED" and output_check.get("status") == "NOT_RUN":
         status = "NOT_RUN"
     result = {
-        "status": status, "rules": rules,
-        "input_graphs": {"baseline": str(Path(args.baseline).resolve()),
-                         "optimized": str(Path(args.optimized).resolve())},
+        "status": status,
+        "rules": rules,
+        "input_graphs": {
+            "baseline": str(Path(args.baseline).resolve()),
+            "optimized": str(Path(args.optimized).resolve()),
+        },
         "checks": {
-            "outputs": output_check, "graph_integrity": "PASSED" if not integrity_issues else "FAILED",
+            "outputs": output_check,
+            "graph_integrity": "PASSED" if not integrity_issues else "FAILED",
         },
         "nodes": nodes,
         "data_edges": edges.get("data", {}),
@@ -682,7 +837,11 @@ def _context_issues(baseline, optimized, required_keys):
         if key not in base_context or key not in opt_context:
             issues.append(f"context missing required key: {key}")
     keys = sorted(set(base_context) | set(opt_context))
-    issues.extend(f"context mismatch: {key}" for key in keys if base_context.get(key) != opt_context.get(key))
+    issues.extend(
+        f"context mismatch: {key}"
+        for key in keys
+        if base_context.get(key) != opt_context.get(key)
+    )
     return issues
 
 
@@ -705,7 +864,9 @@ def _load_output_map(path):
         isinstance(key, str) and isinstance(target, str) and key and target
         for key, target in value.items()
     ):
-        raise RuntimeError("output map must be a JSON object: {baseline_name: optimized_name}")
+        raise RuntimeError(
+            "output map must be a JSON object: {baseline_name: optimized_name}"
+        )
     return value
 
 
@@ -730,7 +891,9 @@ def _validate_output_lists(baseline, optimized, issues):
         issues.append("baseline/optimized outputs must be arrays")
         return [], [], [], []
     if len(base_outputs) != len(opt_outputs):
-        issues.append(f"output count differs: {len(base_outputs)} != {len(opt_outputs)}")
+        issues.append(
+            f"output count differs: {len(base_outputs)} != {len(opt_outputs)}"
+        )
     base_names = _output_names(base_outputs)
     opt_names = _output_names(opt_outputs)
     if any(not isinstance(name, str) or not name for name in base_names + opt_names):
@@ -746,7 +909,9 @@ def _validate_output_map(output_map, base_names, opt_names, issues):
     unknown_baseline = sorted(set(output_map) - set(base_names))
     unknown_optimized = sorted(set(output_map.values()) - set(opt_names))
     target_counts = Counter(output_map.values())
-    duplicate_targets = sorted(target for target, count in target_counts.items() if count > 1)
+    duplicate_targets = sorted(
+        target for target, count in target_counts.items() if count > 1
+    )
     if unknown_baseline:
         issues.append(f"output map has unknown baseline names: {unknown_baseline}")
     if unknown_optimized:
@@ -794,13 +959,23 @@ def _floating_output_result(np, base, optimized, args):
         abs_error = np.array([], dtype=float)
         rel_error = np.array([], dtype=float)
     equal = bool(np.allclose(base, optimized, atol=atol, rtol=rtol, equal_nan=True))
-    close_count = np.isclose(base, optimized, atol=atol, rtol=rtol, equal_nan=True).sum()
+    close_count = np.isclose(
+        base, optimized, atol=atol, rtol=rtol, equal_nan=True
+    ).sum()
     result = {
-        "status": "PASSED" if equal else "FAILED", "atol": atol, "rtol": rtol,
+        "status": "PASSED" if equal else "FAILED",
+        "atol": atol,
+        "rtol": rtol,
         "max_abs_error": float(abs_error.max()) if abs_error.size else 0.0,
         "max_rel_error": float(rel_error.max()) if rel_error.size else 0.0,
-        "nan_counts": {"baseline": int(np.isnan(base).sum()), "optimized": int(np.isnan(optimized).sum())},
-        "inf_counts": {"baseline": int(np.isinf(base).sum()), "optimized": int(np.isinf(optimized).sum())},
+        "nan_counts": {
+            "baseline": int(np.isnan(base).sum()),
+            "optimized": int(np.isnan(optimized).sum()),
+        },
+        "inf_counts": {
+            "baseline": int(np.isinf(base).sum()),
+            "optimized": int(np.isinf(optimized).sum()),
+        },
         "failed_elements": int(np.size(base) - close_count),
     }
     return result, equal
@@ -809,7 +984,8 @@ def _floating_output_result(np, base, optimized, args):
 def _exact_output_result(np, base, optimized):
     equal = bool(np.array_equal(base, optimized))
     result = {
-        "status": "PASSED" if equal else "FAILED", "comparison": "exact",
+        "status": "PASSED" if equal else "FAILED",
+        "comparison": "exact",
         "failed_elements": int(np.size(base) - np.equal(base, optimized).sum()),
     }
     return result, equal
@@ -831,7 +1007,9 @@ def _compare_output_tensors(context, name, base, optimized):
         context.issues.append(f"{name}: shape or dtype differs")
         return {"status": "FAILED", "reason": "shape or dtype differs"}
     if context.np.issubdtype(base.dtype, context.np.floating):
-        comparison, equal = _floating_output_result(context.np, base, optimized, context.args)
+        comparison, equal = _floating_output_result(
+            context.np, base, optimized, context.args
+        )
         message = f"{name}: float allclose failed"
     else:
         comparison, equal = _exact_output_result(context.np, base, optimized)
@@ -848,7 +1026,11 @@ def _compare_output_pair(context, pair, index):
     if name != optimized_name:
         message = f"output mapping differs at {index}: {name!r} != {optimized_name!r}"
         if not context.mapping_supplied:
-            suffix = "; --output-map is required for semantic alignment" if context.args.allow_output_name_diff else ""
+            suffix = (
+                "; --output-map is required for semantic alignment"
+                if context.args.allow_output_name_diff
+                else ""
+            )
             context.issues.append(message + suffix)
             return None
         context.warnings.append(message)
@@ -861,10 +1043,14 @@ def _compare_output_pair(context, pair, index):
         context.issues.append(f"{name}: cannot read output tensor: {exc}")
         return None
     item_result = {
-        "name": name, "optimized_name": optimized_name,
-        "baseline_path": str(base_path.resolve()), "optimized_path": str(optimized_path.resolve()),
-        "baseline_shape": list(base.shape), "optimized_shape": list(optimized_value.shape),
-        "baseline_dtype": str(base.dtype), "optimized_dtype": str(optimized_value.dtype),
+        "name": name,
+        "optimized_name": optimized_name,
+        "baseline_path": str(base_path.resolve()),
+        "optimized_path": str(optimized_path.resolve()),
+        "baseline_shape": list(base.shape),
+        "optimized_shape": list(optimized_value.shape),
+        "baseline_dtype": str(base.dtype),
+        "optimized_dtype": str(optimized_value.dtype),
     }
     item_result.update(_compare_output_tensors(context, name, base, optimized_value))
     return item_result
@@ -885,16 +1071,22 @@ def _write_output_result(args, result):
         sections = [
             ("Provenance", result.get("provenance", {})),
             ("Tensor Comparisons", result.get("comparisons", [])),
-            ("Issues", result.get("issues", [])), ("Warnings", result.get("warnings", [])),
+            ("Issues", result.get("issues", [])),
+            ("Warnings", result.get("warnings", [])),
         ]
-        _write_markdown(args.out_md, "Output Comparison", result.get("status"), sections)
+        _write_markdown(
+            args.out_md, "Output Comparison", result.get("status"), sections
+        )
 
 
 def _write_missing_outputs(args, issues, provenance_missing, input_manifests):
     status = "FAILED" if issues else "NOT_RUN"
     result = {
-        "status": status, "reason": "baseline/optimized 均需至少一个最终输出张量",
-        "issues": issues, "provenance_missing": provenance_missing, "input_manifests": input_manifests,
+        "status": status,
+        "reason": "baseline/optimized 均需至少一个最终输出张量",
+        "issues": issues,
+        "provenance_missing": provenance_missing,
+        "input_manifests": input_manifests,
     }
     _write_json(args.out_json, result)
     if args.out_md:
@@ -905,26 +1097,41 @@ def _write_missing_outputs(args, issues, provenance_missing, input_manifests):
 
 def cmd_outputs(args):
     input_manifests = {
-        "baseline": str(Path(args.baseline).resolve()), "optimized": str(Path(args.optimized).resolve()),
+        "baseline": str(Path(args.baseline).resolve()),
+        "optimized": str(Path(args.optimized).resolve()),
     }
     try:
         import numpy as np
+
         baseline = _load_manifest(args.baseline)
         optimized = _load_manifest(args.optimized)
     except (ImportError, OSError, json.JSONDecodeError, RuntimeError) as exc:
-        result = {"status": "NOT_RUN", "reason": str(exc), "input_manifests": input_manifests}
+        result = {
+            "status": "NOT_RUN",
+            "reason": str(exc),
+            "input_manifests": input_manifests,
+        }
         _write_json(args.out_json, result)
         if args.out_md:
-            _write_markdown(args.out_md, "Output Comparison", result.get("status"), [("Reason", result.get("reason"))])
+            _write_markdown(
+                args.out_md,
+                "Output Comparison",
+                result.get("status"),
+                [("Reason", result.get("reason"))],
+            )
         return 0
     issues = _context_issues(baseline, optimized, OUTPUT_CONTEXT_KEYS)
     provenance_issues, provenance_missing = _manifest_provenance(baseline, optimized)
     issues.extend(provenance_issues)
-    base_outputs, opt_outputs, base_names, opt_names = _validate_output_lists(baseline, optimized, issues)
+    base_outputs, opt_outputs, base_names, opt_names = _validate_output_lists(
+        baseline, optimized, issues
+    )
     if not base_outputs or not opt_outputs:
         return _write_missing_outputs(args, issues, provenance_missing, input_manifests)
     output_map, mapping_supplied = _read_output_map(args, base_names, opt_names, issues)
-    pairs = _output_pairs(base_outputs, opt_outputs, output_map, mapping_supplied, issues)
+    pairs = _output_pairs(
+        base_outputs, opt_outputs, output_map, mapping_supplied, issues
+    )
     comparison_context = _OutputComparisonContext(
         np=np,
         args=args,
@@ -937,17 +1144,26 @@ def cmd_outputs(args):
     comparisons, warnings = _compare_output_pairs(comparison_context, pairs)
 
     status = "FAILED" if issues else "NOT_RUN" if provenance_missing else "PASSED"
-    provenance_status = "FAILED" if provenance_issues else "NOT_RUN" if provenance_missing else "PASSED"
+    provenance_status = (
+        "FAILED" if provenance_issues else "NOT_RUN" if provenance_missing else "PASSED"
+    )
     result = {
-        "status": status, "context": {
-            "baseline": baseline.get("context"), "optimized": optimized.get("context"),
+        "status": status,
+        "context": {
+            "baseline": baseline.get("context"),
+            "optimized": optimized.get("context"),
         },
         "context_issues": _context_issues(baseline, optimized, OUTPUT_CONTEXT_KEYS),
         "provenance": {
-            "status": provenance_status, "issues": provenance_issues, "missing": provenance_missing,
+            "status": provenance_status,
+            "issues": provenance_issues,
+            "missing": provenance_missing,
         },
-        "comparisons": comparisons, "issues": issues, "warnings": warnings,
-        "output_map": output_map or None, "input_manifests": input_manifests,
+        "comparisons": comparisons,
+        "issues": issues,
+        "warnings": warnings,
+        "output_map": output_map or None,
+        "input_manifests": input_manifests,
     }
     _write_output_result(args, result)
     return 0
@@ -959,7 +1175,10 @@ def _percentile_95(values):
 
 
 def _csv_field(row, *names):
-    normalized = {key.lower().replace(" ", ""): value for key, value in row.items() if key}
+    normalized = {}
+    for key, value in row.items():
+        if key:
+            normalized[key.lower().replace(" ", "")] = value
     for name in names:
         value = normalized.get(name.lower().replace(" ", ""))
         if value is not None:
@@ -977,7 +1196,9 @@ def _read_profile_rows(path):
 
 def _add_op_summary(rows, op_summary):
     for row in rows:
-        duration = _as_float(_csv_field(row, "Task Duration(us)", "Task Duration", "Duration(us)"))
+        duration = _as_float(
+            _csv_field(row, "Task Duration(us)", "Task Duration", "Duration(us)")
+        )
         if duration is not None:
             op_summary.append(duration)
 
@@ -986,13 +1207,19 @@ def _add_op_statistics(rows, op_statistic):
     for row in rows:
         op_type = _csv_field(row, "OP Type", "Op Type", "Type")
         count = _as_float(_csv_field(row, "Count"))
-        total = _as_float(_csv_field(row, "Total Time(us)", "Total Time", "Task Duration(us)"))
+        total = _as_float(
+            _csv_field(row, "Total Time(us)", "Total Time", "Task Duration(us)")
+        )
         if op_type and total is not None:
-            statistic = op_statistic.setdefault(op_type, {"count": 0.0, "total_us": 0.0})
-            statistic.update({
-                "count": statistic.get("count", 0.0) + (count or 0.0),
-                "total_us": statistic.get("total_us", 0.0) + total,
-            })
+            statistic = op_statistic.setdefault(
+                op_type, {"count": 0.0, "total_us": 0.0}
+            )
+            statistic.update(
+                {
+                    "count": statistic.get("count", 0.0) + (count or 0.0),
+                    "total_us": statistic.get("total_us", 0.0) + total,
+                }
+            )
 
 
 def _profile_summary(directory):
@@ -1000,7 +1227,11 @@ def _profile_summary(directory):
         return {"status": "NOT_RUN", "reason": "未提供 profiling 目录"}
     root = Path(directory)
     if not root.is_dir():
-        return {"status": "NOT_RUN", "path": str(root), "reason": f"profiling 目录不存在: {root}"}
+        return {
+            "status": "NOT_RUN",
+            "path": str(root),
+            "reason": f"profiling 目录不存在: {root}",
+        }
     op_summary = []
     op_statistic = defaultdict(lambda: {"count": 0.0, "total_us": 0.0})
     for path in root.rglob("*.csv"):
@@ -1011,14 +1242,25 @@ def _profile_summary(directory):
         elif "op_statistic" in lower_name:
             _add_op_statistics(rows, op_statistic)
     if not op_summary and not op_statistic:
-        return {"status": "NOT_RUN", "path": str(root.resolve()), "reason": "未找到可解析的 op_summary/op_statistic CSV"}
-    return {"status": "PASSED", "path": str(root.resolve()), "op_summary_total_us": sum(op_summary),
-            "op_summary_rows": len(op_summary), "op_statistic": dict(sorted(op_statistic.items()))}
+        return {
+            "status": "NOT_RUN",
+            "path": str(root.resolve()),
+            "reason": "未找到可解析的 op_summary/op_statistic CSV",
+        }
+    return {
+        "status": "PASSED",
+        "path": str(root.resolve()),
+        "op_summary_total_us": sum(op_summary),
+        "op_summary_rows": len(op_summary),
+        "op_statistic": dict(sorted(op_statistic.items())),
+    }
 
 
 def _operator_group_summary(profile, op_types):
     valid_group = isinstance(op_types, list) and op_types
-    if not valid_group or not all(isinstance(value, str) and value for value in op_types):
+    if not valid_group or not all(
+        isinstance(value, str) and value for value in op_types
+    ):
         return {"status": "NOT_RUN", "reason": "未提供非空 operator group"}
     if profile.get("status") != "PASSED":
         return {"status": "NOT_RUN", "reason": "profiling 不可用"}
@@ -1027,7 +1269,8 @@ def _operator_group_summary(profile, op_types):
     if missing:
         return {"status": "FAILED", "op_types": op_types, "missing_op_types": missing}
     return {
-        "status": "PASSED", "op_types": op_types,
+        "status": "PASSED",
+        "op_types": op_types,
         "count": sum(statistic[op_type]["count"] for op_type in op_types),
         "total_us": sum(statistic[op_type]["total_us"] for op_type in op_types),
     }
@@ -1041,13 +1284,21 @@ def _operator_group_comparison(profiles, groups):
     baseline = _operator_group_summary(profiles["baseline"], groups.get("baseline"))
     optimized = _operator_group_summary(profiles["optimized"], groups.get("optimized"))
     statuses = {baseline["status"], optimized["status"]}
-    status = "FAILED" if "FAILED" in statuses else "NOT_RUN" if "NOT_RUN" in statuses else "PASSED"
+    status = (
+        "FAILED"
+        if "FAILED" in statuses
+        else "NOT_RUN"
+        if "NOT_RUN" in statuses
+        else "PASSED"
+    )
     result = {"status": status, "baseline": baseline, "optimized": optimized}
     if status == "PASSED":
         absolute = optimized["total_us"] - baseline["total_us"]
         result["delta"] = {
             "absolute_us": absolute,
-            "relative_percent": absolute / baseline["total_us"] * 100 if baseline["total_us"] else None,
+            "relative_percent": absolute / baseline["total_us"] * 100
+            if baseline["total_us"]
+            else None,
         }
     return result
 
@@ -1061,7 +1312,9 @@ def _validate_latency_context(label, manifest, values, issues):
     if runs is None or runs < 1:
         issues.append(f"{label}: runs must be a positive integer")
     elif len(values) != runs:
-        issues.append(f"{label}: latencies_ms samples ({len(values)}) differs from runs ({runs})")
+        issues.append(
+            f"{label}: latencies_ms samples ({len(values)}) differs from runs ({runs})"
+        )
 
 
 def _latency_values(baseline, optimized, issues):
@@ -1071,6 +1324,9 @@ def _latency_values(baseline, optimized, issues):
     except (TypeError, ValueError):
         issues.append("latencies_ms contains non-numeric value")
         return [], []
+    if any(not math.isfinite(value) for value in base_times + opt_times):
+        issues.append("latencies_ms must contain only finite values")
+        return [], []
     if any(value < 0 for value in base_times + opt_times):
         issues.append("latencies_ms must be non-negative")
     _validate_latency_context("baseline", baseline, base_times, issues)
@@ -1079,7 +1335,11 @@ def _latency_values(baseline, optimized, issues):
 
 
 def _latency_stats(values):
-    return {"samples": len(values), "median_ms": statistics.median(values), "p95_ms": _percentile_95(values)}
+    return {
+        "samples": len(values),
+        "median_ms": statistics.median(values),
+        "p95_ms": _percentile_95(values),
+    }
 
 
 def _latency_delta(base_stats, opt_stats):
@@ -1089,7 +1349,9 @@ def _latency_delta(base_stats, opt_stats):
     absolute = opt_stats.get("median_ms") - base_median
     return {
         "median_absolute_ms": absolute,
-        "median_relative_percent": absolute / base_median * 100 if base_median else None,
+        "median_relative_percent": absolute / base_median * 100
+        if base_median
+        else None,
     }
 
 
@@ -1098,15 +1360,24 @@ def _performance_result(baseline, optimized, issues):
     raw_optimized = optimized.get("latencies_ms", [])
     if not raw_base or not raw_optimized:
         status = "NOT_RUN" if not issues else "FAILED"
-        return {"status": status, "reason": "baseline/optimized 均需非空 latencies_ms", "issues": issues}
+        return {
+            "status": status,
+            "reason": "baseline/optimized 均需非空 latencies_ms",
+            "issues": issues,
+        }
     base_times, opt_times = _latency_values(baseline, optimized, issues)
     base_stats = _latency_stats(base_times) if base_times else None
     opt_stats = _latency_stats(opt_times) if opt_times else None
     return {
         "status": _status_from_issues(issues),
-        "context": {"baseline": baseline.get("context"), "optimized": optimized.get("context")},
-        "baseline": base_stats, "optimized": opt_stats,
-        "delta": _latency_delta(base_stats, opt_stats), "issues": issues,
+        "context": {
+            "baseline": baseline.get("context"),
+            "optimized": optimized.get("context"),
+        },
+        "baseline": base_stats,
+        "optimized": opt_stats,
+        "delta": _latency_delta(base_stats, opt_stats),
+        "issues": issues,
     }
 
 
@@ -1140,12 +1411,17 @@ def _write_performance_result(args, result):
     _write_json(args.out_json, result)
     if args.out_md:
         sections = [
-            ("End To End", {key: result.get(key) for key in ("baseline", "optimized", "delta")}),
+            (
+                "End To End",
+                {key: result.get(key) for key in ("baseline", "optimized", "delta")},
+            ),
             ("Profiling", result.get("profiling", {})),
             ("Operator Group", result.get("operator_group_comparison", {})),
             ("Issues", result.get("issues", [])),
         ]
-        _write_markdown(args.out_md, "Performance Comparison", result.get("status"), sections)
+        _write_markdown(
+            args.out_md, "Performance Comparison", result.get("status"), sections
+        )
 
 
 def cmd_performance(args):
@@ -1157,7 +1433,10 @@ def cmd_performance(args):
         _write_json(args.out_json, result)
         if args.out_md:
             _write_markdown(
-                args.out_md, "Performance Comparison", result.get("status"), [("Reason", result.get("reason"))],
+                args.out_md,
+                "Performance Comparison",
+                result.get("status"),
+                [("Reason", result.get("reason"))],
             )
         return 0
     issues = _context_issues(baseline, optimized, PERFORMANCE_CONTEXT_KEYS)
@@ -1167,11 +1446,18 @@ def cmd_performance(args):
     if not issues and provenance_missing:
         result["status"] = "NOT_RUN"
     result["provenance"] = {
-        "status": "FAILED" if provenance_issues else "NOT_RUN" if provenance_missing else "PASSED",
-        "issues": provenance_issues, "missing": provenance_missing,
+        "status": "FAILED"
+        if provenance_issues
+        else "NOT_RUN"
+        if provenance_missing
+        else "PASSED",
+        "issues": provenance_issues,
+        "missing": provenance_missing,
     }
-    result["input_manifests"] = {"baseline": str(Path(args.baseline).resolve()),
-                                 "optimized": str(Path(args.optimized).resolve())}
+    result["input_manifests"] = {
+        "baseline": str(Path(args.baseline).resolve()),
+        "optimized": str(Path(args.optimized).resolve()),
+    }
     _add_performance_profiles(args, result)
     _merge_operator_group_status(result)
     _write_performance_result(args, result)
@@ -1183,22 +1469,44 @@ def cmd_report(args):
     for path in args.items:
         try:
             content = _load_json(path)
-            items.append({"path": str(Path(path).resolve()), "status": content.get("status", "NOT_RUN"),
-                          "command": content.get("command"), "reason": content.get("reason")})
+            items.append(
+                {
+                    "path": str(Path(path).resolve()),
+                    "status": content.get("status", "NOT_RUN"),
+                    "command": content.get("command"),
+                    "reason": content.get("reason"),
+                }
+            )
         except (OSError, json.JSONDecodeError) as exc:
             items.append({"path": str(path), "status": "NOT_RUN", "reason": str(exc)})
     statuses = {item["status"] for item in items}
-    overall = "FAILED" if "FAILED" in statuses else "NOT_RUN" if "NOT_RUN" in statuses else "PASSED"
+    overall = (
+        "FAILED"
+        if "FAILED" in statuses
+        else "NOT_RUN"
+        if "NOT_RUN" in statuses
+        else "PASSED"
+    )
     # G3 availability is distinct from the validation conclusion: a failed run is
     # still an executed run and must remain visible as overall_status=FAILED.
     gate = "DEGRADED" if "NOT_RUN" in statuses else "PASS"
-    result = {"status": overall, "gate_status": gate, "items": items,
-              "artifacts": [item["path"] for item in items]}
+    result = {
+        "status": overall,
+        "gate_status": gate,
+        "items": items,
+        "artifacts": [item["path"] for item in items],
+    }
     _write_json(args.out_json, result)
     if args.out_md:
-        _write_markdown(args.out_md, "Validation Report", overall, [
-            ("G3 Gate", f"gate_status: `{gate}`"), ("Evidence", items),
-        ])
+        _write_markdown(
+            args.out_md,
+            "Validation Report",
+            overall,
+            [
+                ("G3 Gate", f"gate_status: `{gate}`"),
+                ("Evidence", items),
+            ],
+        )
     return 0
 
 
@@ -1208,7 +1516,10 @@ def cmd_normalize(args):
         result = {"status": "PASSED", "graph": graph}
     except RuntimeError as exc:
         result = {"status": "NOT_RUN", "reason": str(exc)}
-    _write_json(args.out_json, result.get("graph") if result.get("status") == "PASSED" else result)
+    _write_json(
+        args.out_json,
+        result.get("graph") if result.get("status") == "PASSED" else result,
+    )
     _emit_json({key: value for key, value in result.items() if key != "graph"})
     return 0
 
@@ -1236,7 +1547,9 @@ def _add_events_command(subparsers):
     command.add_argument("--fusion-result")
     command.add_argument("--pass-name", help="只验收指定 pass 的结构化证据")
     command.add_argument(
-        "--require-applied", action="store_true", help="要求指定 pass 存在 applied/effect_times > 0",
+        "--require-applied",
+        action="store_true",
+        help="要求指定 pass 存在 applied/effect_times > 0",
     )
     _add_report_paths(command)
     command.set_defaults(func=cmd_events)
@@ -1256,11 +1569,13 @@ def _add_outputs_command(subparsers):
     command.add_argument("--atol", type=float)
     command.add_argument("--rtol", type=float)
     command.add_argument(
-        "--allow-output-name-diff", action="store_true",
+        "--allow-output-name-diff",
+        action="store_true",
         help="兼容旧调用；名称变化时仍必须提供 --output-map",
     )
     command.add_argument(
-        "--output-map", help="JSON 文件，显式声明 {baseline_output_name: optimized_output_name} 映射",
+        "--output-map",
+        help="JSON 文件，显式声明 {baseline_output_name: optimized_output_name} 映射",
     )
     _add_report_paths(command)
     command.set_defaults(func=cmd_outputs)
@@ -1271,7 +1586,9 @@ def _add_performance_command(subparsers):
     _add_pair_paths(command)
     command.add_argument("--baseline-profile")
     command.add_argument("--optimized-profile")
-    command.add_argument("--operator-groups", help="JSON: {baseline:[...], optimized:[...]} 的算子类型组")
+    command.add_argument(
+        "--operator-groups", help="JSON: {baseline:[...], optimized:[...]} 的算子类型组"
+    )
     _add_report_paths(command)
     command.set_defaults(func=cmd_performance)
 
@@ -1287,8 +1604,12 @@ def _build_parser():
     parser = argparse.ArgumentParser(description="Validate GE fusion pass evidence")
     subparsers = parser.add_subparsers(dest="command", required=True)
     for register in (
-        _add_normalize_command, _add_events_command, _add_graph_command,
-        _add_outputs_command, _add_performance_command, _add_report_command,
+        _add_normalize_command,
+        _add_events_command,
+        _add_graph_command,
+        _add_outputs_command,
+        _add_performance_command,
+        _add_report_command,
     ):
         register(subparsers)
     return parser
