@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdirSync, writeFileSync, copyFileSync, readdirSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -35,6 +35,25 @@ describe("backup", () => {
   afterEach(teardown);
 
   describe("createBackup", () => {
+    it("preserves both backups when the same target is saved twice in one second", async () => {
+      const { createBackup, findBackups } = await import("../src/core/backup.js");
+      const agentsFile = join(testDir, "AGENTS.md");
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-11-02T00:00:00Z"));
+      try {
+        writeFileSync(agentsFile, "original");
+        const first = createBackup(agentsFile, "plugin-a", "Plugin A");
+        writeFileSync(agentsFile, "edited");
+        const second = createBackup(agentsFile, "plugin-a", "Plugin A");
+        expect(first?.filePath).not.toBe(second?.filePath);
+        expect(readFileSync(first!.filePath, "utf-8")).toBe("original");
+        expect(readFileSync(second!.filePath, "utf-8")).toBe("edited");
+        expect(findBackups(testDir).map((item) => item.filePath)).toEqual([second!.filePath, first!.filePath]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("creates backup beside the target file and records originalPath", async () => {
       const { createBackup } = await import("../src/core/backup.js");
       const agentsFile = join(testDir, "AGENTS.md");

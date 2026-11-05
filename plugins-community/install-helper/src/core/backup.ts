@@ -8,7 +8,7 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { existsSync, copyFileSync, readdirSync, unlinkSync } from "fs";
+import { constants, existsSync, copyFileSync, readdirSync, unlinkSync } from "fs";
 import { join, dirname, basename, resolve } from "path";
 import type { AITool, BackupInfo } from "../types/index.js";
 import { readAllManifests } from "./manifest.js";
@@ -84,21 +84,26 @@ export function createBackup(
   }
 
   const timestamp = formatTimestamp(new Date());
-  const backupFileName = `${basename(targetPath)}.cannbot-backup.${fromPluginId}.${timestamp}`;
-  const backupPath = join(dirname(targetPath), backupFileName);
-
-  try {
-    copyFileSync(targetPath, backupPath);
-    return {
-      filePath: backupPath,
-      originalPath: targetPath,
-      pluginId: fromPluginId,
-      pluginName: fromPluginName,
-      backupTime: timestamp,
-    };
-  } catch {
-    return null;
+  for (let attempt = 0; attempt < 10000; attempt++) {
+    const backupTime = attempt === 0 ? timestamp : `${timestamp}-${String(attempt).padStart(4, "0")}`;
+    const backupFileName = `${basename(targetPath)}.cannbot-backup.${fromPluginId}.${backupTime}`;
+    const backupPath = join(dirname(targetPath), backupFileName);
+    try {
+      // Exclusive creation prevents both sequential and concurrent backups
+      // from overwriting another copy created in the same second.
+      copyFileSync(targetPath, backupPath, constants.COPYFILE_EXCL);
+      return {
+        filePath: backupPath,
+        originalPath: targetPath,
+        pluginId: fromPluginId,
+        pluginName: fromPluginName,
+        backupTime,
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") return null;
+    }
   }
+  return null;
 }
 
 /** Finds the plugin whose install record owns `targetPath` (its recorded
