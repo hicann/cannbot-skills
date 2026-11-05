@@ -299,7 +299,7 @@ class FactorValueGenerator:
                     'sources': source_values,
                     'get_broadcast_result': lambda *shapes: get_broadcast_result(list(shapes)),
                 })
-            except:
+            except Exception:
                 return None
         
         elif constraint_type == 'inferable_filter':
