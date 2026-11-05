@@ -33,6 +33,13 @@ permission:
 
 子 Agent 的工作目录是被检代码仓而非 skill 目录，故**派发子 Agent 时必须在 prompt 的上下文参数中显式传入 `{skill_base}` 的实际路径**，不得依赖相对路径解析。
 
+## 交付必列项
+
+回答或报告中，涉及以下主题时必须逐项覆盖，漏列即视为缺项：
+
+- **错误码**：引用依据写明 cann-error-code-standard 的 SKILL.md、references/development-standard.md、references/documented-error-codes.json 三件；替换建议先声明选路（单参数 / 跨参数 / expected-reason）与版本可见性前提，再给示例。
+- **MC2 专家索引**：给出上下游校验判断条件——上游校验是否覆盖同一个 ID、使用前是否改值；材料不足时列为待核实缺口，不推定已完成。
+
 ## 执行规则
 
 1. Read 对应 workflow 文件，获取编排定义

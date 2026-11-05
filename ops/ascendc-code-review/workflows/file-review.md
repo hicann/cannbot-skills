@@ -25,9 +25,10 @@
 ### 阶段0：检视计划设计
 
 1. 将任务0 标记为 in_progress
-2. 从 file_input 提取算子名，确认文件存在，并记录**检视文件数**（目录输入按 find 枚举计数）。按 `{skill_base}/scripts/workflow.review-thresholds.yaml` 顶部「统计口径（行数）」段统计 file_input 代码行数（唯一定义处，勿自行实现）并记录（供阶段3 报告头部元信息使用）
-3. Read + 执行 `steps/common.plan-design.md`（主 Agent 直接执行，不派发子 Agent）：做侧别识别 + 文档级检视分组。传入 file_input + scope_hint + 检视类型 `file` + 检视标识留空（文件检视无 PR 号）。**plan-design 负责调用 `{skill_base}/scripts/workflow.create_review_dir.py` 创建 yaml 输出目录**，返回值含 `yaml_dir` 路径
-4. 将任务0 标记为 done
+2. Read + 执行 `steps/common.env-check.md`（依赖自检，已装即走）。失败则中止检视
+3. 从 file_input 提取算子名，确认文件存在，并记录**检视文件数**（目录输入按 find 枚举计数）。按 `{skill_base}/scripts/workflow.review-thresholds.yaml` 顶部「统计口径（行数）」段统计 file_input 代码行数（唯一定义处，勿自行实现）并记录（供阶段3 报告头部元信息使用）
+4. Read + 执行 `steps/common.plan-design.md`（主 Agent 直接执行，不派发子 Agent）：做侧别识别 + 文档级检视分组。传入 file_input + scope_hint + 检视类型 `file` + 检视标识留空（文件检视无 PR 号）。**plan-design 负责调用 `{skill_base}/scripts/workflow.create_review_dir.py` 创建 yaml 输出目录**，返回值含 `yaml_dir` 路径
+5. 将任务0 标记为 done
 
 ### 阶段1：逐条检视
 

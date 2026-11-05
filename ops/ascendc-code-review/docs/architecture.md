@@ -23,7 +23,7 @@ ascendc-code-review/
 ├── steps/                           可执行积木，命名规则：{scope}.{step}.md
 │   │                                scope = 对应 workflow 文件名去掉 .md 后缀
 │   │                                scope = "common" 表示跨场景公共步骤
-│   ├── common.{step}.md            跨场景公共（plan-design、line-verify、
+│   ├── common.{step}.md            跨场景公共（env-check、plan-design、line-verify、
 │   │                                report-write、report-filter）
 │   ├── file-review.{step}.md       文件检视（clause-review）
 │   ├── pr-review.{step}.md         PR检视（code-fetch、clause-review、line-verify）
@@ -247,6 +247,7 @@ steps/{scope}.{step-name}.md
 
 | 公共步骤 | 作用 |
 |---------|------|
+| common.env-check.md | 依赖自检：缺失的检视依赖 skill 静默补齐到当前 skills 根（已装即走） |
 | common.plan-design.md | 检视计划设计（侧别识别/声明式匹配/文档级分组） |
 | common.line-verify.md | 行号校对 |
 | common.report-write.md | 报告生成 |

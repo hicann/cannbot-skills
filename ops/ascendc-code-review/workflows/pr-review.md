@@ -22,18 +22,19 @@
 ### 阶段0：获取 diff + 检视计划设计
 
 1. 将任务0 标记为 in_progress
-2. 从用户输入中提取 PR 链接，解析出 repo_url 与 pr_number，判断托管平台（仅支持 GitCode，非 GitCode PR 终止）
-3. Read + 执行 `steps/pr-review.code-fetch.md` 的派发指令，派发 code-fetch 子 Agent 获取 diff 和完整源码（获取/克隆脚本由子 Agent 执行，主 Agent 不直接执行）
-4. 等待 code-fetch 子 Agent 返回（产出 diff_path + repo_path + oversized + 变更文件数 + 变更行数——后两者记录备用，供阶段3 报告头部元信息）
-5. **超大 PR 提示**（oversized 由 code-fetch 调 review_mode.py 双高判定，阈值见 `{skill_base}/scripts/workflow.review-thresholds.yaml`）：
+2. Read + 执行 `steps/common.env-check.md`（依赖自检，已装即走）。失败则中止检视
+3. 从用户输入中提取 PR 链接，解析出 repo_url 与 pr_number，判断托管平台（仅支持 GitCode，非 GitCode PR 终止）
+4. Read + 执行 `steps/pr-review.code-fetch.md` 的派发指令，派发 code-fetch 子 Agent 获取 diff 和完整源码（获取/克隆脚本由子 Agent 执行，主 Agent 不直接执行）
+5. 等待 code-fetch 子 Agent 返回（产出 diff_path + repo_path + oversized + 变更文件数 + 变更行数——后两者记录备用，供阶段3 报告头部元信息）
+6. **超大 PR 提示**（oversized 由 code-fetch 调 review_mode.py 双高判定，阈值见 `{skill_base}/scripts/workflow.review-thresholds.yaml`）：
    - `oversized=true` → **先向用户输出下方提示，再继续标准流程**（提示不阻断、不等待用户回复，编排不变）
    - `oversized=false` → 直接继续
 
    **用户可见提示（仅 `oversized=true` 时输出一次）**：
 
    > 检测到超大 PR（变更文件数与变更行数双高）。**强烈建议先在本地手工拆分**：按算子或子系统边界把它拆成几个小 PR，再分批走文件检视流程（`workflows/file-review.md`）逐个检视——超大 diff 单次全量检视容易因上下文超载而漏检，失败重跑代价也高。本次全量 PR 检视仍将继续；若想改为分批检视，请中断并告知我。
-6. Read + 执行 `steps/common.plan-design.md`（主 Agent 直接执行，不派发子 Agent）：做侧别识别 + 文档级检视分组。传入 diff 路径 + repo_path + scope_hint + 检视类型 `pr` + 检视标识 `{pr_number}`。**plan-design 负责调用 `{skill_base}/scripts/workflow.create_review_dir.py --type pr --id {pr_number}` 创建 yaml 输出目录**，返回值含 `yaml_dir` 路径
-7. 将任务0 标记为 done
+7. Read + 执行 `steps/common.plan-design.md`（主 Agent 直接执行，不派发子 Agent）：做侧别识别 + 文档级检视分组。传入 diff 路径 + repo_path + scope_hint + 检视类型 `pr` + 检视标识 `{pr_number}`。**plan-design 负责调用 `{skill_base}/scripts/workflow.create_review_dir.py --type pr --id {pr_number}` 创建 yaml 输出目录**，返回值含 `yaml_dir` 路径
+8. 将任务0 标记为 done
 
 ### 阶段1：逐条检视
 

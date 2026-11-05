@@ -153,7 +153,7 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "请说明新增的错误码检测项如何工作，要拦截哪些废弃错误码？Host 代码使用 OP_LOGE_WITH_INVALID_INPUT_SHAPE(opName, 0, actual, expected)，目前看不到依赖的 log.h，应该如何给出检视结论和修复建议？不要调用外部服务，也不要修改代码。",
+      "prompt": "请说明新增的错误码检测项如何工作，要拦截哪些废弃错误码？Host 代码使用 OP_LOGE_WITH_INVALID_INPUT_SHAPE(opName, 0, actual, expected)，目前看不到依赖的 log.h，应该如何给出检视结论和修复建议？同一处还存在跨参数约束——两个输入张量 x、y 的 rank 必须一致，各自单独合法但组合非法——这种跨参数场景应选哪个替换入口？不要调用外部服务，也不要修改代码。",
       "expected_output": "应说明引用 cann-error-code-standard 的 SKILL、development-standard 和 documented-error-codes.json，而不是复制正式码表。列出要拦截的 EZ0001、EZ0002、EZ0003、EZ0005、EZ0006、EZ0007 及对应旧宏。旧 shape 宏是废弃码候选，须解析实际宏定义和 include 链；缺少 log.h 时不能臆称实际叶子已验证。替换按语义参数名、单/多参数、expected/reason 选择目标版本已注册且可见的入口，不机械改编号。",
       "expectations": [],
       "files": []
@@ -213,7 +213,7 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "在临时目录复制 ascendc-code-review 的四份 MC2 主题文件，以及 common.plan-design、两个 clause-review 模板、quick-review 和 methodology；不要复制 mc2-specific.md 总览，不修改原技能目录。所有读取都使用临时副本。\n\n任务输入已确认 src/local_index.h 被 MC2 MoE 入口调用，证据是入口.cpp:80 -> local_index.h:12；helper 不含主题文件触发词，变更是专家映射后的本地数组索引。另有含 AllGather 的独立通信实现，已确认与 MC2 无关系。按计划设计的 Step3至Step5实际读取声明和索引，给出两者选规结果，不运行完整检视或派发子代理。再按文件/PR执行模板和快速检视的读取边界，读取 MC2-5.1：本地专家集合[2,5,8]，输入5减起点2后访问长度3数组。\n\n列出实际读取文件和章节，说明判断所需的归属条件、映射条件来自哪里；如缺少资料，指出具体缺口，不推定已经完成。禁止联网或改动原技能目录。",
+      "prompt": "在临时目录复制 ascendc-code-review 的四份 MC2 主题文件，以及 common.plan-design、两个 clause-review 模板、quick-review 和 methodology；不要复制 mc2-specific.md 总览，不修改原技能目录。所有读取都使用临时副本。\n\n任务输入已确认 src/local_index.h（Kernel 侧，被 MC2 MoE 入口调用，证据是入口.cpp:80 -> local_index.h:12）就是待判断的 helper 本身；该 helper 文件不含主题文件触发词，变更是专家映射后的本地数组索引。另有含 AllGather 的独立通信实现，已确认与 MC2 无关系。按计划设计的 Step3至Step5实际读取声明和索引，给出两者选规结果，不运行完整检视或派发子代理。再按文件/PR执行模板和快速检视的读取边界，读取 MC2-5.1：本地专家集合[2,5,8]，输入5减起点2后访问长度3数组。\n\n列出实际读取文件和章节，说明判断所需的归属条件、映射条件来自哪里；如缺少资料，指出具体缺口，不推定已经完成。禁止联网或改动原技能目录。",
       "expected_output": "临时副本确实没有总览文件。根据主题适用声明中的已有调用证据，helper 可进入 MC2 候选，再按 Kernel 和索引访问模式保留 MC2-5.1；独立通信实现按排除条件跳过。文件/PR 模板按「承接全部条款读全文、定向检视退回单章」的口径读取（本场景为定向检视 MC2-5.1，走单章边界）；快速检视按其读取硬约束单章读取。获得已确认MC2归属、实际专家映射和上下游校验的判断条件；5-2=3越界，应使用真实映射，不能默认连续分配。不存在必读公共说明或因缺总览静默丢结果、反复补派的分支；导航文件缺失不等于当前条款必要条件缺失。若实际调用证据不足仍须说明，不能将总览可选解释为可省略领域判断。 独立 AllGather 实现应说明 MC2 条款不适用，不把未执行的 MC2 检查写成 PASS 或已覆盖；快速检视依靠 MC2 单章的适用前提，不要求修改其他规则的排除逻辑。",
       "expectations": [],
       "files": []
