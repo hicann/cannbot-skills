@@ -105,6 +105,9 @@
 - 【算子性能进化】策略卡与 Playbook 正文解耦至 cannbot-knowledge 仓：移除 references/cards 162 份、references/playbooks 143 份正文副本（该两目录内容已全部迁至知识仓，仅保留 SCHEMA.md 与 perf_shape_spec_01.md 规范文档），98 份前置条件 strategy_meta 改写为 doc_repo/doc_path/playbook_path 指针；load_playbook.py 支持 CANNBOT_KNOWLEDGE_ROOT 环境变量、.cannbot/knowledge.env 向上查找、兄弟检出三级解析，全落空时 fail-loud 退出（exit 3）。
 - 【算子性能进化】ascendc-evolution-world-model（wm_ops.py 等脚本）与 ascendc-ops-evaluation 适配策略卡外置后的索引结构。
 
+#### 缺陷修复 Bug Fixes
+- 【通信】源码快照记录所有现存常规跟踪文件的 Unix 权限，恢复仅权限变化的文件时不再回退为 Git 默认权限；保留未跟踪文件、删除与已有符号链接的恢复约束。
+
 ### 【2026-10-10】
 #### 变更 Changes
 - 【AscendC 迁移】skill `ascendc-cross-gen-port-light` 更名为 `ascendc-cross-gen-migration`（目录、SKILL.md、evals 及 feature-list、api-cross-gen-fixpipe 引用同步更新；`plugins-community/ascendc-port-orchestrator` 不在修改范围）。

@@ -13,7 +13,8 @@
 
 The base commit is not bundled: restoration requires a repository containing it.
 Ignored files are intentionally excluded. Changed/new symlinks are rejected.
-New snapshots preserve the full Unix mode of changed tracked and untracked files.
+New snapshots preserve the full Unix mode of existing regular tracked and untracked files,
+including permission-only changes that do not appear in Git diffs.
 """
 
 import argparse
@@ -60,6 +61,26 @@ def regular_file(root, name):
     return path
 
 
+def tracked_file_modes(repo, root):
+    """Include permission-only changes that Git's content diff cannot report."""
+    changed = git(repo, "diff", "--name-only", "-z", "HEAD", "--").split(b"\0")
+    for raw in filter(None, changed):
+        name = os.fsdecode(raw)
+        safe_relative(name)
+        path = root / name
+        if path.exists() or path.is_symlink():
+            regular_file(root, name)
+    tracked = git(repo, "ls-files", "--cached", "-z", "--").split(b"\0")
+    entries = []
+    for raw in filter(None, tracked):
+        name = os.fsdecode(raw)
+        path = root / name
+        if path.is_file() and not path.is_symlink():
+            path = regular_file(root, name)
+            entries.append(dict(path=name, mode=stat.S_IMODE(path.stat().st_mode)))
+    return entries
+
+
 def capture(repo, output):
     repo = Path(repo).resolve()
     root = Path(git(repo, "rev-parse", "--show-toplevel").decode().strip()).resolve()
@@ -82,17 +103,7 @@ def capture(repo, output):
         "HEAD",
         "--",
     )
-    changed = git(repo, "diff", "--name-only", "-z", "HEAD", "--").split(b"\0")
-    tracked_modes = []
-    for raw in filter(None, changed):
-        name = os.fsdecode(raw)
-        safe_relative(name)
-        p = root / name
-        if p.exists() or p.is_symlink():
-            path = regular_file(root, name)
-            tracked_modes.append(
-                dict(path=name, mode=stat.S_IMODE(path.stat().st_mode))
-            )
+    tracked_modes = tracked_file_modes(repo, root)
     names = git(repo, "ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
     entries, contents = [], []
     for raw in filter(None, names):

@@ -85,7 +85,7 @@ python3 <本skill路径>/scripts/workflow.py build ... \
 
 ### 2.4 可恢复源码快照与安装身份
 
-`workflow.py build` 在构建前保存 `source-snapshot/`：基准 commit、已跟踪文件二进制 diff、已变更跟踪文件与未跟踪源码的完整 Unix 权限，以及未跟踪源码内容。统一构建安装部署成功后使用 `archive_package.py --source-snapshot <本次输出/source-snapshot>` 随包归档。手工构建时先执行：
+`workflow.py build` 在构建前保存 `source-snapshot/`：基准 commit、已跟踪文件二进制 diff、所有现存常规跟踪文件及未跟踪源码的完整 Unix 权限（包括仅权限变化），以及未跟踪源码内容。统一构建安装部署成功后使用 `archive_package.py --source-snapshot <本次输出/source-snapshot>` 随包归档。手工构建时先执行：
 
 ```bash
 python3 <本skill路径>/scripts/source_snapshot.py capture \
