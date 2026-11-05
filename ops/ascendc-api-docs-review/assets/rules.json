@@ -1,0 +1,218 @@
+[
+  {
+    "rule_no": "1",
+    "rule_item_name": "API章节结构要求",
+    "rule_name": "API章节结构要求",
+    "rule_type": "完备性",
+    "rule_desc": "请检查文档章节目录结构。【检查范围】只检查目录结构，不检查章节内容。\n必需章节包括：产品支持情况、功能说明、函数原型、参数说明、返回值说明、约束说明、调用示例，共7个章节。章节必须按以下相对顺序出现：产品支持情况 → 功能说明 → 函数原型 → 参数说明 → 返回值说明 → 约束说明 → 调用示例。检查要点：1) 必须包含所有7个必需章节，缺一不可；2) 必需章节的相对顺序必须正确，不允许颠倒；3) 允许在任意两个必需章节之间插入其他可选章节（如'xxx设计'等），可选章节不影响必需章节的顺序检查；4) 不要将可选章节识别为问题。",
+    "rule_level": "严重",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "2",
+    "rule_item_name": "产品支持情况规范",
+    "rule_name": "产品支持情况规范",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当\"产品支持情况\"章节存在时才执行此检查。【检查范围】必须有\"产品支持情况\"列表形式的说明",
+    "rule_level": "严重",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "3",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "参数说明规范",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当\"参数说明\"章节存在时才执行此检查。【检查范围】必须包含参数表格，并且参数表格中的规则如下：\n1. 输入/输出标识：\"输入\"表示入参，\"输出\"表示出参，按实际情况正确填写 \n 2. 表格格式：表格必须有\"参数名\"、\"输入/输出\"、\"描述\"三列",
+    "rule_level": "严重",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "4",
+    "rule_item_name": "约束说明规范",
+    "rule_name": "约束说明规范",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当\"约束说明\"章节存在时才执行此检查。【检查范围】如果有\"汇总的本章节的所有功能约束\"，需要按照检查角度检查：\n 地址重叠约束：检查源操作数和目的操作数是否允许地址重叠，如果允许需说明使用条件\n地址对齐约束：检查输入/输出地址是否需要对齐，对齐要求是多少（如32字节对齐）\n参数组合约束：检查多个参数组合使用时的约束（如参数A和参数B不能同时为某个值）\n环境影响约束：检查接口对环境有无影响，调用后是否需要复原（如是否修改全局状态）\n  特殊数据类型约束：检查对特殊数据类型（如 int4b_t、float16等）有无特别需要注意的地方\n异常和边界值处理（计算类API）：检查是否说明inf、nan、正负0、MAX、MIN等异常和边界值情况下的计算结果",
+    "rule_level": "严重",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "5",
+    "rule_item_name": "返回值说明规范",
+    "rule_name": "返回值说明规范",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当\"返回值说明\"章节存在时才执行此检查。【检查范围】必须存在说明返回值的含义和取值范围",
+    "rule_level": "严重",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "6",
+    "rule_item_name": "调用示例规范",
+    "rule_name": "调用示例规范",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当\"调用示例\"章节存在时才执行此检查。【检查范围】必须提供关键代码片段，并且需要有注释，具体规则如下：\n1. 复杂逻辑注释：复杂逻辑需要添加注释说明，解释为什么这样调用 \n2. 参数匹配：调用示例中调用的接口参数必须与函数原型匹配，类型和数量一致 \n3. 代码片段要求：只需要关键代码片段，不需要完整代码示例，但要能说明用法 \n4. 编码规范：要符合编码规范、无编码错误（如缩进、命名规范） \n5. 完备性要求：特殊场景的参数配置、结果示例需要给出（如边界条件、典型场景）",
+    "rule_level": "严重",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "7",
+    "rule_item_name": "产品支持情况规范",
+    "rule_name": "产品型号支持情况",
+    "rule_type": "规范性",
+    "rule_desc": "- 位置：`## 产品支持情况`章节\n- 规则：出现的产品型号名必须是以下指定范围及顺序，对于遗漏不作检查：\n\t1. Ascend 950PR&950DT系列产品\n\t2. Atlas A3系列产品\n\t3. Atlas A2系列产品\n\t4. Atlas 200I/500 A2推理产品\n\t5. Atlas推理系列产品AI Core\n\t6. Atlas推理系列产品Vector Core\n\t7. Atlas训练系列产品",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/specification/document_writing_specs.md#产品型号命名规范"
+  },
+  {
+    "rule_no": "8",
+    "rule_item_name": "功能说明规范",
+    "rule_name": "功能说明或数学表达式",
+    "rule_type": "完备性",
+    "rule_desc": "- 位置：`## 功能说明`章节的`计算公式`部分\n- 规则：检查是否存在 AscendC API 功能介绍或相关公式。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "9",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "模板参数与接口参数",
+    "rule_type": "规范性",
+    "rule_desc": "- 位置：`## 参数说明`章节的表格部分\n- 规则：检查`## 函数原型`章节中的所有函数参数是否在此处均分为“模板参数”与“接口参数”两个表格予以说明。遇遗漏则需报错。例如：表1 模板参数说明、表2 接口参数说明；两阶段函数需为每个阶段各设两表，如表3 模板参数说明、表4 接口参数说明。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "10",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "模板参数解释顺序",
+    "rule_type": "规范性",
+    "rule_desc": "- 位置：`## 参数说明`章节的“模板参数说明表格”中的`参数名`列\n- 规则：“模板参数说明表格”中的`参数名`列的参数解释顺序需要与`## 函数原型`章节对应的“函数声明”中的参数顺序一致。\n- 举例：函数声明为：template <class T, class pattern, bool isReuseSource = false> aicore inline void ReduceAll(const LocalTensor& dstTensor, const LocalTensor& srcTensor, const LocalTensor<uint8_t> &sharedTmpBuffer, const uint32_t srcShape[], bool srcInnerPad)，“模板参数说明表格”中的`参数名`列的参数解释顺序为：T, pattern, isReuseSource.",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "11",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "函数入参解释顺序",
+    "rule_type": "规范性",
+    "rule_desc": "- 位置：`## 参数说明`章节的“接口参数说明表格”中的`参数名`列\n- 规则：“接口参数说明表格”中的`参数名`列的参数解释顺序需要与`## 函数原型`章节对应的“函数声明”中的入参顺序一致。\n- 举例：函数声明为：template <class T, class pattern, bool isReuseSource = false> aicore inline void ReduceAll(const LocalTensor& dstTensor, const LocalTensor& srcTensor, const LocalTensor<uint8_t> &sharedTmpBuffer, const uint32_t srcShape[], bool srcInnerPad)，“接口参数说明表格”中的`参数名`列的参数解释顺序为：dstTensor, srcTensor, sharedTmpBuffer, srcShape, srcInnerPad.",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "12",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "数据类型顺序",
+    "rule_type": "规范性",
+    "rule_desc": "- 位置：全文各章节中的描述\n- 规则：\n    1. 数据类型应使用中文顿号'、'分隔，数据类型的出现顺序按照位宽从小到大、有符号数->无符号数->浮点数、浮点数按指数位大小排序，具体要求如下：bool, int4b_t, int8_t, uint8_t, fp4x2_e2m1_t, fp4x2_e1m2_t, hifloat8_t, fp8_e8m0_t, fp8_e5m2_t, fp8_e4m3fn_t, int16_t, uint16_t, half, bfloat16_t, int32_t, uint32_t, float, complex32, half2, bhalf2, int64_t, uint64_t, double, complex64。\n    2. 不要出现u8，s8等不规范写法。接口支持的数据类型只和位宽有关时，可以通过位宽表达：b8, b16, b32, b64。\n- 举例：“模板参数说明表格”中写道：参数名列为“T”，描述列为“Atlas A3系列产品，支持的数据类型为：uint8_t、float。”这里的“uint8_t、float”符合规则要求的顿号分隔符及顺序要求。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "13",
+    "rule_item_name": "约束说明规范",
+    "rule_name": "约束说明清晰无歧义",
+    "rule_type": "可读性",
+    "rule_desc": "- 位置：`## 约束说明`章节\n- 规则：检查约束描述需清晰无歧义，语句描述清晰不会混淆，没有多层含义。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "14",
+    "rule_item_name": "约束说明是否准确",
+    "rule_name": "约束说明是否准确",
+    "rule_type": "正确性",
+    "rule_desc": "- 位置：`## 约束说明`章节\n- 规则：\n    1. 约束说明中的描述内容，如果在上下文中有出现相关说明，与上下文中的约束要求保持一致。\n    2. 单参数的约束需在`## 参数说明`的表格中描述；参数组合/接口组合的约束需在`## 约束说明`中写。\n    3. 描述同一件事、同一个场景需约束一致，没有明显语义上的歧义、冲突。\n- 举例：在“参数表”中提到“n值对应的数据大小需满足32B对齐的要求”，后续的约束说明章节的内容中如写相关内容也需要保持同一语义：“PER_TOKEN/PER_GROUP场景，连续计算方向（即n方向）的数据量要求32B对齐”。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "15",
+    "rule_item_name": "前后文一致性",
+    "rule_name": "前后文一致性",
+    "rule_type": "可读性",
+    "rule_desc": "- 位置：全文\n- 规则：\n    1. 同一章节内相同的概念名称、参数名、单位前后保持一致（除`## 调用示例`中的代码部分，`## 调用示例`中的注释部分仍需判断）。\n    2. 同一个 Topic 内，上下文中的单位中英文和大小写相同，同一个参数的参数名大小写相同，相关概念和术语表中的保持一致。\n- 举例：1. 比如“字节”可以写中文，也可以写英文“byte”，但上下文需要保持一致。2. 参数说明中描述的要求在约束说明中也需保持一致。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "16",
+    "rule_item_name": "函数原型规范",
+    "rule_name": "函数重载形式",
+    "rule_type": "正确性",
+    "rule_desc": "- 位置：`## 函数原型`章节\n- 规则：\n    1. 与头文件一致：首先调用当前技能目录下 `scripts/api_locator/src/locate-api.js` 脚本（命令：`node <技能目录>/scripts/api_locator/src/locate-api.js <文档路径> --repo <算子代码仓根目录>`），获取当前文档的关联代码文件列表。检查脚本输出中 `[include]` 分类下的头文件路径：若 `[include]` 分类不存在或为空，则跳过本条规则的检查（不报错）；若 `[include]` 分类存在且有头文件路径，则读取这些头文件的内容，将头文件中的函数声明（去除末尾分号后）与文档中的函数原型进行逐字符比对。比对时必须严格一致，包括但不限于：函数名、模板参数、返回值类型、入参类型、参数名、const修饰符位置、引用符号`&`与类型名之间的空格（如头文件为`uint32_t&`而文档为`uint32_t &`视为不一致）、指针符号`*`位置、参数顺序等。任何字符级别的差异都必须报告为问题，禁止以\\\"风格差异\\\"或\\\"语义相同\\\"为由跳过。\n    2. 多原型区分与列表缩进：当存在多个函数原型（如重载形式）时，需通过无序列表`-`进行区分，无序列表本身需要正确的缩进格式，并说明不同原型之间的区别（如参数差异、适用场景等）。\n    3. 原型结尾无分号：函数原型末尾不需要分号。\n- 举例：若头文件中定义了两个重载原型，文档中应以如下形式呈现：\n    - 原型一：`template <typename T> __aicore__ inline void Foo(const LocalTensor<T>& src, LocalTensor<T>& dst)`\n    - 原型二：`template <typename T> __aicore__ inline void Foo(const LocalTensor<T>& src, LocalTensor<T>& dst, const uint32_t count)`\n    并在每个原型后说明区别，如\u201c原型二额外支持指定计算数量\u201d。",
+    "rule_level": "严重",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "17",
+    "rule_item_name": "函数原型规范",
+    "rule_name": "函数原型模板参数完整性",
+    "rule_type": "完备性",
+    "rule_desc": "- 位置：`## 函数原型`章节\n- 规则：调用当前技能目录下 `scripts/api_locator/src/locate-api.js` 脚本（命令：`node <技能目录>/scripts/api_locator/src/locate-api.js <文档路径> --repo <算子代码仓根目录>`），获取当前文档的关联代码文件列表。检查脚本输出中 `[include]` 分类下的头文件路径：若 `[include]` 分类不存在或为空，则跳过本条规则的检查（不报错）；若 `[include]` 分类存在且有头文件路径，则读取这些头文件的内容，检查头文件中的函数声明是否包含模板参数声明（即`template <...>`部分）。若头文件中的函数声明包含模板参数（如`template <typename T, bool isReuseSource = false>`），则文档中`## 函数原型`章节的对应函数原型也必须包含完整的`template <...>`声明，不得缺失。模板参数声明须与头文件严格一致，包括参数数量、参数名称、类型关键字（如`typename`/`class`）、默认值、参数顺序等。若头文件中有多个模板参数，文档中缺失其中任何一个参数、多出任何参数、或参数顺序与头文件不一致，都必须报告为问题。任何字符级别的差异都必须报告为问题，禁止以\\\"风格差异\\\"或\\\"语义相同\\\"为由跳过。\n- 举例：头文件定义为`template <typename T, bool isReuseSource = false> __aicore__ inline void Asin(const LocalTensor<T>& dstTensor, const LocalTensor<T>& srcTensor, const LocalTensor<uint8_t>& sharedTmpBuffer, const uint32_t calCount)`，则文档中的函数原型必须包含`template <typename T, bool isReuseSource = false>`这一行。若文档中仅写了`__aicore__ inline void Asin(...)`而缺少`template <typename T, bool isReuseSource = false>`，则需报错；若文档中写为`template <typename T>`而缺少`bool isReuseSource = false`参数，也需报错；若文档中写为`template <bool isReuseSource = false, typename T>`而参数顺序与头文件不一致，同样需报错。",
+    "rule_level": "提示",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "18",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "参数完整说明",
+    "rule_type": "完备性",
+    "rule_desc": "- 位置：`## 参数说明`章节\n- 规则：\n    1. 参数必须与函数原型严格保持一致：参数说明中列出的所有参数（包括模板参数和接口参数）的名称、类型、数量须与`## 函数原型`章节中的函数原型严格一致，不得遗漏、多出或类型不符。\n    2. 数值类参数取值范围与单位：对于数值类参数（如`uint32_t`、`int64_t`等），需要列出取值范围和单位；如果取值范围在函数原型中已通过类型或命名明确体现（如`bool`类型仅取`true`/`false`），则可忽略。\n    3. 结构体参数说明：若参数类型为结构体，需要添加该结构体定义的参考链接，或给出结构体定义所在的头文件位置，以便读者查阅。\n- 举例：参数`srcShape`类型为`const uint32_t[]`，描述中应注明\u201c各维度大小，单位为元素个数，取值范围为正整数\u201d；参数`tiling`类型为`FooTiling`结构体，描述中应注明\u201c结构体定义详见`include/foo_tiling.h`\u201d或提供对应链接。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "19",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "参数约束条件描述",
+    "rule_type": "完备性",
+    "rule_desc": "- 位置：`## 参数说明`章节的参数表格`描述`列\n- 规则：\n    1. 产品级约束条件逐行列出：若某参数在特定产品上存在取值限制或使用约束（如仅支持特定值、参数预留等），须在描述列中按产品逐行标注，不得遗漏任何产品的约束说明。例如，Atlas A3系列和Atlas A2系列均仅支持`true`，则两个产品的约束均需分别写明。\n    2. 约束描述与上下文一致：描述列中的约束条件须与`## 约束说明`章节中的相关约束保持一致，不得出现矛盾或遗漏。\n- 举例：参数`srcInnerPad`的描述列中，若Atlas A3系列产品仅支持`true`，Atlas A2系列产品同样仅支持`true`，则需分别注明\u201cAtlas A3系列产品，当前只支持true\u201d和\u201cAtlas A2系列产品，当前只支持true\u201d，不得只写其中一个产品而遗漏另一个。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "20",
+    "rule_item_name": "返回值说明规范",
+    "rule_name": "返回值不同场景的含义说明",
+    "rule_type": "完备性",
+    "rule_desc": "- 位置：`## 返回值说明`章节\n- 规则：\n    1. 非void返回值不得为空：若`## 函数原型`章节中函数的返回类型不为`void`，则返回值说明不得为空，必须描述返回值的含义。\n    2. 无返回值可写\u201c无\u201d：若函数返回类型为`void`或确实无返回值，可填写\u201c无\u201d。\n    3. 多取值场景需逐一说明：若返回值有多种可能的取值（如错误码、状态码等），须逐一列出每种取值的含义，不得遗漏。\n- 举例：若函数返回类型为`int32_t`，返回值说明中需注明\u201c0表示成功，-1表示参数错误，-2表示内存不足\u201d等；若返回类型为`void`，则可写\u201c无\u201d。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "21",
+    "rule_item_name": "调用示例规范",
+    "rule_name": "示例跳转链接规范",
+    "rule_type": "规范性",
+    "rule_desc": "- 位置：`## 调用示例`章节\n- 规则：若调用示例中包含完整样例的跳转链接，该链接必须指向`gitcode.com`仓库，不得使用`gitee.com`或其他平台的链接。\n- 举例：正确写法为\u201c完整样例请参考[ReduceSum样例](https://gitcode.com/xxx/ReduceSum)\u201d；错误写法为\u201c完整样例请参考[ReduceSum样例](https://gitee.com/xxx/ReduceSum)\u201d。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "22",
+    "rule_item_name": "调用示例规范",
+    "rule_name": "禁止使用未公开接口",
+    "rule_type": "正确性",
+    "rule_desc": "- 位置：`## 调用示例`章节\n- 规则：调用示例的代码片段中禁止包含未公开的 AscendC 接口。直接查阅 asc-devkit 官方公开头文件目录 https://gitcode.com/cann/asc-devkit/tree/master/include ，结合示例中的包含头文件、命名空间和所属类，定位接口的实际声明，核对其是否在该目录的头文件中公开声明；不得将其他接口中的调用位置当作声明。若被检文档明确对应特定代码版本，应核对该版本的 include 目录，不以 master 的差异判错。仅在有明确代码依据确认接口未公开时报告；无法访问目录、未找到声明或无法消歧时，不得直接判定为未公开接口。\n- 举例：新增公开头文件中的接口可直接依据官方目录及声明核对，无需同步维护本地头文件清单。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/asc-devkit/tree/master/include"
+  },
+  {
+    "rule_no": "23",
+    "rule_item_name": "调用示例规范",
+    "rule_name": "示例数据是否合理",
+    "rule_type": "正确性",
+    "rule_desc": "- 位置：`## 调用示例`章节的结果示例部分\n- 规则：若调用示例中包含输入数据和输出数据的结果示例，需根据`## 功能说明`章节中的接口功能描述或计算公式，结合示例中的输入数据（如输入tensor数据、shape、pattern等参数），验证输出数据的正确性。输出数据必须与按照接口功能逻辑计算得到的结果一致，不得出现计算错误。\n- 举例：以ReduceSum为例，输入数据为`[[0.0, 4.0, 2.0, 0.0, -1.0, 2.0, -1.0, 7.0], [0.0, 1.0, -9.0, 2.0, 2.0, 2.0, 8.0, 3.0]]`，pattern为AR（第二维为Reduce轴），shape为(2,8)，则按第二维求和的结果应为`[13.0, 9.0]`（第一行和为0+4+2+0-1+2-1+7=13，第二行和为0+1-9+2+2+2+8+3=9），若输出数据与此不符则需报错。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  },
+  {
+    "rule_no": "24",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "预留参数说明规范",
+    "rule_type": "规范性",
+    "rule_desc": "- 位置：`## 参数说明`章节\n- 规则：\n    1. 代码中已实现功能的参数不得标注为\u201c预留参数\u201d：首先调用当前技能目录下 `scripts/api_locator/src/locate-api.js` 脚本（命令：`node <技能目录>/scripts/api_locator/src/locate-api.js <文档路径> --repo <算子代码仓根目录>`），获取当前文档的关联代码文件列表。若脚本输出中 `[include]` 和 `[impl]` 分类均不存在或为空，则跳过本条规则的检查（不报错）；若存在关联代码文件，则读取 `[include]` 下的头文件内容和 `[impl]` 下的实现文件内容，通过头文件中的参数声明、注释以及实现文件中该参数的实际使用情况，判断参数是否已实现功能。若某参数在代码实现中已具备实际功能逻辑，则该参数不属于预留参数，文档中必须给出完整的功能说明，不得简单标注为\u201c预留\u201d或\u201c预留参数\u201d。\n    2. 文档标注\u201c预留\u201d需与代码实现一致：若`## 参数说明`中将某参数标注为\u201c预留参数\u201d或\u201c该参数预留\u201d，需确认在关联的 `[include]` 头文件和 `[impl]` 实现文件中该参数确实未实现任何功能逻辑；若代码中已实现相关功能，则文档不得写\u201c预留\u201d，需补充实际功能描述。\n- 判断参数是否已实现功能的依据（按优先级从高到低）：\n    1. 头文件注释中的功能描述：若头文件注释中描述了该参数的具体功能（如\u201c是否允许修改源操作数\u201d、\u201c判断最内层轴数据是否32Bytes对齐\u201d等），即使注释中同时包含\u201c预留/reserved\u201d声明，仍以功能描述为准，判定该参数已实现功能。仅当头文件注释中仅有\u201c预留/reserved\u201d声明而没有任何功能描述时，才可视为预留参数。\n    2. 实现文件中的实际使用：实现文件中该参数是否被实际使用，包括但不限于：参与计算逻辑、传递给其他函数（包括校验/检查函数、条件分支函数）、作为模板参数影响校验逻辑或条件分支。参数被传递给校验函数并在校验逻辑中产生实际效果（如输出警告、条件校验等）的，视为已实现功能。仅声明但未在实现中使用的参数可视为预留。\n- 举例：若参数`srcInnerPad`在头文件中已声明并注释其功能为\u201c判断最内层轴数据是否32Bytes对齐\u201d，或在实现文件中被实际使用，则文档中不得写\u201c该参数预留\u201d，而应描述其实际功能；反之，若头文件中该参数无功能说明且实现文件中未使用，则可标注为\u201c预留参数\u201d。若参数`isReuseSource`在头文件注释中描述为\u201cwhether allows API to modify source data, usually for performance reason, this parameter is reserved\u201d，虽然注释中包含\u201creserved\u201d，但已明确描述了功能（\u201c是否允许修改源操作数\u201d），且在实现文件中该参数被传递给校验函数进行条件校验，则该参数不属于预留参数，文档中不得写\u201c该参数预留\u201d，而应描述其功能为\u201c是否允许修改源操作数\u201d。",
+    "rule_level": "一般",
+    "reference_doc_path": ""
+  }
+]

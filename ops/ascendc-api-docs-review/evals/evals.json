@@ -1,0 +1,36 @@
+{
+  "skill_name": "ascendc-api-docs-review",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "AscendC API 文档质检全流程（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "对 ops/ascendc-api-docs-review/evals/api/SIMD-API/高阶API/数学计算/Acos接口/Acos.md 做质量检查，按全部规则执行，重点看结构完整性与规范性。",
+      "expected_output": "1. 按 SKILL.md 四步工作流执行并逐个输出 CHECKPOINT：数据准备（文件路径模式、读取 assets/rules.json 全部规则按 rule_item_name 分组、生成文档列表、删除历史 output/ascendc-markdown-check-result.json）→ 执行分析（带行号读取文档全文、逐条规则按 rule_desc 逐字逐行检查、同一行发现问题后继续扫描该行剩余内容、行号从带行号文档内容直接获取）→ 汇总输出 → 清理 output/ascendc 临时目录。\n2. 汇总结果仅写入 output/ascendc-markdown-check-result.json：issue 对象数组，rule_group 固定为 AscendC领域规则，rule_item/rule_type/rule_name/rule_level 取自命中规则的对应字段，description 与 suggestion 不包含行号，location 为可点击跳转的绝对路径行链接；未发现问题的规则不产生任何条目。\n3. 对该文档应检出基准集（evals/ascendc_api_bench.md 问题26~28）对应的规范性问题类型：模版参数顺序与函数原型不一致、函数入参顺序与函数原型不一致、支持的数据类型顺序描述不规范；仅报告 assets/rules.json 已定义规则覆盖的问题，质检期间除 CHECKPOINT 外不输出解释性文字或总结。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "行号与结论定位纪律（禁止心算）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "检查 Acos.md 时我凭印象记得第 118 行附近的模版参数表格有问题，把行号 118 直接写进质检结果可以吗？",
+      "expected_output": "不可以直接写。SKILL.md 结论验证规则要求：行号必须从步骤 1 读取的带行号文档内容中直接获取，禁止凭记忆、心算或人工计数推算；每条结论必须先在原文中定位到具体字符后再判定，无法精确定位时必须回溯原文重新确认，禁止跳过。正确做法是回到带行号的文档内容，定位模版参数表格实际所在行，确认该行内容确实命中规则（模版参数顺序与函数原型不一致）后再记录真实行号；判定依据须在上下文中留有原文对照记录。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}

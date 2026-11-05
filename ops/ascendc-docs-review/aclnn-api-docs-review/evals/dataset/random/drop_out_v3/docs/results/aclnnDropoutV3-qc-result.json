@@ -1,0 +1,645 @@
+{
+  "result": "fail",
+  "details": [
+    {
+      "rule_name": "API 文件命名规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 1,
+      "snippet": "# aclnndropoutV3",
+      "description": "一级标题 aclnndropoutV3 中 API 名 dropoutV3 不是大驼峰格式，应为 DropoutV3；且标题与文件名 aclnnDropoutV3 不一致",
+      "suggestion": "# aclnnDropoutV3",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 章节标题命名规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 236,
+      "snippet": "## 支持的产品",
+      "description": "自定义二级标题「支持的产品」与必选章节「产品支持情况」语义重复",
+      "suggestion": "删除该章节，产品支持信息已在「## 产品支持情况」中说明",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "产品型号命名规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 17,
+      "snippet": "- <term>Atlas 200I/500推理产品</term>：不支持",
+      "description": "产品名称「Atlas 200I/500推理产品」不在允许范围内，缺少「A2」，应为「Atlas 200I/500 A2 推理产品」",
+      "suggestion": "- <term>Atlas 200I/500 A2 推理产品</term>：不支持",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "产品型号命名规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 20,
+      "snippet": "- Atlas 推理系列产品：不支持",
+      "description": "产品名称「Atlas 推理系列产品」缺少 term 标记",
+      "suggestion": "- <term>Atlas 推理系列产品</term>：不支持",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "产品型号命名规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 25,
+      "snippet": "- <term>610Lite</term>：支持",
+      "description": "产品名称「610Lite」不在允许的产品名称列表范围内",
+      "suggestion": "删除该产品行，或更换为允许列表中的产品名称",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 函数原型格式规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 43,
+      "snippet": "aclnnDropoutV3GetWorkspaceSize(",
+      "description": "第一段接口缺少返回类型 aclnnStatus",
+      "suggestion": "aclnnStatus aclnnDropoutV3GetWorkspaceSize(",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 函数原型格式规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 45,
+      "snippet": "  aclTensor*         optionalNoise_Shape, ",
+      "description": "参数名 optionalNoise_Shape 含下划线，不符合小驼峰命名规范",
+      "suggestion": "  aclTensor*         optionalNoiseShape, ",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 函数原型格式规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 48,
+      "snippet": "  int64_t            offset, aclTensor*       out, ",
+      "description": "同一行包含两个参数 offset 和 out，违反单参数单行规则",
+      "suggestion": "  int64_t            offset,\n  aclTensor*         out,",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 函数原型格式规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 43,
+      "snippet": "aclnnDropoutV3GetWorkspaceSize(\n  aclTensor*         input, \n  int64_t            offset, aclTensor*       out, \n  aclTensor*         maskOut,",
+      "description": "第一段接口参数名未对齐：第48行 out 的参数名起始列与上下行参数名不平齐",
+      "suggestion": "每行一个参数，所有参数名左边界在同一列对齐",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 函数原型格式规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 55,
+      "snippet": "aclnnStatus aclnnDropoutV3(\n  void *workspace, \n  uint64_t             workspaceSize, \n  const aclOpExecutor *executor, \n  aclrtStream          stream)：",
+      "description": "第二段接口参数名未对齐：workspace 紧贴 * 号后，参数名起始列与 workspaceSize、executor、stream 不平齐",
+      "suggestion": "  void              *workspace,\n  uint64_t           workspaceSize,\n  aclOpExecutor      *executor,\n  aclrtStream        stream)",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 函数原型格式规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 59,
+      "snippet": "  aclrtStream          stream)：",
+      "description": "第二段接口原型末尾有中文冒号「：」，违反原型末尾不加分号或其他符号规则",
+      "suggestion": "  aclrtStream          stream)",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 函数原型格式规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 58,
+      "snippet": "  const aclOpExecutor *executor, ",
+      "description": "第二段接口 executor 参数添加了 const 修饰符，但规则要求 executor 不允许添加 const，仅 aclrtStream 的 const 可有可无",
+      "suggestion": "  aclOpExecutor      *executor, ",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 参数表里字段规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 79,
+      "snippet": "<th>输入/输出、属性</th>",
+      "description": "表头字段「输入/输出、属性」不在允许的字段名称范围内，应为「输入/输出」",
+      "suggestion": "<th>输入/输出</th>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 参数表里参数名列不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 89,
+      "snippet": "<td>inputs</td>",
+      "description": "参数名「inputs」与函数原型中的「input」不一致",
+      "suggestion": "<td>input</td>",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 参数表里参数名列不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 159,
+      "snippet": "<td>executor</td>",
+      "description": "参数表中 executor 在 workspaceSize 之前（第8行），但函数原型中 workspaceSize 在 executor 之前， 参数顺序不一致",
+      "suggestion": "将 workspaceSize 行移到 executor 行之前， 与函数原型参数顺序一致",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 参数表里输入/输出列不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 90,
+      "snippet": "<td>变量</td>",
+      "description": "输入/输出列值「变量」不在允许的七种书写方式范围内",
+      "suggestion": "<td>输入</td>",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 参数表里数据类型不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 93,
+      "snippet": "<td>float、FLOAT16、BFLOAT16、INT64</td>",
+      "description": "数据类型「float」应为大写「FLOAT」",
+      "suggestion": "<td>FLOAT、FLOAT16、BFLOAT16、INT64</td>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数表里数据类型不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 103,
+      "snippet": "<td>QINT32</td>",
+      "description": "数据类型「QINT32」不在支持的数据类型范围内",
+      "suggestion": "更换为支持范围内的数据类型， 如 INT32",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数表里数据格式不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 94,
+      "snippet": "<td>ND、NC1HW</td>",
+      "description": "数据格式「NC1HW」不是有效的数据格式, 不在支持范围内",
+      "suggestion": "<td>ND、NCHW</td>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数表里数据格式不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 114,
+      "snippet": "<td>ND</td>",
+      "description": "参数 p 为 double 基础数据类型, 不存在 Tensor, 数据格式应为「-」而非「ND」",
+      "suggestion": "<td>-</td>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数表里数据格式不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 144,
+      "snippet": "<td>nd</td>",
+      "description": "数据格式「nd」为小写, 应为大写「ND」",
+      "suggestion": "<td>ND</td>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数表里 shape 不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 125,
+      "snippet": "<td>1-4</td>",
+      "description": "参数 seedOptional 为 int64_t 基础数据类型, 不存在 Tensor, 维度(shape)应为「-」而非「1-4」",
+      "suggestion": "<td>-</td>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数表里非连续 Tensor 支持度不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 116,
+      "snippet": "<td>×</td>",
+      "description": "参数 p 为 double 基础数据类型, 不存在非连续 Tensor 判断, 非连续 Tensor 支持度应为「-」而非「×」",
+      "suggestion": "<td>-</td>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数描述不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 112,
+      "snippet": "<td>默认值为0.5</td>",
+      "description": "参数描述中使用了「默认值」字眼, 不符合规范",
+      "suggestion": "<td>建议值为0.5</td>",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 参数描述不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 200,
+      "snippet": "<td>传入的input、out、maskOut为None。</td>",
+      "description": "参数描述中使用了「None」字眼, 应改为符合 C 语言规范的「空指针」",
+      "suggestion": "<td>传入的input、out、maskOut为空指针。</td>",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "API 参数表里的固定参数说明不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 173,
+      "snippet": "<td>INT64</td>",
+      "description": "workspaceSize 行的数据类型列应为「-」, 当前为「INT64」",
+      "suggestion": "<td>-</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "返回值/错误码不规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 203,
+      "snippet": "<td rowspan=\"5\">ACLNN_ERR_PARAMs_INVALID</td>",
+      "description": "错误码「ACLNN_ERR_PARAMs_INVALID」不在允许的错误码列表中, 应为「ACLNN_ERR_PARAM_INVALID」",
+      "suggestion": "<td rowspan=\"5\">ACLNN_ERR_PARAM_INVALID</td>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "表格使用规范性",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 224,
+      "snippet": "- **参数说明：**\n\n  - workspace（入参）：在Device侧申请的workspace内存地址。\n  - workspaceSize（入参）：...",
+      "description": "第二段接口参数说明使用了列表格式, 应使用表格形式",
+      "suggestion": "使用3列HTML表格或Markdown表格呈现参数说明",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "芯片差异化描述必须k：v形式",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 233,
+      "snippet": "- <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>不支持BFLOAT16。",
+      "description": "芯片差异化描述不符合规范, 缺少中文冒号「：」分隔 key 和 value, 产品名和描述之间应使用 key：value 格式",
+      "suggestion": "- <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：不支持BFLOAT16。",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "废弃/试验接口说明",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 36,
+      "snippet": "- 说明：该接口将从CANN 9.0.0版本开始废弃！",
+      "description": "废弃说明未放在文章大标题下方第一行, 而是在「## 功能说明」章节内",
+      "suggestion": "将废弃说明移至大标题「# aclnnDropoutV3」下方第一行",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "废弃/试验接口说明",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 36,
+      "snippet": "- 说明：该接口将从CANN 9.0.0版本开始废弃！",
+      "description": "废弃说明缺少替换接口信息, 需明确给出替换接口",
+      "suggestion": "- 须知：该接口后续版本废弃，请使用最新aclnnDropoutV4接口。",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "HTML表格语法规范",
+      "rule_type": "规范性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 141,
+      "snippet": "<td>公式中的`out`</td>",
+      "description": "HTML表格内混用了 Markdown 语法（backtick 代码标记）",
+      "suggestion": "<td>公式中的<code>out</code></td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "函数原型缺少使用场景说明",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 40,
+      "snippet": "每个算子分为两段式接口：",
+      "description": "函数原型章节的使用场景说明过于简略, 未明确描述两段式接口的调用流程（先调用 GetWorkspaceSize, 再调用 aclnnXxx）",
+      "suggestion": "每个算子分为两段式接口, 先调用 aclnnDropoutV3GetWorkspaceSize 获取 workspace 大小, 再调用 aclnnDropoutV3 执行计算。",
+      "rule_level": "一般"
+    },
+    {
+      "rule_name": "返回码描述缺失",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 222,
+      "snippet": "## aclnnDropoutV3",
+      "description": "第二段接口 aclnnDropoutV3 缺少返回值说明, 每段接口都必须有返回值描述",
+      "suggestion": "添加返回值说明：aclnnStatus：返回状态码, 具体参见 [aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "一段接口参数拦截描述缺失",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 183,
+      "snippet": "aclnnStatus：返回状态码, 具体参见[aclnn返回码](../../../docs/zh/context/aclnn返回码.md)。",
+      "description": "一段接口返回值后缺少参数拦截场景说明话术, 如「第一段接口会完成入参校验, 出现以下场景时报错：」",
+      "suggestion": "在返回值说明后添加：第一段接口会完成入参校验, 出现以下场景时报错：",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "一段接口参数拦截描述缺失",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 192,
+      "snippet": "<th>返回码</th>",
+      "description": "拦截校验表格字段「返回码」应为「返回值」, 与规范要求的字段名不一致",
+      "suggestion": "<th>返回值</th>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "确定性说明缺失",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 231,
+      "snippet": "## 约束说明",
+      "description": "约束说明章节缺少确定性计算说明",
+      "suggestion": "添加确定性说明, 如：- 确定性计算：aclnnDropoutV3默认确定性实现。",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数表里使用说明信息不完整",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 92,
+      "snippet": "<td>shape支持0-8维, 形如[M, N/2]</td>",
+      "description": "参数 input 为 aclTensor 类型, 使用说明中缺失空 Tensor 支持度说明",
+      "suggestion": "<td>shape支持0-8维, 形如[M, N/2]。不支持空Tensor。</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 参数表里使用说明信息不完整",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 142,
+      "snippet": "<td>数据类型需要是input可转换的数据类型, shape需要与input一致。</td>",
+      "description": "参数 out 为 aclTensor 类型, 使用说明中缺失空 Tensor 支持度说明",
+      "suggestion": "<td>数据类型需要是input可转换的数据类型, shape需要与input一致。不支持空Tensor。</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 参数表里使用说明信息不完整",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 122,
+      "snippet": "<td>-</td>",
+      "description": "参数 seedOptional 为 int64_t 基础数据类型, 使用说明列缺失取值说明或范围约束",
+      "suggestion": "<td>取值说明：随机种子值。</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "基本概念的固定 link 遗漏",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 40,
+      "snippet": "每个算子分为两段式接口：",
+      "description": "函数原型章节缺少必选超链接「两段式接口」, 应链接到 ../../../docs/zh/context/两段式接口.md",
+      "suggestion": "每个算子分为两段式接口, 具体参见[两段式接口](../../../docs/zh/context/两段式接口.md)：",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "基本概念的固定 link 遗漏",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 249,
+      "snippet": "示例代码如下, 仅供参考, 具体编译和执行过程请参考编译与运行样例。",
+      "description": "调用示例章节缺少必选超链接「编译与运行样例」, 应链接到 ../../../docs/zh/context/编译与运行样例.md",
+      "suggestion": "示例代码如下, 仅供参考, 具体编译和执行过程请参考[编译与运行样例](../../../docs/zh/context/编译与运行样例.md)。",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 功能说明缺少差异描述",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 29,
+      "snippet": "- 接口功能：训练过程中, 按照概率p随机将输入中的元素置零, 并将输出按照1/(1-p)的比例缩放。",
+      "description": "文档标题带V3版本号, 但接口功能中缺少与V2相比的版本差异说明",
+      "suggestion": "添加版本差异说明, 如：与 aclnnDropoutV2 相比, aclnnDropoutV3 新增了xxx能力。",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "未知变量含义缺失",
+      "rule_type": "完备性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 92,
+      "snippet": "<td>shape支持0-8维, 形如[M, N/2]</td>",
+      "description": "使用说明中 shape 维度变量 M 和 N 未在上下文中解释含义",
+      "suggestion": "<td>shape支持0-8维, 形如[M, N/2], 其中 M 表示行数, N/2 表示列数。</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "一段接口参数拦截前后参数名一致性",
+      "rule_type": "可读性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 200,
+      "snippet": "<td>传入的input、out、maskOut为None。</td>",
+      "description": "拦截表格描述中的参数名「input」与参数说明表中的参数名「inputs」不一致",
+      "suggestion": "<td>传入的inputs、out、maskOut为空指针。</td>",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 名称前后文一致性",
+      "rule_type": "可读性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 1,
+      "snippet": "# aclnndropoutV3",
+      "description": "一级标题 API 名称「aclnndropoutV3」与函数原型中的「aclnnDropoutV3」不一致（dropoutV3 非大驼峰）",
+      "suggestion": "# aclnnDropoutV3",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 名称前后文一致性",
+      "rule_type": "可读性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 227,
+      "snippet": "由第一段接口aclnnDropoutV3GetWorkSpaceSize获取。",
+      "description": "workspaceSize 描述中接口名「aclnnDropoutV3GetWorkSpaceSize」的 Space 中 S 为大写, 与函数原型「aclnnDropoutV3GetWorkspaceSize」不一致",
+      "suggestion": "由第一段接口aclnnDropoutV3GetWorkspaceSize获取。",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 名称前后文一致性",
+      "rule_type": "可读性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 349,
+      "snippet": "// 调用aclnnDropoutV2第一段接口",
+      "description": "调用示例注释中 API 名称「aclnnDropoutV2」与文档标题「aclnnDropoutV3」不一致, 应为 V3",
+      "suggestion": "// 调用aclnnDropoutV3第一段接口",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 名称前后文一致性",
+      "rule_type": "可读性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 358,
+      "snippet": "// 调用aclnnDropoutV2第二段接口",
+      "description": "调用示例注释中 API 名称「aclnnDropoutV2」与文档标题「aclnnDropoutV3」不一致, 应为 V3",
+      "suggestion": "// 调用aclnnDropoutV3第二段接口",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "产品支持度一致性",
+      "rule_type": "可读性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 234,
+      "snippet": "- <term>Atlas 训练系列产品</term>：输入参数不支持INT64。",
+      "description": "「Atlas 训练系列产品」在产品支持情况中标记为「不支持」, 但在约束说明中出现了差异化描述, 前后矛盾",
+      "suggestion": "删除该约束描述行, 不支持的产品不应出现差异化描述",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "确定性说明不符合固定话术",
+      "rule_type": "可读性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 231,
+      "snippet": "## 约束说明",
+      "description": "约束说明章节缺少确定性计算说明, 未使用三种固定话术之一",
+      "suggestion": "添加确定性说明, 如：- 确定性计算：aclnnDropoutV3默认确定性实现。",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 函数原型一致性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 45,
+      "snippet": "  aclTensor*         optionalNoise_Shape, ",
+      "description": "文档参数名「optionalNoise_Shape」含下划线, 与代码头文件中的「optionalNoiseShape」不一致",
+      "suggestion": "  aclTensor*         optionalNoiseShape, ",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 函数原型一致性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 47,
+      "snippet": "  int64_t            seedOptional, ",
+      "description": "文档参数名「seedOptional」与代码头文件中的「seedOptinal」不一致（Optional vs Optinal）",
+      "suggestion": "  int64_t            seedOptinal, ",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 函数原型一致性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 43,
+      "snippet": "aclnnDropoutV3GetWorkspaceSize(",
+      "description": "文档第一段接口缺少返回类型 aclnnStatus, 代码头文件中存在 aclnnStatus 返回类型",
+      "suggestion": "aclnnStatus aclnnDropoutV3GetWorkspaceSize(",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 函数原型一致性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 58,
+      "snippet": "  const aclOpExecutor *executor, ",
+      "description": "文档 executor 参数有 const 修饰符, 代码头文件中为 aclOpExecutor* executor（无 const）",
+      "suggestion": "  aclOpExecutor      *executor, ",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 函数原型一致性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 59,
+      "snippet": "  aclrtStream          stream)：",
+      "description": "文档第二段原型末尾有中文冒号「：」, 代码中为正常函数结束无额外符号",
+      "suggestion": "  aclrtStream          stream)",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 参数表信息正确性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 93,
+      "snippet": "<td>float、FLOAT16、BFLOAT16、INT64</td>",
+      "description": "input 数据类型：文档包含「INT64」但代码支持列表中不包含 INT64；文档缺少「FLOAT32」(与FLOAT等价)；「float」应为「FLOAT」",
+      "suggestion": "<td>FLOAT、FLOAT32、FLOAT16、BFLOAT16</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 参数表信息正确性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 103,
+      "snippet": "<td>QINT32</td>",
+      "description": "optionalNoiseShape 数据类型：文档为「QINT32」, 代码头文件注释说明为「INT64」",
+      "suggestion": "<td>INT64</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 参数表信息正确性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 143,
+      "snippet": "<td>FLOAT、FLOAT16、BFLOAT16、HIFLOAT8</td>",
+      "description": "out 数据类型：文档包含「HIFLOAT8」但代码支持列表中不包含 HIFLOAT8；文档缺少「FLOAT32」",
+      "suggestion": "<td>FLOAT、FLOAT32、FLOAT16、BFLOAT16</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 参数表信息正确性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 94,
+      "snippet": "<td>ND、NC1HW</td>",
+      "description": "input 数据格式：文档包含「NC1HW」但代码只支持 ND 格式（baseFormat = {FORMAT_ND})",
+      "suggestion": "<td>ND</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 参数表信息正确性",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 144,
+      "snippet": "<td>nd</td>",
+      "description": "out 数据格式：文档为小写「nd」, 代码中格式为 ND",
+      "suggestion": "<td>ND</td>",
+      "rule_level": "提示"
+    },
+    {
+      "rule_name": "API 调用示例与代码不一致",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 255,
+      "snippet": "#include \"aclnnop/aclnn_dropout_v4.h\"",
+      "description": "文档调用示例引用头文件「aclnn_dropout_v4.h」(V4), 但测试代码引用「aclnn_dropout_v3.h」(V3)",
+      "suggestion": "#include \"aclnnop/aclnn_dropout_v3.h\"",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 调用示例与代码不一致",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 349,
+      "snippet": "// 调用aclnnDropoutV2第一段接口",
+      "description": "文档注释使用「aclnnDropoutV2」(V2), 但测试代码使用「aclnnDropoutV3」(V3)",
+      "suggestion": "// 调用aclnnDropoutV3第一段接口",
+      "rule_level": "严重"
+    },
+    {
+      "rule_name": "API 调用示例与代码不一致",
+      "rule_type": "正确性",
+      "file_name": "cannbot_benchmark/01-aclnn领域/random/drop_out_v3/docs/aclnnDropoutV3.md",
+      "line_number": 358,
+      "snippet": "// 调用aclnnDropoutV2第二段接口",
+      "description": "文档注释使用「aclnnDropoutV2」(V2), 但测试代码使用「aclnnDropoutV3」(V3)",
+      "suggestion": "// 调用aclnnDropoutV3第二段接口",
+      "rule_level": "严重"
+    }
+  ]
+}

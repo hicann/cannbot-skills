@@ -36,6 +36,8 @@
 | **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 | — |
 | **ascendc-docs-gen** | 算子文档写作与 ACLNN API 完整生成，按需加载取证、审阅及交付流程 | [入口](../ops/ascendc-docs-gen/SKILL.md) |
 | **ascendc-api-docs-gen** | Ascend C API 文档写作参考，按需加载源码完整生成流程 | [入口](../ops/ascendc-api-docs-gen/SKILL.md) |
+| **ascendc-api-docs-review** | Ascend C API 文档（Markdown）质检：结构完整性、规范性、语言通顺性 | — |
+| **ascendc-docs-review** | aclnn 算子 API 说明文档质检：规范性、完备性、可读性、正确性 | — |
 | **ops-simulator** | NPU 仿真器技能。提供 CANN Simulator 的使用指导，包括精度仿真、性能仿真、流水线分析。 | — |
 | **ascendc-blaze-best-practice** | Matmul/Cube/GEMM/BMM 单算子直调生成（Blaze/tensor_api 路径），覆盖模板选型、改造、Tiling 及排错 | — |
 | **ascendc-tensor-api-best-practice** | 在 Ascend 950 / DAV_3510 上用户明确指定 Tensor API 时的实现路线权威源（硬约束，不由 Blaze 优先选型改写），Tensor API 为主、C API 为辅，覆盖 API 分工、Layout、内存预算、工具链、精度与性能 | — |

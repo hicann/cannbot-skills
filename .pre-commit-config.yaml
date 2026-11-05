@@ -42,8 +42,8 @@ repos:
           - "--style=file"
           - "--verbose"
           - "-i"
-        # kb/ 为从 CANN 仓提取的知识库快照，重排会与提取源漂移
-        exclude: (^|/)kb/
+        # kb/ 为从 CANN 仓提取的知识库快照，evals/dataset/ 为基准数据集快照，重排均会与提取源漂移
+        exclude: (^|/)kb/|(^|/)evals/dataset/
 
   # Python 代码检查
   - repo: https://gitcode.com/gh_mirrors/ru/ruff-pre-commit

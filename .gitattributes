@@ -51,3 +51,6 @@ Dockerfile text eol=lf
 *.tar  binary
 *.gz   binary
 *.whl  binary
+
+# Ascend C API 基准语料配图走 Git LFS 托管（目录级规则，不改全局 *.png binary 策略）
+ops/ascendc-api-docs-review/evals/api/figures/*.png filter=lfs diff=lfs merge=lfs -text
