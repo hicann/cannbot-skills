@@ -8,7 +8,7 @@
 
 ### 1.1 什么是计算流伪码
 
-计算流伪码是 [broadcast-standard-dag-buffers.md](broadcast-standard-dag-buffers.md) 物理存活节点分析的序列化产物。P trace 选定了三要素组合（API 能力 + 融合策略 + buffer 分配），伪码把这一选择写成 `DataCopy → 计算 → 释放` 的完整序列。每步标注 UB 驻留数，验证全程 ≤ P。
+计算流伪码是 [broadcast-standard-dag-buffers.md](broadcast-standard-dag-buffers.md) 物理存活节点分析的序列化产物。P trace 选定了三要素组合（API 能力 + 融合策略 + buffer 分配——复用映射由 [common/scripts/allocate.py](../../../common/scripts/allocate.py) 生成、P 峰值由 physical_p.py 验证），伪码把这一选择写成 `DataCopy → 计算 → 释放` 的完整序列。每步标注 UB 驻留数，验证全程 ≤ P。
 
 伪码不是实现——它是物理分析到 kernel 编码之间的桥梁。后续所有设计（计算流验证、输入预处理、UB 切分、kernel 编码）都以这份伪码为唯一参照。
 
@@ -64,7 +64,7 @@ agent 自行判断是否执行：
 
 ### 3.3 dtype 分路径
 
-每种 dtype 路径分别写一份计算流伪码。不同 dtype 路径可能因 Cast 插入而步骤数不同——Cast 不参与 VF 融合，作为链的断点，可能增加中间 buffer 和步骤。
+每种 dtype 路径分别写一份计算流伪码。不同 dtype 路径可能因 Cast 插入而步骤数不同——Cast 可参与 VF 融合（`Reg::Cast` 寄存器指令，见 [cast-rules.md](../../../common/cast-rules.md) §4.3）；未参与融合的独立 Cast 操作作为链的断点，可能增加中间 buffer 和步骤。
 
 ### 3.4 搬出段
 

@@ -35,7 +35,7 @@ references/paradigms/
 | `{paradigm}-template-overview.md` | 模板 / TilingKey / TilingData 划分及对应关系 |
 | `{paradigm}-tiling-preprocess.md` | 平台/算子信息获取、值依赖、shape 归一化 |
 | `{paradigm}-kernel-entrance.md` | 入口注册、模板分发、TilingData 获取 |
-| `{paradigm}-{scene}-dag-buffers.md` | 计算流、存活节点、VF 融合、buffer 划分 |
+| `{paradigm}-{scene}-dag-buffers.md` | 计算流、物理存活节点 P、VF 融合、buffer 划分 |
 | `{paradigm}-{scene}-tiling.md` | UB 切分、多核切分、切分后处理 |
 | `{paradigm}-{scene}-kernel.md` | 骨架、偏移、CopyIn、Compute、CopyOut、同步 |
 

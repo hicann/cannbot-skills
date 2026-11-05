@@ -85,10 +85,10 @@
 
 ### §3.3 Host 侧 Tiling 方案
 
-**[3.3.1] 逻辑存活节点（L）**
+**[3.3.1] 计算图推导**
 
 - **必读**：[broadcast-standard-dag-buffers.md](references/broadcast-template-standard/broadcast-standard-dag-buffers.md) §1.1、§3
-- **指引**：从 spec.yaml 公式推导 S1..Sn 并标注分叉点；以持有法则逐操作 trace。L trace 仅基于纯数学拓扑，不考虑 VF、融合、寄存器。调度 trace 格式示例：
+- **指引**：从 spec.yaml 公式推导 S1..Sn 并标注分叉点。计算图是 VF 段编排与物理 trace 的共同输入；关键搬运次序决策（如"推迟某路 CopyIn 至某链 CopyOut 之后"）在 [3.3.2] 物理 trace 中显式给出。持有法则三态标注格式（供 [3.3.2] 物理 trace 沿用）：
 
   ```pseudocode
   // S1: DataCopy x（第一步，执行前为空）
@@ -103,23 +103,22 @@
 
 - **产出**：
   (1) `##### 计算图` — 从 spec.yaml 公式推导 S1..Sn，标注分叉点。标 pseudocode。格式：`S<N>: <操作> [<输入> → <输出>]`
-  (2) `##### 调度` — 以持有法则逐操作 trace。标 pseudocode。每步标注 执行前/中/后: 持有=[...]，消费者推理，峰值标 ← 峰值
-  (3) `##### 结论` — 表格：L 值 / 峰值出现步骤 / 瓶颈 / 不可降原因
 - **约束**：对照 [broadcast-standard-dag-buffers.md](references/broadcast-template-standard/broadcast-standard-dag-buffers.md) §3 自查
 
 ---
 
 **[3.3.2] 物理存活节点（P）**
 
-- **必读**：[broadcast-standard-dag-buffers.md](references/broadcast-template-standard/broadcast-standard-dag-buffers.md) §1.1、§1.2、§3，[broadcast-standard-kernel-template.md](references/broadcast-template-standard/broadcast-standard-kernel-template.md) §5.2、§5.3
-- **指引**：P = f(计算流, API 能力, 算法实现)。计数域为 UB buffer，寄存器不计入。P ≥ L 一般成立，但 VF 寄存器链融合可打破，此时 P < L 合法。融合穷举方法论见 [broadcast-standard-dag-buffers.md](references/broadcast-template-standard/broadcast-standard-dag-buffers.md) §1.2
+- **必读**：[common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md)（VF 段编排，C1-C9）、[broadcast-standard-dag-buffers.md](references/broadcast-template-standard/broadcast-standard-dag-buffers.md) §1.1、§1.2、§3，[broadcast-standard-kernel-template.md](references/broadcast-template-standard/broadcast-standard-kernel-template.md) §5.2、§5.3
+- **指引**：P = f(计算流, API 能力, 算法实现)。计数域为 UB buffer，寄存器不计入；VF 寄存器链融合可消掉中间量（不落 UB）。下界自检：P < 输入数+输出数 → 须显式解释被寄存器链消掉的中间量。先按 [common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md)（C1-C9）做 VF 段编排定段边界，融合穷举方法论见 [broadcast-standard-dag-buffers.md](references/broadcast-template-standard/broadcast-standard-dag-buffers.md) §1.2。段编排与融合定型后，B0/B1.. 复用映射由 [common/scripts/allocate.py](../common/scripts/allocate.py) 生成（设计侧只声明调度顺序 / pinned 约束），P 峰值与 WAR / 下界自检交 [common/scripts/physical_p.py](../common/scripts/physical_p.py) 验证——脚本调用时机、顺序与落盘要求以 [common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md) §12 为准（三步管线：liveness.py P_baseline 预计算 → allocate.py 槽位分配 → physical_p.py P 峰值校验），**本范式要求三步全部执行，产物见产出 (6)**
 - **产出**：
-  (1) `##### 核心原则` — P = f(计算流, API 能力, 算法实现)。计数域为 UB buffer，寄存器不计入。P ≥ L 一般成立，但 VF 寄存器链融合可打破，此时 P < L 合法
+  (1) `##### 核心原则` — P = f(计算流, API 能力, 算法实现)。计数域为 UB buffer，寄存器不计入；VF 寄存器链融合可消掉中间量。下界自检：P < 输入数+输出数 → 须显式解释被寄存器链消掉的中间量
   (2) `##### 可用 API 能力` — 表格：API | 能力 | 对物理节点的意义 | 来源。必须检查：NDDMA 随路 broadcast、RegBase 寄存器指令集（打开 `../../api/regbase_api_whitelist.md` 逐条核对存在性）
-  (3) `##### VF 融合穷举分析` — 列出所有相邻 Vector 操作对，逐对判据：RegBase 指令存在？非 Cast？链长 ≤ 7？多消费者不打断链，但融合后峰值 ≤ 目标 P 方可全融，超 P 则拆分。Cast 不参与 VF 融合，作为断点
-  (4) `##### {dtype} 物理 trace` — 每种 dtype 独立 trace（从 spec.yaml dtype_policy 提取）。从 CopyIn S1 到 CopyOut Sn 每步展开，禁止写总结。每步标注 执行前/中/后: 持有=[B0,B1,...] + 消费者推理，峰值标 `← P_{dtype}=N 峰值`。Buffer 用 B0/B1/... 命名。标 regbase
-  (5) `##### 结论表` — 汇总各 dtype 路径下的 P 值。含 perBufBytes、perBufElems
-- **约束**：对照 [broadcast-standard-dag-buffers.md](references/broadcast-template-standard/broadcast-standard-dag-buffers.md) §3 自查
+  (3) `##### VF 融合穷举分析` — 段边界先按 [common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md)（C1-C9）判定；段内列出所有相邻 Vector 操作对，逐对判据：RegBase 指令存在？链长 ≤ 7？多消费者不打断链，但融合后峰值 ≤ 目标 P 方可全融，超 P 则拆分。Cast 可参与 VF 融合（`Reg::Cast` 寄存器指令，见 [common/cast-rules.md](../common/cast-rules.md) §4.3），不作为断点
+   (4) `##### {dtype} 物理 trace` — 每种 dtype 独立 trace（从 spec.yaml dtype_policy 提取）。从 CopyIn S1 到 CopyOut Sn 每步展开，禁止写总结。每步标注 执行前/中/后: 持有=[B0,B1,...] + 消费者推理，峰值标 `← P_{dtype}=N 峰值`。Buffer 用 B0/B1/... 命名（B 名映射由 [common/scripts/allocate.py](../common/scripts/allocate.py) 产出，按脚本输出复核誊写）。标 regbase
+  (5) `##### 结论表` — 汇总各 dtype 路径下的 P 值。含 perBufBytes、perBufElems。结论表并列记录 P、P_baseline（liveness.py --pinned）、L（liveness.py 无 pinned）三个值——**融合后 P 与 L / P_baseline 不保证普遍大小关系**（VF 融合消掉中间量可降 P，链上并发输入增多/多消费者物化/新增搬入可升 P），禁止以 P ≥ L 或 P ≥ P_baseline 作门禁；但**同一基线动作流（同 steps 与 excluded）下 P_baseline ≥ L 恒成立**（pinned 仅补计独占项，不减少峰值）；P 相对 P_baseline 的升降须给出解释（降=消掉哪些中间量 / 升=新增哪些并发输入或物化）；与脚本输出不一致处须逐项说明。自动 sanity check 沿用 physical_p.py 既有的「P < 输入数+输出数 → 强制解释」判据
+  (6) `##### 脚本管线产物` — **执行权归属（显式）：本产出由读到本节的集中设计任务（通常为 write-design-host-tiling——该任务读本文件、产出 HostTiling.md 的 P 结论表与「VF 融合穷举分析」）就地执行一次**（与 reduction 范式 [3.4] 对齐；下游 write-design-kernel / write-design-api / 分支设计任务只消费本产出结果，不重复执行、不得以「顺延至后续任务」为由推迟）。按 [common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md) §12 三步管线执行 liveness.py → allocate.py → physical_p.py：脚本输入 JSON（计算图 / tensor 级物理流 / B 名物理流）与输出结论（P_baseline、槽位映射、P 峰值、WAR 检查、下界自检）落盘 `$WORK_DIR/design/liveness/`；**禁止以顺延声明推迟落盘——目录受限时在当前任务内落最近可用位置并在设计文档登记绝对路径**；物理 trace（产出 (4)）与结论表（产出 (5)）须与脚本输出一致（按脚本输出复核誊写）；physical_p.py 的 WAR 违规或下界自检未通过时不得进入 tiling，回退调整语义约束后重跑 allocate→physical_p
+- **约束**：对照 [broadcast-standard-dag-buffers.md](references/broadcast-template-standard/broadcast-standard-dag-buffers.md) §3 自查；产出 (6) 的脚本输入/输出文件必须真实存在（含 steps/pinned 声明的输入 JSON 与含 P_baseline/P/WAR 结论的输出 JSON），禁止只写脚本名不落盘
 
 ---
 

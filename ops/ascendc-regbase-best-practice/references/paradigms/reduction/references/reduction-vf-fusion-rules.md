@@ -1,6 +1,8 @@
-# VF 融合分析
+# VF 段内融合分析
 
-> **适用范围**: reduction 范式通用方法论。§1.1 存活节点分析（L + P）和 §1.2 VF 融合分析时使用。
+> **两层定位**：本文档是 VF 设计的**段内融合层**——判定段内相邻 Vector 算子能否串成一条寄存器链（白名单、链长 ≤7、P+3）。段级编排（计算流划几个段、段边界在哪，规则 C1-C9）见 [common/vf-split-fusion-rules.md](../../common/vf-split-fusion-rules.md)，**先段编排、后段内融合**，两层判据不混用。
+>
+> **适用范围**: 各范式 UB 划分（物理存活节点 P 与 VF 融合分析）通用；文中案例以 reduction 范式为背景。
 
 ## 1. 穷举所有相邻操作对
 
@@ -18,6 +20,8 @@
 3. **RegBase 指令必须存在**——对应操作在 [regbase_api_whitelist.md](../../../api/regbase_api_whitelist.md) 白名单中能找到
 
 **多消费者不打断链。** 即使某个中间结果被 VF 外的其他步骤引用，VF 链仍可继续——VF 内部把这个值 `StoreAlign` 到 UB 即可，寄存器链路不受影响。代价是多写一次 UB 会多占一个 P slot，需要纳入物理 trace 做峰值验证。
+
+**与 C6 的优先级**：多消费者引用的量本身是算子输出（物化点）时，段边界先按 [common/vf-split-fusion-rules.md](../../common/vf-split-fusion-rules.md) §6 C6 裁决（默认拆、可豁免）；C6 豁免保持融合后，本条多消费者规则适用（StoreAlign 落 UB、链继续、占 1 个 P slot）。非输出型分叉不触发 C6，直接按本条处理。
 
 ```
 VF 内:  ...→vdiv→raw_x(reg)→StoreAlign→UB (供VF外读)

@@ -106,7 +106,7 @@
         "eval_mode": "text"
       },
       "prompt": "Reviewer 看了我的 RegBase 设计方案，发现外层用了 TPipe、TQue 和 LocalTensor 做数据搬运，就说这其实是 MemBase 而不是 RegBase，让我重写。我该怎么判断和回应？可阅读该技能文档获取规范，但不要实际执行修改代码。",
-      "expected_output": "应说明 RegBase outer shell 使用 TPipe、TQue、LocalTensor 做 UB staging 是允许的，这不等于 MemBase；RegBase 与 MemBase 的区别在于 Compute 的数学核心是否进入寄存器级 VF body（__VEC_SCOPE__ 内使用 RegTensor/MaskReg），而不是外层是否用队列。不应因为出现 TQue 就否定 RegBase；也不要一边声明 asc_vf_call 一边给出 MemBase API 伪代码。应重新画 Host/Kernel/UB/VF 分层，区分 UB staging 与 VF compute，并对不确定的 API 回到白名单和参考实现验证。",
+      "expected_output": "1. 应说明 RegBase outer shell 使用 TPipe、TQue、LocalTensor 做 UB staging 是允许的，这不等于 MemBase。\n2. 应给出判别标准：RegBase 与 MemBase 的区别在于 Compute 的数学核心是否进入寄存器级 VF body（__VEC_SCOPE__ / __simd_vf__ 内使用 RegTensor / MaskReg），而不是外层是否用队列。\n3. 应明确指出不应因为出现 TQue 就否定 RegBase，并据此回应 Reviewer 的质疑（外层用队列不构成 MemBase 的证据）。",
       "expectations": [],
       "files": []
     }

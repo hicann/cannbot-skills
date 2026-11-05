@@ -14,7 +14,6 @@
 | **split ubSplitIdx** | UB 单切分轴，将 effective_shape 分为 UB 内轴和 UB 外轴 |
 | **perBufElems** | 单个 UB buffer 可容纳的元素数 = UB / P |
 | **P (物理存活节点)** | UB buffer 层面的峰值同时驻留数，决定 TBuf 槽位数 |
-| **L (逻辑存活节点)** | 计算图 tensor 层面的峰值同时驻留数 |
 | **RANK** | effective_shape 的维度数，TilingKey 的唯一参数 |
 | **NDDMA** | 多维数据搬运（DataCopy<T, NDDMA_DIMS, cfg>），支持随路 broadcast |
 | **TBuf** | 单缓冲 UB 管理模型，禁止 TQue |

@@ -113,6 +113,12 @@
 - **产出**：(1) **axes 归一化结论**（本算子的空 axes 语义判定结论 + 归一化后的轴下标集合）(2) **合轴结论**（合轴后的 axisShape/axisNum/是否 tailR/tailA）(3) `HandleEmptyTensor()` 函数签名及核心代码 (4) `DropSizeOneAxes()` / `FuseAxis()` / `PadLeadingOneA()` / `PadRIfPureA()` 四步独立函数签名及核心代码
 - **约束**：以必读文件骨架为准，四步函数签名和核心代码不变
 
+**[3.4] 存活节点脚本管线（集中执行，跨分支唯一产物）**（通用）
+
+- **指引**：本范式 [5.1]/[6.1]/[7.1] 产出 (2) 的「脚本管线产物」**统一由首个到达 UB 划分分析的集中设计任务（通常为 write-design-host-tiling——该任务读本文件、产出 HostTiling.md 的 P 结论表）执行一次**：按 [common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md) §12 三步管线 [common/scripts/liveness.py](../common/scripts/liveness.py) → [common/scripts/allocate.py](../common/scripts/allocate.py) → [common/scripts/physical_p.py](../common/scripts/physical_p.py)，preReduce / postReduce **分阶段各跑一份**（Group 模板追加 Phase 2 差异 B 名物理流的 physical_p 增量校验），全算子共一份产物落盘 `$WORK_DIR/design/liveness/`，**禁止以顺延声明推迟落盘——目录受限时在当前任务内落最近可用位置并在设计文档登记绝对路径**
+- **执行权归属（防顺延断链）**：分支设计任务（DESIGN-BRANCH-K）**不读本文件、不执行脚本**，只消费 `design/liveness/` 产物与 HostTiling.md「P 结论表」的锚定结论；任何设计任务**不得以「归分支设计任务 / 后续任务 / per-template 产出」为由推迟执行或落盘**——实测该顺延路径的接棒者不存在（三级顺延全部过站后产物仍缺失）
+- **产出**：(1) pre 阶段 dag / alloc / flow JSON 与 liveness.py、physical_p.py 输出（P_pre_baseline、P_pre、WAR、下界自检）(2) post 阶段同套（P_post_baseline、P_post）(3) Group Phase 2 差异物理流的 physical_p 增量校验输出（如路由到 Group 模板）(4) HostTiling.md「P 结论表」与脚本输出的一致性对账（P、P_baseline、L 三个值并列记录——**融合后 P 与 L / P_baseline 不保证普遍大小关系**（禁止以 P ≥ L / P ≥ P_baseline 作门禁；同一基线动作流下 P_baseline ≥ L 恒成立——pinned 仅补计独占项）；P 相对 P_baseline 的升降须解释（降=消掉哪些中间量 / 升=新增哪些并发输入或物化）；不一致以脚本输出修正 P 结论表；自动 sanity check 沿用 physical_p.py 的「P < 输入数+输出数 → 强制解释」）
+
 ---
 
 ### 4 Kernel 公共处理
@@ -129,7 +135,7 @@
 - **必读**：[reduction-tuple-reduce.md](references/reduction-tuple-reduce.md)
 - **指引**：N 次独立归约用 for 循环依次处理（empty/base/group 各分支内）
 - **产出**：(1) Tuple Reduce 场景判定结论 (2) for 循环结构代码（preEle 按 processIdx 分发 + CopyOut 写到不同输出指针）(3) Group 模板 for 循环末尾需额外 SyncAll（base/empty 不加 SyncAll，跨过程 WAR 由 [5.10]/[6.10] 全局跳旗规则覆盖）
-- **约束**：⚠ 算子为 Tuple Reduce 时，代码必须产出，不能是伪码，不得凭记忆编写；Workspace 和 UB buffer 与标准范式一致，N 次循环复用同一份，禁止在 workspace 公式或 UB 预算中乘以 N；存活节点分析按代码结构画一条流：公共步骤一次、过程独有步骤 if/else 分支并列（分割粒度 = 归约过程，同过程分叉输出在分支内合并），分支互斥取各分支峰值 max（不叠加、不按分支单独记账），其余按存活区间判定
+- **约束**：⚠ 算子为 Tuple Reduce 时，代码必须产出，不能是伪码，不得凭记忆编写；Workspace 和 UB buffer 与标准范式一致，N 次循环复用同一份，禁止在 workspace 公式或 UB 预算中乘以 N；P 物理 trace 按代码结构画一条流：公共步骤一次、过程独有步骤 if/else 分支并列（分割粒度 = 归约过程，同过程分叉输出在分支内合并），分支互斥取各分支峰值 max（不叠加、不按分支单独记账），其余按存活区间判定
 
 **[4.2] Kernel 代码规则与 VF 编程速查** (附源码)（通用）
 
@@ -142,13 +148,14 @@
 
 ### 5 空tensor模板
 
-**[5.1] UB 划分（存活节点 + VF 融合 + Buffer 分类 + Double Buffer）**
+**[5.1] UB 划分（物理存活节点 P + VF 融合 + Buffer 分类 + Double Buffer）**
 
-- **必读**：[reduction-empty-dag-buffers.md](references/reduction-template-empty/reduction-empty-dag-buffers.md) §1；⛔ Tuple Reduce 场景：额外必读 [reduction-tuple-reduce.md](references/reduction-tuple-reduce.md)
-- **指引**：计算图从算子公式推导（不依赖合轴）。存活节点分析（L→P）→ VF 融合分析 → 额外 buffer → Buffer 分类汇总表。Double Buffer 当前不开启
+- **必读**：[common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md)（VF 段编排，C1-C9）、[reduction-empty-dag-buffers.md](references/reduction-template-empty/reduction-empty-dag-buffers.md) §1；⛔ Tuple Reduce 场景：额外必读 [reduction-tuple-reduce.md](references/reduction-tuple-reduce.md)
+- **指引**：计算图从算子公式推导（不依赖合轴）。VF 段编排（C1-C9 定段边界）→ 段内 VF 融合分析（[reduction-vf-fusion-rules.md](references/reduction-vf-fusion-rules.md)）→ 复用映射由 [common/scripts/allocate.py](../common/scripts/allocate.py) 生成（设计侧只声明调度顺序 / pinned / 互斥分支约束）→ P 峰值与 WAR / 下界自检交 [common/scripts/physical_p.py](../common/scripts/physical_p.py) 验证，物理 trace 按脚本输出复核誊写 → 额外 buffer → Buffer 分类汇总表。Double Buffer 当前不开启。脚本调用时机、顺序与落盘要求以 [common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md) §12 为准（三步管线：[common/scripts/liveness.py](../common/scripts/liveness.py) P_baseline 预计算 → allocate.py 槽位分配 → physical_p.py P 峰值校验），**本范式要求三步全部执行，产物见产出 (2)**
 - **产出**：
-  - (1) **Empty**：计算图 + L 调度 trace + L 结论表 + P_baseline + 可用 API 能力表 + VF 融合穷举分析 + VF 融合方案 + {dtype} 物理 trace + P 结论表（P_post）+ Buffer 分类汇总表 + **Double Buffer 决策结论**
-  - ⛔ Tuple Reduce 场景：UB buffer 与标准范式一致，N 次循环复用同一份，禁止乘以 N；存活节点画一条流（公共步骤一次、独有步骤按 processIdx 分支并列，分割粒度 = 归约过程、禁止按 for 展开），分支互斥取 max 不叠加，其余按存活区间判定
+  - (1) **Empty**：计算图 + P_baseline + 下界自检 + 可用 API 能力表 + VF 融合穷举分析 + VF 融合方案 + {dtype} 物理 trace + P 结论表（P_post）+ Buffer 分类汇总表 + **Double Buffer 决策结论**
+  - (2) **脚本管线产物**（**执行权归 [3.4] 集中任务，本模板不单独跑；本条为消费契约**）：[common/scripts/liveness.py](../common/scripts/liveness.py) → [common/scripts/allocate.py](../common/scripts/allocate.py) → [common/scripts/physical_p.py](../common/scripts/physical_p.py) 按 §12 三步管线的产物（P_baseline、槽位映射、P 峰值、WAR 检查、下界自检）落盘 `$WORK_DIR/design/liveness/`（**禁止以顺延声明推迟落盘——目录受限时在当前任务内落最近可用位置并在设计文档登记绝对路径**）；(1) 中的 P_baseline / 物理 trace / P 结论表须与脚本输出一致（按脚本输出复核誊写，P/P_baseline/L 三值并列记录且升降有解释（融合后 P 与 L / P_baseline 无普遍大小关系、禁止以不等式作门禁；同一基线动作流下 P_baseline ≥ L 恒成立））；physical_p.py 的 WAR 违规或下界自检未通过时不得进入 tiling，回退调整语义约束后重跑 allocate→physical_p
+  - ⛔ Tuple Reduce 场景：UB buffer 与标准范式一致，N 次循环复用同一份，禁止乘以 N；P trace 画一条流（公共步骤一次、独有步骤按 processIdx 分支并列，分割粒度 = 归约过程、禁止按 for 展开），分支互斥取 max 不叠加，其余按存活区间判定
 
 **[5.2] Tiling UB 切分** (附源码)（empty 专用）
 
@@ -219,13 +226,14 @@
 
 ### 6 Base 模板
 
-**[6.1] UB 划分（存活节点 + VF 融合 + Buffer 分类 + Double Buffer）**
+**[6.1] UB 划分（物理存活节点 P + VF 融合 + Buffer 分类 + Double Buffer）**
 
-- **必读**：[reduction-binary-base-dag-buffers.md](references/reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §1；⛔ Tuple Reduce 场景：额外必读 [reduction-tuple-reduce.md](references/reduction-tuple-reduce.md)
-- **指引**：计算图从算子公式推导（不依赖合轴）。存活节点分析（L→P）→ VF 融合分析 → 额外 buffer → Buffer 分类汇总表。Double Buffer 当前不开启
+- **必读**：[common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md)（VF 段编排，C1-C9）、[reduction-binary-base-dag-buffers.md](references/reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §1；⛔ Tuple Reduce 场景：额外必读 [reduction-tuple-reduce.md](references/reduction-tuple-reduce.md)
+- **指引**：计算图从算子公式推导（不依赖合轴）。VF 段编排（C1-C9 定段边界）→ 段内 VF 融合分析（[reduction-vf-fusion-rules.md](references/reduction-vf-fusion-rules.md)）→ 复用映射由 [common/scripts/allocate.py](../common/scripts/allocate.py) 生成（设计侧只声明调度顺序 / pinned / 互斥分支约束）→ P 峰值与 WAR / 下界自检交 [common/scripts/physical_p.py](../common/scripts/physical_p.py) 验证，物理 trace 按脚本输出复核誊写 → 额外 buffer → Buffer 分类汇总表。Double Buffer 当前不开启。脚本调用时机、顺序与落盘要求以 [common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md) §12 为准（三步管线：[common/scripts/liveness.py](../common/scripts/liveness.py) P_baseline 预计算 → allocate.py 槽位分配 → physical_p.py P 峰值校验），**本范式要求三步全部执行，产物见产出 (2)**
 - **产出**：
-  - (1) **Base**：计算图 + L 调度 trace + L 结论表 + P_baseline + 可用 API 能力表 + VF 融合穷举分析 + VF 融合方案 + {dtype} 物理 trace + P 结论表（P_pre/P_post）+ isReuseSource + sharedTmpBuffer + Buffer 分类汇总表 + **Double Buffer 决策结论**（当前不开启）+ **preReduceResult 校验**（完全独立 buffer，不与 preReducePhase 内任何节点复用）
-  - ⛔ Tuple Reduce 场景：UB buffer 与标准范式一致，N 次循环复用同一份，禁止乘以 N；存活节点画一条流（公共步骤一次、独有步骤按 processIdx 分支并列，分割粒度 = 归约过程、禁止按 for 展开），分支互斥取 max 不叠加，其余按存活区间判定
+  - (1) **Base**：计算图 + P_baseline + 下界自检 + 可用 API 能力表 + VF 融合穷举分析 + VF 融合方案 + {dtype} 物理 trace + P 结论表（P_pre/P_post）+ isReuseSource + sharedTmpBuffer + Buffer 分类汇总表 + **Double Buffer 决策结论**（当前不开启）+ **preReduceResult 校验**（完全独立 buffer，不与 preReducePhase 内任何节点复用）
+  - (2) **脚本管线产物**（**执行权归 [3.4] 集中任务，本模板不单独跑；本条为消费契约**）：[common/scripts/liveness.py](../common/scripts/liveness.py) → [common/scripts/allocate.py](../common/scripts/allocate.py) → [common/scripts/physical_p.py](../common/scripts/physical_p.py) 按 §12 三步管线的产物（P_baseline、槽位映射、P 峰值、WAR 检查、下界自检）落盘 `$WORK_DIR/design/liveness/`（**禁止以顺延声明推迟落盘——目录受限时在当前任务内落最近可用位置并在设计文档登记绝对路径**）；(1) 中的 P_baseline / 物理 trace / P 结论表须与脚本输出一致（按脚本输出复核誊写，P/P_baseline/L 三值并列记录且升降有解释（融合后 P 与 L / P_baseline 无普遍大小关系、禁止以不等式作门禁；同一基线动作流下 P_baseline ≥ L 恒成立））；physical_p.py 的 WAR 违规或下界自检未通过时不得进入 tiling，回退调整语义约束后重跑 allocate→physical_p
+  - ⛔ Tuple Reduce 场景：UB buffer 与标准范式一致，N 次循环复用同一份，禁止乘以 N；P trace 画一条流（公共步骤一次、独有步骤按 processIdx 分支并列，分割粒度 = 归约过程、禁止按 for 展开），分支互斥取 max 不叠加，其余按存活区间判定
 
 **[6.2] Tiling UB 切分** (附源码)（base）
 
@@ -339,14 +347,14 @@
 
 ### 7 Group 模板
 
-**[7.1] UB 划分（存活节点 + VF 融合 + Buffer 分类 + Double Buffer）**
+**[7.1] UB 划分（物理存活节点 P + VF 融合 + Buffer 分类 + Double Buffer）**
 
-- **必读**：[reduction-binary-base-dag-buffers.md](references/reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §1、[reduction-binary-group-dag-buffers.md](references/reduction-template-binary-group/reduction-binary-group-dag-buffers.md) §1（Phase 2 差异）；⛔ Tuple Reduce 场景：额外必读 [reduction-tuple-reduce.md](references/reduction-tuple-reduce.md)
-- **指引**：Phase 1 preReducePhase / postReducePhase 的 VF 融合分析与 Base 完全一致。Phase 2 差异：Phase 2 CopyIn 复用 Phase 1 的 preReduceResult 物理槽 + cacheBuf 写[0] + workspace GM buffer 新增
+- **必读**：[common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md)（VF 段编排，C1-C9）、[reduction-binary-base-dag-buffers.md](references/reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §1、[reduction-binary-group-dag-buffers.md](references/reduction-template-binary-group/reduction-binary-group-dag-buffers.md) §1（Phase 2 差异）；⛔ Tuple Reduce 场景：额外必读 [reduction-tuple-reduce.md](references/reduction-tuple-reduce.md)
+- **指引**：Phase 1 preReducePhase / postReducePhase 的 VF 段编排（C1-C9；跨核场景 C9 即 Group 模板 Phase 1/Phase 2 两段结构）与段内融合分析均与 Base 完全一致；复用映射同样由 [common/scripts/allocate.py](../common/scripts/allocate.py) 生成、[common/scripts/physical_p.py](../common/scripts/physical_p.py) 验证；脚本三步管线要求同 [6.1]（liveness.py → allocate.py → physical_p.py，时机与落盘以 [common/vf-split-fusion-rules.md](../common/vf-split-fusion-rules.md) §12 为准），Phase 2 差异部分（workspace 二次归约物理流）须重跑 physical_p.py 验证。Phase 2 差异：Phase 2 CopyIn 复用 Phase 1 的 preReduceResult 物理槽 + cacheBuf 写[0] + workspace GM buffer 新增
 - **产出**：
-  - (1) 复用 [6.1] 全部产出（计算图 + L 调度 trace + L 结论表 + P_baseline + 可用 API 能力表 + VF 融合穷举分析 + VF 融合方案 + {dtype} 物理 trace + P 结论表 + Buffer 分类汇总表 + Double Buffer 决策结论 + preReduceResult 校验）
-  - (2) **Group Phase 2 差异**（Phase 2 CopyIn 复用 Phase 1 的 preReduceResult 物理槽 + cacheBuf 写[0] + workspace GM buffer `[rGroupCnt, aTotal]` fp32 dense），见 group dag-buffers §1.1~§1.3
-  - ⛔ Tuple Reduce 场景：UB buffer 与标准范式一致，N 次循环复用同一份，禁止乘以 N；存活节点画一条流（公共步骤一次、独有步骤按 processIdx 分支并列，分割粒度 = 归约过程、禁止按 for 展开），分支互斥取 max 不叠加，其余按存活区间判定
+  - (1) 复用 [6.1] 全部产出（计算图 + P_baseline + 下界自检 + 可用 API 能力表 + VF 融合穷举分析 + VF 融合方案 + {dtype} 物理 trace + P 结论表 + Buffer 分类汇总表 + Double Buffer 决策结论 + preReduceResult 校验 + **[6.1] 产出 (2) 的脚本管线产物（[3.4] 集中执行）**）
+  - (2) **Group Phase 2 差异**（Phase 2 CopyIn 复用 Phase 1 的 preReduceResult 物理槽 + cacheBuf 写[0] + workspace GM buffer `[rGroupCnt, aTotal]` fp32 dense），见 group dag-buffers §1.1~§1.3；Phase 2 的 B 名物理流由 **[3.4] 集中任务**随基础三步一并追加进 [common/scripts/physical_p.py](../common/scripts/physical_p.py) 校验（输出同样落盘 `$WORK_DIR/design/liveness/`，分支任务不执行），Phase 1/Phase 2 各自的 P 峰值以脚本输出为准
+  - ⛔ Tuple Reduce 场景：UB buffer 与标准范式一致，N 次循环复用同一份，禁止乘以 N；P trace 画一条流（公共步骤一次、独有步骤按 processIdx 分支并列，分割粒度 = 归约过程、禁止按 for 展开），分支互斥取 max 不叠加，其余按存活区间判定
 
 **[7.2] Tiling UB 切分**
 

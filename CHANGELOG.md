@@ -14,6 +14,7 @@
 ### 【2026-10-31】
 #### 新特性 New Features
 - 【算子】`ops-design-paradigms` 新增 RandomSampling 范式：随机流代数（不重叠不变量、预留律、seed 语义与 offset 递进）、分布变换消耗目录与双轨验证；AscendC 适配层含 random_common 接入契约与 TF 对标 SIMD / torch 对标 SIMT 双路线，另含 CANNBotDSL 适配层；蒸馏自 22 算子。
+- 【算子 ascendc-regbase-best-practice】buffer 槽位分配脚本化：scripts/ 新增 allocate.py（贪心配槽，输入调度顺序/pinned/互斥分支约束，产出 B0..Bn 复用映射与 B 名物理流，demo 锚定文档已知答案）与 example-alloc.json；README/SKILL/各范式文档同步"LLM 定约束、脚本配槽、physical_p 验证"分工与四步链路，example-flow.json 更新为分配器产物。
 
 ### 【2026-10-30】
 #### 新特性 New Features
@@ -40,6 +41,7 @@
 #### 新特性 New Features
 - 【算子生成】`catlass-dsl-generator` 性能收口瓶颈取证前置 makespan 零成本判定（`ceil(总块数/核数) × 单块耗时` 与实测吻合即任务铺放空转，含无 profiler 时的消融取证路径），新增 `optimization/makespan-scheduling-gap` 知识条目与尾轮条目交叉引用。
 - 【算子性能】`ops/ascendc-performance-best-practices` 新增 arch35 小 shape（latency-bound）优化指南：测空核 floor/roofline、逐杆单变量 A/B 与退化即回滚、7 类可选优化杆及实测反模式。
+
 ### 【2026-10-26】
 #### 新特性 New Features
 - 【算子生成】`plugins-community/catlass-dsl-generator` 新增骨架门禁、探针与调研预算、无性能目标时三轮性能收口，沉淀 14 条实现模式知识条目。
@@ -51,6 +53,14 @@
 ### 【2026-10-23】
 #### 变更 Changes
 - 【插件清理】删除 `plugins-official/ops-direct-invoke` 旧副本及注册、测试入口，统一指向 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke)；保留公共 Skills 与 Flash 插件，同步安装说明与 ST 统计。
+
+### 【2026-10-21】
+#### 修复 Bug Fixes
+- 【算子】修复 `ascendc-regbase-best-practice` P 计算脚本 pinned 双计：pinned buffer 中流写入且持有时在 `during` 与 pinned 计数中被重复计入，P 系统性高估 ≤|pinned|（example-flow.json 真值 3 误报 4）；修复为 during 排除 pinned 只计一次，两个 demo 各补 1 例中流 pinned 防回归用例，README 示例结论同步更正（4→3）。
+
+### 【2026-10-13】
+#### 新特性 New Features
+- 【算子 ascendc-regbase-best-practice】新增 VF 段编排规则（C1-C9）与 L/P 计算脚本：paradigms/common/ 下新增 vf-split-fusion-rules.md（Reduce/Broadcast/多段融合范式必读）与 scripts/（liveness.py、physical_p.py、example JSON）；删除原手工 L 分析叙事，改为脚本化预计算；工作流挂接（task-prompts 2.2 决策表、workflow-cp2-2 检查项）。
 
 ### 【2026-10-22】
 #### 缺陷修复 Bug Fixes

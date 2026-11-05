@@ -48,6 +48,7 @@
 - **输入 buffer（inQueue）**：每路输入一个 inQueue；多输入算子可共用 inQueue 或独立 inQueue。
 - **输出 buffer（outQueue）**：每路输出一个 outQueue。
 - **中间计算 buffer（tmpBuf / workBuf）**：保存中间结果、升精度中转、reduce 树等。
+- **VF 段编排与融合**：计算流先按 [common/vf-split-fusion-rules.md](common/vf-split-fusion-rules.md)（规则 C1-C9）做段编排（定段数与段边界），段内融合按白名单、链长 ≤7、存活节点 P 约束判定（[reduction-vf-fusion-rules.md](reduction/references/reduction-vf-fusion-rules.md)）。
 - **Double Buffer**：搬运/计算重叠优化，启用时 inQueue / outQueue 容量翻倍。
 - **总和校验**：所有 buffer 字节数之和必须 ≤ 该芯片可用 UB（含 double buffer 倍数）。
 
@@ -55,6 +56,7 @@
 - [ ] Buffer 列表及用途（名称 + 类型 + 容量 + 是否启用 double buffer）
 - [ ] 各 buffer 大小计算公式（含 dtype、对齐、double buffer 倍数）
 - [ ] 总 UB 使用量及与芯片预算的差额
+- [ ] VF 段编排结论（段数 + 每处段边界的 C1-C9 规则引用 + 计算图锚点）
 
 ### 4. 分支场景覆盖
 

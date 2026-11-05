@@ -1,6 +1,6 @@
 # reduction 范式 binary-group DAG 分析和 Buffer 划分
 
-> UB buffer 的划分方案，包括 DAG 图分析（主要是VF融合）、存活节点分析、double buffer 决策, 需要产出 VF融合后的DAG 图和 buffer 分类表。
+> UB buffer 的划分方案，包括 DAG 图分析（段编排 + VF 融合）、物理存活节点（P）分析、double buffer 决策, 需要产出 VF融合后的DAG 图和 buffer 分类表。
 
 依赖输入：[reduction-template-overview.md](../reduction-template-overview.md)、[reduction-binary-base-dag-buffers.md](../reduction-template-binary-base/reduction-binary-base-dag-buffers.md)
 
@@ -19,19 +19,19 @@ Group 模板将 Base 的三段式（preReducePhase → reducePhase → postReduc
 - **reduceResult**：Phase 2 reducePhase 完成后的节点（写入 cacheBuf[0]），作为 Phase 2 postReducePhase 的输入
 
 preReducePhase 与 postReducePhase 各自独立分析：
-- **独立的存活节点分析**：preReducePhase 和 postReducePhase 各自追踪存活节点峰值，两阶段独立分配 buffer，不复用
+- **独立的物理存活节点（P）分析**：preReducePhase 和 postReducePhase 各自追踪 P 峰值，两阶段独立分配 buffer，不复用
 - **独立的 buffer 空间分配**：两阶段空间大小不同——preReducePhase 的 UB buffer 含 R 轴维度，postReducePhase 不含 R 轴（reduce 后 R 轴被归约）
 - **独立的 VF 融合**：preReducePhase 和 postReducePhase 各自做 VF 融合，不跨 reducePhase 融合
 - reducePhase 内部引入的节点和 buffer 详见 §1.1.2 和 §1.3。Phase 2 的 reducePhase 复用 Phase 1 的 preReduceResult 物理槽（workspace MTE2 搬入）和 cacheBuf（Reduce dst 写入 [0] 位置，R 全载无需二分树），详见 §1.1.2 和 §1.3。
 
-⛔ Tuple Reduce 场景（N 次独立归约、`Process`/`ProcessGroup` 按 `processIdx` 分发）：存活节点分析**分阶段**（pre/reduce/post，Group 为 Phase 1/Phase 2）各自画**一条流**，禁止按 for 循环展开成多轮：
+⛔ Tuple Reduce 场景（N 次独立归约、`Process`/`ProcessGroup` 按 `processIdx` 分发）：P 物理 trace **分阶段**（pre/reduce/post，Group 为 Phase 1/Phase 2）各自画**一条流**，禁止按 for 循环展开成多轮：
 1. **公共步骤**（所有过程都执行）在流中只出现一次。
 2. **过程独有步骤**写成 `if (processIdx == …) {…} else if …` 并列分支，分割粒度 = 归约过程（同一过程的多个分叉输出在该分支内合并 trace）；分支互斥——任一时刻只执行一个分支，各分支的 buffer 不可能同时存活。
 3. **分支峰值取 max**：每个分支单独 trace 其执行时的峰值，一处 if/else 的峰值 = 各分支峰值的 max，禁止相加；互斥分支共用同一份物理 UB，不按分支单独记账。
 4. **存活期照常判定**：分支的中间 buffer 在分支结束即释放，仅被后续公共步骤消费的产出继续存活；释放后的普通复用池 buffer 可被后续任意步骤复用，与它来自哪个分支无关。既有复用例外不变（§1.1 各阶段复用规则、§1.3 固定份数 buffer 照旧）。
-5. 每个阶段一条流走完，阶段峰值 = 该阶段存活节点数；UB 份数仍按 §1.5 汇总表分阶段相加。
+5. 每个阶段一条流走完，阶段峰值 = 该阶段 P 值；UB 份数仍按 §1.5 汇总表分阶段相加。
 
-**注**：以上规则对 L、P 均适用；"共用物理 UB""记账""UB 份数"只作用于 P——L 无物理复用概念，仍按公平基线逐 op 计节点；"按代码结构"指代码结构镜像算子公式的公共/独有子图划分，不违背 L 的纯拓扑定义。
+**注**：以上规则作用于 P 的物理 trace；"按代码结构"指代码结构镜像算子公式的公共/独有子图划分。（逻辑存活节点 L 已从分析流程移除；P 的理论下界**必须**由 [common/scripts/liveness.py](../../../common/scripts/liveness.py) 从计算图 JSON 算出，脚本调用时机与三步管线以 [common/vf-split-fusion-rules.md](../../../common/vf-split-fusion-rules.md) §12 为准。）
 
 **从GM视角看，不考虑UB，两阶段数据流概览**：
 
@@ -59,7 +59,7 @@ preReducePhase 与 postReducePhase 各自独立分析：
 >
 > **postReducePhase 也可能有其他 GM 输入**：Phase 2 的 postReducePhase 除了接收 reduceResult 的结果外，还可能有自己的 CopyIn 节点从 GM 搬入额外的输入。
 
-### 1.1 存活节点分析
+### 1.1 物理存活节点（P）分析
 
 **Phase 1**：同 [reduction-binary-base-dag-buffers.md](../reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §1.1 的 preReducePhase + reducePhase 部分。`P_pre / P_pre_ext` 与 BinaryBase 一致，不涉及 postReducePhase（`P_post` 留给 Phase 2）。
 
@@ -83,6 +83,8 @@ preReducePhase 与 postReducePhase 各自独立分析：
 
 跨阶段约束：preReducePhase 与 postReducePhase 不跨 reducePhase 融合。
 
+**复用映射与 trace 工具化**：同 base——B 名映射由 [common/scripts/allocate.py](../../../common/scripts/allocate.py) 生成（设计侧声明调度顺序 / pinned / 互斥分支约束），P 峰值与 WAR / 下界自检交 [common/scripts/physical_p.py](../../../common/scripts/physical_p.py) 验证；手工 trace 仅作复核誊写。
+
 ### 1.3 额外buffer要求
 
 UB buffer 部分同 [reduction-binary-base-dag-buffers.md](../reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §1.3（preReduceResultTail、cacheBuf 兼作 reduceResult、preReduceResultTail 兼作 sharedTmpBuffer）。
@@ -102,14 +104,13 @@ UB buffer 部分同 [reduction-binary-base-dag-buffers.md](../reduction-template
 
 **Phase 1 preReducePhase**（§1.1 + §1.2）：
 - [ ] 计算图（S1..Sn，标注 CopyIn/中间计算/preReduceResult/preReduceOut，标注分叉点）
-- [ ] L 调度 trace（执行前/中/后: 持有=[...] + 消费者推理，标 L_pre 峰值）
-- [ ] L 结论表（L_pre 值 / 峰值步骤 / 瓶颈 / 不可降原因）
-- [ ] P_pre_baseline（不考虑 VF 融合的基线）
+- [ ] P_pre_baseline（不考虑 VF 融合的基线，**必须用** common/scripts/liveness.py 预计算，脚本输入/输出落盘 `$WORK_DIR/design/liveness/`）
+- [ ] 下界自检（P_pre < 输入数+输出数 → 解释成因：VF 消中间量 / I/O 错峰等，无法归因才判漏记）
 - [ ] 可用 API 能力表（API | 能力 | 对物理节点的意义 | 来源）
 - [ ] VF 融合穷举分析（所有相邻操作对判据结果）
 - [ ] VF 融合方案（哪些融成一条链，哪些断开）
 - [ ] {dtype} 物理 trace（执行前/中/后: 持有=[B0,B1,...] + 消费者推理，标 P_pre 峰值）
-- [ ] P 结论表（P_pre 值 / 峰值步骤 / 与 L_pre 的差距）
+- [ ] P 结论表（P_pre 值 / 峰值步骤 / 与 P_pre_baseline 的差距）
 - [ ] 校验：preReduceResult 完全独立分配，不与 preReducePhase 内任何节点复用
 - [ ] preReduceResultTail（P_pre_ext = 1）
 
@@ -126,14 +127,13 @@ UB buffer 部分同 [reduction-binary-base-dag-buffers.md](../reduction-template
 
 **Phase 2 postReducePhase**（§1.1 + §1.2）：
 - [ ] 计算图（S1..Sn，标注 CopyIn（可选）/PostElewise/CopyOut）
-- [ ] L 调度 trace（执行前/中/后: 持有=[...] + 消费者推理，标 L_post 峰值）
-- [ ] L 结论表（L_post 值 / 峰值步骤 / 瓶颈 / 不可降原因）
-- [ ] P_post_baseline
+- [ ] P_post_baseline（**必须用** common/scripts/liveness.py 预计算，脚本输入/输出落盘 `$WORK_DIR/design/liveness/`）
+- [ ] 下界自检（P_post < 输入数+输出数 → 解释成因：VF 消中间量 / I/O 错峰等，无法归因才判漏记）
 - [ ] 可用 API 能力表
 - [ ] VF 融合穷举分析
 - [ ] VF 融合方案
 - [ ] {dtype} 物理 trace（执行前/中/后: 持有=[B0,B1,...] + 消费者推理，标 P_post 峰值）
-- [ ] P 结论表（P_post 值 / 峰值步骤 / 与 L_post 的差距）
+- [ ] P 结论表（P_post 值 / 峰值步骤 / 与 P_post_baseline 的差距）
 
 **Double Buffer 决策**（§1.4）：
 - [ ] 是否开启 double buffer 的结论及理由
@@ -143,15 +143,15 @@ UB buffer 部分同 [reduction-binary-base-dag-buffers.md](../reduction-template
 
 | 阶段 | buffer | 份数 | 来源 |
 |------|--------|------|------|
-| Phase 1 preReducePhase | preReducePhase buffer（含 preReduceResult） | `P_pre` | §1.1 + §1.2，P_pre 包含 preReduceResult |
+| Phase 1 preReducePhase | preReducePhase buffer（含 preReduceResult） | **`S_pre`**（= allocate 实际槽数，可 ≥ P_pre） | §1.1 + §1.2，P_pre 包含 preReduceResult；容量与份数以 S_pre 为准 |
 | Phase 1 preReducePhase | preReduceResultTail | P_pre_ext（固定 1） | §1.3，不计入 P_pre |
 | Phase 1 reducePhase | cacheBuf | 1（固定） | §1.3，兼作 Reduce 输出落点和 reduceResult |
 | Phase 2 reducePhase | preReduceResult（Phase 2 复用 Phase 1 槽） | 0（不新增） | §1.1 |
 | Phase 2 reducePhase | cacheBuf（复用 Phase 1） | 0（不新增） | §1.1 |
-| Phase 2 postReducePhase | postReducePhase buffer | `P_post` | §1.1 + §1.2 |
+| Phase 2 postReducePhase | postReducePhase buffer | **`S_post`**（= allocate 实际槽数，可 ≥ P_post） | §1.1 + §1.2 |
 | GM | workspace | `rGroupCnt × aTotal × sizeof(fp32)` | §1.3 |
 
-- [ ] UB 总计 = `P_pre` + 1 + 1 + `P_post`（Phase 2 复用，不额外增加 UB buffer）
+- [ ] UB 总计 = `S_pre` + 1 + 1 + `S_post`（S = allocate.py 实际槽数，可 ≥ 对应变体峰值 P；Phase 2 复用，不额外增加 UB buffer）
 
 ## 2 Buffer 划分产出校验
 
@@ -172,7 +172,7 @@ UB buffer 部分同 [reduction-binary-base-dag-buffers.md](../reduction-template
 
 （1）Phase 1 preReducePhase + reducePhase
 
-preReducePhase 的完整分析（计算图 / L trace / VF 融合 / 物理 trace）同 [reduction-binary-base-dag-buffers.md](../reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §2 (1)(2)，`P_pre=4`、`P_pre_ext=1`。
+preReducePhase 的完整分析（计算图 / P_baseline / VF 融合 / 物理 trace）同 [reduction-binary-base-dag-buffers.md](../reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §2 (1)(2)，`P_pre=4`、`P_pre_ext=1`。
 
 （2）Phase 2 reducePhase
 
@@ -190,7 +190,7 @@ preReducePhase 的完整分析（计算图 / L trace / VF 融合 / 物理 trace�
 
 （3）Phase 2 postReducePhase
 
-完整分析（计算图 / L trace / VF 融合 / 物理 trace）同 [reduction-binary-base-dag-buffers.md](../reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §2 (3)，`P_post=3`。reduceResult 来源从 cacheBuf 树根改为 cacheBuf[0]，但不影响 postReducePhase 内部计算图和 VF 融合。
+完整分析（计算图 / P_baseline / VF 融合 / 物理 trace）同 [reduction-binary-base-dag-buffers.md](../reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §2 (3)，`P_post=3`。reduceResult 来源从 cacheBuf 树根改为 cacheBuf[0]，但不影响 postReducePhase 内部计算图和 VF 融合。
 
 （4）Buffer 划分产出
 
@@ -204,6 +204,6 @@ preReducePhase 的完整分析（计算图 / L trace / VF 融合 / 物理 trace�
 | Phase 2 postReducePhase | postReducePhase buffer | 3（= P_post） | (3) |
 | GM | workspace | `rGroupCnt × aTotal × sizeof(fp32)` | §1.3 |
 
-**UB 总计 = P_pre(4) + P_pre_ext(1) + 1(cacheBuf) + P_post(3) = 9 份物理 buffer**。Phase 2 复用 Phase 1 的 preReduceResult 和 cacheBuf，不额外增加 UB buffer。postReducePhase buffer 是 Phase 2 专用，Init 时分配。
+**UB 总计 = S_pre(4) + P_pre_ext(1) + 1(cacheBuf) + S_post(3) = 9 份物理 buffer**（本示例各阶段 S=P；一般情形按 allocate 实际槽数 S 计）。Phase 2 复用 Phase 1 的 preReduceResult 和 cacheBuf，不额外增加 UB buffer。postReducePhase buffer 是 Phase 2 专用，Init 时分配。
 
 **workspace GM**：`[rGroupCnt=2, aTotal]` fp32 dense，大小 = `2 × aTotal × 4` 字节。

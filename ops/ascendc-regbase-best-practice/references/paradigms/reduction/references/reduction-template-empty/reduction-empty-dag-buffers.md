@@ -1,6 +1,6 @@
 # reduction 范式 empty DAG 分析和 Buffer 划分
 
-> UB buffer 的划分方案，包括 DAG 图分析（主要是VF融合）、存活节点分析、buffer 分类表。
+> UB buffer 的划分方案，包括 DAG 图分析（段编排 + VF 融合）、物理存活节点 P 分析、buffer 分类表。
 
 依赖输入：[reduction-template-overview.md](../reduction-template-overview.md)
 
@@ -26,22 +26,20 @@ EMPTY_R:
 
 > **可能有其他 GM 输入**：除了 reduced_value 外，还可能有自己的 CopyIn 节点从 GM 搬入额外的输入。
 
-### 1.1 存活节点分析
+### 1.1 物理存活节点（P）分析
 
-分两层：
+**物理存活节点 P**：`P = physical_min(计算图, API能力, 算法策略)`。P 的计数域为 UB buffer（寄存器不计入）；VF 寄存器链融合可消掉中间量（不落 UB）。P 的具体值依赖 VF 融合策略，在 §1.2 中分析得出。
 
-**逻辑存活节点 L**：纯拓扑分析，不考虑 VF、融合、寄存器。画出计算流程的完整计算图，按最优调度逐步追踪存活 tensor 数，取峰值。L 对给定计算图是固定的，不随硬件/API/实现改变。
+**下界自检（必做）**：P < 输入 tensor 数 + 输出 tensor 数时，须解释成因（该 bound 假设 GM 输入输出同时驻 UB，**非硬性同时存活下界**）——合法成因含 ① VF 寄存器链消掉中间量 ② I/O 错峰调度（串行 CopyIn→计算→CopyOut 流水下输入输出非同时驻留）等；**无法归因到任一成因时才判 trace 漏记/异常**。P 的理论下界（原 L 值）**必须**由 [common/scripts/liveness.py](../../../common/scripts/liveness.py) 从计算图 JSON 算出——本节仅转述方法论，脚本调用时机、三步管线顺序（liveness.py → allocate.py → physical_p.py）与产物落盘以 [common/vf-split-fusion-rules.md](../../../common/vf-split-fusion-rules.md) §12 为准。
 
-**物理存活节点 P**：`P = physical_min(L, API能力, 算法策略)`。P 的计数域为 UB buffer（寄存器不计入）。P ≥ L 一般成立，VF 寄存器链融合可打破（中间值不落 UB，P < L 合法）。P 的具体值依赖 VF 融合策略，在 §1.2 中分析得出。L 是 P 的下界和收敛目标——P == L 时确认已到最优，P > L 时知道还有优化空间。
-
-⛔ Tuple Reduce 场景（N 次独立归约、`Process`/`ProcessGroup` 按 `processIdx` 分发）：存活节点分析**分阶段**（pre/reduce/post，Group 为 Phase 1/Phase 2）各自画**一条流**，禁止按 for 循环展开成多轮：
+⛔ Tuple Reduce 场景（N 次独立归约、`Process`/`ProcessGroup` 按 `processIdx` 分发）：P 物理 trace **分阶段**（pre/reduce/post，Group 为 Phase 1/Phase 2）各自画**一条流**，禁止按 for 循环展开成多轮：
 1. **公共步骤**（所有过程都执行）在流中只出现一次。
 2. **过程独有步骤**写成 `if (processIdx == …) {…} else if …` 并列分支，分割粒度 = 归约过程（同一过程的多个分叉输出在该分支内合并 trace）；分支互斥——任一时刻只执行一个分支，各分支的 buffer 不可能同时存活。
 3. **分支峰值取 max**：每个分支单独 trace 其执行时的峰值，一处 if/else 的峰值 = 各分支峰值的 max，禁止相加；互斥分支共用同一份物理 UB，不按分支单独记账。
 4. **存活期照常判定**：分支的中间 buffer 在分支结束即释放，仅被后续公共步骤消费的产出继续存活；释放后的普通复用池 buffer 可被后续任意步骤复用，与它来自哪个分支无关。既有复用例外不变（§1.1 各阶段复用规则、§1.3 固定份数 buffer 照旧）。
-5. 每个阶段一条流走完，阶段峰值 = 该阶段存活节点数；UB 份数仍按 §1.5 汇总表分阶段相加。
+5. 每个阶段一条流走完，阶段峰值 = 该阶段 P 值；UB 份数仍按 §1.5 汇总表分阶段相加。
 
-**注**：以上规则对 L、P 均适用；"共用物理 UB""记账""UB 份数"只作用于 P——L 无物理复用概念，仍按公平基线逐 op 计节点；"按代码结构"指代码结构镜像算子公式的公共/独有子图划分，不违背 L 的纯拓扑定义。
+**注**：以上规则作用于 P 的物理 trace；"按代码结构"指代码结构镜像算子公式的公共/独有子图划分。（逻辑存活节点 L 已从分析流程移除；P 的理论下界**必须**由 [common/scripts/liveness.py](../../../common/scripts/liveness.py) 从计算图 JSON 算出，脚本调用时机与三步管线以 [common/vf-split-fusion-rules.md](../../../common/vf-split-fusion-rules.md) §12 为准。）
 
 **buffer 复用规则**：
 - **reduced_value**：Duplicate 写入后作为 PostElewise 的输入，PostElewise 消费后可释放
@@ -53,9 +51,7 @@ EMPTY_R:
 
 **EMPTY_R 产出**：
 1. **计算图** — 从算子公式推导 S1..Sn，含 DuplicateEmptyROutputVf + 可选 CopyIn_post + PostElewise + CopyOut
-2. **L 调度 trace** — 逐操作追踪存活 tensor 数，标 L_post 峰值
-3. **L 结论** — L_post 值 / 峰值步骤 / 瓶颈 / 不可降原因
-4. **P_post_baseline** — 不考虑 VF 融合时的基线
+2. **P_post_baseline** — 不考虑 VF 融合时的基线（**必须用** [common/scripts/liveness.py](../../../common/scripts/liveness.py) 预计算并落盘，时机与三步管线以 [common/vf-split-fusion-rules.md](../../../common/vf-split-fusion-rules.md) §12 为准）
 
 ### 1.2 DAG VF融合分析
 
@@ -63,7 +59,7 @@ EMPTY_R:
 
 **EMPTY_R**：R 轴有 0 → reduce 沿空集合 → 每个 output entry 取算子常量 `kEmptyROutputValue`。Kernel 直接 `Duplicate(kEmptyROutputValue)` 写目标 buf。
 
-VF 融合分析方法参考 [reduction-vf-fusion-rules.md](../reduction-vf-fusion-rules.md)。
+段边界先按 [common/vf-split-fusion-rules.md](../../../common/vf-split-fusion-rules.md)（规则 C1-C9）判定；段内融合方法参考 [reduction-vf-fusion-rules.md](../reduction-vf-fusion-rules.md)。
 
 **VF 融合对 buffer 的影响**：融合后中间值在寄存器内不落 UB，减少存活节点数。不融的相邻操作各占一个独立 buffer。如果融合后存活节点峰值过高，需要主动拆分 VF 降压。
 
@@ -71,12 +67,12 @@ VF 融合分析方法参考 [reduction-vf-fusion-rules.md](../reduction-vf-fusio
 1. **可用 API 能力** — 表格：API | 能力 | 对物理节点的意义 | 来源
 2. **VF 融合穷举分析** — 所有相邻操作对判据结果
 3. **VF 融合方案** — 哪些融成一条链，哪些断开
-4. **{dtype} 物理 trace** — 每步展开，标 P_post 峰值。各 dtype 峰值取最大者为统一 P_post，不产生 per-dtype 份数
-5. **结论** — P_post 值 / 峰值步骤 / 与 L_post 的差距
+4. **{dtype} 物理 trace** — 每步展开，标 P_post 峰值。各 dtype 峰值取最大者为统一 P_post，不产生 per-dtype 份数（B 名映射由 [common/scripts/allocate.py](../../../common/scripts/allocate.py) 生成，设计侧只声明调度顺序 / pinned / 互斥分支约束；P 峰值与 WAR / 下界自检交 physical_p.py 验证）
+5. **结论** — P_post 值 / 峰值步骤 / 与 P_post_baseline 的差距 / 下界自检结论
 
 ### 1.3 额外buffer要求
 
-Empty 模板只分配 postReducePhase buffer（`P_post` 份），不分配其他 buffer：
+Empty 模板只分配 postReducePhase buffer（**`S_post` 份 = allocate.py 实际槽数**，可 ≥ 变体峰值 P_post——分支/公共交错映射中槽数大于任一变体峰值，容量与份数以 S_post 为准），不分配其他 buffer：
 - 不搬入 reduce 输入（preReducePhase 无输入搬入）
 - 无跨循环累加器
 - reduce 输出由 `DuplicateEmptyROutputVf` 写算子常量 `kEmptyROutputValue`（取值见 empty kernel 模板 §5.1 表）
@@ -98,14 +94,13 @@ Empty 模板只分配 postReducePhase buffer（`P_post` 份），不分配其他
 
 **EMPTY_R**（§1.1 + §1.2）：
 - [ ] 计算图（DuplicateEmptyROutputVf + 可选 CopyIn_post + PostElewise + CopyOut）
-- [ ] L 调度 trace（执行前/中/后: 持有=[...] + 消费者推理，标 L_post 峰值）
-- [ ] L 结论表（L_post 值 / 峰值步骤 / 瓶颈 / 不可降原因）
-- [ ] P_post_baseline
+- [ ] P_post_baseline（**必须用** common/scripts/liveness.py 预计算，脚本输入/输出落盘 `$WORK_DIR/design/liveness/`）
+- [ ] 下界自检（P_post < 输入数+输出数 → 解释成因：VF 消中间量 / I/O 错峰等，无法归因才判漏记）
 - [ ] 可用 API 能力表
 - [ ] VF 融合穷举分析
 - [ ] VF 融合方案
 - [ ] {dtype} 物理 trace（执行前/中/后: 持有=[B0,B1,...] + 消费者推理，标 P_post 峰值）
-- [ ] P 结论表（P_post 值 / 峰值步骤 / 与 L_post 的差距）
+- [ ] P 结论表（P_post 值 / 峰值步骤 / 与 P_post_baseline 的差距）
 
 **Double Buffer 决策**（§1.4）：
 - [ ] 不开启
@@ -145,76 +140,7 @@ running_var_update (fp16) = PostElewise链2(...)
 
 分叉点：reduced_value（S3 和 S8 消费）、count_sum（S3 和 S7 消费）。S 编号沿用 [reduction-binary-base-dag-buffers.md](../reduction-template-binary-base/reduction-binary-base-dag-buffers.md) §2(3) 计算图（Duplicate 无编号；CopyIn_post count_sum = S1、running_var = S2；链1 = S3-S6+S12，链2 = S7-S11+S13）。
 
-**L 调度 trace**（纯拓扑，不考虑 VF 融合；采用最优调度：推迟 CopyIn_post running_var 至链1 完成并 CopyOut invert_std 之后——若提前搬入，running_var 与链1 中间值叠加，峰值 4→5。"执行中"取峰值瞬间=输入未释放+输出写入，输入仅在"执行后"其所有消费者完成时才移除）：
-
-```pseudocode
-// DuplicateEmptyROutputVf → reduced_value
-// 执行前: 持有=[]
-// 执行中: 持有=[reduced_value]
-// 执行后: 持有=[reduced_value]               ← S3/S8 会读，保留
-// CopyIn_post count_sum
-// 执行前: 持有=[reduced_value]
-// 执行中: 持有=[reduced_value, count_sum]
-// 执行后: 持有=[reduced_value, count_sum]    ← S3/S7 会读，保留
-// 链1: Div → var_sum_n
-// 执行前: 持有=[reduced_value, count_sum]
-// 执行中: 持有=[reduced_value, count_sum, var_sum_n]
-// 执行后: 持有=[reduced_value, count_sum, var_sum_n]    ← 三者均有未来消费者，保留
-// 链1: Add → var_sum_n_eps
-// 执行前: 持有=[reduced_value, count_sum, var_sum_n]
-// 执行中: 持有=[reduced_value, count_sum, var_sum_n, var_sum_n_eps]    ← L_post=4 峰值
-// 执行后: 持有=[reduced_value, count_sum, var_sum_n_eps]    ← var_sum_n 无未来消费者，释放
-// 链1: Sqrt → sqrt_result
-// 执行前: 持有=[reduced_value, count_sum, var_sum_n_eps]
-// 执行中: 持有=[reduced_value, count_sum, var_sum_n_eps, sqrt_result]    ← L_post=4 峰值
-// 执行后: 持有=[reduced_value, count_sum, sqrt_result]    ← var_sum_n_eps 无未来消费者，释放
-// 链1: Div(1,x) → invert_std
-// 执行前: 持有=[reduced_value, count_sum, sqrt_result]
-// 执行中: 持有=[reduced_value, count_sum, sqrt_result, invert_std]    ← L_post=4 峰值
-// 执行后: 持有=[reduced_value, count_sum, invert_std]    ← sqrt_result 无未来消费者，释放
-// 链1: Cast → invert_std_fp16
-// 执行前: 持有=[reduced_value, count_sum, invert_std]
-// 执行中: 持有=[reduced_value, count_sum, invert_std, invert_std_fp16]    ← L_post=4 峰值
-// 执行后: 持有=[reduced_value, count_sum, invert_std_fp16]    ← invert_std 无未来消费者，释放
-// CopyOut invert_std
-// 执行后: 持有=[reduced_value, count_sum]    ← invert_std_fp16 无未来消费者，释放
-// 链2: Sub → count_sum_minus_1
-// 执行前: 持有=[reduced_value, count_sum]
-// 执行中: 持有=[reduced_value, count_sum, count_sum_minus_1]
-// 执行后: 持有=[reduced_value, count_sum_minus_1]    ← count_sum 无未来消费者，释放
-// 链2: Div → unbiased_var
-// 执行前: 持有=[reduced_value, count_sum_minus_1]
-// 执行中: 持有=[reduced_value, count_sum_minus_1, unbiased_var]
-// 执行后: 持有=[unbiased_var]    ← reduced_value + count_sum_minus_1 无未来消费者，释放
-// CopyIn_post running_var
-// 执行前: 持有=[unbiased_var]
-// 执行中: 持有=[unbiased_var, running_var]
-// 执行后: 持有=[unbiased_var, running_var]    ← running_var S10 会读，保留
-// 链2: Mul → scaled_var
-// 执行前: 持有=[unbiased_var, running_var]
-// 执行中: 持有=[unbiased_var, running_var, scaled_var]    ← unbiased_var 仍存活（正在被读）
-// 执行后: 持有=[running_var, scaled_var]    ← unbiased_var 无未来消费者，释放；scaled_var S11 会读，保留
-// 链2: Mul → scaled_running
-// 执行前: 持有=[running_var, scaled_var]
-// 执行中: 持有=[running_var, scaled_var, scaled_running]
-// 执行后: 持有=[scaled_var, scaled_running]    ← running_var 无未来消费者，释放
-// 链2: Add → running_var_update
-// 执行前: 持有=[scaled_var, scaled_running]
-// 执行中: 持有=[scaled_var, scaled_running, running_var_update]
-// 执行后: 持有=[running_var_update]    ← scaled_var + scaled_running 无未来消费者，释放；S13 会读，保留
-// 链2: Cast → running_var_update_fp16
-// 执行前: 持有=[running_var_update]
-// 执行中: 持有=[running_var_update, running_var_update_fp16]
-// 执行后: 持有=[running_var_update_fp16]    ← running_var_update 无未来消费者，释放
-// CopyOut running_var_update
-// 执行后: 持有=[]    ← running_var_update_fp16 无未来消费者，释放
-```
-
-**L 结论**：
-
-| L_post | 峰值步骤 | 瓶颈 | 不可降原因 |
-|--------|---------|------|-----------|
-| 4 | 链1 中间步骤 | reduced_value + count_sum + 链上中间值 + 产出 | reduced_value 分叉（S3, S8）、count_sum 分叉（S3, S7）与链1 中间值同时存活，叠加产出，二元链不可降 |
+**调度决策**（供 P_baseline 与物理 trace 沿用）：推迟 CopyIn_post running_var 至链1 完成并 CopyOut invert_std 之后——若提前搬入，running_var 与链1 中间值叠加，峰值 4→5。"执行中"取峰值瞬间=输入未释放+输出写入，输入仅在"执行后"其所有消费者完成时才移除。
 
 **P_post_baseline**（不考虑 VF 融合）：= 4（按最优调度，各 op src/dst 各占独立 buffer，峰值在链1 中间步骤 = 4）。
 
@@ -268,9 +194,9 @@ running_var_update (fp16) = PostElewise链2(...)
 
 **P 结论**：
 
-| P_post | 峰值步骤 | 与 L_post 差距 |
-|--------|---------|-------------|
-| 4 | 链2 | 0（reduced_value + count_sum + running_var + 产出 = 4；VF 融合消除链内中间值，B2 分时复用承载 invert_std/running_var） |
+| P_post | 峰值步骤 | 与 P_post_baseline 差距 | 下界自检 |
+|--------|---------|-------------|------|
+| 4 | 链2 | 0（reduced_value + count_sum + running_var + 产出 = 4 = P_post_baseline；VF 融合消除链内中间值，B2 分时复用承载 invert_std/running_var） | 不触发（4 ≥ 输入 2 + 输出 2 = 4；reduced_value 为 Duplicate 常量，非 GM 输入） |
 
 > **变体（cast 不融 VF）**：Cast 单独落 UB（fp32 结果先写 UB 再 Cast），P_post 会更高。算子作者按性能/UB 占用权衡。
 

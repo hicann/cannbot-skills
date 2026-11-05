@@ -1,30 +1,24 @@
 # broadcast 范式 standard DAG 分析和 Buffer 划分
 
-> UB buffer 的划分方案，包括 DAG 图分析（主要是VF融合）、存活节点分析、double buffer 决策, 需要产出 VF融合后的DAG 图和 buffer 分类表。
+> UB buffer 的划分方案，包括 DAG 图分析（段编排 + VF 融合）、物理存活节点（P）分析、double buffer 决策, 需要产出 VF融合后的DAG 图和 buffer 分类表。
 
 ## 1 DAG 分析和 Buffer 划分方案
 
-### 1.1 存活节点分析
+### 1.1 物理存活节点（P）分析
 
-Broadcast 场景 buffer 划分采用 **L/P 双层分析模型**：
-
-**逻辑存活节点（L）**：
-- **参考案例**: `example/examples-adam-design/adam_apply_one_assign_design.md` §1
-- 计数域：计算图 tensor（每个独立数据实体计 1）
-- 由计算图拓扑决定，与物理媒介无关
-- **L 对给定计算图是固定的**，不随硬件/API/实现改变
+Broadcast 场景 buffer 划分采用 **P 物理存活节点分析**：
 
 **物理存活节点（P）**：
 - **参考案例**: `example/examples-adam-design/adam_apply_one_assign_design.md` §2
 - 计数域：UB buffer。寄存器不在计数域——UB→Reg→UB 是过路中转，中间值留在寄存器时不占 P
 - **P 不由计算图唯一确定**——同一计算图，不同 API 策略/融合决策 → 不同 P。寻找在给定约束下可达的**最小峰值**
 
-**公平基线（L 和 P 共用）**：
+**下界自检（必做）**：P < 输入数 + 输出数时，必须显式解释哪些中间量被 VF 寄存器链消掉——对不上即 trace 有漏记。P 的理论下界（P_baseline）**必须**由 [common/scripts/liveness.py](../../../common/scripts/liveness.py) 从计算图 JSON 算出——本节仅转述方法论，脚本调用时机、三步管线顺序（liveness.py → allocate.py → physical_p.py）与产物落盘以 [common/vf-split-fusion-rules.md](../../../common/vf-split-fusion-rules.md) §12 为准。
+
+**公平基线**：
 1. 二元及以上操作，不假设 dst 与 src 复用——每个 op 的 src 和 dst 各占独立节点
 2. 单步内不假设 in-place
 3. 跨步的"用完释放"允许——一个节点的所有消费者执行完后从存活列表移除
-
-**L 与 P 的关系**：P ≥ L 恒成立（MemBase 下每个 op 的 src 和 dst 各占独立 UB buffer）。VF 寄存器链融合可打破此规律：中间值全程在寄存器，不落 UB。L 仍包含（按 tensor 计数），P 不包含（寄存器不计入 P）。此时 **P < L 合法**。
 
 **物理基线差异来源表**：
 
@@ -90,10 +84,9 @@ CopyOutOne(coord, OUT0, UB4);
 
 **验证**：任意执行中持有数 ≤ P；执行后持有与释放时机一致。
 
-**Cast 对 P 的影响**：
-- Cast src 和 dst 是两块独立 UB buffer（不能 in-place，FP16 2B vs FP32 4B，硬件不支持重叠读写）
-- 并发放宽：若基线 P ≤ 6，可扩大 P（**最多 +2**），为 Cast 分配更多 buffer，减少多输入争抢同一 temp
-- 按需取，用不到 2 时不强拉到上限
+**Cast 对 P 的影响**（分两种情况）：
+- **Cast 参与 VF 融合时**（限 Cast 结果为**链内中间量**——非算子输出、无链外消费者）：Cast 在寄存器内完成，src 和 dst 不需要同时占两个 UB buffer，不额外增加 P，无需中转 buffer。**若 Cast 结果是算子输出或被链外消费**：仍必须 Store 物化并保留独立 UB 载体（实测 VF 同时写回 Cast 结果与后续计算结果需 3 槽 = 输入 + 两个物化输出）——"不额外占 UB"不成立
+- **Cast 未参与融合时**（独立 Cast 操作）：Cast src 和 dst 是两块独立 UB buffer（不能 in-place，FP16 2B vs FP32 4B，硬件不支持重叠读写）；并发放宽：若基线 P ≤ 6，可扩大 P（**最多 +2**），为 Cast 分配更多 buffer，减少多输入争抢同一 temp（按需取，用不到 2 时不强拉到上限）
 
 **RegBase 对 P 的影响**——三种降节点场景：
 1. **常量/标量在寄存器构造**：标量不占 UB
@@ -143,17 +136,17 @@ Broadcast 场景的计算流以 element-wise + broadcast 为核心。以二元�
 > **关键**：NDDMA 随路 broadcast 在 CopyIn 阶段直接完成广播，不另占 UB buffer，降低物理存活节点。
 > RegBase 将中间结果留在 VF 寄存器链传递，不落 UB，进一步降低 P 值。
 
-**VF 融合穷举方法论**：
+**VF 段编排 + 段内融合穷举方法论**：
 
-列出计算图中**所有**连续 Vector 操作对，逐对判据。禁止只检查"看起来像"的那一对。方法：从计算图第一条 Vector 操作开始，相邻两两配对，每一对都走三条硬规则判据：
+段边界先按 [common/vf-split-fusion-rules.md](../../../common/vf-split-fusion-rules.md)（规则 C1-C9）判定。段内再穷举融合：列出计算图中**所有**连续 Vector 操作对，逐对判据。禁止只检查"看起来像"的那一对。方法：从计算图第一条 Vector 操作开始，相邻两两配对，每一对都走三条硬规则判据：
 
 1. **链长 ≤ 7**——超过 7 条 Vector 操作必须拆为多次 VF 调用
-2. **Cast 不参与 VF**——Cast 前后必须断链（Cast 不走 Vector 寄存器链路）
+2. **Cast 可参与 VF**——Cast 使用 `Reg::Cast` 寄存器指令，可串入 VF 寄存器链路，不作为断点
 3. **RegBase 指令必须存在**——对应操作在 RegBase API 白名单中能找到
 
 **多消费者不打断链**。即使某个中间结果被 VF 外的其他步骤引用，VF 链仍可继续——VF 内部把这个值 `StoreAlign` 到 UB 即可，寄存器链路不受影响。代价是多写一次 UB 会多占一个 P slot，需要纳入物理 trace 做峰值验证。
 
-**连续可融对合并为单条 VF 链**：从第一条 Vector op 开始，只要 RegBase 指令存在、非 Cast、累积未超 7，链就延续。不因分叉而断链。
+**连续可融对合并为单条 VF 链**：从第一条 Vector op 开始，只要 RegBase 指令存在、累积未超 7，链就延续。不因分叉而断链。
 
 **存活节点压力——融合 vs 拆分取舍**：
 
@@ -164,6 +157,8 @@ Broadcast 场景的计算流以 element-wise + broadcast 为核心。以二元�
 2. 做物理 trace，检查峰值是否 ≤ 目标 P
 3. 若超 P → 在分叉输出最多的位置拆分 VF，释放部分 buffer 后再续链
 4. 重复直到峰值 ≤ P
+
+**物理 trace 与复用映射工具化**：段编排与融合方案定型后，B0..Bn 复用映射由 [common/scripts/allocate.py](../../../common/scripts/allocate.py) 生成（设计侧只声明调度顺序 / pinned 约束，选槽即 WAR 检查），P 峰值 / WAR / 下界自检由 [common/scripts/physical_p.py](../../../common/scripts/physical_p.py) 验证；手工 trace 仅作复核誊写。
 
 **融合改变存活节点大小**：融合前每个中间结果各占 1 个 UB buffer。融合后中间结果在寄存器内不进 UB——存活节点 = 所有输入操作数 + 最终输出 + 其他还活着的 buffer。
 
@@ -179,11 +174,11 @@ A+B+C+D = E
 
 **硬件融合指令**（一条指令完成两步，省 1 buffer）：`MulAddDst, FusedMulAdd, AddRelu, SubRelu, FusedMulAddRelu, MulCast`。
 
-**寄存器链组合**（两条或多条 RegBase 指令串在 VF 循环内完成）：`Compare + Select`, `Mul + Add`, `Ln + Mul`, `Exp + Sub` 等。
+**寄存器链组合**（两条或多条 RegBase 指令串在 VF 循环内完成）：`Compare + Select`, `Mul + Add`, `Ln + Mul`, `Exp + Sub`, `Cast(b16→fp32) + Square`, `Cast(fp32→b16) + 任意计算` 等。
 
 ### 1.3 额外buffer要求
 
-- Cast 场景：FP16/BF16 输入时必须额外分配一个 Cast 中转 buffer（src/dst 不可 in-place）
+- Cast 场景：Cast 参与 VF 融合时无需中转 buffer（寄存器内完成，见 §1.2）；未参与融合的独立 Cast 操作须额外分配 Cast 中转 buffer（src/dst 不可 in-place）
 - 多输出算子：若 >1 个输出，每个输出需独立 CopyOutOne 调用，输出 buffer 在 CopyOut 前不可被覆写
 - Buffer 复用：同一物理 buffer 可多次复用，只要持有数 ≤ P 约束。Process 代码中 buffer 角色变更须标注 `// UBx 释放` / `// UBx 重新分配为{新角色}`
 
@@ -219,7 +214,7 @@ for (int i = 0; i < 5; i++)
     pipe_.InitBuffer(buf_[i], td_->perBufBytes);
 ```
 
-`perBufBytes` 和 `Get<T>(count)` 中的 `count * sizeof(T)` 都必须 **blocksize 对齐**（硬件 `ONE_BLK_SIZE = 32`，经 `Ops::Base::GetUbBlockSize` 获取，不要写死）。`perBufBytes = floor(UB / P / ubBlockSize) * ubBlockSize`。
+`perBufBytes` 和 `Get<T>(count)` 中的 `count * sizeof(T)` 都必须 **blocksize 对齐**（硬件 `ONE_BLK_SIZE = 32`，经 `Ops::Base::GetUbBlockSize` 获取，不要写死）。`perBufBytes = floor(UB / S / ubBlockSize) * ubBlockSize`（S = allocate.py 实际槽数，与 §2.2 口径一致；本节示例映射无分支/公共交错，S = P = 5）。
 
 使用方式：
 ```cpp
@@ -256,9 +251,9 @@ UB(B2) ←─Store─── Reg(vregOut) ←────────────
 
 | 类别 | dtype | DB | 份数 | 用途 |
 |------|-------|----|------|------|
-| buf_[0..P-1] | D_T | 关 | P × 1 | P 个 TBuf 槽位，按 perBufBytes 均分 UB |
+| buf_[0..S-1] | D_T | 关 | S × 1 | S 个 TBuf 槽位（S = allocate 实际槽数，可 ≥ 变体峰值 P），按 perBufBytes 均分 UB |
 
-**perBufBytes** = `(UB / P) & ~(ubBlockSize - 1)`（P 个 buffer 均分 UB；ubBlockSize 经 `Ops::Base::GetUbBlockSize` 获取，当前平台 32B 对齐）
+**perBufBytes** = `(UB / S) & ~(ubBlockSize - 1)`（S 个 buffer 均分 UB；**S = allocate.py 实际槽位数**——分支值跨公共链存活的映射中 S 可大于变体峰值 P（贪心映射须对全部分支安全），容量预算以 S 为准、不得以 P 充当槽数；ubBlockSize 经 `Ops::Base::GetUbBlockSize` 获取，当前平台 32B 对齐）
 
 **perBufElems** = `perBufBytes / sizeof(float32)`，**永远按 FP32 算**，不随输入 dtype 变化。原因：FP16 CopyIn 后立即 Cast 到 FP32 data buffer——真正参与计算、填满 buffer 的数据是 FP32。即使 FP32 输入不经过 Cast，为了 TilingData 统一（perBufBytes 唯一），也按同一公式。
 
