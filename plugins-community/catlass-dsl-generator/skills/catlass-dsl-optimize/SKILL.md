@@ -1,105 +1,156 @@
 ---
 name: catlass-dsl-optimize
-description: Iteratively optimize, speed up, benchmark, and profile one existing CATLASS DSL operator source file on Ascend NPU with correctness gates, compact traces, noise-aware best selection, and resumable state. Use for CATLASS DSL performance optimization, repeated kernel tuning, profiler-guided latency reduction, or requests to make an existing operator faster.
+description: Iteratively optimize, speed up, benchmark, and profile one existing CATLASS DSL operator source file on Ascend NPU with a text-tracked round ledger, noise-aware best selection, and profiler-guided tuning. Use for CATLASS DSL performance optimization or repeated kernel tuning.
 ---
 
-# CATLASS DSL 算子优化
+# CATLASS DSL 算子优化（门禁引导）
+
+> **入口**：本阶段开始前先加载 `catlass-dsl-workflow` 并输出阶段卡。
+
+> **入口门禁**：`python3 <workflow>/scripts/gate.py fulltest --workspace <ws>` 必须通过，
+> 即当前 kernel 已有全量测试（full test #1 或 #2）`passed`；未通过不得开始优化，也不得用
+> focused test 或 optimize 自测代替。
+
+> **自动执行**：遇到问题只要有可行方案就逐步尝试，一个方案失败就换下一个，不停下来找
+> 用户确认。等待远端任务、编译、benchmark、设备或长跑用例时直接等待并轮询，不结束回合，
+> 也不用进展汇报代替继续执行。仅当缺少只有用户能提供的信息、或可行路径已穷尽时才提问。
+
+> **超时纪律**：编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块；
+> 编译独立 300s，单例运行 `timeout -k 5 60s`，批量分片，禁止整批套一次性超时，禁止裸跑。
+> 超时或卡住立即终止，不得死等或加大超时。终止后先做卡健康判定：同一张卡的小探针或
+> 官方算子能过 → 判本算子死锁并转 debug；探针也失败 → 判设备问题并换卡重试一次。
 
 驱动 profile → hypothesis → modify → correctness → benchmark → record 闭环，直到达到性能
-目标或满足停止条件。直接修改当前 workspace 中主实现文件；用
-`optimize_state.py` 维护状态、恢复 best、执行噪声门禁和清理产物。
+目标或满足停止条件。**本版本没有 `optimize_state.py`**：轮次账本、best 恢复和停止条件由
+`ITERATIONS.md` 的 `## Performance Rounds` 表与本文规则维护。
 
 ## First action
 
 先浏览工作区和用户提示，识别：
 
 - workspace 与主实现文件；
-- `solution.json`、`definition.json`、`workload.jsonl`；
-- correctness 与 benchmark argv；
+- `solution.json`、`definition.json`、`workload.jsonl`、`workload_dev.jsonl`；
+- correctness 与 benchmark 命令；
 - NPU device、性能指标、目标、迭代上限和 stall threshold；
-- operator/optimization 知识、既有 `state.json` 与 `ITERATIONS.md`。
+- operator/optimization 知识、既有 `ITERATIONS.md`。
 
-不要机械询问可从文件系统确定的信息。只有 kernel、benchmark inputs 或性能目标存在真实
-歧义时才停止并询问。执行任何测试或修改前，先向用户展示：
+不要机械询问可从文件系统确定的信息。执行任何测试或修改前展示：
 
 **📋 Resolved Plan**
 
-- **Workspace** — `<path>`
-- **Kernel** — `<path>`
-- **Benchmark inputs** — `<solution.json>, <definition.json>, <workload.jsonl>`
+- **Workspace / Kernel** — `<path>`
+- **Benchmark inputs** — `<solution.json>, <definition.json>, <workload_dev.jsonl>`
 - **Correctness / benchmark** — `<resolved argv>`
 - **Device** — `<npu:index>`
-- **Target** — `<metric direction threshold>`
+- **Target** — `<metric direction threshold；无目标写 explore（模式 B）>`
 - **Iteration limit** — `<max_iterations>; stall=<stall_threshold>`
-- **Knowledge** — `<operator family, query filters, relevant concept paths or none>`
+- **Knowledge** — `<operator family, keywords, adopted concept paths>`
 
-任一字段仍不可信时先解决歧义；否则进入工作流。
+用户未指定迭代上限时默认最多 30 轮。
 
-用户未指定迭代上限时，默认最多迭代 30 轮。
+## 两种模式
+
+| 模式 | 触发条件 | 停止条件 |
+|---|---|---|
+| A 达标 | 用户提示或 `DESIGN.md` 给出明确性能目标 | best candidate 达到 threshold 且至少完成 1 轮 |
+| B 探索 | 没有明确性能目标 | 至少完成 3 轮已记录迭代 |
+
+模式在开始时确定并写入 `ITERATIONS.md`，中途不得切换。模式 B 在无用户确认时也必须执行
+至少三轮，不得以“感觉差不多了”提前收口；模式 A 即使 baseline 已经达标也必须记录至少
+一轮，避免把未优化的首版实现直接当作达标交付。
+
+停止条件只看账本：模式 B 未满 3 轮、模式 A 未满 1 轮或未达标时必须继续下一轮。不得中途
+结束回合、不得汇报“优化完成”、不得询问用户是否继续。认为没有新方向时，仍要选一个可
+证伪的优化轴完成本轮并如实记录 `rejected`。
+
+## 轮次账本
+
+`ITERATIONS.md` 中维护：
+
+```markdown
+## Optimization Policy
+- mode: target | explore
+- metric: performance.candidate.mean_ms (lower is better)
+- threshold: <value | none>
+- device: npu:<id>
+- dev workload: workload_dev.jsonl (<n> cases)
+
+## Performance Rounds
+| Round | Axis | Bottleneck | Before (ms) | After (ms) | Decision | Evidence |
+|-------|------|------------|-----------|----------|----------|----------|
+| 1 | ... | ... | 1.20 | 1.05 | adopted | evidence/round-001/result.json |
+```
+
+每轮必须填全：
+
+- `Axis`：本轮唯一改动轴；
+- `Bottleneck`：从本轮 fresh profile 指出主导 pipe、占比、搬运还是计算受限、理论下限；
+- `Before (ms)`：进入本轮时 best 的 candidate mean；
+- `After (ms)`：本轮正确性通过且完成计时后的 candidate mean，未通过写 `null`；
+- `Decision`：越过噪声门禁为 `adopted`，否则 `rejected`；
+- `Evidence`：本轮结果 JSON 与 profile 目录的项目相对路径。
+
+账本逐轮追加，禁止事后补写。模式 B 不足三轮、模式 A 不足一轮时不得进入 finalization。
+
+## 评测口径（控温仅在 optimize 阶段执行）
+
+- 性能计时只使用 design 冻结的 `workload_dev.jsonl`（30~40 条；用户用例不足 30 条时全选），
+  所有轮次共用同一份样本。
+- 逐例配对：同一用例先跑 candidate 再跑 reference，在同一张卡相邻时间完成，抵消温度
+  漂移；有对标实现时不得只跑 candidate。测量契约见
+  [`catlass-dsl-bench`](../catlass-dsl-bench/SKILL.md)。
+- 控温：同用例内各实现温差 ≤3℃；执行前校验 AICore 频率为 1650 MHz；温度超过 85℃ 停机，
+  降温后重新配对测量该例。full test 与 benchmark 不控温。
+- 单例 60 秒硬超时；超时判定卡死，换卡重试一次，二次仍超时判定 kernel 问题，不得加大
+  超时绕过。
 
 ## Setup and baseline
 
-1. 查询 `catlass-dsl-knowledge` 中的 operator 与 optimization 证据，读取已有
-   `ITERATIONS.md`，避免重复已证伪方向。
-2. 确认优化对象是一个现有、无符号链接的主实现文件，允许包含多个 DSL kernel。
-   继承 design/develop 的 `fusion.mode`：默认 performance，`--anti-hack off`，允许多个
-   executor、GM 中间张量和变体分派；仅用户明确要求单融合时设置 `fusion.mode=single_kernel` 并使用 `--anti-hack single-fused`。
-   严格模式只声明一个 `@tla.kernel`，每次只 launch 一个，且不得为编译期变体声明独立
-   kernel。普通评审检查各 kernel 自包含，不使用模块级可变配置、closure 或 `global`
-   改写语义。严格模式额外枚举自由名字，不得把结构违规源码作为 baseline。
-3. 运行全部 correctness 命令，再用已解析 argv 生成 baseline。要求 benchmark 的
-   `solution.source_sha256` 与 kernel SHA-256 一致。
-4. 初始化 controller；它保存 baseline、生成 `ITERATIONS.md` 并返回 `next_action`。
+1. 按 `catlass-dsl-knowledge` 读取 operator 与 optimization 证据，读已有 `ITERATIONS.md`，
+   避免重复已证伪方向。
+2. 确认优化对象是一个现有、无符号链接的主实现文件，允许包含多个 DSL kernel。继承
+   design/develop 的 `fusion.mode`：默认 performance，允许多 executor、GM 中间张量和
+   变体分派；仅用户明确要求单融合时按 `single_kernel` 审计唯一声明与单 launch。
+3. 运行全部 correctness 命令，再用已解析命令生成 baseline；确认结果的
+   `solution.source_sha256` 与当前 kernel SHA-256 一致。
+4. 在 `ITERATIONS.md` 写入 `## Optimization Policy` 与第 0 行 baseline。
 
 ## Optimization loop
 
-每轮只探索一个可证伪的优化轴。严格按以下顺序执行：
+每轮只探索一个可证伪的优化轴，严格按以下顺序执行：
 
 1. **Analyze.** 从保留的 `kernel_details.csv`、`step_trace_time.csv` 和历史指标识别当前
-   瓶颈。不要盲目调参；先形成可用于查询的 operator family、瓶颈类型、相关 DSL API、
+   瓶颈。不要盲目调参；先形成可用于检索的 operator family、瓶颈类型、相关 DSL API、
    shape/dtype/layout 和架构关键词。
 
    若 fresh profile 中 `mac` 或 `mte2` 单项达到墙钟的 0.7 以上，本轮轴按
-   `dsl/pattern-gemm-optimization-ladder` 的阶梯顺序选取（波次量化 → L1 双缓冲 →
-   L0 双侧双缓冲），不要在同一阶段反复微调参数。
-2. **Query knowledge.** 每轮都调用 `catlass-dsl-knowledge query`，至少查询
-   `optimization`，并按 operator family、`c310`、瓶颈关键词和相关 tag 缩小范围；需要
-   代码模式时再查询 `operator` 或 `dsl`。只读取命中的 concept，不扫描整个知识库：
+   `knowledge/dsl/pattern-gemm-optimization-ladder` 的阶梯顺序选取（波次量化 → L1 双缓冲
+   → L0 双侧双缓冲），不要在同一阶段反复微调参数。
 
-   ```bash
-   python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-     --project-root <workspace> --category optimization \
-     --operator-family <family> --arch c310 --text "<bottleneck-or-api>" --compact
-   ```
+2. **Query knowledge.** 读 `knowledge/optimization/index.md` 与相关分类索引，按算子族、
+   `c310`、瓶颈关键词定位候选条目，再完整读取实际采用的条目；检查适用条件、验证记录和
+   版本新鲜度。不得把知识结论当作性能证据。把采用的条目路径写入本轮记录；零命中时明确
+   记录，并仅在 profile 证据足以支撑 hypothesis 时继续。
 
-   根据摘要、评分和正文片段选择候选后，对实际采用的每条结果调用
-   `record_knowledge.py get --project-root <workspace> --path <query-result-path>`；只读取这些
-   完整 concept，检查适用条件、验证记录和版本新鲜度，不得把知识结论当作性能证据。把实际
-   采用的项目相对路径写入 proposal 的 `knowledge_sources`，并保留规范化查询、匹配模式及
-   score/matched_fields/matched_terms 作为选择依据。零命中建议不得自动采用；如需使用，
-   必须显式重查。零命中时在本轮
-   `Expected:` 中明确记录，并仅在 profile evidence 足以支撑 hypothesis 时继续。
-3. **Pre-register.** 从 [proposal template](templates/proposal.json) 创建 proposal，填写
-   hypothesis、单一 `axis_id`、`expected_effect` 和 `falsification_condition`。调用
-   `begin-round`，确保 `Expected:` 在 benchmark 前写入 `ITERATIONS.md`；controller 会先
-   恢复当前 best kernel。
-4. **Modify.** 只修改主实现文件，修改后同步更新 `solution.json` 的源码包，不改变
-   reference、workload、容差或计时边界。默认允许 multi-launch、融合范围及显式 dispatch
+3. **Pre-register.** 在 `## Performance Rounds` 增加一行草稿，填写 `Axis`、
+   `Bottleneck`、预期收益和判伪条件；Expected 必须在 benchmark 前写入。
+4. **Snapshot.** 修改前把当前 best kernel 复制到 `evidence/round-NNN/kernel-before.py`，
+   便于 rejected 后恢复。
+5. **Modify.** 只修改主实现文件，修改后同步更新 `solution.json` 的源码包；不改变
+   reference、workload、容差或计时边界。默认允许多 launch、融合范围及显式 dispatch
    调整，以完整 `run` 的性能为准；严格模式禁止多 kernel、多 launch 或独立变体。
-   计算主体继续采用 CATLASS Python DSL，配置使用函数局部值、显式参数或 metadata。
-5. **Correctness.** 运行全部 required correctness commands。失败时立即停止本轮，不得
-   benchmark。
-6. **Benchmark.** 正确后使用同一 device、输入、环境和采样配置测量。默认 warmup 1 次、
-   采集 2 次；默认记录 `anti_hack.status=disabled`；严格模式必须得到 `anti_hack.status=passed`，否则本轮失败且不能更新 best。不得为了
-   得到更好数字临时改变配置。
-7. **Record immediately.** benchmark 返回后，下一项动作必须是从
-   [round result template](templates/round-result.json) 创建 submission 并调用
-   `record-round`。在关闭当前 iteration 前，不得 profile、读新资料、修改 kernel 或规划
-   下一轮。failed/partial 轮也必须记录。
-8. **Decide.** 读取 controller 的 accepted/rejected、best、stall count 和
-   `next_action`。rejected/failed 后 controller 会恢复 best；不要手工重建候选。
-9. **Continue.** 只有当前轮已记录后，才分析下一优化轴并发起下一轮知识查询。不得复用
-   上一轮查询结果来跳过查询；可以复用仍适用的 concept，但必须重新核对本轮瓶颈和适用条件。
+6. **Correctness.** 运行全部 required correctness 命令。失败时立即停止本轮，不得
+   benchmark；记录 `After ms = null`、`Decision = rejected`。
+7. **Benchmark.** 正确后使用同一 device、`workload_dev.jsonl`、环境和采样配置测量，逐例
+   配对。默认 warmup 1 次、采集 2 次；需要更稳时取 5 次中位数。不得为得到更好数字临时
+   改变配置。
+8. **Record immediately.** benchmark 返回后立即补齐本轮行与 `evidence/round-NNN/result.json`；
+   在关闭本轮前不得 profile、读新资料、修改 kernel 或规划下一轮。failed/partial 轮也必须
+   记录。
+9. **Decide.** 按下方噪声门禁判断 adopted / rejected。rejected 时从
+   `evidence/round-NNN/kernel-before.py` 恢复 best；不要手工重建候选。
+10. **Continue.** 只有本轮已记录后才分析下一优化轴。不得复用上一轮检索结果跳过本轮核对，
+    但可以复用仍适用的条目。
 
 正确候选只有越过噪声门禁才更新 best：
 
@@ -110,171 +161,97 @@ required_improvement = max(
   candidate_std_ms / candidate_mean_ms)
 ```
 
-## Keep the loop fast
+candidate 相对 best 的提升小于 `required_improvement` 时记 `rejected`，不得因为“看起来
+更快”就更新 best。
 
-- 每轮保持 warmup 1、采集 2 次，用 candidate latency 排序正确候选。
-- 复用项目级 Torch reference profile cache；候选变化时只重新采集 candidate。
+## Stall 与停止条件
+
+连续 `stall_threshold` 轮没有产生 adopted 结果时进入 stall 处理，不得直接收口：
+
+1. 重新分析保留的 `kernel_details.csv`、`step_trace_time.csv`、best 与 rejected 结果；
+2. 采集一次 fresh profile，保存到对应轮的 `evidence/round-NNN/profile/`；
+3. 选择与上一轮不同的改动轴，写明新的机制与判伪条件后继续。
+
+仅在以下条件停止迭代并进入 Finalization：
+
+- 模式 A 达到 threshold 且至少完成 1 轮；
+- 模式 B 至少完成 3 轮；
+- 达到 `max_iterations`（默认 30）；
+- 环境缺失导致无法继续，记录 `blocked` / `not_run` 与精确重跑命令。
+
+达到 `max_iterations` 仍未达标时，如实记录未达标、剩余瓶颈和下一步建议，不得伪造成达标。
+
+## 保持循环高效
+
+- 每轮 warmup 1、采集 2 次，用 candidate latency 排序正确候选。
+- 候选变化时只重新采集 candidate profile；不变的 Torch reference 可以复用已有 profile。
 - 不改变 correctness oracle、workload、tolerance、reference 或已确认的 benchmark 语义来
   缩短时间。
-- 仅严格模式在 profiler 原始目录中用 `anti_hack_manifest.json` 和逐 iteration CSV 完成单 launch
-  校验；压缩审计目录只保留每个 candidate workload 的合并 `kernel_details.csv`，并可选
-  保留 `step_trace_time.csv`，不保存 `anti_hack/` 或 manifest。
-- 把完整 correctness、同配置 benchmark 和 fresh profiling 留给 final verdict；快速信号
-  不能替代最终复测。
+- 把完整 correctness、同配置 benchmark 和 fresh profiling 留给最终验收；快速信号不能
+  替代最终复测。
 
-## Stall handling
+## Finalization
 
-达到 stall threshold 后暂停修改：
+满足停止条件后，对当前 best kernel 做一次最终验收：
 
-1. 重新分析保留的两个 CSV、best 与 rejected traces，并查询尚未尝试的 operator-specific
-   知识。
-2. 提供当前运行中未使用过的 fresh profile。
-3. 选择与上一轮不同的 `axis_id`，写明新的机制和判伪条件后继续。
+1. 运行全部 correctness 命令，记录退出码与逐 case 结果；
+2. 用 `workload_dev.jsonl` 做一次 fresh 配对 benchmark；
+3. 采集 fresh profiling，保留每例 `kernel_details.csv` 与 `step_trace_time.csv`；
+4. 在 `ITERATIONS.md` 写 `## Final Verdict`：模式、轮次数、best 前后耗时、加速比、
+   剩余瓶颈、下一步建议，并记录**交付 kernel SHA-256**（当前主实现文件的 SHA）；
+   交付 kernel 与 best kernel 不同时（例如后续 review 修复了源码）说明差异原因；
+   Final Verdict 引用的证据路径必须真实存在，不得引用未产出的文件；
+5. 把 best kernel 保留为工作区主实现文件，并确认 `solution.json` 与之一致。
 
-完成 fresh profile 后继续迭代；后续再次达到 stall threshold 时重复上述诊断流程。stall
-本身不是进入 finalization 的条件。profiler 暂时不可用是诊断约束，不是通过依据；保存
-精确重跑 argv，绝不伪造 profile 或性能结论。
+最终验收证据只服务 optimize 自身，不移交 develop；交回 develop 后先跑
+`gate.py optimize` 确认账本完整，再按 final review → 全量测试验收：采纳改动导致 kernel
+变化时补跑 `full test #2`，全部轮次 rejected、kernel 未变化时可复用 `full test #1`。
+`DESIGN.md` 声明 `性能要求：requested` 时继续执行 benchmark，`gate.py benchmark` 通过后
+才算 optimize 真正交付；声明 `none` 时当前 kernel 全量测试通过后直接 finish，不再做交付
+benchmark 与 profiling。缺少当前 kernel 的全量测试记录时不得进入 benchmark 或 finish，
+也不得把本阶段的 dev 子集结果当作全量正确性证据。若后续 review 修复了源码，只需补跑
+focused test 与 `full test #2`；优化轮次按其 evidence 中的 kernel SHA 说明适用范围，
+不要求对最终 kernel 重跑。
 
-## When to stop
+## 知识沉淀
 
-仅在以下条件停止迭代并进入 finalization：
+final 验收通过后，对 adopted 方向做一次去重检查：按 operator family、改动轴、关键 DSL
+API、shape/dtype/layout 和最终 profiler 瓶颈，读 `knowledge/optimization/index.md` 与
+`knowledge/learned/index.md`；已有条目覆盖同一机制与适用条件时，只在 `ITERATIONS.md`
+引用，不重复录入。
 
-1. controller 报告性能目标已达到；
-2. 达到已解析的最大迭代数；
-3. 环境缺失导致无法继续，记录为 blocked/not_run 并给出重跑命令。
-
-停止时必须调用 `begin-finalization`，让 controller 从 snapshot 恢复真实 best kernel。
-重新运行全部 correctness、同配置 benchmark 和 profiling，再调用 `finalize`。禁止凭记忆
-重写 best，也禁止把最后一轮误当成 best。finalization 前再次检查 kernel 自包含性和
-wrapper 无隐式全局注入；结构违规不能 finalize。最终 kernel 以未提交修改留在工作区。
-
-## Knowledge admission after finalization
-
-`finalize` 通过后，对 accepted 方向执行一次精确去重查询。使用 operator family、axis、
-关键 DSL API、shape/dtype/layout 和最终 profiler 瓶颈查询 `optimization` 与 `learned`；若
-已有 concept 已覆盖同一机制与适用条件，只在 `ITERATIONS.md` 引用它，不重复录入。
-
-仅当经验同时满足以下条件时录入：
+同时满足以下条件才写入 learned：
 
 - final correctness、fresh benchmark 和 profiling 均通过；
-- final best 相对 baseline 越过噪声门禁，并达到 Resolved Plan 的突出提升阈值；未指定时
-  使用至少 5% latency 改善；
-- 知识库没有覆盖同一优化机制和适用条件；
-- 能从 accepted trace 与 final 证据说明 hypothesis、实际修改、适用条件、性能前后和
-  profiler 观察，不把推测写成结论。
+- best 相对 baseline 越过噪声门限，且达到 Resolved Plan 的提升阈值（未指定时至少 5%）；
+- 知识库未覆盖同一优化机制与适用条件；
+- 能从 accepted 结果与 final 证据说明 hypothesis、实际修改、适用条件、性能前后和
+  profiler 观察。
 
-为每个符合条件且机制独立的方向生成 learned candidate，`kernel_sha256` 使用 final best
-SHA-256，evidence 至少引用 final correctness/benchmark，profiling 通过时还要引用保留的
-CSV。结束时一次批量录入，禁止逐轮写入或录入 rejected/failed 方向：
-
-```bash
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py record \
-  --project-root <workspace> --entry <temporary>/knowledge-candidates.json
-```
-
-录入成功后将生成的 learned concept 路径和录入判定追加到 `ITERATIONS.md` session
-synthesis，然后删除临时 candidate。录入失败不改变优化性能结论，但必须在 synthesis 中
-保留错误、candidate 摘要和精确重建/重跑命令，不能声称知识已写入，也不能把临时文件留在
-optimize run 中。
-
-## Controller protocol
-
-按顺序使用控制器，所有写命令传入最新 `expected_revision`：
-
-```bash
-# 1. baseline
-python3 skills/catlass-dsl-optimize/scripts/optimize_state.py initialize \
-  --state <run>/state.json --repository-root <workspace> --kernel <kernel.py> \
-  --solution <solution.json> \
-  --verification-context <optional-develop-verification-context.json> \
-  --run-id <operator>-YYYYMMDD-HHMMSS --expected-revision 0 \
-  --metric-path performance.candidate.mean_ms --direction lower --threshold <target> \
-  --max-iterations <count> --stall-threshold <count> \
-  --min-improvement-fraction <fraction> --profiling-required <yes|no> --anti-hack <off|single-fused> \
-  --required-command <command-id> \
-  --baseline-result <run>/baseline/benchmark/result.json \
-  --correctness-evidence <command-id>=<evidence-path>
-
-# 2. every iteration
-python3 skills/catlass-dsl-optimize/scripts/optimize_state.py begin-round \
-  --state <run>/state.json \
-  --expected-revision <revision> --proposal <proposal.json>
-python3 skills/catlass-dsl-optimize/scripts/optimize_state.py record-round \
-  --state <run>/state.json \
-  --expected-revision <revision> --result <trace>/submission.json
-
-# 3. final verdict
-python3 skills/catlass-dsl-optimize/scripts/optimize_state.py begin-finalization \
-  --state <run>/state.json --expected-revision <revision>
-python3 skills/catlass-dsl-optimize/scripts/optimize_state.py finalize \
-  --state <run>/state.json \
-  --expected-revision <revision> --result <run>/final/submission.json
-
-# resume / inspect
-python3 skills/catlass-dsl-optimize/scripts/optimize_state.py status \
-  --state <run>/state.json
-```
-
-初始化会把 workspace、主实现文件、性能策略和 required command IDs 固化进
-`state.json`；后续命令只读取 state。`state.json` 是机器权威；`ITERATIONS.md` 是唯一人类
-阅读入口。不得创建 Git branch、commit 或 worktree，也不得自动 merge 或 push。
-
-## Artifacts Layout
-
-长期只保留：
-
-```text
-.catlass-dsl/optimize-runs/<run-id>/
-├── state.json
-├── ITERATIONS.md
-├── baseline/{kernel.py,result.json}
-├── traces/
-│   └── iter-NNN-<axis-id>/
-│       ├── kernel.py
-│       ├── proposal.json
-│       ├── result.json
-│       └── profile/case-NNNN/{kernel_details.csv,step_trace_time.csv}
-└── final/
-    ├── kernel.py
-    ├── result.json
-    └── profile/case-NNNN/{kernel_details.csv,step_trace_time.csv}
-```
-
-每个 NPU `profile/case-NNNN/` 包含合并 `kernel_details.csv`，另可包含
-`step_trace_time.csv`；不保留 `anti_hack/` 或 `anti_hack_manifest.json`。不得在 run 中留下
-worktrees、完整 profiler trace、编译缓存或重复源码树。
+每个独立机制一条 learned concept，`kernel_sha256` 使用 final best，evidence 引用 final
+correctness/benchmark，profiling 通过时附 CSV 路径。结束前一次性写入，不逐轮写入，也不
+录入 rejected/failed 方向。写入后把 concept 路径追加到 `ITERATIONS.md` 的 Final Verdict。
 
 ## Gotchas
 
-- 追求真实 latency 降低，不做 reward hacking；不得跳过计算、返回未初始化输出或规避计时。
-- 默认按性能选择融合范围；严格单融合模式禁止拆分 launch。实现仍使用 CATLASS Python DSL。
-- 不得为了调参方便把 tile、dtype、shape、params 或开关移到模块级，也不得用可变全局
-  状态或 closure 生成隐式编译期特化。
+- 追求真实 latency 降低，不做 reward hacking：不得跳过计算、返回未初始化输出或规避计时。
+- 不得为了调参方便把 tile、dtype、shape、params 或开关移到模块级，也不得用可变全局状态
+  或 closure 生成隐式编译期特化。
 - 异常大幅提升先核对 correctness、kernel hash、workload 和 profiler CSV，再下结论。
 - 不把仅调整 benchmark 参数、仅停留在 Torch 或跳过 profiling 当成 kernel 优化。
 - 不因为工具不可用而静默停止；按 stall/blocked 协议保留证据和重跑入口。
 
-## Reference files
+## 产物布局
 
-- [proposal.json](templates/proposal.json) — 开始一轮前填写 hypothesis 与 Expected。
-- [round-result.json](templates/round-result.json) — correctness/benchmark 后立即提交本轮。
-- [final-result.json](templates/final-result.json) — final verdict、剩余瓶颈和下一步。
-- [ITERATIONS.md](templates/ITERATIONS.md) — Summary、Expected、dead ends 与 session synthesis。
+```text
+.catlass-dsl/optimize-runs/<run-id>/
+├── ITERATIONS.md
+├── baseline/{kernel.py,result.json}
+└── evidence/
+    ├── round-001/{kernel-before.py,result.json,profile/case-NNNN/*.csv}
+    ├── round-002/...
+    └── final/{kernel.py,result.json,profile/case-NNNN/*.csv}
+```
 
-anti-hack 策略固化到 optimization policy 并参与配置摘要；baseline、每轮和 final 复测
-必须一致。默认模式不执行任何源码或 profile anti-hack 审查，不要求 manifest；正确性、
-有限正数时延、逐 workload profiling 和 best 恢复保持有效。只接受
-`catlass.dsl.optimization.v5`，旧 run 需重新创建设计配置。
-
-`--solution` 默认主实现同目录的 `solution.json`。控制器仅允许该派生包更新主实现的
-源码 content，冻结其余元数据；恢复 best 时同步源码包，其他路径仍禁止修改。
-
-## Final acceptance handoff
-
-从 develop 调用时，初始化传入其导出的可选 `--verification-context`。finalize 的
-command_results.evidence 应指向测试执行器产生的逐 case JSON 报告，格式见
-[证据复用协议](../catlass-dsl-develop/references/verification-reuse.md)。完整通过时生成
-final/result.json.acceptance 并保留 final/acceptance/ 中的报告、完整 benchmark 和 CSV；
-严格模式额外保留移交复核所需的 manifest 和逐 iteration 审计 CSV。
-develop 校验该最终结果后只补 final_review，源码和条件不变则直接 finish。
-缺少上下文或结构化执行证据时不生成 acceptance，记录原因并保留原有验收流程。
+长期只保留 `ITERATIONS.md`、每轮结果 JSON、best kernel 快照和最终 profile CSV；不保存
+完整 profiler trace。

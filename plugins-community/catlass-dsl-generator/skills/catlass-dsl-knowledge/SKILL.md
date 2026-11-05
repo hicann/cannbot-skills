@@ -1,142 +1,118 @@
 ---
 name: catlass-dsl-knowledge
-description: Use when querying, validating, indexing, initializing, or appending evidence-backed CATLASS DSL kernel knowledge for Ascend NPU operator development in an OKF v0.2 project bundle
+description: Use when querying, validating, or appending evidence-backed CATLASS DSL kernel knowledge for Ascend NPU operator development in an OKF v0.2 project bundle; this version reads and writes Markdown files directly without scripts.
 ---
 
-# CATLASS DSL OKF 知识管理
+# CATLASS DSL OKF 知识管理（独立阶段）
 
-本 Skill 是公共知识入口。插件根 `knowledge/` 是只读的内置
-Open Knowledge Format v0.2 bundle；运行时只读取和写入目标项目的
-`.catlass-dsl/knowledge/`。内置 concept 不覆盖，项目经验只追加；不得在目标项目根
-目录创建运行时 `knowledge/`。
+> **入口**：作为独立任务入口时，先加载 `catlass-dsl-workflow` 并输出阶段卡。
 
-项目 bundle 使用以下渐进发现目录：
+> **自动执行**：遇到问题只要有可行方案就逐步尝试，一个方案失败就换下一个，不停下来找
+> 用户确认。等待长跑任务时直接等待并轮询，不结束回合。
 
-- `.catlass-dsl/knowledge/dsl/`：API 与编程概念；
-- `.catlass-dsl/knowledge/operator/`：有固定提交源码支持的算子样例；
-- `.catlass-dsl/knowledge/debug/`：构建、IR、runtime 与正确性调试；
-- `.catlass-dsl/knowledge/profiler/`：msOpProf 上板与仿真采集、指标和可视化分析；
-- `.catlass-dsl/knowledge/optimization/`：带适用条件和证据门禁的优化候选；
-- `.catlass-dsl/knowledge/learned/`：项目完整测试或 profiling 证明的结论。
+> **超时纪律**：编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块，
+> 一次只做一类动作，禁止串成一条长命令。编译独立 300s，单例运行 `timeout -k 5 60s`，
+> 批量按分片逐段执行，禁止整批套一次性超时，禁止裸跑。超时、无输出增长或卡住时立即终止
+> 命令，不得死等或加大超时。
+> 终止后先做卡健康判断：同一张卡的小探针或官方算子能过就判定为本算子实现的死锁，直接转
+> debug 定位；探针也失败才判定为设备问题并换卡重试一次。
 
-## 初始化
+本 Skill 是公共知识入口。插件根 `knowledge/` 是只读的内置 Open Knowledge Format v0.2
+bundle；项目经验写入目标项目的 `.catlass-dsl/knowledge/`。内置 concept 不覆盖，项目经验
+只追加；不得在目标项目根目录创建运行时 `knowledge/`。
 
-```bash
-python skills/catlass-dsl-knowledge/scripts/record_knowledge.py initialize \
-  --project-root <confirmed-worktree>
+**本版本没有 `record_knowledge.py`。** 查询通过直接读取 Markdown 索引与条目完成，记录
+通过按模板新建 Markdown 文件完成。
+
+## 目录结构
+
+```text
+knowledge/
+├── index.md                  # bundle 入口
+├── query-vocabulary.yaml     # 算子族别名与检索词
+├── dsl/                      # API 与编程概念
+├── operator/                 # 有固定源码支持的算子样例
+├── debug/                    # 构建、IR、runtime 与正确性调试
+├── profiler/                 # 上板与仿真采集、指标和可视化分析
+├── optimization/             # 带适用条件和证据的优化候选
+└── learned/                  # 项目完整测试或 profiling 证明的结论
 ```
 
-初始化复制缺失文件，不覆盖目标项目已有 concept 或 learned 内容；作为版本化路由元数据的
-`query-vocabulary.yaml` 会从内置 bundle 原子同步，避免项目继续使用已失效的 family 别名。
+项目覆盖层使用相同目录结构，位于 `<project>/.catlass-dsl/knowledge/`。同名 concept
+以内置为准，项目层只追加新文件；`index.md` 与 `log.md` 是保留文件，不要当作事实条目。
 
 ## 查询
 
-```bash
-python skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-  --project-root <confirmed-worktree> \
-  [--category <dsl|operator|debug|profiler|optimization|learned>] \
-  [--type <exact-OKF-type>] [--tag <tag>] [--status <status>] \
-  [--operator-family <family>] [--arch c310] [--text <term>] [--limit <count>] \
-  [--compact]
+不要扫描整个知识库。按以下顺序渐进发现：
 
-python skills/catlass-dsl-knowledge/scripts/record_knowledge.py get \
-  --project-root <confirmed-worktree> \
-  --path <path-returned-by-query>
-```
+1. 读 `knowledge/index.md`，确定相关分类；
+2. 读目标分类的 `index.md`，按标题、标签和描述筛选候选；
+3. 读候选条目的 YAML frontmatter，确认 `type`、`tags`、`status`、`verified`、
+   `stale_after` 与来源；
+4. 只对实际采用的条目读取全文，记录项目相对路径、适用条件和版本。
 
-查询先使用正式 YAML frontmatter 解析并校验整个 bundle，再按结构化字段过滤。
-`--category` 按知识根目录的第一层目录过滤；`--type` 只精确匹配 YAML frontmatter 的
-`type`，不得用 `--type optimization`、`--type dsl` 等目录名代替 category。
-`--tag` 可重复。完整结果包含项目相对路径、标题、描述、状态、验证记录和来源；
-`--compact` 只返回选择所需的摘要、评分、命中字段、命中词和最多三条带行号的正文片段。
-Agent 应先用 compact 查询缩小范围，再用 `get --path` 仅读取选中的完整 concept；`get`
-接受 query 返回的项目相对路径，也接受 bundle 相对路径，并拒绝越界、符号链接和保留文件。
-算子族和文本先通过 `query-vocabulary.yaml` 做大小写、下划线、连字符与显式别名归一化；
-结构化过滤始终严格，文本按标题、算子族、标签、描述、路径、正文和 source title
-确定性加权排序。全部词零命中时才允许至少半数词命中的受控放宽，结果通过 `score`、
-`matched_fields`、`matched_terms` 解释原因；CLI 默认返回前 20 条并报告总数、匹配模式和
-零命中建议。建议不自动参与召回。
-检索覆盖不足时，显式调整过滤条件并重新查询，记录初始查询、
-调整条件及采用依据；不得仅凭零命中断言没有相关知识。
-concept 必须包含执行所需的接口、代码模式、约束和验证方法。`knowledge/operator/`
-concept 保留这些通用章节，并在其中分别加入“算子算法”“分核策略与基本块切分”
-“数据路径与存储层级”“流水排布、同步关系与数值精度”四个二级主题。离线时使用内置concept，
-并结合 `verified` 与可选的 `stale_after` 判断可信度和新鲜度。
+检索词先按 `query-vocabulary.yaml` 做大小写、下划线、连字符和别名归一化。结构化过滤
+（category、tag、status、operator family）保持严格；文本匹配按标题、算子族、标签、描述、
+路径和正文加权。零命中时调整关键词或分类重查，不得仅凭零命中断言没有相关知识。
 
-## 入库标准路由
+条目必须包含执行所需的接口、代码模式、约束和验证方法。`operator/` 条目还应包含
+“算子算法”“分核策略与基本块切分”“数据路径与存储层级”“流水排布、同步关系与数值精度”
+四个主题。离线时使用内置条目，并结合 `verified` 与 `stale_after` 判断可信度和新鲜度。
 
-新增、重写或审核 `dsl/`、`operator/`、`debug/`、`profiler/`、`optimization/`、
-`learned/` concept 前，必须先完整阅读并执行
-[公共入库标准](references/common-entry-standards.md)，再按目标目录完整阅读并执行对应的
-专用标准：
+查询记录写入当前阶段的 `ITERATIONS.md`：查询词、命中的条目路径、采用理由；不要只写
+“查过知识库”。
 
-- `knowledge/operator/`：
-  [Operator 入库标准](references/operator-entry-standards.md)，包括固定源码取证范围、
-  “算子算法”“分核策略与基本块切分”“数据路径与存储层级”
-  “流水排布、同步关系与数值精度”四个强制主题，以及优化指导的最低标准；
-- `knowledge/optimization/`：
-  [Optimization 入库标准](references/optimization-entry-standards.md)；
-- `knowledge/dsl/`：[DSL 入库标准](references/dsl-entry-standards.md)；
-- `knowledge/profiler/`：
-  [Profiler 入库标准](references/profiler-entry-standards.md)；
-- `knowledge/debug/`：[Debug 入库标准](references/debug-entry-standards.md)；
-- `knowledge/learned/`：[Learned 入库标准](references/learned-entry-standards.md)。
+## 入库标准
 
-跨目录创建、修改、迁移或审核 concept 时，只读取一次公共标准，但必须读取所有相关目录的
-专用标准。只执行查询、初始化、校验或重建索引时无需读取这些 references。
+新增、重写或审核 concept 前，必须先完整阅读并执行
+[公共入库标准](references/common-entry-standards.md)，再按目标目录读取对应的专用标准：
 
-## 校验与索引
+- `operator/`：[Operator 入库标准](references/operator-entry-standards.md)
+- `optimization/`：[Optimization 入库标准](references/optimization-entry-standards.md)
+- `dsl/`：[DSL 入库标准](references/dsl-entry-standards.md)
+- `profiler/`：[Profiler 入库标准](references/profiler-entry-standards.md)
+- `debug/`：[Debug 入库标准](references/debug-entry-standards.md)
+- `learned/`：[Learned 入库标准](references/learned-entry-standards.md)
 
-```bash
-python skills/catlass-dsl-knowledge/scripts/record_knowledge.py validate \
-  --project-root <confirmed-worktree>
+跨目录创建、修改或审核时，只读一次公共标准，但必须读取所有相关目录的专用标准。只做
+查询时无需读取这些 references。
 
-python skills/catlass-dsl-knowledge/scripts/record_knowledge.py reindex \
-  --project-root <confirmed-worktree>
-```
+## 校验（人工）
 
-`query-vocabulary.yaml` 是版本化 bundle 元数据；`validate` 会拒绝重复或冲突别名、非法
-schema，以及没有任何 concept 声明的规范算子族。
+没有脚本校验时，按以下清单人工检查：
 
-每个非保留 Markdown concept 必须有合法 YAML frontmatter，并包含
-`type`、`title`、`description`、`tags`、`status`、`generated`、`verified`
-和 `sources`。静态 concept 的事实必须通过与 `sources[].id` 相同的 Markdown
-footnote 归因；actor、ISO 时间、source resource 和 index 链接也会被校验。
-`.catlass-dsl/knowledge/index.md` 是 bundle 入口；`index.md`、`log.md` 是 OKF 保留文件。
-任一 `index.md` 索引子目录时必须显式链接 `<子目录>/index.md`，不能只链接目录路径
-或使用 `<子目录>/` 尾斜杠形式。
-`.catlass-dsl/knowledge/learned/index.md` 是可重建发现视图，
-不是事实数据库。
+- 每个非保留 Markdown concept 有合法 YAML frontmatter，包含 `type`、`title`、
+  `description`、`tags`、`status`、`generated`、`verified` 和 `sources`；
+- 静态事实通过 `sources[].id` 对应的 Markdown footnote 归因；
+- `index.md` 索引子目录时显式链接 `<子目录>/index.md`，不能只链接目录路径；
+- `query-vocabulary.yaml` 中不存在重复或冲突别名，也没有未被任何 concept 声明的规范
+  算子族；
+- 新增文件不覆盖已有 concept；冲突结论以新的条件化 concept 追加。
 
 ## Learned 准入
 
-`record --entry` 接受一个对象或对象数组。每条候选必须包含：
+项目实测经验写入 `.catlass-dsl/knowledge/learned/`，每条至少包含：
 
-- 安全的 `operator_family`、`topic`，架构 `c310` 和 CATLASS/CANN 版本；
+- 安全的 `operator_family`、`topic`、架构 `c310` 和 CATLASS/CANN 版本；
 - shape、dtype、layout、仓库集成条件；
 - 假设、实际修改、修改前后正确性和性能；
 - 修改后正确性 `passed`；
-- 至少一个项目内可访问的 test 或 profiling 普通文件；
+- 至少一个项目内可访问的 test 或 profiling 普通文件路径；
 - 最终 best kernel 的完整 SHA-256；
-- `有效`、`无效` 或 `条件有效`。
+- 结论标记为 `有效`、`无效` 或 `条件有效`。
 
-```bash
-python skills/catlass-dsl-knowledge/scripts/record_knowledge.py record \
-  --project-root <confirmed-worktree> --entry <candidate-or-batch.json>
-```
+只有完整测试或 profiling 直接支持的结论可以入库；证伪假设、静态推断、不可访问证据和
+`not_run` 结论不得入库。新证据与旧结论冲突时追加新的条件化 concept，不修改历史 concept。
 
-finish 应一次提交本次任务全部候选。只有完整测试或 profiling 直接支持的结论
-可以进入 `learned/`；证伪假设、静态推断、不可访问证据和
-`not_run` 结论不得入库。批次先整体校验；同名 concept 或批次内冲突会失败。
+模板见 [`templates/learned-entry.md`](templates/learned-entry.md)。
 
-## 写入保证
+## 写入约定（人工）
 
-- learned concept 使用 `O_EXCL | O_NOFOLLOW` 创建，拒绝覆盖。
-- 并发写入使用 POSIX `flock`；不支持时安全失败。
-- 批量 record 在同一锁内预检全部目标；任一冲突或写入失败都不保留本批次的部分 concept。
-- index 使用临时文件、`fsync` 和原子替换。
-- 新证据与旧结论冲突时追加新的条件化 concept，不修改历史 concept。
-- `project-evidence:` source 同时绑定项目相对证据路径和完整 kernel SHA-256。
+- 新建文件使用“文件名冲突即失败”的方式：写入前检查目标路径不存在，不使用覆盖写入；
+- 批量记录前先列出全部目标路径，确认无冲突后再逐个写入；
+- 一个 concept 一个文件，文件名使用安全 ID；
+- 写入后更新对应目录的 `index.md`，并在 `log.md`（不存在时创建）增加一条变更记录；
+- 证据路径使用项目相对路径，并绑定 kernel SHA-256。
 
-任何路径、仓库身份、证据、frontmatter 或 OKF 版本问题都返回结构化 `failed`，
-不会把 `not_run` 汇总为 `passed`。
+任何路径、仓库身份、证据、frontmatter 或 OKF 版本问题都应记录为 `failed` 并停止写入，
+不得把 `not_run` 汇总为 `passed`。

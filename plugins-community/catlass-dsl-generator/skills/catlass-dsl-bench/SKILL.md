@@ -1,33 +1,38 @@
 ---
 name: catlass-dsl-bench
-description: Use when independently checking and timing a CATLASS Python DSL solution against definition and workload files
+description: Use when independently checking and timing a CATLASS Python DSL solution against definition and workload files; this version provides the measurement contract and requires the agent to write and run its own benchmark script.
 ---
 
-# CATLASS DSL 公共 Benchmark
+# CATLASS DSL 公共 Benchmark（门禁引导）
 
-以 NPU-KernelBench 风格的 `solution.json`、`workload.jsonl` 和 `definition.json`
-作为唯一公开输入，在当前进程依次执行输入生成、正确性、同步 warmup 和重复计时。
-输入会执行 Python 代码，必须来自用户信任的来源；本工具不提供安全沙箱。
-默认 `--anti-hack off`，关闭全部 anti-hack，允许多个 DSL kernel 和 GM 中间张量。
-只有用户明确要求单融合时使用 `--anti-hack single-fused`，执行源码及逐次 launch 严格校验。
+> **入口**：本阶段开始前先加载 `catlass-dsl-workflow` 并输出阶段卡。
 
-```bash
-python3 skills/catlass-dsl-bench/scripts/bench.py \
-  --solution <solution.json> \
-  --workload <workload.jsonl> \
-  --definition <definition.json> \
-  --output <evidence-directory>/benchmark \
-  --reference-profile-cache <project>/.catlass-dsl/profiles/reference \
-  --device npu:0 --seed 1 --warmup 1 --trials 2 --anti-hack off
-```
+> **入口门禁**：作为工作流阶段执行时，`python3 <workflow>/scripts/gate.py benchmark
+> --workspace <ws>` 必须通过。它要求 optimize 已按模式 A/B 完成并落账，且当前 kernel 已有
+> 全量测试 passed 记录：优化采纳改动了 kernel 时必须重跑 `full test #2`，全部未采纳、
+> kernel 未变化时可复用 `full test #1`；只有 optimize 自测结果的不得开始工作流内的
+> benchmark。独立测量任务不经过该门禁，直接按本 Skill 执行。
+> 仅当 `DESIGN.md` 声明 `性能要求：requested` 时进入工作流内的 benchmark 阶段；声明 `none`
+> 时不执行 benchmark 与 profiling，当前 kernel 全量测试通过后直接 finish。
 
-默认执行 1 次 warmup、采集 2 次；仍可通过 `--warmup` 和 `--trials` 显式覆盖。
+> **自动执行**：遇到问题只要有可行方案就逐步尝试，一个方案失败就换下一个，不停下来找
+> 用户确认。等待远端任务、编译、benchmark、设备或长跑用例时直接等待并轮询，不结束回合。
 
-模板位于 [`templates/`](templates/)。
+> **超时纪律**：编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块；
+> 编译独立 300s，单例运行 `timeout -k 5 60s`，批量分片，禁止整批套一次性超时，禁止裸跑。
+> 超时或卡住立即终止，不得死等或加大超时。终止后先做卡健康判定：同一张卡的小探针或
+> 官方算子能过 → 判本算子死锁并转 debug；探针也失败 → 判设备问题并换卡重试一次。
 
-## Definition 接口
+**本版本不提供 `bench.py`。** 执行测量时由 Agent 在工作区写一次性脚本（建议
+`tools/bench_local.py`），按本文的输入接口、测量口径和结果字段实现，并把命令、退出码和
+结果路径写入 `ITERATIONS.md`。脚本可以简化，但不得改变正确性判据、计时边界或数据口径。
 
-`definition.json` 是算子语义的权威输入：
+## 输入接口
+
+以 `solution.json`、`workload.jsonl`、`definition.json` 作为唯一公开输入。输入会执行
+Python 代码，必须来自用户信任的来源；测量脚本不提供安全沙箱。
+
+### definition.json
 
 ```json
 {
@@ -43,49 +48,36 @@ python3 skills/catlass-dsl-bench/scripts/bench.py \
 }
 ```
 
-- `axes` 固定为 `{}`；workload 的 `axes` 固定为 `null`。禁止用 `const`、`var`、
-  `expr` 或 axis 名称间接表达 case shape 和配置。
-- definition 中 `shape` 为 `null`，或只使用十进制常量字符串表达所有 case 共有的
-  固定 shape；不得引用 axis。每个 tensor case 的实际数值 shape/dtype 仍必须直接写入
-  workload。标量和可选空输入的 definition shape 为 `null`。
-- `dtype` 支持 `bool`、`uint8`、`int8/16/32/64`、`float16/32/64` 和
-  `bfloat16`。
-- `reference` 必须是包含顶层 `run` 的完整、可信 Torch Python 源码。
-- `custom_inputs_entrypoint` 可指定 reference 源码中的 `(axes, device) -> dict`
-  输入生成函数；此时 `axes` 仍为空对象，对应 workload 的所有输入必须统一使用
-  `custom`。custom 仅用于特殊分布或约束，不得恢复 axis binding；shape、dtype、layout、
-  开关、标量和可选输入状态仍须在 workload 行中显式保存。不得用 `CASE`、`case_id`、
-  序号或其他不透明索引在 reference 内部查表恢复 case 配置。
+- `axes` 固定为 `{}`；workload 的 `axes` 固定为 `null`。禁止用 `const`、`var`、`expr`
+  或 axis 名称间接表达 case shape。
+- definition 中 `shape` 为 `null`，或只使用十进制常量字符串表达所有 case 共有的固定
+  shape。每个 tensor case 的实际 shape/dtype 必须直接写入 workload。
+- `dtype` 支持 `bool`、`uint8`、`int8/16/32/64`、`float16/32/64` 和 `bfloat16`。
+- `reference` 必须是包含顶层 `run` 的完整 Torch 源码。
+- `custom_inputs_entrypoint` 可指定 `(axes, device) -> dict` 输入生成函数；对应 workload
+  的输入统一使用 `custom`，但 shape、dtype、layout 和开关仍须在 workload 行中显式保存。
 
-## Workload 接口
+### workload.jsonl
 
-`workload.jsonl` 每个非空行是一个独立用例：
+每个非空行是一个独立用例：
 
 ```json
-{"uuid":"scale-001","axes":null,"inputs":{"x":{"type":"random","shape":[1024],"dtype":"float32"},"alpha":{"type":"scalar","value":0.5}},"tolerance":{"max_atol":0.00001,"max_rtol":0.00001,"required_matched_ratio":1.0,"max_error_cap":null,"allow_negative_inf":false}}
+{"uuid":"scale-001","axes":null,"inputs":{"x":{"type":"random","shape":[1024],"dtype":"float32"},"alpha":{"type":"scalar","value":0.5}},"tolerance":{"max_atol":0.00001,"max_rtol":0.00001,"required_matched_ratio":0.999,"max_error_cap":null,"allow_negative_inf":false}}
 ```
 
-- `uuid` 在文件内唯一，并直接作为结果中的 case id。
-- `axes` 必须为 `null`。每个 tensor input 必须直接声明数值 `shape` 和 `dtype`；标量
-  使用 `{"type":"scalar","value":...}`，可选空输入直接写 JSON `null`。
-- 每个 case 的完整配置必须保存在其 JSONL 行中；`uuid` 仅用于身份标识，不能作为
-  隐藏配置的 dispatch key。shape、dtype、layout selector、序列边界、布尔开关、
-  标量参数和 initial state 是否存在等都必须直接保存在该行。
-- `random` 必须声明 `shape`、`dtype`，并可为整数输入声明 `range: [low, high]`。
-  此外支持 `zeros`、`ones`、字面量 `scalar`、JSON `null`、definition 自定义生成的
-  `custom`、`safetensors` 文件输入和变长 `tensor_list`。
-- 使用 `custom` 时不得借此隐藏 shape/dtype 或恢复 axis binding，也不得在 reference
-  中维护 `_CASE_SPECS` 等 case table。边界、尾块和广播尺寸分别用独立 workload 表达。
-- tolerance 逐 workload 生效。元素满足
-  `abs(candidate-reference) <= max_atol + max_rtol * abs(reference)` 时计为匹配；
-  匹配比例不得低于 `required_matched_ratio`，`max_error_cap` 是额外硬上限。
-- NaN 和 Inf 默认失败；`allow_negative_inf` 只允许两侧同位置的 `-inf`。
-- 随机输入由 CLI 的 `--seed` 固定。同一 suite 中每个 workload 使用相同 seed，
-  以便结果可复现。
+- `uuid` 文件内唯一，直接作为结果 case id；不得用 uuid 承担隐藏配置查表。
+- 每个 tensor input 直接声明数值 `shape` 和 `dtype`；标量用
+  `{"type":"scalar","value":...}`，可选空输入写 JSON `null`。
+- 支持 `random`（可带 `range`）、`zeros`、`ones`、字面量 `scalar`、`null`、
+  `custom`、`safetensors` 和变长 `tensor_list`。
+- tolerance 逐 workload 生效：满足
+  `abs(candidate-reference) <= max_atol + max_rtol * abs(reference)` 计为匹配；匹配比例
+  不得低于 `required_matched_ratio`，`max_error_cap` 是额外硬上限。
+- 浮点输出默认 `required_matched_ratio: 0.999`；`1.0` 只用于位精确、整数结果或数值设计
+  明确要求。NaN/Inf 默认失败；`allow_negative_inf` 只允许两侧同位置的 `-inf`。
+- 同一 suite 使用同一随机 seed，保证可复现。
 
-## Solution 接口
-
-`solution.json` 保存完整方案和源码：
+### solution.json
 
 ```json
 {
@@ -104,74 +96,141 @@ python3 skills/catlass-dsl-bench/scripts/bench.py \
 }
 ```
 
-- `definition` 必须等于 `definition.name`。
-- CATLASS DSL 是 Python DSL，`languages` 使用 NPU-KernelBench 兼容值
-  `["python"]`，不要填写 C++ CATLASS 的 `catlass`。
-- `sources[].path` 必须是安全相对路径，`content` 必须包含完整源码。所有源码会复制
-  进证据目录后再导入。
+- `definition` 必须等于 `definition.name`；`languages` 使用 `["python"]`。
+- `sources[].path` 必须是安全相对路径，`content` 包含完整源码。
 - `entry_point` 固定为 `<source-path>::<callable>`。
-- 返回值模式使用 `destination_passing_style: false`，入口返回 Tensor，或与
-  definition 输出顺序一致的 flat tuple/list。
-- DPS 模式使用 `destination_passing_style: true`，入口参数依次为全部输入和全部
-  输出 buffer，不返回结果；所有输出必须在 definition 中声明 shape 和 dtype。
-- 所有输入按 definition 顺序作为位置参数传入，solution 和 reference 必须接受相同
-  调用。正确性调用使用独立 Tensor 克隆；计时阶段复用一组独立输入，不把输入生成和
-  clone 时间计入算子时延。
+- 返回值模式使用 `destination_passing_style: false`；DPS 模式为 `true`，入口参数依次为
+  全部输入和输出 buffer，不返回结果。
+- 所有输入按 definition 顺序作为位置参数传入，solution 与 reference 接受相同调用。
 - solution 中每个 `@tla.kernel` 必须自包含，只能读取形式参数、函数内局部值、Python
-  内建符号和受信任的 `tla` API 命名空间。禁止模块级 tile/shape/dtype/params/开关、
-  可变全局状态和 closure capture；固定值在 kernel 内定义，运行时值使用显式 ABI 或
-  tensor metadata。默认允许多个 kernel 和显式变体分派；严格模式
-  solution 只能声明一个 `@tla.kernel`，不得为编译期变体声明独立 kernel。
+  内建符号和受信任的 `tla` API 命名空间。
 
-## Anti-hack 接口
+## 测量脚本要求
 
-Python `run_suite(..., anti_hack="off")` 与 CLI `--anti-hack {off,single-fused}` 一致。
-默认 `off` 不执行以下任何 anti-hack 检查，不生成审计 manifest；根结果和逐 workload
-记录 `status=disabled`、`policy=off`、`reason=disabled_by_policy`，不伪装为通过。
-默认流程先正常 correctness，再 prime/warmup 和采样；正确性失败不测性能。
-多 kernel 时统计完整 `run` 的所有计算阶段。普通配置、正确性和 profiling 校验仍生效。
+建议脚本按以下顺序实现，命令行参数至少包含
+`--solution --workload --definition --output --device --seed --warmup --trials`：
 
-以下全部条款仅适用于显式 `single-fused` 模式：
+1. **加载与校验**：解析三个输入，校验 `definition.name`、`solution.definition`、
+   `entry_point`、`sources[].path` 和 workload uuid 唯一性。
+2. **导入候选**：把 `sources[]` 复制到输出目录后导入，按 `entry_point` 取 callable；
+   `source_sha256` 取主源码文件的 SHA-256。
+3. **逐例正确性**：按 workload 生成输入（固定 seed），按 definition 的输入顺序展开为
+   位置参数，分别调用 reference 和 candidate；用独立 Tensor 克隆，按 tolerance 比对，
+   输出结构必须与 `definition.outputs` 顺序一致。
+4. **同步 warmup**：每例 candidate 执行 1 次并同步，不计时。
+5. **配对计时**：同一例先 candidate 后 reference，或奇偶例交替先后（`paired`）；使用
+   `torch.npu.Event` 或等价设备事件记录单次 `run` 到同步完成的耗时，采集 `trials` 次
+   （默认 2；需要更稳时取 5 次中位数）。输入生成和 clone 不计入算子时延。
+6. **聚合**：逐例 `mean_ms`、`std_ms`，再计算全部用例的均值；speedup =
+   `reference_mean / candidate_mean`。
+7. **profiling**：NPU 上用 `torch_npu.profiler` 文本导出，保留每例的
+   `kernel_details.csv` 与 `step_trace_time.csv`；优先用 `step_trace_time.csv` 的
+   `Computing` 总时间除以 trials，缺失时回退到 `kernel_details.csv` 的 kernel 总时长。
+8. **落盘**：即使某例失败也写入结果，失败用例标记 `status=failed` 并附错误摘要；正确性
+   失败的用例不产生有效性能结论。
 
-- benchmark 前必须审查每个 decorated kernel 的自由名字，并检查 host entry point 没有
-  通过 `global`、模块属性或可变容器改变 kernel 编译语义。结构审查失败时不得执行或
-  接受 benchmark，即使数值和单 launch profile 能通过。
-- 单 kernel 同时按源码声明和运行时 launch 计数：solution 必须且只能声明一个
-  `@tla.kernel`，每个 workload 的每次候选调用必须只 launch 该 kernel，且所有 profile
-  中 kernel 名必须稳定并匹配该唯一声明。不得为编译期变体声明独立 dispatch kernel。
-- 候选源码不得调用 `torch`、`torch.nn`、`torch.ops` 或 Tensor 计算算子，也不得用
-  Python Tensor 运算替代 DSL。只允许 dtype/device/shape 元数据检查、
-  `dim/numel/size/stride/is_contiguous`，以及 `torch.empty/empty_like/empty_strided`
-  空输出分配；Torch reference 不受此限制。
-- NPU candidate 必须生成可解析的 `kernel_details.csv`。记录数必须严格等于 trials；
-  缺失、零/多 launch、vendor/Torch kernel 或名称不匹配统一记录为 `category=hack`。
-  `step_trace_time.csv` 可继续作为计时来源，但不能替代 anti-hack 证据。
-- candidate `run` 只在 `trials` 个 profiler 窗口内调用；其中一次输出直接用于 correctness，
-  不再执行无法证明 launch 次数的 candidate correctness/prime/warmup 调用。
-- 每个 candidate trace 必须同时生成 `anti_hack_manifest.json` 和 SHA-256 绑定的逐
-  iteration `anti_hack/iteration-NNNN/kernel_details.csv`；每个分片严格一行，合并 CSV
-  不能代替 iteration 边界证据。
-- 根结果和每个 workload 都记录 `anti_hack`，字段包括 `status`、`policy`、声明/观测
-  kernel 名、profile iteration 数、launch 数、每 iteration launch 数和稳定 reason。
-  `policy` 固定为 `single-fused-catlass-kernel-v1`。CPU 使用
-  `status=not_applicable`；NPU 只有全部 workload `status=passed` 才能通过。
+参考骨架（按实际环境补全）：
 
-## 结果与流程
+```python
+import json, statistics, time
+from pathlib import Path
+import torch
 
-根 `result.json` 汇总所有 workload，`workloads[]` 指向各用例的原始结果；兼容 optimize
-的聚合指标为 `performance.candidate.mean_ms`，当前 schema 为 version 4。NPU 性能使用 `torch_npu.profiler`
-采集，优先以 `step_trace_time.csv` 的 `Computing` 总时间除以 trials，缺失时回退到
-`kernel_details.csv` 的 kernel 总时长。候选实现会随开发或优化轮次变化，因此每次都在
-本轮输出目录的 `profiling/` 中重新采集；不变的 Torch reference 只采集一次，并按
-definition、workload、设备环境和测量参数的 SHA-256 指纹保存在项目级
-`.catlass-dsl/profiles/reference/<fingerprint>/`。后续 develop/optimize run 只复用该
-manifest 和原始 trace，不复制或再次执行 reference profiling。若输出目录不在
-`.catlass-dsl` 下，使用 `--reference-profile-cache <project>/.catlass-dsl/profiles/reference`
-显式指定共享目录。definition、workload、设备或 profiler 参数变化会产生新指纹，避免
-误用陈旧标杆。
-任何 workload 精度失败都会使 suite 失败，且该 workload 不产生有效性能结论。
-环境缺失返回退出码 2；配置或正确性失败返回 1。
+def load_jsonl(path):
+    return [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
 
-独立纳入状态机时，`state.json` 的批准命令必须把三个输入文件和输出目录作为逐项 argv。
-只有契约声明性能目标时才把结果交给 `catlass-dsl-optimize`；正确性失败回到 develop
-内部定位流程。
+def make_inputs(spec, seed, device):
+    generator = torch.Generator(device="cpu").manual_seed(seed)
+    values = {}
+    for name, item in spec.items():
+        if item is None:
+            values[name] = None
+        elif item["type"] == "scalar":
+            values[name] = item["value"]
+        elif item["type"] == "random":
+            tensor = torch.randn(item["shape"], generator=generator,
+                                 dtype=getattr(torch, item["dtype"]))
+            values[name] = tensor.to(device)
+        else:
+            raise ValueError("unsupported input type: {}".format(item["type"]))
+    return values
+
+def timed(run, args, trials):
+    times = []
+    for _ in range(trials):
+        start = torch.npu.Event(enable_timing=True)
+        end = torch.npu.Event(enable_timing=True)
+        start.record()
+        run(*args)  # 按 definition 的输入顺序展开为位置参数
+        end.record()
+        torch.npu.synchronize()
+        times.append(start.elapsed_time(end))
+    return times
+```
+
+脚本必须打印每例进度与最终摘要，并把完整结果写入 `<output>/result.json`。
+
+## 结果字段约定
+
+为了让 optimize 和交付报告能直接消费，结果 JSON 至少包含：
+
+```json
+{
+  "status": "passed",
+  "solution": {"source_sha256": "<sha256>"},
+  "environment": {"device": "npu:0", "arch": "...", "cann": "...", "torch": "...",
+                  "python": "...", "seed": 1, "warmup": 1, "trials": 2},
+  "selection": {"cases": ["scale-001"], "mode": "benchmark", "paired": true, "shard": null},
+  "correctness": {"status": "passed", "passed": 1, "total": 1},
+  "correctness_evidence": {"path": "evidence/full-test/result.json", "sha256": "<sha256>", "cases": 1},
+  "workloads": [
+    {"uuid": "scale-001", "status": "passed",
+     "correctness": {"status": "passed"},
+     "performance": {"status": "passed",
+       "candidate": {"mean_ms": 0.12, "std_ms": 0.01, "trace_dir": "..."},
+       "reference": {"mean_ms": 0.20, "std_ms": 0.02},
+       "order": "candidate_first", "speedup": 1.67}}
+  ],
+  "performance": {"status": "passed",
+    "candidate": {"mean_ms": 0.12}, "reference": {"mean_ms": 0.20}, "speedup": 1.67},
+  "profiling": {"status": "passed", "artifact": "..."}
+}
+```
+
+- `performance.candidate.mean_ms` 是统一性能指标路径。
+- `selection.paired` 必须为 `true`（有对标实现时）。
+- `profiling.status` 只有在每例都产出 CSV 时才写 `passed`。
+- benchmark 跳过逐例正确性时，`correctness_evidence` 必须指向 full test 的合并结果，
+  写明路径、SHA-256 和覆盖用例数；缺失时该 benchmark 结果不可作为交付证据。
+
+## 分片与续跑（按需实现）
+
+- 批量用例建议按 `--shard i/n` 分片，每片写独立 `--output`，最后合并；
+- 每例结果单独落盘，重跑时可按 `kernel_sha256 + workload + case` 复用已通过结果；
+- 分片合并时校验 uuid 集合完整、无重复；合并结果保留每片路径与 SHA-256；
+- 设备不健康或单例失败时，允许换卡重试一次，记录原设备、新设备与重试结果；二次
+  失败按 kernel 问题处理，不得加大超时。
+- 禁止用 `rm -rf` 丢弃已完成结果。
+
+## 单融合审计（仅 `single_kernel` 模式）
+
+用户明确要求单融合时，测量前人工完成以下检查，并把结论写入 `ITERATIONS.md`：
+
+- solution 只声明一个 `@tla.kernel`，每次 `run` 只 launch 它；
+- 每个 decorated kernel 的自由名字只来自形式参数、函数内局部值、Python 内建符号和
+  `tla` API，不存在模块级可变配置或 closure；
+- 候选源码不调用 `torch` / `torch.nn` / `torch.ops` 或 Tensor 计算算子替代 DSL；
+  只允许 dtype/device/shape 元数据检查和空输出分配；
+- 每个 candidate trace 的 `kernel_details.csv` 只出现该 kernel 名，记录数与 trials 一致；
+- 任何一项不满足即判定本轮无效，不产生性能结论。
+
+默认 `performance` 模式不做上述审计，允许多 kernel 和 GM 中间张量。
+
+## 与其它阶段的衔接
+
+- full test 使用完整 `workload.jsonl`；benchmark 使用完整 workload 并逐例配对。
+- optimize 使用 design 冻结的 `workload_dev.jsonl`（30~40 条；用户用例不足 30 条时全选），
+  每轮复用同一份样本。
+- benchmark 正确性失败时回到 develop 的 debug 流程；环境缺失时结果记 `blocked` /
+  `not_run`，不得写成通过。
+- 模板位于 [`templates/`](templates/)；脚本与结果路径必须记录到 `ITERATIONS.md`。

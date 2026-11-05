@@ -2,7 +2,14 @@
 
 ## 概述
 
-`catlass-dsl-generator` 为 Ascend NPU CATLASS DSL 算子开发提供完整的工具链，覆盖设计、编码、基准测试、性能优化与知识管理五大阶段。内置**离线 OKF 知识库**，支持 API 查询、样例检索、问题排查与性能调优，无需网络连接。
+`catlass-dsl-generator` 为 Ascend NPU CATLASS DSL 算子开发提供完整流程指引，覆盖设计、
+编码、基准测试、性能优化与知识管理五个阶段。内置**离线 OKF 知识库**，支持 API 查询、
+样例检索、问题排查与性能调优，无需网络连接。
+
+**本版本是门禁引导工作流**：不包含 `develop_state.py`、`optimize_state.py`、`bench.py`、
+`verification.py`、`validate_reference.py`、`record_knowledge.py` 等状态机脚本；阶段推进
+由各 `SKILL.md`、`AGENTS.md` 与工作区 `ITERATIONS.md` 中的真实执行记录承担，并由只读门禁
+脚本 `skills/catlass-dsl-workflow/scripts/gate.py` 核对产物与记录。
 
 ---
 
@@ -13,7 +20,7 @@
 ### 方式 A：init.sh 脚本安装（推荐）
 
 适用于 OpenCode、Claude Code、Trae（IDE/插件版/CLI）、Cursor、Codex、Copilot、CodeArts，
-通过软链把 5 个 Skill 和内置 OKF 知识库注册到工具的项目级/全局发现路径，并生成
+通过软链把 6 个 Skill 和内置 OKF 知识库注册到工具的项目级/全局发现路径，并生成
 自动加载的工作流配置（`AGENTS.md` / `CLAUDE.md`）——新会话不依赖对话历史即可恢复工作流。
 
 ```bash
@@ -40,6 +47,7 @@ bash <plugin-source>/init.sh --uninstall project trae
 | CodeArts | `.codeartsdoer/{skills,knowledge}/` | `AGENTS.md` | 项目/全局 |
 
 说明：
+
 - 全部为软链安装，插件仓库仍是唯一源，`git pull` 更新后自动生效。
 - 同一项目安装多个工具时，配置文件以最后一次安装为准。
 - 卸载只删除本插件的白名单内容，不影响项目里其他 skills。
@@ -79,8 +87,6 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 
 已有本地 checkout 时也可直接链接到 `~/.cursor/plugins/local/catlass-dsl-generator`。随后执行 `Developer: Reload Window`，在 `Settings > Plugins` 中确认插件已加载。
 
-> GitHub 仓库也可在 Cursor Agent 中使用 `/add-plugin <git-repository-url>` 导入。
-
 #### OpenCode
 
 在目标项目的 `opencode.json` 中添加：
@@ -91,7 +97,7 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 }
 ```
 
-用户级安装则修改 `~/.config/opencode/opencode.json`。重启 OpenCode 后使用原生 `skill` 工具确认五个 Skill 均可发现。更多说明见 [`.opencode/INSTALL.md`](.opencode/INSTALL.md)。
+用户级安装则修改 `~/.config/opencode/opencode.json`。重启 OpenCode 后使用原生 `skill` 工具确认六个 Skill 均可发现。更多说明见 [`.opencode/INSTALL.md`](.opencode/INSTALL.md)。
 
 ---
 
@@ -100,21 +106,53 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 开发新算子只需两步：
 
 > **第一步** — 使用 `catlass-dsl-design` 生成算子规格、初步设计、Torch
-> `reference.py` 精度标杆、`definition.json` 和 `workload.jsonl` 用例：
+> `reference.py` 精度标杆、`definition.json`、`workload.jsonl` 与
+> `workload_dev.jsonl`：
 
 ```text
 使用 catlass-dsl-design 设计一个 <算子名称> 算子。
 输入、输出、dtype、shape、数值语义和性能目标是：...
 ```
 
-> **第二步** — 检查生成的可读 `DESIGN.md`，确认接口、语义、允许路径和测试方法后批准。
-> 严格的命令 argv 和状态机字段直接冻结在 develop run 根目录的 `state.json`：
+> **第二步（默认直通，无需批准）** — 产物齐备后自动进入 `develop`，继续完成
+> **骨架 → 实现 → 调试 → 全量测试 → optimize → Review → 全量测试验收（kernel 变化时补跑
+> #2）→ Benchmark/Profiling（仅用户明确要求性能时）**。
+> 只有你想先评审设计时才需要额外说一句：
 
 ```text
-我批准 DESIGN.md，请使用 catlass-dsl-develop 按设计完成开发。
+先给我看设计
 ```
 
-`develop` 会读取与 `DESIGN.md` 摘要绑定的 state config，自动完成**任务拆分 → 实现 → 调试 → Review → 测试 → Benchmark/Profiling**全流程。最终交付始终包含当前实现的性能现状和 candidate profiler 原始数据；仅当设计声明了性能门槛且初始实现未达标时，才会进入 optimize 阶段。
+`design` 会暂停并展示产物；回复“继续”即进入开发，不需要“批准”字样。
+
+`develop` 会按 `ITERATIONS.md` 逐个里程碑推进：先落一个可运行骨架，再按
+「正确性 → 边界 → 性能」扩展。阶段顺序固定为 focused test → **full test #1** →
+optimize（有目标走模式 A，无目标走模式 B 至少三轮）→ targeted/final review →
+全量测试验收（kernel 变化时补跑 **full test #2**）→ [benchmark]。每次进入下一阶段前都要
+先跑门禁并通过：
+
+```bash
+python3 <skills>/catlass-dsl-workflow/scripts/gate.py <阶段> --workspace <项目根>
+```
+
+门禁是只读校验（产物 + `ITERATIONS.md`），跳步、缺少当前 kernel 的全量测试或缺少设计交付物
+都会被直接拦下；`FAIL` 时必须补真实证据，不能手改记录绕过。
+
+`DESIGN.md` 的 `性能要求：` 决定是否采集性能：只有用户明确提出性能、时延或加速比时才写
+`requested`，此时当前 kernel 全量测试后执行 benchmark 与 profiling；写 `none` 时当前 kernel
+全量测试通过后直接 finish，不跑 benchmark、不做 profiling。优化全部未采纳、kernel 未变化时
+`full test #1` 可直接作为交付用的全量测试，采纳改动导致 kernel 变化时才必须补跑
+`full test #2`。
+
+执行模式在任务开始时确定并写入 `DESIGN.md` 的 `执行模式：` 行，门禁只读这一行、不做本地
+环境探测：
+
+- `remote-detached`：本地生成、当前拿不到远端连接、无本机 NPU，最多推进到代码生成完成，
+  focused test 可写 `deferred` 并附精确重跑命令，之后必须先连上远端；
+- `remote-connected`：本地生成、远端可连接，全流程真实执行；
+- `local`：本地生成并在本机调试，全流程真实执行；
+- full test #1 及之后都不接受推迟，`design` 与 `finish` 永不豁免，`finish` 见到任何
+  `deferred` 行即 FAIL。
 
 ---
 
@@ -122,13 +160,15 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 
 | Skill | 用途 | 示例 |
 |:------|:-----|:-----|
+| [`catlass-dsl-workflow`](skills/catlass-dsl-workflow/SKILL.md) | 入口：阶段路由、流程约束与证据要求 | 任意 CATLASS DSL 算子请求 |
 | [`catlass-dsl-design`](skills/catlass-dsl-design/SKILL.md) | 生成规格、Torch 精度标杆和 workload 用例 | `设计一个 float16 masked softmax 算子` |
-| [`catlass-dsl-develop`](skills/catlass-dsl-develop/SKILL.md) | 按已批准的设计完成开发 | `按照 DESIGN.md 实现并完成测试` |
+| [`catlass-dsl-develop`](skills/catlass-dsl-develop/SKILL.md) | 按设计完成开发、调试、评审与交付 | `按照 DESIGN.md 实现并完成测试` |
 | [`catlass-dsl-bench`](skills/catlass-dsl-bench/SKILL.md) | 独立验证正确性与测量性能 | `用 solution、workload 和 definition 执行 benchmark` |
 | [`catlass-dsl-optimize`](skills/catlass-dsl-optimize/SKILL.md) | 独立优化已有算子 | `优化 matmul，目标 mean_ms < 0.5` |
 | [`catlass-dsl-knowledge`](skills/catlass-dsl-knowledge/SKILL.md) | 查询或维护本地 OKF 知识 | `查询 layout 不一致的排查方法` |
 
-> **提示：** `debug` 和 `review` 已内置在 `develop` 流程中，无需单独调用。批准后的 `DESIGN.md` 不应直接修改；需求变化时请建立新的 develop run 并重新批准 Resolved Plan。
+> **提示：** `debug` 和 `review` 已内置在 `develop` 流程中，无需单独调用。冻结后的
+> `DESIGN.md` 评测口径不应直接修改；实现方案变化时在 `ITERATIONS.md` 记录设计修订。
 
 ---
 
@@ -137,23 +177,23 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 ### Benchmark
 
 三个输入文件的接口定义见 [`catlass-dsl-bench/SKILL.md`](skills/catlass-dsl-bench/SKILL.md)。
-默认 `fusion.mode=performance`，design 以整体性能选择融合范围，允许多个 DSL kernel、
-executor 和 GM 中间张量。benchmark 使用 `--anti-hack off`，关闭全部 anti-hack，
-结果显式记录 `anti_hack.status=disabled`；正确性和 profiling 门禁仍保留。
-只有用户明确要求单个融合 kernel 时采用 `single_kernel`，benchmark/optimize 使用
-`--anti-hack single-fused`：检查唯一源码声明、每次单 launch 及审计证据。
+本版本不提供 `bench.py`，需要由 Agent 写一次性测量脚本（建议 `tools/bench_local.py`），
+按以下口径实现：
 
-```bash
-python3 skills/catlass-dsl-bench/scripts/bench.py \
-  --solution skills/catlass-dsl-bench/templates/solution.json \
-  --workload skills/catlass-dsl-bench/templates/workload.jsonl \
-  --definition skills/catlass-dsl-bench/templates/definition.json \
-  --output .catlass-dsl/runs/example/benchmark
-```
+- 逐例生成输入、分别执行 reference 与 candidate，按 tolerance 比对；
+- 同步 warmup 1 次，配对采集 2 次（或 5 次取中位数）；
+- 用 `torch.npu.Event` 记录单例 `run` 到同步完成的耗时；
+- 结果写入 `result.json`，至少包含 `performance.candidate.mean_ms`、逐例
+  candidate/reference 耗时、`selection.paired` 和 profiling 路径。
+
+可参考 [`catlass-dsl-bench/SKILL.md`](skills/catlass-dsl-bench/SKILL.md) 中的脚本骨架与
+结果字段约定。
 
 ### Optimize
 
-调用 optimize 时需提供算子路径、测试命令、benchmark 指标、性能目标和迭代上限：
+调用 optimize 时需提供算子路径、测试命令、benchmark 指标、design 冻结的
+`workload_dev.jsonl` 和迭代上限；有明确目标时给出阈值（模式 A），没有目标时省略阈值、
+至少执行三轮（模式 B）：
 
 ```text
 使用 catlass-dsl-optimize 优化 src/matmul.py。
@@ -161,73 +201,59 @@ python3 skills/catlass-dsl-bench/scripts/bench.py \
 目标小于 0.5 ms，最多迭代 8 轮。
 ```
 
+每轮的 bottleneck、改动轴、前后耗时、决策和证据写入 optimize 的 `ITERATIONS.md`。
+
 ### Knowledge
 
-首次使用先初始化，之后可按关键词、标签或算子族查询：
+知识库是插件根 `knowledge/` 下的 Markdown bundle。查询时先读
+`knowledge/index.md`，再读目标分类的 `index.md`，最后只读实际采用的条目；项目实测经验
+写入 `<project>/.catlass-dsl/knowledge/learned/`，按
+[`catlass-dsl-knowledge/SKILL.md`](skills/catlass-dsl-knowledge/SKILL.md) 的入库标准手工
+创建文件。
 
-```bash
-# 初始化知识库
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py initialize \
-  --project-root <project>
-
-# 按关键词查询
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-  --project-root <project> --text "layout"
-
-# 按知识类别 + 算子族查询
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-  --project-root <project> --category optimization --operator-family matmul
-```
-
-> 知识涵盖 DSL API、算子样例、调试方法、优化技巧及项目实测经验。查询仅读取本地文件；来源链接仅用于归因和可选审计。
+> 知识涵盖 DSL API、算子样例、调试方法、优化技巧及项目实测经验。查询仅读取本地文件。
 
 ---
 
 ## 五、使用要求
 
-- 直接在当前 **Git workspace** 中运行，并明确允许修改的路径
-- 测试、benchmark 和 profiling 命令应能从目标项目直接执行
-- 融合范围由 design 按整体性能确定，NPU 结果包含
-  profiling CSV 证据；严格模式额外要求 `anti_hack.status=passed`
-- 缺少 CANN、NPU 或 CATLASS DSL 环境时，相关结果为 `not_run`，不会被视作通过
+- 直接在当前 **Git workspace** 中运行，并明确允许修改的路径；
+- 测试、benchmark 和 profiling 命令应能从目标项目直接执行；
+- 融合范围由 design 按整体性能确定，NPU 结果应保留 profiling CSV 证据；严格单融合模式
+  额外执行唯一声明与单 launch 审计；
+- 缺少 CANN、NPU 或 CATLASS DSL 环境时，相关结果为 `not_run`，不会被视作通过。
 
 ---
 
 ## 六、插件自检
 
+本版本只保留文本结构与知识库检查：
+
 ```bash
 python3 -m pytest
-python3 -m compileall -q skills
 ```
 
+测试会校验：7 个 `SKILL.md` 存在、`AGENTS.md`/`quickstart.md`/`UPGRADE.md` 存在、
+`skills/` 下除 `catlass-dsl-workflow/scripts/gate.py` 外不存在 `.py` 脚本、文档不引用已移除的
+状态机脚本。
+
+---
 
 ## 完整生成与后续调试
 
-develop 默认从 implement 开始，一次生成主 Python 文件内的全部 kernel、host 编排及
-完整 `solution.json`，不拆任务、不逐任务上板。生成只检查语法和源码包一致性，不要求
-本地安装 NPU/CATLASS；生成完成不代表验证通过。
+develop 先落可运行骨架，再一次生成主 Python 文件内的全部 kernel、host 编排及完整
+`solution.json`。生成阶段只产出文件，不在本地做语法检查、模拟检查或标杆运行；不论
+一开始是否有服务器信息、或本来就在服务器上，都先生成再推进。生成完成不代表验证通过。
 
-随后进入 focused_test；编译、运行、精度或评审失败时先查知识库、读取采用条目，再
-增量修改并重建 `solution.json`，回到验证。环境缺失记录 blocked/not_run，保留代码及
-待执行阶段，环境就绪后直接继续。连接与同步由使用者现有方式处理。
+随后进入 focused test；编译、运行、精度或评审失败时先查知识库、读取采用条目，再增量
+修改并重建 `solution.json`，回到验证。本地生成、远端验证时，静态检查、reference 运行、
+编译、上板、精度、benchmark、profiling 全部在真实环境完成；环境缺失记录 `blocked` /
+`not_run`，保留代码及待执行阶段，环境就绪后直接继续。连接与同步由使用者现有方式处理。
 
-开发状态使用 `catlass.dsl.workflow.v4`，优化状态使用 `catlass.dsl.optimization.v5`，
-benchmark 结果为 version 4。旧 run 不自动迁移，需要重新创建设计配置。
+focused test 通过后先跑全量测试 #1，再进入 optimize（有目标走模式 A，无目标走模式 B 至少
+三轮），完成后经 targeted_review / final_review、全量测试验收（kernel 变化时补跑 #2，
+2~5 片）交付；声明 `性能要求：requested` 时再执行逐例配对 benchmark 与 profiling。每一步
+进入前都要通过 `gate.py` 对应门禁。
 
-真实 NPU 冒烟通过 `CATLASS_DSL_BENCH_SOLUTION`、`CATLASS_DSL_BENCH_WORKLOAD`、
-`CATLASS_DSL_BENCH_DEFINITION` 提供绝对路径，默认方案可包含多个 kernel。
-另设 `CATLASS_DSL_BENCH_SINGLE_SOLUTION` 指向同一算子的单融合方案，即可同时覆盖
-严格模式；无对应配置时各自标记 skipped，不伪造硬件验证结果。
-
-## 调试验收去重
-
-- focused_test 的执行器报告覆盖全部 required cases 和批准命令时，评审后直接 benchmark，
-  不重复 full_test；部分覆盖仍补跑全测。
-- optimize 初始化可传 `--verification-context`。其 finalize 保留完整验收记录后，develop
-  通过 optimize submission 的 `optimize_result` 接收，只补 final_review；条件不变则 finish。
-- 复用绑定源码、规格、命令与脚本、设备环境和测量参数；当前快照、报告或摘要不完整时
-  继续原验证流程，finish 前再次检查。
-
-环境快照、逐 case 报告、上下文导出及 submission 格式见
-[证据复用协议](skills/catlass-dsl-develop/references/verification-reuse.md)。旧 run 的状态版本
-保持不变，缺少结构化证据时不自动跳过门禁。
+所有阶段的里程碑、命令、结果和证据路径都记录在工作区 `ITERATIONS.md`；没有执行记录的
+结论不进入交付报告。

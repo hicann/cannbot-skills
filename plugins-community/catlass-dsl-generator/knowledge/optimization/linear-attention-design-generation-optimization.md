@@ -86,34 +86,18 @@ Cube/Vector/MTE profile 为准；该规则不承诺未测量的加速。
 先读取通用入口，再按当前计算结构选择专项知识。开发或优化时沿用通用 Skill 的查询和记录
 协议，计算图、实现条件或版本变化时重新核对采用依据，不另建阶段门禁或状态协议。
 
-```bash
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-  --project-root <workspace> --category optimization \
-  --operator-family <family> --arch c310 \
-  --tag linear-attention --tag design --tag generation --compact
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py get \
-  --project-root <workspace> \
-  --path .catlass-dsl/knowledge/optimization/linear-attention-design-generation-optimization.md
+```text
+读取 knowledge/optimization/index.md，按 linear-attention / design / generation 标签
+定位本条目与相关专项条目；完整读取实际采用的 concept，并记录采用路径。
 ```
 
 入口零命中时核对 family 归一化与项目词表，不能跳过适用约束。把规范化查询、匹配模式、版本、
 采用路径与实际适用的 R01-R21、Stage、同步生命周期及矩阵逆约束写入 `DESIGN.md`。
 包含 mixed Cube/Vector、重复独立局部块或共享操作数时，继续执行专项查询：
 
-```bash
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-  --project-root <workspace> --category optimization \
-  --operator-family <family> --arch c310 \
-  --text "mixed cube vector task coarsening dual aiv shared rhs diagonal subtile" \
-  --limit 10 --compact
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-  --project-root <workspace> --category optimization \
-  --operator-family <family> --arch c310 \
-  --text "aiv mte vector layout task coarsening grouped dma" --limit 10 --compact
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-  --project-root <workspace> --category optimization \
-  --operator-family <family> --arch c310 \
-  --text "matmul shared rhs diagonal subtile layout" --limit 10 --compact
+```text
+继续读取 knowledge/optimization/ 下 mixed Cube/Vector、AIV/MTE、RegBase、MatMul
+专项条目的 index 与正文，按当前计算结构筛选并记录采用路径。
 ```
 
 按“性能架构路由门禁”选择并 `get` mixed、AIV/MTE、RegBase、MatMul 专项条目。
@@ -252,9 +236,9 @@ state 的完整依赖图。每条边记录生产者、消费者、首次与末�
 精度观察点、测试及性能采集。
 
 设计产物必须记录完整公式与 benchmark 三文件摘要、依赖图、Stage 表、跨 Stage 数据表、地址生命周期表、
-同步边及伪代码、R01-R21 结论和证据位置。bench 的 definition/workload 格式及 state.json 仍由现有
-DSL Skills 决定；获批前运行全部 reference case，获批后按 develop 状态机实现、审查、全量测试、
-benchmark 与 profiling。容量、依赖或同步假设失败时退回第一步；接口或 reference 变化时建立新 run
+同步边及伪代码、R01-R21 结论和证据位置。bench 的 definition/workload 格式由现有
+DSL Skills 决定；运行全部 reference case 后按 develop 的实施、审查、全量测试、benchmark
+与 profiling 流程推进。容量、依赖或同步假设失败时退回第一步；接口或 reference 变化时建立新 run
 并重新审批，不能提高容差或改变 workload 隐藏问题。[^pr1134-design]
 
 # Stage、任务映射与依赖

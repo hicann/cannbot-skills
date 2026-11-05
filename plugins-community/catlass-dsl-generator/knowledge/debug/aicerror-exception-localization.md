@@ -202,11 +202,9 @@ ARGS/TILING_DATA 与预期不符
 
 静态验证要求：
 
-```bash
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py validate \
-  --project-root .
-python3 skills/catlass-dsl-knowledge/scripts/record_knowledge.py query \
-  --project-root . --text aicerror
+```text
+读取 knowledge/debug/index.md 定位 aicerror 相关条目；
+完整读取命中的 concept，并核对 frontmatter 的 verified / stale_after 与来源。
 ```
 
 设备验证要求保存：首个失败同步点、生成的 Core、匹配的 kernel 调试对象、

@@ -1,12 +1,11 @@
 #!/bin/bash
 # ----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# This program is free software, you can redistribute it and/or modify it under the terms and
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
-# Please refer to the License for details. You may not use this file except in compliance with
-# the License.
+# Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
@@ -60,7 +59,8 @@ VERSION="0.3.0"
 AGENTS_MARKER="generated-by-cannbot-catlass-dsl-generator-init"
 
 # 本插件全部 skills（安装/卸载白名单，仅触碰这些内容）
-INCLUDED_SKILLS="catlass-dsl-design catlass-dsl-develop catlass-dsl-bench catlass-dsl-optimize catlass-dsl-knowledge"
+# catlass-dsl-knowledge-upgrade 是维护者专用，不随插件安装到客户工程。
+INCLUDED_SKILLS="catlass-dsl-workflow catlass-dsl-design catlass-dsl-develop catlass-dsl-bench catlass-dsl-optimize catlass-dsl-knowledge"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$SCRIPT_DIR"
@@ -416,7 +416,7 @@ MANIFEST_EOF
     esac
     echo -e "  ${CYAN}2.${NC} 描述算子需求，例如："
     echo -e "     ${GREEN}${BOLD}使用 catlass-dsl-design 设计一个 QuantMatMul+GELU 融合算子：INT8 输入，per-token/per-channel 量化系数，tanh 近似 GELU${NC}"
-    echo -e "  ${CYAN}3.${NC} 批准设计后：${GREEN}${BOLD}我批准 DESIGN.md，请使用 catlass-dsl-develop 按设计完成开发${NC}"
+    echo -e "  ${CYAN}3.${NC} 设计完成后默认直接进入开发；如需先评审：${GREEN}${BOLD}先给我看设计${NC}"
     echo ""
 }
 

@@ -1,17 +1,25 @@
-# Iteration Log
+# Optimization Log
 
-Append a Summary row for every labeled bench. That's the only required action.
+## Optimization Policy
 
-When a change is worth pre-committing a hypothesis to, write `Expected: ...` in
-`## Notes` before running the bench. At session end, add a brief synthesis of
-the final kernel, remaining bottlenecks, dead ends, and next directions.
+- mode: target | explore
+- metric: performance.candidate.mean_ms
+- threshold: <value | none>
+- device: npu:<id>
+- dev workload: workload_dev.jsonl (<n> cases)
 
-## Summary
+## Performance Rounds
 
-| Iter | Title | Score | Passed | Notes |
-|------|-------|-------|--------|-------|
+| Round | Axis | Bottleneck | Before (ms) | After (ms) | Decision | Evidence |
+|------:|------|------------|------------:|-----------:|----------|----------|
+
+## Final Verdict
+
+- 轮次数：
+- best 前后耗时与加速比：
+- 剩余瓶颈：
+- 下一步建议：
 
 ## Notes
 
-Free-form workspace for pre-benchmark `Expected:` statements, dead-end records,
-and the end-of-session synthesis.
+用于记录 benchmark 前的 `Expected:` 假设、被拒方向与死路。

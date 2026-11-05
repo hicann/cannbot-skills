@@ -1,17 +1,17 @@
 # Iteration Log
 
-Append a Summary row for every labeled bench. That's the only required action.
+## Milestones
 
-When a change is worth pre-committing a hypothesis to, write `Expected: ...` in
-`## Notes` before running the bench. At session end, add a brief synthesis of
-the final kernel, remaining bottlenecks, dead ends, and next directions.
+| Iter | Stage | Kernel SHA256 | Command | Result | Evidence |
+|------|-------|---------------|---------|--------|----------|
 
-## Summary
+## Performance Rounds
 
-| Iter | Title | Score | Passed | Notes |
-|------|-------|-------|--------|-------|
+optimize 阶段必填：模式 B 至少三轮，模式 A 至少一轮。每轮记录改动轴、瓶颈、前后耗时、决策与证据路径。
+
+| Round | Axis | Bottleneck | Before (ms) | After (ms) | Decision | Evidence |
+|------:|------|------------|------------:|-----------:|----------|----------|
 
 ## Notes
 
-Free-form workspace for pre-benchmark `Expected:` statements, dead-end records,
-and the end-of-session synthesis.
+用于记录 benchmark 前的 `Expected:` 假设、死路和最终总结。

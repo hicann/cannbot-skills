@@ -4,7 +4,8 @@
 
 ## 唯一写入入口与字段合同
 
-只能通过 `record_knowledge.py record` 写入。entry 必含：
+直接写入 `knowledge/learned/` 下的 Markdown concept（参考
+[learned-entry 模板](../templates/learned-entry.md)），entry 必含：
 
 - `operator_family/topic/arch/versions/applicability`；applicability 含 shape、dtype、layout 和集成条件。
 - `hypothesis/actual_change/result/status`。
