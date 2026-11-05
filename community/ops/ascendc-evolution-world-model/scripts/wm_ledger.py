@@ -27,6 +27,8 @@ import sys
 from dataclasses import dataclass
 from typing import Optional
 
+from evaluation_contract import load_eval_result
+
 LOGGER = logging.getLogger(__name__)
 
 _LEDGER_INDEX_CACHE = None
@@ -121,117 +123,24 @@ def _all_known_strategy_ids() -> set:
     return ids
 
 
-def _parse_multi_shape_eval(data: dict, targets: list, generalization: list) -> dict:
-    """解析 multi_shape 结构的评估结果。"""
-    # target 是否全部通过（multi target 时取交集）
-    all_compile = all(t.get("compilation_success") for t in targets)
-    all_precision = all(t.get("precision_passed") for t in targets)
-    # speedup 取 aggregate 优先，targets[0] 兜底
-    agg = data.get("aggregate") or {}
-    speedup = (
-        agg.get("target_geo_mean_speedup")
-        or agg.get("target_min_speedup")
-        or targets[0].get("speedup")
-    )
-    result = {
-        "compile": all_compile,
-        "precision": all_precision,
-        "speedup": speedup,
-        "_source": "multi_shape",
-    }
-    # F-G2: generalization 状态（不影响主 compile/precision，作为 warnings）
-    if generalization:
-        gen_compile = all(g.get("compilation_success") for g in generalization)
-        gen_precision = all(g.get("precision_passed") for g in generalization)
-        warnings: list[str] = []
-        if not gen_compile:
-            warnings.append("generalization_compile_failed")
-        if not gen_precision:
-            warnings.append("generalization_precision_failed")
-        # 也加上 regression 信号
-        if agg.get("any_generalization_regression"):
-            warnings.append("generalization_regression")
-        result["_generalization_compile"] = gen_compile
-        result["_generalization_precision"] = gen_precision
-        if warnings:
-            result["_warnings"] = warnings
-    return result
-
-
-def _parse_comparison_eval(data: dict) -> Optional[dict]:
-    """解析 flat_with_comparison 结构，字段全空返回 None。"""
-    comparison = data.get("comparison") or {}
-    evolved = data.get("evolved") or {}
-    if not (comparison or evolved):
-        return None
-    compile_val = comparison.get("compilation_success")
-    precision_val = (
-        comparison.get("precision_passed")
-        if comparison.get("precision_passed") is not None
-        else evolved.get("precision_passed")
-    )
-    speedup_val = comparison.get("speedup") or data.get("speedup")
-    # 仅当至少有一个字段非 None 时才认为是 comparison 结构
-    if not any(v is not None for v in (compile_val, precision_val, speedup_val)):
-        return None
-    return {
-        "compile": compile_val,
-        "precision": precision_val,
-        "speedup": speedup_val,
-        "_source": "flat_with_comparison",
-    }
-
-
 def _load_eval_results_for_parallel(results_dir: str, pidx_str: str) -> Optional[dict]:
-    """读取 round_N/parallel_K/evaluation_results.json，兼容多种 evaluator 输出结构。
-
-    返回归一化后的 dict: {compile, precision, speedup, _source, _warnings?}
-    若文件不存在或解析失败返回 None。
-
-    支持的结构（按检测优先级）:
-
-    1. multi_shape (新 ops-evo, e.g. rms_norm):
-       data.shape_results.target[i].{compilation_success, precision_passed, speedup}
-       data.shape_results.generalization[i].* (可选，跑了泛化时存在)
-       data.aggregate.target_geo_mean_speedup
-       → 主 compile/precision 来自 target；generalization 状态作为 _warnings
-
-    2. flat_with_comparison (旧 ops-evo 单 shape, e.g. lightning_indexer_grad):
-       data.comparison.{compilation_success, precision_passed, speedup}
-       data.evolved.precision_passed (兜底)
-
-    3. flat (扁平兜底，最简单的 evaluator 输出):
-       data.{compilation_success, precision_passed, speedup}
-    """
+    """Use the same evidence contract as refine and artifact validation."""
     path = os.path.join(results_dir, f"parallel_{pidx_str}", "evaluation_results.json")
-    if not os.path.isfile(path):
+    return load_eval_result(path)
+
+
+def _decision_speedup(eval_data: Optional[dict], node: dict):
+    """Report the accepted score; retain raw evaluator speedup separately."""
+    if node.get("status") == "passed":
+        return node.get("score")
+    if node.get("status") in {
+        "failed",
+        "failed_compile",
+        "failed_precision",
+        "blocked",
+    }:
         return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return None
-
-    # 优先 multi-shape 结构（shape_results.target/generalization）
-    shape_results = data.get("shape_results") or {}
-    targets = shape_results.get("target") or []
-    generalization = shape_results.get("generalization") or []
-
-    if targets:
-        return _parse_multi_shape_eval(data, targets, generalization)
-
-    # F-G1: 旧 flat with comparison 结构（lightning_indexer_grad 类）
-    result = _parse_comparison_eval(data)
-    if result is not None:
-        return result
-
-    # 兜底：最扁平结构
-    return {
-        "compile": data.get("compilation_success"),
-        "precision": data.get("precision_passed"),
-        "speedup": data.get("speedup"),
-        "_source": "flat",
-    }
+    return eval_data["speedup"] if eval_data else node.get("score")
 
 
 def _write_ledger_header(f, op_name: str):
@@ -257,7 +166,7 @@ def _resolve_compile_precision_marks(eval_data: Optional[dict], node: dict) -> t
             precision_ok = "?" if not eval_data["compile"] else "✗"
         else:
             precision_ok = "✓" if eval_data["precision"] else "✗"
-        speedup = eval_data["speedup"] or node.get("score") or 0.0
+        speedup = _decision_speedup(eval_data, node)
         return compile_ok, precision_ok, speedup
     # 回退到节点字段推断（向后兼容）
     compile_ok = (
@@ -274,7 +183,7 @@ def _resolve_compile_precision_marks(eval_data: Optional[dict], node: dict) -> t
         if node.get("precision_passed")
         else ("✗" if node.get("status") == "failed_precision" else "?")
     )
-    return compile_ok, precision_ok, node.get("score") or 0.0
+    return compile_ok, precision_ok, _decision_speedup(eval_data, node)
 
 
 def _build_ledger_row(
@@ -344,11 +253,11 @@ def _build_lineage_entry(
     if eval_data is not None:
         compile_success = eval_data["compile"]
         precision_passed = eval_data["precision"]
-        speedup = eval_data["speedup"] or node.get("score")
+        speedup = _decision_speedup(eval_data, node)
     else:
         compile_success = node.get("compile_success")
         precision_passed = node.get("precision_passed")
-        speedup = node.get("score")
+        speedup = _decision_speedup(eval_data, node)
 
     return {
         "node_id": nid,
@@ -361,18 +270,22 @@ def _build_lineage_entry(
         "compile_success": compile_success,
         "precision_passed": precision_passed,
         "speedup": speedup,
+        "reported_speedup": eval_data["speedup"] if eval_data else None,
+        "status": node.get("status"),
+        "measurement_quality": eval_data["measurement_quality"]
+        if eval_data
+        else "unknown",
+        "evaluation_source": eval_data["_source"] if eval_data else None,
         "diagnosis": node.get("diagnosis"),
         "filtered_by": node.get("filtered_by", []),
     }
 
 
 def _is_lineage_passed(node: dict) -> bool:
-    """v3.2 C8-T1: 用 node.status + score 判 passed，而非缺失的 compile_success 字段。"""
-    return (
-        node.get("status") == "passed"
-        or node.get("precision_passed")
-        or (node.get("score") or 0) > 0
-    )
+    """Explicit decision status wins over raw precision or a stale score."""
+    if node.get("status") is not None:
+        return node["status"] == "passed"
+    return bool(node.get("precision_passed") or (node.get("score") or 0) > 0)
 
 
 @dataclass

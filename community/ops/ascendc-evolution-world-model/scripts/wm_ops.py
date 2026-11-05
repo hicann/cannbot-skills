@@ -45,6 +45,8 @@ _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if _SCRIPT_DIR not in sys.path:
     sys.path.insert(0, _SCRIPT_DIR)
 
+from evaluation_contract import QUALITY_RANK, load_eval_result, normalize_eval_result  # noqa: E402
+
 # Ledger 模块（v3.2 Phase D1 artifacts + finalize-ledger），从 wm_ops 拆分
 from wm_ledger import (  # noqa: E402
     _collect_ancestry_failed_strategies,
@@ -323,14 +325,8 @@ def _profiling_complete(parallel_dir: str) -> bool:
 
 def _read_precision_passed(eval_path: str) -> bool:
     """读取 evaluation_results.json 的 precision_passed，读取失败返回 False。"""
-    if not os.path.isfile(eval_path):
-        return False
-    try:
-        with open(eval_path, "r", encoding="utf-8") as f:
-            eres = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return False
-    return bool(eres.get("precision_passed"))
+    result = load_eval_result(eval_path)
+    return bool(result and result["compile"] and result["precision"])
 
 
 def _collect_missing_profiling(results_dir: str, parallel_map: dict) -> list:
@@ -393,14 +389,8 @@ def _read_precision_flag(eval_path: str):
 
     返回 True/False；文件缺失或解析失败返回 None（不计入统计）。
     """
-    if not os.path.isfile(eval_path):
-        return None
-    try:
-        with open(eval_path, "r", encoding="utf-8") as f:
-            eres = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-    return bool(eres.get("precision_passed", True))
+    result = load_eval_result(eval_path)
+    return result["precision"] if result else None
 
 
 def _count_precision_failures(results_dir: str, parallel_map: dict) -> tuple:
@@ -833,7 +823,7 @@ def soft_demote_stale_directions(
 
     Returns list of demoted node IDs.
     """
-    stag_threshold = _THRESHOLDS.get(quality, _THRESHOLDS["good"])["stagnation"]
+    stag_threshold = _THRESHOLDS.get(quality, _THRESHOLDS["unknown"])["stagnation"]
     nodes = wm.get("decision_tree", {}).get("nodes", {}) or {}
     demoted = []
 
@@ -1552,6 +1542,7 @@ _THRESHOLDS = {
     "good": {"improve": 1.05, "stagnation": 1.02},
     "acceptable": {"improve": 1.08, "stagnation": 1.03},
     "noisy": {"improve": 1.15, "stagnation": 1.05},
+    "unknown": {"improve": 1.15, "stagnation": 1.05},
 }
 
 
@@ -1606,7 +1597,7 @@ def _make_child_node(parent: dict, spec: ChildNodeSpec) -> dict:
     }
 
 
-_QUALITY_RANK = {"good": 0, "acceptable": 1, "noisy": 2}
+_QUALITY_RANK = QUALITY_RANK
 
 
 @dataclass
@@ -1925,7 +1916,7 @@ def _gen_children_for_passed(
             node["bottleneck_shift"] = f"{parent_bn} → {bottleneck}"
 
     # Dynamic threshold
-    thresholds = _THRESHOLDS.get(info.mq, _THRESHOLDS["good"])
+    thresholds = _THRESHOLDS.get(info.mq, _THRESHOLDS["unknown"])
     improve_threshold = thresholds["improve"]
     parent_score = parent_node.get("score") or 1.0
     substantial = speedup > parent_score * improve_threshold
@@ -2084,7 +2075,7 @@ def _process_passed_variant(vei: _VariantEvalInput, ctx: _RefineContext):
     # ops-evo 写的是 {"evolved": {...}} 嵌套结构；lingxi-evo/lingxi-partial
     # 写的是扁平结构（直接把 pipeline / bottleneck 放顶层）。兼容两种。
     evolved = eval_result.get("evolved") or eval_result
-    pipeline = evolved.get("pipeline", {})
+    pipeline = (normalize_eval_result(eval_result) or {}).get("pipeline") or {}
     bottleneck = _infer_bottleneck(pipeline, evolved.get("bottleneck", "unknown"))
 
     # Build profiling_insight
@@ -2096,8 +2087,7 @@ def _process_passed_variant(vei: _VariantEvalInput, ctx: _RefineContext):
         "profiling_one_liner": one_liner,
     }
 
-    comp = eval_result.get("comparison", {})
-    mq = comp.get("measurement_quality", "good")
+    mq = node["measurement_quality"]
 
     _attach_csv_evidence(node, pipeline, bottleneck)
     _gen_children_for_passed(
@@ -2141,11 +2131,15 @@ def _process_failed_variant(
     node: dict, node_id: str, p_idx: int, eval_result: dict, ctx: _RefineContext
 ):
     """处理 FAILED 变体：标失败、记 pending_diagnosis。"""
-    comp = eval_result.get("comparison", {})
-    compilation_ok = comp.get("compilation_success", False)
-    precision_ok = comp.get("precision_passed", False)
+    comp = eval_result.get("comparison") or eval_result
+    compilation_ok = node.get("compile_success", False)
+    precision_ok = node.get("precision_passed", False)
     node["status"] = "failed"
-    error = comp.get("precision_message", eval_result.get("error", "unknown"))
+    error = (
+        comp.get("precision_message")
+        or eval_result.get("error")
+        or eval_result.get("correctness_message", "unknown")
+    )
     node["failure_reason"] = str(error)[:200]
     ctx.round_failed += 1
 
@@ -2169,6 +2163,25 @@ def _process_failed_variant(
     )
 
 
+def _reject_evaluation(
+    node: dict, node_id: str, p_idx: int, reason: str, ctx: _RefineContext
+):
+    """Invalid evidence fails only its variant, so other slots can still finish."""
+    node.update(
+        status="failed",
+        score=None,
+        failure_reason=reason,
+        compile_success=None,
+        precision_passed=None,
+        measurement_quality="unknown",
+    )
+    ctx.round_failed += 1
+    ctx.pending_diagnosis.append(
+        {"node_id": node_id, "parallel_index": p_idx, "reason": reason}
+    )
+    ctx.summary_lines.append(f"  p{p_idx} [{node_id}]: FAIL ({reason})")
+
+
 def _process_one_variant(node_id: str, p_idx_str: str, ctx: _RefineContext):
     """处理单个变体：SKIP / no-results / PASS / FAIL 分发。"""
     p_idx = int(p_idx_str)
@@ -2183,27 +2196,33 @@ def _process_one_variant(node_id: str, p_idx_str: str, ctx: _RefineContext):
         ctx.results_dir, f"parallel_{p_idx}", "evaluation_results.json"
     )
     if not os.path.isfile(eval_path):
-        node["status"] = "failed"
-        node["failure_reason"] = "evaluation_results.json not found"
-        ctx.summary_lines.append(f"  p{p_idx} [{node_id}]: FAIL (no results)")
-        ctx.round_failed += 1
-        ctx.pending_diagnosis.append(
-            {
-                "node_id": node_id,
-                "parallel_index": p_idx,
-                "reason": "evaluation_results.json not found",
-            }
+        _reject_evaluation(
+            node, node_id, p_idx, "evaluation_results.json not found", ctx
         )
         return
 
-    with open(eval_path, "r", encoding="utf-8") as f:
-        eval_result = json.load(f)
-
-    comp = eval_result.get("comparison", {})
-    compilation_ok = comp.get("compilation_success", False)
-    precision_ok = comp.get("precision_passed", False)
-    speedup = comp.get("speedup", 0.0) or 0.0
-    mq = comp.get("measurement_quality", "good")
+    try:
+        with open(eval_path, "r", encoding="utf-8") as f:
+            eval_result = json.load(f)
+    except (OSError, ValueError):
+        _reject_evaluation(node, node_id, p_idx, "unreadable_evaluation_result", ctx)
+        return
+    normalized = normalize_eval_result(eval_result)
+    if normalized is None:
+        _reject_evaluation(node, node_id, p_idx, "invalid_evaluation_result", ctx)
+        return
+    comp = eval_result.get("comparison") or eval_result
+    compilation_ok = normalized["compile"]
+    precision_ok = normalized["precision"]
+    speedup = normalized["speedup"] or 0.0
+    mq = normalized["measurement_quality"]
+    node.update(
+        compile_success=compilation_ok,
+        precision_passed=precision_ok,
+        measurement_quality=mq,
+        evaluation_source=normalized["_source"],
+        score=None,
+    )
     if _QUALITY_RANK.get(mq, 0) > _QUALITY_RANK.get(ctx.worst_quality, 0):
         ctx.worst_quality = mq
 
@@ -2248,13 +2267,6 @@ def _process_one_variant(node_id: str, p_idx_str: str, ctx: _RefineContext):
 
     # ── Multi-shape pipeline: prefer new fields when present ──
     ms_active = _is_multi_shape_eval(eval_result)
-    ms_aggregate = eval_result.get("aggregate") if ms_active else None
-    if ms_active and isinstance(ms_aggregate, dict):
-        # Use min(target speedups) as the node's effective speedup
-        ms_min = ms_aggregate.get("target_min_speedup")
-        if isinstance(ms_min, (int, float)) and ms_min > 0:
-            speedup = ms_min
-
     # ── P8 (修正): score = 同 run canonical（同一次 msprof 测量的 ref geomean ÷ asc geomean）──
     # 历史缺陷: 旧 P8 用 baseline_evaluation.base_time_ms_avg（基线 run 的 mean_ref，
     # 属跨 run 值）作为 "canonical PyTorch 参考"；当变体 base_time_ms 与之偏差 >±20% 时
@@ -2280,12 +2292,16 @@ def _process_one_variant(node_id: str, p_idx_str: str, ctx: _RefineContext):
             try:
                 with open(perf_json, "r", encoding="utf-8") as _pf:
                     pd = json.load(_pf)
-                _gr = pd.get("geomean_ref_us")
-                _ga = pd.get("geomean_asc_us")
+                _gr = pd.get("geomean_ref_us") if isinstance(pd, dict) else None
+                _ga = pd.get("geomean_asc_us") if isinstance(pd, dict) else None
                 if (
                     isinstance(_gr, (int, float))
+                    and not isinstance(_gr, bool)
+                    and math.isfinite(_gr)
                     and _gr > 0
                     and isinstance(_ga, (int, float))
+                    and not isinstance(_ga, bool)
+                    and math.isfinite(_ga)
                     and _ga > 0
                 ):
                     canonical = float(_gr) / float(_ga)
@@ -2296,13 +2312,17 @@ def _process_one_variant(node_id: str, p_idx_str: str, ctx: _RefineContext):
         if not canonical and (
             ref_base == "pytorch"
             and isinstance(base_ms, (int, float))
+            and not isinstance(base_ms, bool)
+            and math.isfinite(base_ms)
             and base_ms > 0
             and isinstance(gen_ms, (int, float))
+            and not isinstance(gen_ms, bool)
+            and math.isfinite(gen_ms)
             and gen_ms > 0
         ):
             canonical = float(base_ms) / float(gen_ms)
             canonical_src = "comparison"
-        if canonical > 0:
+        if math.isfinite(canonical) and canonical > 0:
             if abs(canonical - speedup) > 0.05 * max(speedup, 1e-9):
                 ctx.score_scale_alerts.append(
                     {
@@ -2313,7 +2333,10 @@ def _process_one_variant(node_id: str, p_idx_str: str, ctx: _RefineContext):
                         "ref_base": ref_base,
                         "raw_speedup": round(speedup, 4),
                         "normalized_speedup": round(canonical, 4),
-                        "note": f"comparison.speedup 与同 run canonical 不一致，score 按 {canonical_src} 同 run canonical 重算",
+                        "note": (
+                            "comparison.speedup 与同 run canonical 不一致，"
+                            f"score 按 {canonical_src} 同 run canonical 重算"
+                        ),
                     }
                 )
             speedup = canonical
@@ -2352,7 +2375,7 @@ def _update_stagnation(wm: dict, nodes: dict, parallel_map: dict, si: _Stagnatio
     """停滞计数：全局 stagnation_count + vs_base（是否有变体跑赢父节点）。"""
     round_best_speedup = si.round_best_speedup
     best_score_before = si.best_score_before
-    stag_threshold = _THRESHOLDS.get(si.worst_quality, _THRESHOLDS["good"])[
+    stag_threshold = _THRESHOLDS.get(si.worst_quality, _THRESHOLDS["unknown"])[
         "stagnation"
     ]
     if round_best_speedup <= best_score_before * stag_threshold:

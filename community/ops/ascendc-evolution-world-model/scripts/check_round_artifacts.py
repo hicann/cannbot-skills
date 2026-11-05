@@ -41,6 +41,8 @@ import os
 import sys
 import logging
 
+from evaluation_contract import normalize_eval_result
+
 LOGGER = logging.getLogger(__name__)
 
 # 数据输出专用 logger：CLI 结果走 stdout（agent 调用协议通道），
@@ -140,42 +142,20 @@ def _check_eval_json(variant_dir):
     except (json.JSONDecodeError, OSError) as e:
         return {"exists": True, "valid": False, "reason": f"parse_error: {e}"}
 
-    comp = data.get(
-        "comparison",
-    )
-    if not isinstance(comp, dict):
-        return {"exists": True, "valid": False, "reason": "missing_comparison_dict"}
-
-    missing = []
-    for field in ("compilation_success", "precision_passed", "speedup"):
-        if field not in comp:
-            missing.append(field)
-
-    if missing:
-        return {"exists": True, "valid": False, "reason": f"missing_fields: {missing}"}
-
-    # Pipeline presence (profiling evidence for wm_ops.refine). Not fatal —
-    # msprof can legitimately fail or be skipped when compilation/precision
-    # fail. Only report a warning signal so downstream diagnose can tell
-    # "no evidence" apart from "evidence says nothing interesting".
-    evolved = data.get("evolved") if isinstance(data.get("evolved"), dict) else {}
-    pipeline = evolved.get("pipeline") if isinstance(evolved, dict) else None
-    pipeline_missing = not (isinstance(pipeline, dict) and pipeline)
-    # Only flag missing when compilation+precision both passed — otherwise
-    # skipping msprof is expected behavior.
-    compile_ok = bool(comp.get("compilation_success"))
-    precision_ok = bool(comp.get("precision_passed"))
-    pipeline_should_exist = compile_ok and precision_ok
-
+    result = normalize_eval_result(data)
+    if result is None:
+        return {"exists": True, "valid": False, "reason": "invalid_evaluation_result"}
     return {
         "exists": True,
         "valid": True,
         "reason": "ok",
-        "compilation_success": compile_ok,
-        "precision_passed": precision_ok,
-        "speedup": comp.get("speedup"),
-        "pipeline_present": not pipeline_missing,
-        "pipeline_expected": pipeline_should_exist,
+        "compilation_success": result["compile"],
+        "precision_passed": result["precision"],
+        "speedup": result["speedup"],
+        "measurement_quality": result["measurement_quality"],
+        "evaluation_source": result["_source"],
+        "pipeline_present": bool(result["pipeline"]),
+        "pipeline_expected": result["compile"] and result["precision"],
     }
 
 

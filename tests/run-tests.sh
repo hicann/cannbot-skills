@@ -537,6 +537,7 @@ get_incremental_tests() {
               "${CHANGED_SKILLS[ascendc-evolution-strategies]:-}" == "1" || \
               "${CHANGED_SKILLS[ascendc-evolution-knowledge]:-}" == "1" ]]; then
             tests+="unit/test-evolution-diagnosis-contract.sh:fast\n"
+            tests+="unit/test-evolution-evaluation-contract.sh:fast\n"
         fi
     fi
 
@@ -592,6 +593,7 @@ get_tests_for_category() {
             echo "unit/test-dependency-graph.sh:fast"
             echo "unit/test-markdown-anchors.sh:fast"
             echo "unit/test-evolution-diagnosis-contract.sh:fast"
+            echo "unit/test-evolution-evaluation-contract.sh:fast"
             echo "unit/infra/test-gitcode-issue-workflow.sh:fast"
             echo "unit/skills/test-structure.sh:fast"
             echo "unit/skills/test-content.sh:fast"

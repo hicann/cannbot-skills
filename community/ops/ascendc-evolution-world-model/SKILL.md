@@ -14,6 +14,7 @@ references/
   schema.md                  # world_model.json 完整 JSON Schema 定义
   operations.md              # 四大操作：Init / Select / Refine / Analyze
   state_schema.md            # state.json 状态机定义
+  evaluation_contract.md     # 评测格式、测量质量与接受评分的契约
 
 scripts/
   wm_ops.py                  # CLI 工具（选择/验证/摘要/深度分析）
@@ -21,6 +22,7 @@ scripts/
   profiling_evidence.py      # 瓶颈分析 → 策略映射
   session_anchor.py          # Session 身份锚定
   check_round_artifacts.py   # 产物完整性检查
+  evaluation_contract.py     # refine、产物检查与 ledger 共用的评测解析
   solution_db.py             # JSONL 谱系追踪
   transcript_audit.py        # 子 Agent 审计
 ```
@@ -85,6 +87,10 @@ utility = 3.0 * parent_score
 Stage 1 `extract_facts()` 提供 `cube_ratio`、`fixpipe_ratio`、`mte1_ratio`；Stage 2 分别使用 `cube_bound`、`fixp_bound`、`mte1_stall`。这些标签同时用于诊断校验、策略检索和预期收益估算。字段单位、缺失值规则及完整词表见 [Profiling Reference](../ascendc-evolution-knowledge/references/a3/profiling_reference/INDEX.md)。
 
 ## 参考文档
+
+### Evaluation Contract (references/evaluation_contract.md)
+
+接入评测器或排查结果与世界模型不一致时，读取 [评测证据契约](references/evaluation_contract.md)。flat、comparison 和 multi-shape 结果共用解析规则；缺失或无效测量质量保留为 `unknown`，使用保守搜索阈值。ledger 区分报告的 speedup 与世界模型接受的 score。
 
 ### Schema (references/schema.md)
 
