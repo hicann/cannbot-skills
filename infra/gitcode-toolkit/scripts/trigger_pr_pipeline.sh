@@ -60,8 +60,23 @@ HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" = "201" ]; then
-    COMMENT_ID=$(echo "$BODY" | python3 -c "import json,sys; print(json.load(sys.stdin).get('id','?'))" 2>/dev/null || echo "?")
-    echo "{\"status\":\"ok\",\"http_code\":201,\"comment_id\":${COMMENT_ID},\"pr\":\"${OWNER}/${REPO_NAME}#${PR_NUMBER}\",\"comment\":\"${COMMENT}\"}"
+    python3 - "$BODY" "${OWNER}/${REPO_NAME}#${PR_NUMBER}" "$COMMENT" <<'PYEOF'
+import json
+import sys
+
+try:
+    response = json.loads(sys.argv[1])
+except ValueError:
+    response = {}
+comment_id = response.get("id", "?") if isinstance(response, dict) else "?"
+print(json.dumps({
+    "status": "ok",
+    "http_code": 201,
+    "comment_id": comment_id,
+    "pr": sys.argv[2],
+    "comment": sys.argv[3],
+}, ensure_ascii=False))
+PYEOF
 else
     echo "{\"status\":\"fail\",\"http_code\":${HTTP_CODE},\"detail\":$(echo "$BODY" | python3 -c "import json,sys; print(json.dumps(sys.stdin.read().strip()))")}"
     exit 1

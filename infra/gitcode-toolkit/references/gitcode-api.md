@@ -139,6 +139,10 @@ curl -X POST 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}
 ```
 
 > 脚本封装：`bash scripts/trigger_pr_pipeline.sh --repo <owner/repo> --pr <N>`。
+
+> CLI 输出一行 JSON。成功时 `comment_id` 保留 API 返回的字符串或数字类型，
+> `comment` 保留原始内容（含引号、换行和反斜杠）；调用方应解析 JSON，而非切分文本。
+
 > 共享脚本只执行 GitCode 评论调用，不解释调用方的业务授权模式。调用方必须在执行脚本前
 > 完成真实用户确认和授权证据记录。
 

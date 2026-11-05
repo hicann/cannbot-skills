@@ -124,6 +124,10 @@
 - 【安装部署】install-helper `v1.2.2` 修复静默覆盖用户 AGENTS.md：预检只查工具配置根而实际替换项目根文件，无确认、无备份、卸载不可恢复。改为枚举全部替换目标，无主文件须确认（默认保留，`--yes` 保留），逐文件就地备份并记录原路径，卸载按原路径还原。另同步 `tilelang-op-orchestrator` yml 漂移。
 - 【文档】修复 `ops/ascendc-sync-audit/SKILL.md` 执行步骤命令携带脚本不存在的 `--frontend auto` 参数、照抄即 argparse 报错中断主流程的问题（issue #792）；同步删除「范围扩大检查点」中不可达的「frontend 切换」表述——analyzer 的 frontend 硬编码为 regex 且不可切换。
 
+### 【2026-10-02】
+#### 缺陷修复 Bug Fixes
+- 【GitCode 协作】修复流水线触发脚本成功输出的 JSON 序列化：保留字符串评论 ID，转义自定义评论中的引号、换行与反斜杠。
+
 ### 【2026-09-30】
 #### 新特性 New Features
 - 【通信】新增 `hccl-test-tool-hvm` Skill：HCCL-VM 仿真测试能力，覆盖环境就绪检查、测试覆盖计划、用例执行、证据固化、基线回归比较与定点补测，无需实物 NPU(#743)
