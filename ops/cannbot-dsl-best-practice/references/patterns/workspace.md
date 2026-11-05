@@ -21,21 +21,20 @@ def workspace_bytes(rows, cols, row_stride, item_bytes, depth, alignment_bytes):
 
 ## 区分 GM 临时张量与片上容量
 
-Host 用 Tensor 分配 GM workspace，并在编译入口为每个必要参数声明 `TensorSpec`。设备内的 `Buffer/Channel` 由片上资源规划管理；二者不能共用一个“总 workspace 字节数”替代各自容量检查。
+Host 用 Tensor 分配 GM workspace，并在编译入口为每个必要参数声明 `TensorSpec`。设备内的 `Buffer/RingBuffer` 由片上资源规划管理；二者不能共用一个“总 workspace 字节数”替代各自容量检查。
 
 ```text
-from cannbotdsl import Buffer, Channel, MemLoc, dtypes
+from cannbotdsl import Buffer, MemLoc, dtypes, make_layout
 
 # 在设备 DSL 中，valid_rows 是合法的运行时 i64 尺寸
-scratch = Buffer(MemLoc.UB, (valid_rows, TILE_COLS), dtypes.float32,
-                 capacity=(MAX_TILE_ROWS, TILE_COLS))
-tiles = Channel(MemLoc.L1, (valid_rows, TILE_COLS), dtypes.float16,
-                capacity=(MAX_TILE_ROWS, TILE_COLS), depth=DEPTH)
+backing = Buffer(MemLoc.UB, dtypes.float32,
+                 make_layout((MAX_TILE_ROWS, TILE_COLS)))
+scratch = backing.reinterpret(layout=make_layout((valid_rows, TILE_COLS)))
 ```
 
-`capacity` 是正的编译期整数元组，与逻辑 shape 同 rank；动态 shape 使用静态 backing stride。调用方保证 `0 < valid_rows <= MAX_TILE_ROWS`，空任务走显式空路径；`capacity` 不会自动截断超限访问。
+先按静态上界分配，再派生动态逻辑视图；构造器不使用 `capacity=`。上例列数固定，两个 layout 的行跨度一致；带 padding 时须显式保留 backing stride。调用方保证 `0 < valid_rows <= MAX_TILE_ROWS`，空任务走显式空路径；视图不会自动截断超限访问。RingBuffer 先选槽，再按相同原则派生视图。
 
-Host 可用 `get_mem_size("ub")`、`get_mem_size("l1")` 等查询单层片上容量，返回单位为字节；不可用时返回 0，应停止该配置的规划。评估占用须计入同时存活的全部资源、Channel 各槽位和布局对齐，查询结果不等于当前剩余可分配字节数。
+Host 可用 `get_mem_size("ub")`、`get_mem_size("l1")` 等查询单层片上容量，返回单位为字节；不可用时返回 0，应停止该配置的规划。评估占用须计入同时存活的全部资源、RingBuffer 各槽位和布局对齐，查询结果不等于当前剩余可分配字节数。
 
 ## 按核 workspace 使用实际启动数量
 

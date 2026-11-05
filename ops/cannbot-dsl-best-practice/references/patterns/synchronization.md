@@ -1,6 +1,6 @@
 # 同步：为具体的数据依赖建立顺序
 
-每次同步要回答：哪次写入必须先完成，谁接着读取，哪个资源随后可以复用。事件、屏障、Channel 各自的作用域和内存可见性不能互相猜测替代。
+每次同步要回答：哪次写入必须先完成，谁接着读取，哪个资源随后可以复用。事件、屏障、RingBuffer 各自的作用域和内存可见性不能互相猜测替代。
 
 ## 使用原则：作用域恰当，数量必要
 
@@ -60,14 +60,14 @@ vec_sync_wait(PIPE.MTE2, PIPE.V, LOAD_TO_VECTOR_EVENT)
 ## 集体同步与资源复用
 
 ```text
-from cannbotdsl import global_sync_all, channel_rewind
+from cannbotdsl import global_sync_all, onchip_rewind
 
 if 本核有任务:
     完成本核当前阶段
 # 所有参与核均到达，不能放在“有任务”分支内
 global_sync_all()
 # 只有下一阶段显式复用片上地址时才需要，且旧存储已无后续访问
-channel_rewind()
+onchip_rewind()
 进入下一阶段
 ```
 
@@ -75,6 +75,6 @@ channel_rewind()
 
 默认屏障使用固定的三个 flag ID；有重叠的手工协议时，使用 `flag_ids=(FUNNEL_IN, CROSS_BLOCK, FUNNEL_OUT)` 明确规划三个互不相同、位于 `[0, 15]` 的 ID，避免冲突。手工 block arrive/wait 配对必须保持相同 mode。
 
-`channel_rewind(reset_sync_id=True)` 声明地址、Buffer ID 和计数器分配阶段边界；它不插入硬件屏障、不释放仍被使用的存储。`reset_sync_id=False` 只保留该边界的计数器分配阶段，也不能替代同步。普通阶段衔接仅需建立实际依赖，无需机械调用 rewind。
+`onchip_rewind(reset_sync_id=True)` 声明地址、Buffer ID 和计数器分配阶段边界；它不插入硬件屏障、不释放仍被使用的存储，也不重置 RingBuffer 的读写游标。`reset_sync_id=False` 保留计数器分配阶段，也不能替代同步。普通阶段衔接仅需建立实际依赖，无需机械调用 rewind。
 
 **检查：** 任务数小于核数、任务数非整除、慢消费者、重复槽位复用、分支事件配对，以及屏障的参与核和驻留条件。诊断记录具体等待的生产者与消费者。

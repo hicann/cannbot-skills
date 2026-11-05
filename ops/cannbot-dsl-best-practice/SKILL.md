@@ -1,13 +1,13 @@
 ---
 name: cannbot-dsl-best-practice
-description: "为 CANNBotDSL 算子提供整体实现、局部写法和生产代码最佳实践。当需要职责划分、Host 约束校验、Channel/同步/布局、注册与适配、编译启动、AICPU 负载均衡 metadata、VF 向量计算或命名建议时使用。"
+description: "为 CANNBotDSL 算子提供整体实现、局部写法和生产代码最佳实践。当需要职责划分、Host 约束校验、RingBuffer/同步/布局、注册与适配、编译启动、AICPU 负载均衡 metadata、VF 向量计算或命名建议时使用。"
 metadata:
   category: implementation
 ---
 
 # CANNBotDSL 实现最佳实践
 
-针对当前实现问题提供可应用的写法、选择依据和正反例。参考内容按主题组织，示例使用通用对象名，不要求某种算法、工程目录或特定实现存在。
+API 写法以 CANNBotDSL 0.8.0 为例；遇到版本差异时，参考本 skill 的编码思想，按实际版本的 API 自适应调整。针对当前实现问题提供可应用的写法、选择依据和正反例。参考内容按主题组织，示例使用通用对象名，不要求某种算法、工程目录或特定实现存在。
 
 ## 输入
 
@@ -28,9 +28,10 @@ metadata:
 | 整体结构、入口、Host、Kernel、@export、Native 导出、生命周期、CV 融合、preload | [整体实现](references/overall-implementation.md) | 公共骨架、导出、程序管理与 preload 流水 |
 | 命名、常量、重复、注释、docstring、可读性 | [生产代码](references/production-code.md) | 清楚表达数据、单位与计算意图 |
 | Host 校验、非法输入、约束拦截、dtype、shape、参数组合 | [Host 约束校验](references/patterns/host-validation.md) | 在分配、编译和启动前拒绝非法元数据 |
-| Channel、Buffer、双缓冲、深度、slot | [Channel 与 Buffer](references/patterns/channel-buffer.md) | 存储选择、生命周期和复用 |
-| CrossCore、同步、事件、屏障、流水线交接 | [同步](references/patterns/synchronization.md) | 写入、可见、读取、复用顺序 |
-| VF、寄存器向量、mask、向量归约、cast、pack/unpack | [VF 向量计算](references/patterns/vf.md) | 向量操作链、尾部掩码、类型转换与累计状态 |
+| RingBuffer、Buffer、双缓冲、深度、slot | [RingBuffer 与 Buffer](references/patterns/channel-buffer.md) | 存储选择、生命周期和复用 |
+| 跨核、同步、事件、屏障、流水线交接 | [同步](references/patterns/synchronization.md) | 写入、可见、读取、复用顺序 |
+| VF、寄存器向量、mask、向量归约、cast、pack/unpack、局部编码优化 | [VF 向量计算](references/patterns/vf.md) | 向量操作链、循环与寄存器复用、尾部掩码、类型转换与累计状态 |
+| 搬运优化、批量读写、有效视图、冗余初始化与复制 | [搬运与内存访问](references/patterns/memory_optimization.md) | 既定方案内的批量搬运与冗余访存消除 |
 | layout、stride、ND/NZ、视图、尾块、有效行 | [布局与尾块](references/patterns/layout-tail.md) | 物理跨度、格式转换与有效范围 |
 | workspace、临时存储、资源容量、别名、跨阶段复用 | [Workspace](references/patterns/workspace.md) | 分配、所有权、容量与生命周期 |
 | AICPU、负载均衡、metadata、调度协议、记录消费、任务成本、分核、分轮 | [AICPU 负载均衡 Metadata](references/patterns/aicpu-load-balance-metadata.md) | 设备侧调度、成本划分、记录生成与消费 |
@@ -40,7 +41,7 @@ metadata:
 
 生成完整算子或设计其公共结构时，必须读取 [整体实现](references/overall-implementation.md)，落实其中的公共骨架与必备 `@export` 入口；生成或修改算子源码时读取 [生产代码](references/production-code.md)，应用代码规范与轻量检查规则。
 
-按问题含义选择内容；多个主题直接相关时组合读取。仅有命名问题时不需要读取全部计算参考，缓冲覆盖问题则同时涉及 Channel 与同步。
+按问题含义选择内容；多个主题直接相关时组合读取。仅有命名问题时不需要读取全部计算参考，缓冲覆盖问题则同时涉及 RingBuffer 与同步。
 
 ## 禁止事项
 

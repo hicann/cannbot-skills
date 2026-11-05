@@ -8,7 +8,7 @@
 
 | 类别 | 例子 | 放置与传递方式 |
 |---|---|---|
-| 编译配置 | tile 大小、Channel depth、静态 dtype/布局变体、容量上限 | 使用具名工厂参数，决定编译变体；在工厂内构造 Kernel、`TensorSpec` 等 |
+| 编译配置 | tile 大小、RingBuffer depth、静态 dtype/布局变体、容量上限 | 使用具名工厂参数，决定编译变体；在工厂内构造 Kernel、`TensorSpec` 等 |
 | 动态张量元数据 | 实际行数、受支持的行跨度 | 用 `Dim` 和 `TensorSpec` 声明范围，调用时绑定当前 Tensor；不为范围内的每个值生成变体 |
 | 运行时标量 | `scale`、实际 `block_num`、需要显式传递的有效长度 | 在 `@host` 签名及 compile 参数描述中声明类型，调用程序时传当前值 |
 | Host 配置 | 公开选项、校验策略 | 在 Host 处理；若选择不同编译变体，则将选择结果明确传给工厂 |

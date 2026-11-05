@@ -27,20 +27,21 @@ valid_cols = min(tile_cols, max(0, cols - col_begin))
 ## 视图与搬运使用不同接口
 
 ```text
-from cannbotdsl import tile_slice, reinterpret, make_copy_engine, mem_copy
+from cannbotdsl import Buffer, MemLoc, dtypes, make_layout, tile_slice, mem_copy
 
+# FP16 GM → NZ L1；tile 尺寸须满足目标格式和搬运的对齐要求
+slot = Buffer(MemLoc.L1, dtypes.float16,
+              make_layout((TILE_ROWS, TILE_COLS)), data_format="nz")
 gm_tile = tile_slice(gm_input, (TILE_ROWS, TILE_COLS), (row_tile, col_tile))
 # coord 是 tile 编号；实际尾块范围取 gm_tile.shape
-slot = l1_tiles.produce()
-nd_to_nz = make_copy_engine(format_transform="nd2nz")
-mem_copy(slot, gm_tile, engine=nd_to_nz)  # slot 已声明为容量足够的 NZ L1 Tensor
+mem_copy(slot, gm_tile)
 ```
 
 - `tile_slice` 保留父视图的跨度，尾块报告实际 extent；调用方仍要保证 tile 坐标在合法范围，不能依赖所有路径都做越界检查。
-- `reinterpret(..., offset=offset_bytes)` 的 offset 单位是**字节**，stride 单位是目标 dtype 的**元素**。它只重解释存储；改变 dtype 不做数值 cast，改变 `data_format` 不会转换原有数据。
-- `permute(gm_tensor, dims)` 为 GM 的 Identity/ND Tensor 创建零拷贝视图，不是片上 Tensor 或 Channel 的通用转置接口。
-- `make_copy_engine` 描述静态搬运方式；`mem_copy` 使用实际 Tensor 视图确定地址。UB 内的格式转换用 VF 实现，不能假定 DMA 支持所有方向的 ND/NZ 转换。
-- 分块格式的内侧 tile 边界还需满足 fractal 对齐。使用 ND2NZ 的 `dst_nd_arrangement="stack_m"` 时，合并后的运行时 `batch * rows` 必须不超过目标静态容量，不能只检查单个矩阵的 rows。
+- `reinterpret(tensor, dtype, make_layout(shape, stride), offset=offset_bytes)` 的 offset 单位是**字节**，stride 单位是目标 dtype 的**元素**。它只重解释存储；改变 dtype 不做数值 cast，改变 `data_format` 不会转换原有数据。
+- `permute(tensor, dims)` 创建零拷贝逻辑视图，能否被搬运取决于具体源/目标布局；例如 UB 转置视图直接搬到 GM 可能因缺少共同单位跨度轴而编译失败，不能把视图构造当成物理转置完成。
+- 格式转换由源、目标 Tensor 的布局决定；需显式搬运控制时用 `copy_options(...)`，传给 `mem_copy(dst, src, options=...)`。它不接受 `format_transform` 或 `dst_nd_arrangement`；不能假定 DMA 支持所有方向的 ND/NZ 转换，必要时用 VF 重排。
+- 分块格式的内侧 tile 边界须满足 fractal 对齐。合并 batch 与 rows 时，按实际索引映射和物理跨度检查全部元素的容量，不能只检查单个矩阵的 rows。
 
 | 运算 | 常用填充值 | 边界 |
 |---|---|---|

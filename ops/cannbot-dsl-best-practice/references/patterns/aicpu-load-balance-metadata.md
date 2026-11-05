@@ -7,11 +7,11 @@
 ## AICPU 声明接口
 
 ```text
-from cannbotdsl.aicpu import aicpu_kernel, GmIn, GmOut, I32
+from cannbotdsl.aicpu import aicpu_kernel, gm_in, gm_out, I32
 
 class ScheduleArgs:
-    lengths: GmIn(I32)
-    records: GmOut(I32)
+    lengths: gm_in(I32)
+    records: gm_out(I32)
     record_capacity: I32
 
 @aicpu_kernel
