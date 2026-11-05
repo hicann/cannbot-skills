@@ -37,8 +37,8 @@ from typing import Dict, List, Optional, Any
 logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stderr)
 logger = logging.getLogger(__name__)
 
-if sys.platform == 'win32':
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.platform == "win32":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 
 @dataclass
@@ -92,12 +92,14 @@ class SessionStats:
 
     @classmethod
     def from_export_file(cls, file_path: str) -> "SessionStats":
-        with open(file_path, 'r', encoding='utf-8-sig') as f:
+        with open(file_path, "r", encoding="utf-8-sig") as f:
             data = json.load(f)
         return cls._parse_export_data(data)
 
     @classmethod
-    def from_database(cls, session_id: str, db_path: Optional[str] = None) -> "SessionStats":
+    def from_database(
+        cls, session_id: str, db_path: Optional[str] = None
+    ) -> "SessionStats":
         if db_path is None:
             db_path = cls._get_default_db_path()
 
@@ -124,7 +126,9 @@ class SessionStats:
 
         logger.info("\n[耗时统计]")
         logger.info("  总耗时: %s", self._format_duration(self.duration_ms))
-        logger.info("  Reasoning耗时: %s", self._format_duration(self.reasoning_time_ms))
+        logger.info(
+            "  Reasoning耗时: %s", self._format_duration(self.reasoning_time_ms)
+        )
         logger.info("  工具执行耗时: %s", self._format_duration(self.tool_time_ms))
         logger.info("  输出生成耗时: %s", self._format_duration(self.output_time_ms))
 
@@ -197,7 +201,14 @@ class SessionStats:
 
     def check_test_command(self, command: str):
         """检查命令是否为测试命令"""
-        test_keywords = ["pytest", "test", "unittest", "npm test", "go test", "cargo test"]
+        test_keywords = [
+            "pytest",
+            "test",
+            "unittest",
+            "npm test",
+            "go test",
+            "cargo test",
+        ]
         for kw in test_keywords:
             if kw in command.lower():
                 self.test_runs += 1
@@ -209,8 +220,11 @@ class SessionStats:
     @staticmethod
     def _format_time(timestamp_ms: int) -> str:
         from datetime import datetime
+
         if timestamp_ms:
-            return datetime.fromtimestamp(timestamp_ms / 1000).strftime("%Y-%m-%d %H:%M:%S")
+            return datetime.fromtimestamp(timestamp_ms / 1000).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
         return "N/A"
 
     @staticmethod
@@ -290,7 +304,9 @@ class SessionStats:
             cls._process_part(part, stats)
 
     @classmethod
-    def _process_assistant_info(cls, msg_info: Dict[str, Any], stats: "SessionStats") -> None:
+    def _process_assistant_info(
+        cls, msg_info: Dict[str, Any], stats: "SessionStats"
+    ) -> None:
         """处理 assistant 消息的元信息"""
         tokens = msg_info.get("tokens", {})
         if tokens:
@@ -316,7 +332,9 @@ class SessionStats:
             stats.output_time_ms += cls._calc_duration(part_time)
 
     @classmethod
-    def _process_tool_part(cls, part: Dict[str, Any], part_time: Dict, stats: "SessionStats") -> None:
+    def _process_tool_part(
+        cls, part: Dict[str, Any], part_time: Dict, stats: "SessionStats"
+    ) -> None:
         """处理 tool 类型的 part"""
         tool_name = part.get("tool", "unknown")
         stats.tool_calls[tool_name] = stats.tool_calls.get(tool_name, 0) + 1
@@ -329,14 +347,16 @@ class SessionStats:
                 stats.check_test_command(command)
 
     @classmethod
-    def _query_session_info(cls, conn: sqlite3.Connection, session_id: str) -> "SessionStats":
+    def _query_session_info(
+        cls, conn: sqlite3.Connection, session_id: str
+    ) -> "SessionStats":
         """Query session row and build base stats object."""
         cursor = conn.cursor()
         cursor.execute(
             "SELECT id, title, directory, time_created, time_updated, "
             "summary_additions, summary_deletions, summary_files "
             "FROM session WHERE id = ?",
-            (session_id,)
+            (session_id,),
         )
         row = cursor.fetchone()
 
@@ -360,14 +380,15 @@ class SessionStats:
         return stats
 
     @classmethod
-    def _query_step_finish(cls, conn: sqlite3.Connection, session_id: str,
-                           stats: "SessionStats") -> None:
+    def _query_step_finish(
+        cls, conn: sqlite3.Connection, session_id: str, stats: "SessionStats"
+    ) -> None:
         """Process step-finish parts for tokens, cost, and stop reason."""
         cursor = conn.cursor()
         cursor.execute(
             "SELECT data FROM part "
             "WHERE session_id = ? AND json_extract(data, '$.type') = 'step-finish'",
-            (session_id,)
+            (session_id,),
         )
         for row in cursor.fetchall():
             part_data = json.loads(row["data"])
@@ -380,8 +401,9 @@ class SessionStats:
             stats.cost += part_data.get("cost", 0)
 
     @classmethod
-    def _query_tool_parts(cls, conn: sqlite3.Connection, session_id: str,
-                          stats: "SessionStats") -> None:
+    def _query_tool_parts(
+        cls, conn: sqlite3.Connection, session_id: str, stats: "SessionStats"
+    ) -> None:
         """Process tool parts for tool call counts and timing."""
         cursor = conn.cursor()
         cursor.execute(
@@ -390,7 +412,7 @@ class SessionStats:
             "json_extract(data, '$.state.time.start') as time_start, "
             "json_extract(data, '$.state.time.end') as time_end "
             "FROM part WHERE session_id = ? AND json_extract(data, '$.type') = 'tool'",
-            (session_id,)
+            (session_id,),
         )
         for row in cursor.fetchall():
             tool_name = row["tool_name"] or "unknown"
@@ -401,28 +423,42 @@ class SessionStats:
                 stats.check_test_command(row["command"])
 
     @classmethod
-    def _accumulate_type_time(cls, conn: sqlite3.Connection, session_id: str,
-                              part_type: str, attr_name: str,
-                              stats: "SessionStats") -> None:
+    def _accumulate_type_time(
+        cls,
+        conn: sqlite3.Connection,
+        session_id: str,
+        part_type: str,
+        attr_name: str,
+        stats: "SessionStats",
+    ) -> None:
         """Sum timing for a given part_type into the named attribute on stats."""
         cursor = conn.cursor()
         cursor.execute(
             "SELECT json_extract(data, '$.time.start') as time_start, "
             "json_extract(data, '$.time.end') as time_end "
             "FROM part WHERE session_id = ? AND json_extract(data, '$.type') = ?",
-            (session_id, part_type)
+            (session_id, part_type),
         )
         for row in cursor.fetchall():
             if row["time_start"] and row["time_end"]:
-                setattr(stats, attr_name,
-                        getattr(stats, attr_name) + int(row["time_end"]) - int(row["time_start"]))
+                setattr(
+                    stats,
+                    attr_name,
+                    getattr(stats, attr_name)
+                    + int(row["time_end"])
+                    - int(row["time_start"]),
+                )
 
     @classmethod
-    def _query_database(cls, conn: sqlite3.Connection, session_id: str) -> "SessionStats":
+    def _query_database(
+        cls, conn: sqlite3.Connection, session_id: str
+    ) -> "SessionStats":
         stats = cls._query_session_info(conn, session_id)
         cls._query_step_finish(conn, session_id, stats)
         cls._query_tool_parts(conn, session_id, stats)
-        cls._accumulate_type_time(conn, session_id, "reasoning", "reasoning_time_ms", stats)
+        cls._accumulate_type_time(
+            conn, session_id, "reasoning", "reasoning_time_ms", stats
+        )
         cls._accumulate_type_time(conn, session_id, "text", "output_time_ms", stats)
         return stats
 
@@ -445,6 +481,6 @@ if __name__ == "__main__":
         stats = SessionStats.from_database(args.session_id, args.db)
 
     if args.json:
-        logger.info(json.dumps(stats.to_dict(), indent=2, ensure_ascii=False))
+        print(json.dumps(stats.to_dict(), indent=2, ensure_ascii=False))
     else:
         stats.print_report()
