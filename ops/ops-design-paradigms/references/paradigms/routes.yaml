@@ -24,7 +24,7 @@
 #
 # 未配置路由的 paradigm（按 fallback 走通用方法论）：
 #   Padding, AtomicUpdate, Interpolation,
-#   SortSelect, Histogram, SlidingWindow,
+#   SlidingWindow,
 #   Spectral,
 #   CollectiveCommunication, FusedComposite,
 #   以及 Elementwise, ReductionComposite, ArgReduce,
@@ -35,6 +35,8 @@ routes:
   paradigms:
     Broadcast:
       - references/paradigms/broadcast/patterns.md
+    SortSelect:
+      - references/paradigms/sortselect/patterns.md
     Reduction:
       - references/paradigms/reduction/patterns.md
     Contraction:

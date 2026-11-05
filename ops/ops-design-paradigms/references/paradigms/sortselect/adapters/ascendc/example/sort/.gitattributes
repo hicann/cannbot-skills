@@ -1,0 +1,2 @@
+# Preserve upstream source line endings.
+* -text !eol

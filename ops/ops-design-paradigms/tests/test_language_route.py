@@ -140,6 +140,31 @@ class YamlSpecTests(unittest.TestCase):
             for path in paths:
                 self.assertTrue((root / path).is_file(), path)
 
+    def test_sortselect_registered_and_has_no_cross_language_example(self):
+        import yaml
+
+        root = SCRIPT.parents[2]
+        routes = yaml.safe_load((SCRIPT.parent / "routes.yaml").read_text())["routes"][
+            "paradigms"
+        ]
+        self.assertEqual(
+            routes["SortSelect"], ["references/paradigms/sortselect/patterns.md"]
+        )
+        self.assertTrue((root / routes["SortSelect"][0]).is_file())
+        for language in ("ascendc", "dsl"):
+            result = self.run_spec(
+                f"op: {{language: {language}, paradigms: [SortSelect]}}"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = json.loads(result.stdout)
+            paths = payload["examples"]["SortSelect"]
+            self.assertEqual(len(paths), 1)
+            self.assertTrue(Path(paths[0]).is_dir())
+            self.assertEqual(Path(paths[0]).name, "sort")
+            entry = "op_kernel/sort.cpp" if language == "ascendc" else "entry.py"
+            self.assertTrue((Path(paths[0]) / entry).is_file())
+            self.assertIn(f"/adapters/{language}/", paths[0])
+
 
 if __name__ == "__main__":
     unittest.main()

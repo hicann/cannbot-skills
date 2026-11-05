@@ -26,6 +26,11 @@
 
 routes:
   paradigms:
+    SortSelect:
+      ascendc:
+        - references/paradigms/sortselect/adapters/ascendc/example/sort
+      dsl:
+        - references/paradigms/sortselect/adapters/dsl/example/sort
     Broadcast:
       ascendc:
         - references/paradigms/broadcast/adapters/ascendc/example/xdivy_custom_package

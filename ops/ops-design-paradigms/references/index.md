@@ -20,6 +20,7 @@
 | ScatterUpdate 写散射 assign 覆盖写（nondet 直写 / det 段尾覆盖、双模板、冲突域） | [ScatterUpdate 入口](paradigms/scatterupdate/patterns.md) |
 | RandomSampling 随机流、分布变换、状态管理与随机+逐元素复合 | [RandomSampling 入口](paradigms/random_sampling/patterns.md) |
 | Sparse 散射累积、稀疏行更新与索引重映射 | [Sparse 入口](paradigms/sparse/patterns.md) |
+| Sort、Argsort、TopK、Kth 的排序与选择设计 | [SortSelect 入口](paradigms/sortselect/patterns.md) |
 | Contraction、Reduction、Broadcast 组合 | [FA 组合范式](paradigms/fused_composite/fa/patterns.md) |
 | Ascend C regbase 开发方法 | [开发指导](knowledge/regbase_development_guide.md) |
 | API 约束与签名 | [API 索引](knowledge/api/index.md) |

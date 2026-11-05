@@ -71,7 +71,7 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "请加载并使用 ops-design-paradigms 技能回答（可阅读该技能文档，但不要实际运行脚本或修改代码）。我的算子 op.paradigms 标的是 Sort，但我在这个技能的范式索引表里没找到 Sort 的路由。用 AscendC 开发时这个技能对我还有用吗？我该按什么方法做 Tiling 设计？",
+      "prompt": "请加载并使用 ops-design-paradigms 技能回答（可阅读该技能文档，但不要实际运行脚本或修改代码）。我的算子 op.paradigms 标的是 Padding，但我在这个技能的范式索引表里没找到 Padding 的路由。用 AscendC 开发时这个技能对我还有用吗？我该按什么方法做 Tiling 设计？",
       "expected_output": "1. 应指出未注册范式（范式索引表中无匹配）使用对应语言的通用方法：AscendC 使用 references/paradigms/general-methodology.md 作为兜底方法论，范式注册状态从范式索引表查找，不通过扫描目录推断。\n2. 应概述通用方法论要素：多核切分策略（负载均衡、数据局部性、尾块处理）、UB 切分与 chunk 规划（按目标芯片 UB 容量预算）、buffer 规划（inQueue/outQueue/中间 buffer、double buffer、总和校验）、分支场景覆盖（dtype/shape/对齐/边界/架构差异）、TilingKey 与 Tiling 字段设计。\n3. 应说明命中专用范式时优先专用范式知识，本文档仅作为通用基线。",
       "expectations": [],
       "files": []
