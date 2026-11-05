@@ -32,6 +32,20 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _has_valid_containers(data) -> bool:
+    if not isinstance(data, dict) or not isinstance(data.get("evals", []), list):
+        return False
+    for item in data.get("evals", []):
+        if not isinstance(item, dict) or not isinstance(item.get("config", {}), dict):
+            return False
+        expectations = item.get("expectations", [])
+        if not isinstance(expectations, list) or not all(
+            isinstance(exp, dict) for exp in expectations
+        ):
+            return False
+    return True
+
+
 def parse_evals_json(file_path: Path) -> Optional[Dict[str, Any]]:
     """
     解析 evals.json，返回与 evals_parser.parse_evals_md() 相同结构的 dict。
@@ -73,6 +87,10 @@ def parse_evals_json(file_path: Path) -> Optional[Dict[str, Any]]:
         logger.error("Error reading %s: %s", file_path, e)
         return None
 
+    if not _has_valid_containers(data):
+        logger.error("Invalid evaluation JSON containers in %s", file_path)
+        return None
+
     skill_name = data.get("skill_name", "")
     team_name = data.get("team_name", "")
 
@@ -82,7 +100,10 @@ def parse_evals_json(file_path: Path) -> Optional[Dict[str, Any]]:
 
     eval_mode = data.get("eval_mode", "text")
     if not isinstance(eval_mode, str):
-        logger.warning("eval_mode is %s (not str), falling back to 'text'", type(eval_mode).__name__)
+        logger.warning(
+            "eval_mode is %s (not str), falling back to 'text'",
+            type(eval_mode).__name__,
+        )
         eval_mode = "text"
     else:
         eval_mode = eval_mode.strip().lower()
@@ -162,14 +183,22 @@ def _parse_cann_bench_config(config: dict, eval_case: dict, case_id) -> None:
         try:
             eval_case["cann_bench_warmup"] = int(warmup_str)
         except (ValueError, TypeError):
-            logger.warning("Invalid cann_bench_warmup '%s' in case %s, ignoring", warmup_str, case_id)
+            logger.warning(
+                "Invalid cann_bench_warmup '%s' in case %s, ignoring",
+                warmup_str,
+                case_id,
+            )
 
     repeat_str = config.get("cann_bench_repeat")
     if repeat_str is not None:
         try:
             eval_case["cann_bench_repeat"] = int(repeat_str)
         except (ValueError, TypeError):
-            logger.warning("Invalid cann_bench_repeat '%s' in case %s, ignoring", repeat_str, case_id)
+            logger.warning(
+                "Invalid cann_bench_repeat '%s' in case %s, ignoring",
+                repeat_str,
+                case_id,
+            )
 
 
 def _parse_eval_item(item: dict, eval_mode: str) -> dict:
@@ -195,8 +224,10 @@ def _extract_expectations(raw_exps: List[Dict[str, str]]) -> List[Dict[str, str]
     results = []
     for exp in raw_exps:
         if "type" in exp and "pattern" in exp:
-            results.append({
-                "type": exp["type"],
-                "pattern": exp["pattern"],
-            })
+            results.append(
+                {
+                    "type": exp["type"],
+                    "pattern": exp["pattern"],
+                }
+            )
     return results
