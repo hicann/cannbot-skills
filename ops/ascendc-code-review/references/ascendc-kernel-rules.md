@@ -1,42 +1,16 @@
 # Ascend C Kernel 侧编码规范
 
+```
 <适用>
 语言: C++
 侧别: Kernel
-领域: true
-触发: AscendC::, pipe.InitBuffer, DataCopy, DataCopyPad, AllocTensor, FreeTensor, CrossCoreSetFlag, CrossCoreWaitFlag, SetFlag, WaitFlag, EnQue, DeQue, PipeBarrier, ASCENDC_TPL_ARGS_DECL, ASCENDC_TPL_DTYPE_DECL, ASCENDC_TPL_DATATYPE_DECL, TILING_KEY_IS, _apt, __VEC_SCOPE__, asc_vf_call, __simd_vf__, __simt_vf__
 默认启用: true
-适用场景: ascendc kernel 侧编码规范（KERNEL-1~5 API 使用与硬件约定 + KERNEL-6~8 TilingKey 注册/Kernel 派发/命名约定 + KERNEL-9 核内同步推荐 Lock/Unlock + KERNEL-10 SetFlag/WaitFlag 配对 + KERNEL-11 禁用 PipeBarrier<PIPE_ALL> + KERNEL-12 VF 函数实现方式 + KERNEL-13 VF 函数内禁分支）
-介绍: Kernel 侧 AscendC API 使用与工程约定规范（数据搬运推荐 DataCopyPad/内存管理配对/API 参数限制/核间与核内同步配对/硬件参数 + TilingKey 注册/Kernel 派发/命名约定 + VF 编程），由 ascendc-api.md 与 ascendc-perf.md 合并而来，另自 ascendc-op-conventions.md 迁入 3 条（重编号 KERNEL-6~8）；日落检查独立于 ascendc-sunset-api.md
+
+领域: true
+触发: 必须触发
 </适用>
+```
 
-
-> **适用范围**：Kernel 侧（Device 侧）
->
-> **Host 侧不适用**：Host 侧代码（tiling/图推断/aclnn）不使用 Kernel 侧 Ascend C API。
->
-> **合并说明**：本文件由 ascendc-api.md（API 使用类）、ascendc-perf.md（PERF-1/2/4、PREC-1/3 → 性能/精度类）及 ascendc-op-conventions.md 条款 1/2/4（→ TilingKey 注册/Kernel 派发/命名类，条款 1 侧别标记改 [适用: Kernel]——其检查对象 op_kernel/**/*tiling_key*.h 属 Kernel 侧）合并而来；perf 其余条款已废弃。合并时删除 2 条 API 条款（原 KERNEL-5/11），2026-09-16 重排编号消除空洞：旧 KERNEL-6~10 → KERNEL-5~9、旧 KERNEL-12 → KERNEL-10、旧 KERNEL-13~17 → KERNEL-11~15、旧 KERNEL-18~20 → KERNEL-16~18，历史引用按此映射换算。2026-09-28 删除 10 条（原 KERNEL-1/2/4/6/8/9/11/13/14/15：GlobalTensor::SetValue/GetValue 禁用、std:: 计算函数禁用、Compare 256 字节对齐、动态内存分配、Cast RoundMode、blockLen 单位差异、循环内逐元素操作、PipeBarrier、流水线同步、FP16 中间精度保护），并重排编号消除空洞：旧 KERNEL-3→1、5→2、7→3、10→4、12→5、16→6、17→7、18→8、19→9、20→10、21→11，历史引用按此映射换算。同日 KERNEL-4 拆分：核内 SetFlag/WaitFlag 配对检查独立成条（新增 KERNEL-10），KERNEL-4 全名化仅管核间 CrossCore* 配对，原 KERNEL-10/11 顺延为 KERNEL-11/12，历史引用按此换算。同日新增 KERNEL-11：禁止使用 PipeBarrier<PIPE_ALL>（自原已删 KERNEL-13 的 PIPE_ALL 部分提炼，依据官方 PipeBarrier 文档约束与 PR#0309/PR#3019 真实案例），原 KERNEL-11/12 顺延为 KERNEL-12/13，历史引用按此换算。
-
-## 检视前置要求
-
-> **重要**：Agent 在检视本条例时，必须先使用 `ascendc-docs-search` skill 获取相关 API 的最新文档，确认 API 参数、限制、对齐要求等信息是否与条例描述一致。若文档与条例有差异，以最新 API 文档为准，并记录差异供后续更新条例。
-
-### 需要查阅文档的 API
-
-| 条例编号 | 涉及 API | 查阅重点 |
-|---------|---------|---------|
-| KERNEL-1 | `DataCopy`, `DataCopyPad` | 确认 DataCopy 对齐限制与 blockLen 单位、DataCopyPad 参数与 pad 机制 |
-| KERNEL-2 | `AllocTensor`, `FreeTensor` | 确认内存管理配对要求 |
-| KERNEL-3 | 向量计算类 API（高维切分形态） | 确认 repeatTime 参数类型与上限、count 形态可用性 |
-| KERNEL-4 | `CrossCoreSetFlag`, `CrossCoreWaitFlag` | 确认同步配对规则和提前退出风险 |
-| KERNEL-5 | 系统变量 API（`GetBlockNum`/`GetDataBlockSizeInBytes`/`GetRuntimeUBSize` 等）+ 目标代际硬件规格 | 确认代际核数/UB/L1/L2 值、GetRuntimeUBSize 等的代际支持范围 |
-| KERNEL-9 | `SetFlag/WaitFlag`, `Mutex::Lock/Unlock` | 确认目标代际 Lock/Unlock 支持情况与 Mutex 约束 |
-| KERNEL-10 | `SetFlag/WaitFlag` | 确认 HardEvent 模板参数与 eventID 配对约束、连续 SetFlag 限制 |
-| KERNEL-11 | `PipeBarrier`（PIPE_ALL） | 确认 PIPE_ALL 性能约束与各流水类型（PIPE_V/PIPE_MTE2/PIPE_MTE3）适用场景 |
-| KERNEL-12 | `__VEC_SCOPE__`, `__simd_vf__`/`__simt_vf__`, `asc_vf_call` | 确认目标代际 VF 限定符与 asc_vf_call 签名约束 |
-| KERNEL-13 | 向量级 VF（`__simd_vf__`）体内分支（if/switch/?:） | 确认目标代际 VF 分支与硬件循环生成约束（仅 `__simd_vf__`，`__simt_vf__` 豁免） |
-
----
 
 ## 快速索引
 
@@ -45,7 +19,7 @@
 | KERNEL-1 | 推荐使用 DataCopyPad，不推荐使用 DataCopy | 数据搬运 | 中 | [适用: Kernel] |
 | KERNEL-2 | AllocTensor/FreeTensor 必须配对使用 | 内存管理 | 高 | [适用: Kernel] |
 | KERNEL-3 | repeatTime 限制（≤255） | API限制 | 中 | [适用: Kernel] |
-| KERNEL-4 | CrossCoreSetFlag/WaitFlag 必须对称 | 核间同步 | 高 | [适用: Kernel] |
+| KERNEL-4 | CrossCoreSetFlag/CrossCoreWaitFlag 必须配对对称 | 核间同步 | 高 | [适用: Kernel] |
 | KERNEL-5 | 禁止写死硬件参数 | 性能优化 | 高 | [适用: Kernel] |
 | KERNEL-6 | ASCENDC_TPL_ARGS_DECL 禁止包含算子数据类型 | TilingKey注册 | 高 | [适用: Kernel] |
 | KERNEL-7 | Kernel 代码禁止使用 TILING_KEY_IS 宏 | Kernel派发 | 高 | [适用: Kernel] |
@@ -53,25 +27,8 @@
 | KERNEL-9 | 核内同步推荐使用 Lock/Unlock，SetFlag/WaitFlag 不推荐使用 | 核内同步 | 中 | [适用: Kernel] |
 | KERNEL-10 | SetFlag/WaitFlag 必须配对对称 | 核内同步 | 高 | [适用: Kernel] |
 | KERNEL-11 | 禁止使用 PipeBarrier<PIPE_ALL> | 核内同步 | 中 | [适用: Kernel] |
-| KERNEL-12 | 禁止使用 __VEC_SCOPE__，VF 任务须以具名 VF 函数 + asc_vf_call 实现 | API黑名单 | 高 | [适用: Kernel] |
-| KERNEL-13 | 向量级 VF（__simd_vf__）实现内部禁止使用 if 分支判断 | 性能优化 | 高 | [适用: Kernel] |
-
----
-
-## 检视检查清单
-
-使用以下清单快速检查代码是否满足 API 最佳实践：
-
-- [ ] **KERNEL-1**: 是否使用了 DataCopy？（不推荐——建议改用 DataCopyPad 自动处理对齐与尾块；非对齐属正确性缺陷）
-- [ ] **KERNEL-2**: AllocTensor/FreeTensor 是否配对？分支/提前 return 路径是否都有 Free？
-- [ ] **KERNEL-3**: 高维切分形态 API 的 repeatTime 是否可能超过 255？（优先改用 count 形态）
-- [ ] **KERNEL-4**: CrossCoreSetFlag/WaitFlag 是否一一配对？所有代码路径（含提前 return）是否都有 SetFlag？是否与 Matmul 高阶 API 混用？同一 flagId 是否超过 15 次？
-- [ ] **KERNEL-5**: 是否写死核数/UB/L1/L2/Cache 等代际可变硬件参数？（改用系统 API 或 TilingData 下发；DataBlock 32B 须具名）
-- [ ] **KERNEL-9**: 目标代际是否为 950？若是，核内同步是否使用了 SetFlag/WaitFlag？（不推荐，建议迁移至 Lock/Unlock，非强制）
-- [ ] **KERNEL-10**: 核内 SetFlag/WaitFlag 是否配对？（模板参数+eventID 一致、所有路径双向可达、不共用 eventID、无连续 SetFlag）
-- [ ] **KERNEL-11**: 是否使用了 PipeBarrier<PIPE_ALL>？（禁止——改用细粒度 Barrier 或队列/事件同步）
-- [ ] **KERNEL-12**: 是否使用了 __VEC_SCOPE__？（禁止——提取为 __simd_vf__/__simt_vf__ 具名函数并用 asc_vf_call 启动）
-- [ ] **KERNEL-13**: 向量级 VF 函数（__simd_vf__，含 callee）实现内部是否有运行时 if/switch/三目分支？（__simt_vf__ 除外；禁止——用 if constexpr/外提/无分支计算替代）
+| KERNEL-12 | 禁止使用 __VEC_SCOPE__，VF 任务必须以具名 VF 函数（__simd_vf__/__simt_vf__）+ asc_vf_call 实现 | API黑名单 | 高 | [适用: Kernel] |
+| KERNEL-13 | 向量级 VF 函数实现内部禁止使用 if 分支判断 | 性能优化 | 高 | [适用: Kernel] |
 
 ---
 
@@ -81,7 +38,7 @@
 
 ### 问题描述
 
-数据搬运（GM ↔ UB）推荐统一使用 `DataCopyPad`，**不推荐继续使用 `DataCopy`**：新增搬运代码一律使用 `DataCopyPad`；存量已正确对齐的 `DataCopy` 可保留，建议在重构或功能迭代时逐步迁移（非强制）。
+数据搬运（GM ↔ UB）推荐统一使用 `DataCopyPad`，**不推荐继续使用 `DataCopy`**：新增搬运代码一律使用 `DataCopyPad`。
 
 不推荐 `DataCopy` 的机理（其参数约束天然易错）：
 
@@ -96,7 +53,7 @@
 | float (4 bytes) | 8 | 32 |
 | int32_t (4 bytes) | 8 | 32 |
 
-### 不推荐示例
+### 错误示例
 
 ```cpp
 // ⚠️ 不推荐：DataCopy 需自行保证 32 字节对齐，且 blockLen 单位为 32 字节块数
@@ -107,7 +64,7 @@ dp.blockCount = 1;
 DataCopy(dst, src, dp);
 ```
 
-### 推荐示例
+### 正确示例
 
 ```cpp
 // ✅ 推荐：统一使用 DataCopyPad，自动处理对齐，blockLen 单位为字节
@@ -121,7 +78,14 @@ AscendC::DataCopyPadExtParams<float> padParams {false, 0, 0, 0};
 AscendC::DataCopyPad(xLocal, xGm, copyParams, padParams);
 ```
 
-### 检视方法
+### 注意事项
+
+1. 本条总体为建议性规范（严重级别中）：存量已正确对齐的 `DataCopy` 可保留，建议在重构或功能迭代时逐步迁移，不强制整改
+2. 例外升级：数据量不保证 32 字节对齐的调用（如尾块/非整块搬运）属**正确性缺陷**，不适用存量豁免——须立即整改
+
+### 专属检视方法
+
+**文档核实（前置）**：`DataCopy`、`DataCopyPad`——确认 DataCopy 对齐限制与 blockLen 单位、DataCopyPad 参数与 pad 机制。
 
 **步骤1 — 定位**：`grep -nE '\bDataCopy\s*\(' {file}`（词边界天然排除 `DataCopyPad`）。
 
@@ -131,8 +95,6 @@ AscendC::DataCopyPad(xLocal, xGm, copyParams, padParams);
 - problem_desc：使用 `DataCopy` 搬运数据——需硬性保证 32 字节对齐且 `blockLen` 单位为 32 字节块数，易错；推荐改用 `DataCopyPad`（自动处理对齐，单位为字节）
 - fix_suggestion：按推荐示例给出 `DataCopyPad` 改写；若为存量已对齐代码，注明可保留、建议迭代时迁移
 - **措辞升级**：若该调用数据量不保证 32 字节对齐（如尾块/非整块搬运），属正确性缺陷——意见中标注「非对齐将导致数据错误，须立即整改」
-
-**步骤4 — 前置核实**：检视时通过 `/ascendc-docs-search` 核实 `DataCopy`/`DataCopyPad` 的参数约束与对齐要求（见本文件「检视前置要求」）。
 
 ---
 
@@ -185,15 +147,20 @@ AscendC::Adds<float>(yLocal, xLocal, 1.0f, count);
 inQueueX.FreeTensor(xLocal);
 ```
 
-### 检视方法
+### 注意事项
+
+1. 勿误报标准三段式流水线：Free 的是 **DeQue 返回的变量**（如 `xIn`），而非 Alloc 时的变量名（`xLocal`）——两者为同一 buffer 槽位，属合法配对
+2. 勿误报直接使用范式：`AllocTensor → 使用 → FreeTensor`，不经过 EnQue/DeQue，亦属合法配对
+
+### 专属检视方法
+
+**文档核实（前置）**：`AllocTensor`、`FreeTensor`——确认内存管理配对要求。
 
 **步骤1 — 定位**：`grep -n "AllocTensor\|FreeTensor" {file}`，记录每个调用点的行号、队列对象（如 `inQueueX`）与变量名（Alloc 的返回变量 / Free 的入参变量）。
 
 **步骤2 — 范围过滤**：PR 模式仅保留 diff 新增/修改的调用点所在的函数/循环体（存量未动代码按 methodology 范围外规则不进正文）；文件检视模式全量进入步骤 3。
 
-**步骤3 — 按队列分组核对**：将调用点按队列对象分组，核对同一循环体/阶段内 `AllocTensor → EnQue` 与 `DeQue → FreeTensor` 是否成组出现。以下两类均为**合法配对，勿误报**：
-- 标准三段式流水线：Free 的是 **DeQue 返回的变量**（如 `xIn`），而非 Alloc 时的变量名（`xLocal`）——两者为同一 buffer 槽位
-- 直接使用范式：`AllocTensor → 使用 → FreeTensor`，不经过 EnQue/DeQue
+**步骤3 — 按队列分组核对**：将调用点按队列对象分组，核对同一循环体/阶段内 `AllocTensor → EnQue` 与 `DeQue → FreeTensor` 是否成组出现（两类合法配对形态见「注意事项」，勿误报）。
 
 **步骤4 — 路径完备性检查**（核心，逐 Alloc 点执行）：从每个 `AllocTensor` 调用点沿代码向下，至其所在函数/循环体的**全部出口**（函数末尾、`return`、`break`、`continue`）逐路径核对：
 1. **无绕过**：任何路径不得跳过该 tensor 的配对调用——提前退出路径漏 Free 泄漏队列槽位（后续 AllocTensor 阻塞），漏 EnQue 则对侧 DeQue 永久等待
@@ -216,7 +183,7 @@ inQueueX.FreeTensor(xLocal);
 
 > **依据**（asc-devkit 官方文档 `SIMD-API/basic_api/memory_vector_compute/SIMD_compute/high_dim_split.md`）：「由于硬件限制，repeatTime不能超过255」。
 
-### 受影响 API
+受影响参数与排除边界：
 
 | API/参数 | 类型 | 上限 | 是否受 255 限制 |
 |---------|------|------|---------------|
@@ -224,22 +191,29 @@ inQueueX.FreeTensor(xLocal);
 | `DataCopy/DataCopyPad` 的 `blockCount` | `uint16_t` | 4095（取值范围 [0, 4095]） | ❌ 否 |
 | `DataCopy/DataCopyPad` 的 `blockLen` | `uint16_t` | 65535（单位 DataBlock 32B） | ❌ 否 |
 
-### 推荐做法
+### 错误示例
+
+```cpp
+// ❌ 错误：repeatTime 计算值超过 255，按 uint8_t 静默截断——实际迭代次数错误
+uint32_t repeatTime = CeilDiv(totalCount, elementsPerRepeat);   // 如 totalCount=510、elementsPerRepeat=1 → 510
+AscendC::Add<T>(dstLocal, src0Local, src1Local, mask, repeatTime, repeatParams);
+//                            ^^^^^^^^^ uint8_t 形参：510 截断为 254，仅完成一半计算且无任何报错
+```
+
+### 正确示例
 
 优先使用**连续计算形态**（count 入参，`int32_t`），无 255 限制、无需手工分批：
 
 ```cpp
-// ✅ 推荐：连续计算形态，count 为参与计算的元素个数（int32_t）
+// ✅ 正确1：连续计算形态，count 为参与计算的元素个数（int32_t）
 AscendC::Add<T>(dstLocal, src0Local, src1Local, count);
 AscendC::Exp<T>(dstLocal, srcLocal, count);
 ```
 
-### 处理方案
-
 必须使用高维切分形态时，repeatTime > 255 需分批调用：
 
 ```cpp
-// 分批处理
+// ✅ 正确2：分批调用，每批 repeatTime ≤ 255
 constexpr uint32_t MAX_REPEAT = 255;
 uint32_t repeatTime = ...;
 uint32_t fullBatches = repeatTime / MAX_REPEAT;
@@ -253,7 +227,14 @@ if (remainder > 0) {
 }
 ```
 
-### 检视方法
+### 注意事项
+
+1. repeatTime 超 255 **不触发任何报错**——按 `uint8_t` 静默截断为低位（如 510 → 254），实际迭代次数少于预期、缺陷隐蔽；检视时须对 `CeilDiv(totalCount, elementsPerRepeat)` 等计算来源推算上界后判定
+2. 勿误报不受限参数：`DataCopy/DataCopyPad` 的 `blockCount`/`blockLen`（`uint16_t`，取值 [0,4095]/[0,65535]）不适用本条（参数边界见问题描述受影响表）
+
+### 专属检视方法
+
+**文档核实（前置）**：向量计算类 API（高维切分形态）——确认 repeatTime 参数类型与上限、count 形态可用性。
 
 **步骤1 — 定位**：`grep -nE 'repeatTime|RepeatParams' {file}`，定位高维切分形态调用（`mask, repeatTime, repeatParams` 签名）。
 
@@ -262,7 +243,7 @@ if (remainder > 0) {
 **步骤3 — 判定**：
 1. repeatTime 实参是否可能超过 255（如由 `CeilDiv(totalCount, elementsPerRepeat)` 等计算得出，超过将按 `uint8_t` 截断，实际计算量错误）
 2. 同一计算是否可直接改用连续计算形态（count 入参）替代
-3. 排除不受限参数：`DataCopy/DataCopyPad` 的 blockCount/blockLen（[0,4095]/[0,65535]）不适用本条
+3. 排除不受限参数（`blockCount`/`blockLen`）——见「注意事项」第 2 条，勿误报
 
 **步骤4 — 意见输出**（FAIL + confidence HIGH）：
 - problem_desc：repeatTime 超过 255（硬件限制），按 uint8_t 截断导致实际迭代次数错误
@@ -278,21 +259,39 @@ if (remainder > 0) {
 
 多核算子中，Cube 核和 Vec 核通过 `CrossCoreSetFlag`/`CrossCoreWaitFlag` 进行跨核同步。若 CrossCoreSetFlag 和 CrossCoreWaitFlag 不一一对应，或存在某条代码路径跳过了 CrossCoreSetFlag，对应的 CrossCoreWaitFlag 将永久阻塞，导致死锁。
 
-> **边界**：本条仅覆盖核间同步（`CrossCore*` API，Cube/Vec 跨核）；核内 `SetFlag`/`WaitFlag` 配对正确性归 KERNEL-10，核内同步 Lock/Unlock 迁移建议归 KERNEL-9。
+配对要求：
+
+1. **每个 CrossCoreWaitFlag 必须有且仅有一个对称的 CrossCoreSetFlag**
+2. **所有能到达 CrossCoreWaitFlag 的代码路径，都必须能触发对应的 CrossCoreSetFlag**
+3. **提前 return、条件分支不能跳过 CrossCoreSetFlag**
 
 > **官方约束**（8.5.0）：
 > - `CrossCoreSetFlag` 内部已被 Matmul 高阶 API 使用，**禁止二者混用**，否则有 flagId 冲突风险
 > - **同一 flagId 计数器最多设置 15 次**
 
-### 核心原则
+### 错误示例
 
-1. **每个 CrossCoreWaitFlag 必须有且仅有一个对称的 CrossCoreSetFlag**
-2. **所有能到达 CrossCoreWaitFlag 的代码路径，都必须能触发对应的 CrossCoreSetFlag**
-3. **提前 return、条件分支不能跳过 CrossCoreSetFlag**
-4. **禁止与 Matmul 高阶 API 混用**：Matmul 高阶 API 内部使用了 CrossCoreSetFlag 进行核间同步控制，若开发者同时使用 CrossCoreSetFlag/WaitFlag 和 Matmul 高阶 API，会有 flagId 冲突的风险
-5. **同一 flagId 计数器最多设置 15 次**：超过此限制行为未定义
+```cpp
+// ❌ 错误1：提前 return 跳过了 SetFlag
+void ComputeMm1(...) {
+    if (edgeCase) {
+        return;  // Vec1 的 CrossCoreWaitFlag(syncC1V1) 永久等待 → 死锁！
+    }
+    // ... 正常计算 ...
+    CrossCoreSetFlag(syncC1V1);  // 只有正常路径才执行
+}
+```
 
-### 同步配对示意
+使用双缓冲时，常见 `(loop - 1) % N` 的计算。当 `loop` 为 `uint32_t` 且等于 0 时，`loop - 1` 会下溢为 `UINT32_MAX`，导致错误的 buffer 索引：
+
+```cpp
+// ❌ 错误2：loop=0 时 uint32_t 下溢
+uint32_t inIdx = (info.loop - 1) % preLoadNum;
+```
+
+### 正确示例
+
+三段式核间同步配对形态（Cube/Vec 两侧）：
 
 ```
 Cube 侧                          Vec 侧
@@ -310,23 +309,8 @@ ComputeMm2 末尾:
                                    CrossCoreWaitFlag(syncC2V2)  ✅
 ```
 
-### 错误示例
-
 ```cpp
-// ❌ 危险：提前 return 跳过了 SetFlag
-void ComputeMm1(...) {
-    if (edgeCase) {
-        return;  // Vec1 的 CrossCoreWaitFlag(syncC1V1) 永久等待 → 死锁！
-    }
-    // ... 正常计算 ...
-    CrossCoreSetFlag(syncC1V1);  // 只有正常路径才执行
-}
-```
-
-### 正确示例
-
-```cpp
-// ✅ 正确：所有路径都 SetFlag
+// ✅ 正确1：所有路径都 SetFlag
 void ComputeMm1(...) {
     if (edgeCase) {
         CrossCoreSetFlag(syncC1V1);  // 提前退出前必须 Set
@@ -337,15 +321,8 @@ void ComputeMm1(...) {
 }
 ```
 
-### 双缓冲 loop 偏移下溢风险
-
-使用双缓冲时，常见 `(loop - 1) % N` 的计算。当 `loop` 为 `uint32_t` 且等于 0 时，`loop - 1` 会下溢为 `UINT32_MAX`，导致错误的 buffer 索引。
-
 ```cpp
-// ❌ 危险：loop=0 时 uint32_t 下溢
-uint32_t inIdx = (info.loop - 1) % preLoadNum;
-
-// ✅ 正确：首次迭代单独处理
+// ✅ 正确2：首次迭代单独处理
 if (info.isFirstIteration) {
     // 使用默认初始值，不读上一轮
 } else {
@@ -353,7 +330,13 @@ if (info.isFirstIteration) {
 }
 ```
 
-### 检视方法
+### 注意事项
+
+1. 本条仅覆盖核间同步（`CrossCore*` API，Cube/Vec 跨核）；核内 `SetFlag`/`WaitFlag` 配对正确性归 KERNEL-10，核内同步 Lock/Unlock 迁移建议归 KERNEL-9
+
+### 专属检视方法
+
+**文档核实（前置）**：`CrossCoreSetFlag`、`CrossCoreWaitFlag`——确认同步配对规则和提前退出风险。
 
 **步骤1 — 定位**：`grep -nE 'CrossCore(Set|Wait)Flag' {file}`，记录行号、flag 变量名与所在函数（核间同步通常分处 Cube/Vec 两侧文件或函数）。
 
@@ -380,7 +363,7 @@ if (info.isFirstIteration) {
 
 核数、UB/Cache 等硬件参数随芯片代际变化，Kernel 侧写死会导致代码不可移植、跨代际运行出错。**代际可变参数禁止写死**；架构不变量（如 DataBlock 32B）也应以具名常量或系统 API 引用，禁止裸数字参与对齐计算。
 
-### 硬件参数定义
+硬件参数分类与判定：
 
 | 类别 | 典型标识符 | 判定 |
 |------|-----------|------|
@@ -426,7 +409,13 @@ if (totalLength > AscendC::GetRuntimeUBSize() / sizeof(half) / 2) {
 uint32_t ubSize = tilingData.ubSize;
 ```
 
-### 检视方法
+### 注意事项
+
+1. 分工边界：本条仅在数值命中硬件规格时报出——Host 侧 platform 参数的获取与校验归 HOST-3/HOST-4；通用裸数字风格问题（数值与任何代际硬件规格无关）归 GEN-4.2
+
+### 专属检视方法
+
+**文档核实（前置）**：系统变量 API（`GetBlockNum`/`GetDataBlockSizeInBytes`/`GetRuntimeUBSize` 等）+ 目标代际硬件规格——确认代际核数/UB/L1/L2 值、GetRuntimeUBSize 等的代际支持范围。
 
 **步骤1 — 候选定位（保召回）**：
 - 名称信号：`grep -inE 'core[_]?num|aic[_]?num|aiv[_]?num|ub[_]?(size|len|bytes)|local.?mem|unified.?buf|block[_]?size|l0[abc]?[_]?size|l1[_]?size|l2[_]?size|cache[_]?size' {file}`
@@ -438,7 +427,7 @@ uint32_t ubSize = tilingData.ubSize;
 **步骤3 — 用途与来源判定（消误报）**：
 - 违规：裸常量/宏直接用作 `pipe.InitBuffer` 大小、blockDim、循环切分边界、对齐计算，且数值命中硬件规格
 - 豁免：值来自 `tilingData.*` 字段读取（概要「TilingData 值域溯源」表佐证）；来自系统 API 返回值；DataBlock 32B 的**具名**常量；`sizeof(T)` 参与的换算
-- 边界排除：Host 侧 platform 参数获取与校验归 HOST-3/HOST-4；通用裸数字风格问题归 GEN-4.2（本条仅在数值命中硬件规格时报出）
+- 边界排除——见「注意事项」第 1 条（勿跨条款误报）
 
 **步骤4 — 意见输出**（FAIL + confidence HIGH）：
 - problem_desc：指明参数类别（核数/UB/Block/Cache）、写死值与目标代际实际值的差异、不可移植影响
@@ -446,28 +435,15 @@ uint32_t ubSize = tilingData.ubSize;
 
 ---
 
-## KERNEL-6: ASCENDC_TPL_ARGS_DECL 禁止包含算子数据类型 `[适用: Kernel]`
-
-> **注意**：`ASCENDC_TPL_DTYPE_DECL` 定义的 **INT 索引类型**（如 INDEX_DTYPE: `TPL_INT32` / `TPL_INT64`）仍允许出现，本条只关注算子**运算数据类型**（fp16/bf16/fp32/int8 等）。
+## KERNEL-6: ASCENDC_TPL_ARGS_DECL 禁止包含算子数据类型
 
 **严重级别**：高
 
-**问题描述**
+### 问题描述
 
 `ASCENDC_TPL_ARGS_DECL` 宏中直接使用 `ASCENDC_TPL_DTYPE_DECL` 或 `ASCENDC_TPL_DATATYPE_DECL` 声明算子数据类型（fp16、bf16、fp32 等），会使得数据类型的枚举值直接暴露为 TilingKey 枚举组合。这违反 TilingKey 不耦合算子语义类型的设计原则。正确做法是将 dtype 差异编码为整型 TilingKey（如 `schMode`），由 Host 侧 `ChooseTilingKey` 统一决策和派发。
 
-**检查点**
-
-| 序号 | 检查项 | 判断依据 |
-|------|--------|---------|
-| 1 | `ASCENDC_TPL_ARGS_DECL` 内是否出现 `ASCENDC_TPL_DTYPE_DECL` | 查找是否声明了 fp16/bf16/fp32 等运算数据类型枚举 |
-| 2 | `ASCENDC_TPL_ARGS_DECL` 内是否出现 `ASCENDC_TPL_DATATYPE_DECL` | 查找是否通过 `C_DT_*` / `ASCENDC_TPL_INPUT(n)` 绑定了输入 dtype |
-| 3 | `ASCENDC_TPL_SEL` 内是否使用 `ASCENDC_TPL_DTYPE_SEL` / `ASCENDC_TPL_DATATYPE_SEL` | 确认选择器未展开数据类型的枚举组合 |
-
-**注意**：以下不视为违规：
-- `ASCENDC_TPL_DTYPE_DECL` 用于 **索引/中间类型**（如 `INDEX_DTYPE: TPL_INT32, TPL_INT64`），属于合理用途
-
-**反例**
+### 错误示例
 
 ```
 optim/apply_rms_prop/op_kernel/arch35/apply_rms_prop_tiling_key.h
@@ -478,24 +454,24 @@ loss/sigmoid_cross_entropy_with_logits/op_kernel/arch35/sigmoid_cross_entropy_wi
 ```
 
 ```cpp
-// 反例1: ASCENDC_TPL_DATATYPE_DECL 直接声明 fp16/fp32/bf16 作为 TilingKey（relu6_tiling_key.h）
+// ❌ 错误1: ASCENDC_TPL_DATATYPE_DECL 直接声明 fp16/fp32/bf16 作为 TilingKey（relu6_tiling_key.h）
 ASCENDC_TPL_ARGS_DECL(Relu6,
     ASCENDC_TPL_DATATYPE_DECL(D_T, C_DT_FLOAT16, C_DT_FLOAT, C_DT_INT32, C_DT_BF16, ASCENDC_TPL_INPUT(0))
 );
 
-// 反例2: ASCENDC_TPL_DTYPE_DECL 直接声明 fp16/bf16/fp32 作为 TilingKey（sigmoid_cross_entropy_with_logits_struct.h）
+// ❌ 错误2: ASCENDC_TPL_DTYPE_DECL 直接声明 fp16/bf16/fp32 作为 TilingKey（sigmoid_cross_entropy_with_logits_struct.h）
 ASCENDC_TPL_ARGS_DECL(SigmoidCrossEntropyWithLogits,
     ASCENDC_TPL_DTYPE_DECL(dType, TPL_FP16, TPL_BF16, TPL_FP32)
 );
 
-// 反例3: ASCENDC_TPL_DATATYPE_DECL 绑定输入0的 dtype（apply_rms_prop_tiling_key.h）
+// ❌ 错误3: ASCENDC_TPL_DATATYPE_DECL 绑定输入0的 dtype（apply_rms_prop_tiling_key.h）
 ASCENDC_TPL_ARGS_DECL(ApplyRmsProp,
     ASCENDC_TPL_DATATYPE_DECL(D_T_X, C_DT_FLOAT, C_DT_FLOAT16, C_DT_BF16, ASCENDC_TPL_INPUT(0)),
     ASCENDC_TPL_UINT_DECL(BUFFER_MODE, 8, ASCENDC_TPL_UI_LIST, 0, 1)
 );
 ```
 
-**正例**
+### 正确示例
 
 ```
 pooling/adaptive_avg_pool2d/op_kernel/arch35/adaptive_avg_pool2d_struct.h
@@ -505,7 +481,7 @@ pooling/adaptive_pool3d_common/op_kernel/arch35/adaptive_pool3d_tiling_struct.h
 ```
 
 ```cpp
-// 正例1: 全部用 ASCENDC_TPL_UINT_DECL 整型编码，无 dtype 声明
+// ✅ 正确1: 全部用 ASCENDC_TPL_UINT_DECL 整型编码，无 dtype 声明
 // （pooling/adaptive_avg_pool2d/op_kernel/arch35/adaptive_avg_pool2d_struct.h）
 #define TPL_INT32_UINT32 0
 #define TPL_INT64_UINT64 1
@@ -519,11 +495,15 @@ ASCENDC_TPL_ARGS_DECL(AdaptiveAvgPool2d,
     ASCENDC_TPL_UINT_DECL(BIG_KERNEL_COPY_MODE, 1, ASCENDC_TPL_UI_LIST, TPL_BIG_KERNEL_NDDMA, TPL_BIG_KERNEL_COPYPAD),
 );
 
-// 正例2: 仅有 ASCENDC_TPL_UINT_DECL，无任何 dtype 声明（max_pool_grad_struct.h）
+// ✅ 正确2: 仅有 ASCENDC_TPL_UINT_DECL，无任何 dtype 声明（max_pool_grad_struct.h）
 // op_kernel/arch35/max_pool_grad_struct.h ✅ 全部用 UINT
 ```
 
-**检视方法**
+### 注意事项
+
+1. 豁免：`ASCENDC_TPL_DTYPE_DECL` 用于**索引/中间类型**（如 `INDEX_DTYPE: TPL_INT32, TPL_INT64`）仍允许出现——本条仅拦截**算子运算数据类型**（fp16/bf16/fp32/int8 等）的声明
+
+### 专属检视方法
 
 ```bash
 # 1. 在 tiling_key 文件中查找 ASCENDC_TPL_DTYPE_DECL 或 ASCENDC_TPL_DATATYPE_DECL
@@ -536,27 +516,21 @@ grep -n "ASCENDC_TPL_DTYPE_DECL\|ASCENDC_TPL_DATATYPE_DECL" op_kernel/**/*tiling
 **逐步检视**：
 1. 在 `tiling_key.h` / `struct.h` 中找到所有 `ASCENDC_TPL_ARGS_DECL` 宏
 2. 检查其参数列表中是否有 `ASCENDC_TPL_DTYPE_DECL(...)` 或 `ASCENDC_TPL_DATATYPE_DECL(...)`
-3. 对命中的条目判断：声明的类型值是否包含 fp16/bf16/fp32/int8 等**算子运算数据类型**——若是则为违规
-4. 排除 `INDEX_DTYPE: TPL_INT32, TPL_INT64` 等索引/中间类型定义（非算子运算数据类型）
+3. 检查 `ASCENDC_TPL_SEL` 中是否使用 `ASCENDC_TPL_DTYPE_SEL` / `ASCENDC_TPL_DATATYPE_SEL`——选择器展开数据类型枚举组合同样违规
+4. 对命中的条目判断：声明的类型值是否包含 fp16/bf16/fp32/int8 等**算子运算数据类型**——若是则为违规
+5. 排除 `INDEX_DTYPE: TPL_INT32, TPL_INT64` 等索引/中间类型定义（豁免见「注意事项」第 1 条）
 
 ---
 
-## KERNEL-7: Kernel 代码禁止使用 TILING_KEY_IS 宏 `[适用: Kernel]`
+## KERNEL-7: Kernel 代码禁止使用 TILING_KEY_IS 宏
 
 **严重级别**：高
 
-**问题描述**
+### 问题描述
 
 Kernel 入口函数（`op_kernel/*.cpp`）中使用 `TILING_KEY_IS(N)` 宏按硬编码的 TilingKey 数值分支选择不同实现路径，直接耦合了 Kernel 实现与具体 TilingKey 值。正确做法是通过模板参数（如 `uint32_t schMode`）利用 `if constexpr` 实现编译期分支派发，Kernel 逻辑不感知 TilingKey 具体数值。
 
-**检查点**
-
-| 序号 | 检查项 | 判断依据 |
-|------|--------|---------|
-| 1 | Kernel `.cpp` 中是否出现 `TILING_KEY_IS(` | 搜索 Kernel 入口函数中的 `TILING_KEY_IS` 调用 |
-| 2 | 是否使用硬编码数值（如 `TILING_KEY_IS(0)`）或宏常量数值（如 `TILING_KEY_IS(800001)`） | 判断是否直接引用了具体 TilingKey 值 |
-
-**反例**
+### 错误示例
 
 ```
 pooling/max_pool_with_argmax/op_kernel/max_pool_with_argmax.cpp
@@ -568,7 +542,7 @@ rnn/single_layer_lstm_grad/op_kernel/single_layer_lstm_grad.cpp
 ```
 
 ```cpp
-// 反例1: 大量硬编码宏常量的 TILING_KEY_IS 分支（max_pool_with_argmax.cpp）
+// ❌ 错误1: 大量硬编码宏常量的 TILING_KEY_IS 分支（max_pool_with_argmax.cpp）
 #define MAX_POOL_WITH_ARGMAX_TILING_KEY_NHWC_BIG_C 800001
 #define MAX_POOL_WITH_ARGMAX_TILING_KEY_NHWC_BIG_C_PAD 800002
 // ...
@@ -585,7 +559,7 @@ __global__ __aicore__ void max_pool_with_argmax(GM_ADDR x, GM_ADDR y, GM_ADDR ar
     // ... 更多 TILING_KEY_IS 分支
 }
 
-// 反例2: 在 Kernel 中使用 TILING_KEY_IS 按硬编码数值分支（quant/flat_quant.cpp）
+// ❌ 错误2: 在 Kernel 中使用 TILING_KEY_IS 按硬编码数值分支（quant/flat_quant.cpp）
 __global__ __aicore__ void flat_quant(...)
 {
     if (TILING_KEY_IS(1)) {                    // ❌
@@ -597,7 +571,7 @@ __global__ __aicore__ void flat_quant(...)
     }
 }
 
-// 反例3: LSTM grad 中大量 TILING_KEY_IS 硬编码组合（rnn/single_layer_lstm_grad.cpp）
+// ❌ 错误3: LSTM grad 中大量 TILING_KEY_IS 硬编码组合（rnn/single_layer_lstm_grad.cpp）
 __global__ __aicore__ void single_layer_lstm_grad(...)
 {
     if (TILING_KEY_IS(0)) {                    // ❌
@@ -607,7 +581,7 @@ __global__ __aicore__ void single_layer_lstm_grad(...)
 }
 ```
 
-**正例**
+### 正确示例
 
 ```
 pooling/max_pool_grad/op_kernel/max_pool_grad.cpp
@@ -618,7 +592,7 @@ conv/conv3d_backprop_input_v2/op_kernel/conv3d_backprop_input_v2.cpp
 ```
 
 ```cpp
-// 正例1: 使用模板参数 + if constexpr 编译期分支（max_pool_grad.cpp）
+// ✅ 正确1: 使用模板参数 + if constexpr 编译期分支（max_pool_grad.cpp）
 // Kernel 通过模板参数 KERNEL_MODE/FORMAT/INDICES_DTYPE 做编译期分支，无 TILING_KEY_IS
 template <
     uint64_t KERNEL_MODE = TPL_SIMT_KERNEL, uint64_t FORMAT = TPL_NCHW_FORMAT,
@@ -636,7 +610,7 @@ __global__ __aicore__ void max_pool_grad(
     }
 }
 
-// 正例2: 模板参数分支，无 TILING_KEY_IS（conv3d_transpose_v2.cpp）
+// ✅ 正确2: 模板参数分支，无 TILING_KEY_IS（conv3d_transpose_v2.cpp）
 __global__ __aicore__ void conv3d_transpose_v2(GM_ADDR x, GM_ADDR filter, GM_ADDR y, ...)
 {
     // ...
@@ -645,7 +619,7 @@ __global__ __aicore__ void conv3d_transpose_v2(GM_ADDR x, GM_ADDR filter, GM_ADD
     }
 }
 
-// 正例3: 模板参数直接传入，无 TILING_KEY_IS（quant_conv3d.cpp）
+// ✅ 正确3: 模板参数直接传入，无 TILING_KEY_IS（quant_conv3d.cpp）
 __global__ __aicore__ void quant_conv3d(GM_ADDR x, GM_ADDR filter, ...)
 {
     // ...
@@ -655,7 +629,11 @@ __global__ __aicore__ void quant_conv3d(GM_ADDR x, GM_ADDR filter, ...)
 }
 ```
 
-**检视方法**
+### 注意事项
+
+1. 豁免：`op_host/` 目录（tiling 侧）允许使用 `TILING_KEY_IS`——本条仅拦截 Kernel 入口函数（`op_kernel/*.cpp`）中的使用
+
+### 专属检视方法
 
 ```bash
 # 1. 在 Kernel 源文件中查找 TILING_KEY_IS
@@ -667,47 +645,21 @@ grep -rn "TILING_KEY_IS(" op_kernel/*.cpp op_kernel/**/*.cpp 2>/dev/null
 
 **逐步检视**：
 1. 在 `op_kernel/` 目录下搜索 `TILING_KEY_IS(` 的所有出现
-2. 排除 `op_host/` 目录下的文件（Host 侧允许使用）
+2. 排除 `op_host/` 目录下的文件——见「注意事项」第 1 条
 3. 检查 Kernel 入口函数是否改用 `if constexpr (schMode == ...)` 基于模板参数编译期分支
 4. 若 Kernel 仅做简单透传无分支，检查模板参数是否为 `uint32_t schMode` 或 `ASCENDC_TPL_KERNEL_TYPE`
 
 ---
 
-## KERNEL-8: Kernel 文件禁止 _apt 后缀 `[适用: Kernel]`
-
-> **排除**：ops-transformer 仓暂不遵守此规则。
+## KERNEL-8: Kernel 文件禁止 _apt 后缀
 
 **严重级别**：高
 
-**问题描述**
+### 问题描述
 
 `op_kernel/` 下的 Kernel 入口文件应使用标准命名 `xxx.cpp`，禁止添加 `_apt` 后缀（如 `xxx_apt.cpp`）。`_apt` 后缀源自 Adaptive Tiling Pattern 的旧写法，现已不推荐使用。Kernel 入口文件命名为 `{op_name}.cpp` 即可，无需额外后缀。
 
-**检查点**
-
-| 序号 | 检查项 | 判断依据 |
-|------|--------|---------|
-| 1 | `op_kernel/` 目录下是否存在 `*_apt.cpp` 文件 | 文件名为违规 |
-
-**正例**
-
-```
-pooling/max_pool_grad/op_kernel/max_pool_grad.cpp
-pooling/avg_pool3_d/op_kernel/avg_pool3_d.cpp
-pooling/max_pool_with_argmax/op_kernel/max_pool_with_argmax.cpp
-pooling/max_pool_grad_with_argmax/op_kernel/max_pool_grad_with_argmax.cpp
-pooling/adaptive_max_pool3d/op_kernel/adaptive_max_pool3d.cpp
-conv/quant_conv3d/op_kernel/quant_conv3d.cpp
-```
-
-```cpp
-// 正例: 标准命名，无需 _apt 后缀
-// pooling/avg_pool3_d/op_kernel/avg_pool3_d.cpp ✅
-// pooling/max_pool_grad/op_kernel/max_pool_grad.cpp ✅
-// pooling/max_pool_with_argmax/op_kernel/max_pool_with_argmax.cpp ✅
-```
-
-**反例**
+### 错误示例
 
 ```
 pooling/avg_pool_v2/op_kernel/avg_pool_v2_apt.cpp
@@ -723,18 +675,40 @@ quant/dynamic_quant_v2/op_kernel/dynamic_quant_v2_apt.cpp
 ```
 
 ```cpp
-// 反例1: 文件名带 _apt 后缀（avg_pool_v2_apt.cpp）❌
+// ❌ 错误1: 文件名带 _apt 后缀（avg_pool_v2_apt.cpp）
 // 文件路径: pooling/avg_pool_v2/op_kernel/avg_pool_v2_apt.cpp
 
-// 反例2: 文件名带 _apt 后缀（avg_pool_apt.cpp）❌
+// ❌ 错误2: 文件名带 _apt 后缀（avg_pool_apt.cpp）
 // 文件路径: pooling/avg_pool/op_kernel/avg_pool_apt.cpp
 
-// 反例3: 文件名带 _apt 后缀（avg_pool3_d_apt.cpp）❌
+// ❌ 错误3: 文件名带 _apt 后缀（avg_pool3_d_apt.cpp）
 // 文件路径: pooling/avg_pool3_d/op_kernel/avg_pool3_d_apt.cpp
 // 注意: 同目录下 avg_pool3_d.cpp 是正例 ✅
 ```
 
-**检视方法**
+### 正确示例
+
+```
+pooling/max_pool_grad/op_kernel/max_pool_grad.cpp
+pooling/avg_pool3_d/op_kernel/avg_pool3_d.cpp
+pooling/max_pool_with_argmax/op_kernel/max_pool_with_argmax.cpp
+pooling/max_pool_grad_with_argmax/op_kernel/max_pool_grad_with_argmax.cpp
+pooling/adaptive_max_pool3d/op_kernel/adaptive_max_pool3d.cpp
+conv/quant_conv3d/op_kernel/quant_conv3d.cpp
+```
+
+```cpp
+// ✅ 正确1: 标准命名，无需 _apt 后缀
+// pooling/avg_pool3_d/op_kernel/avg_pool3_d.cpp ✅
+// pooling/max_pool_grad/op_kernel/max_pool_grad.cpp ✅
+// pooling/max_pool_with_argmax/op_kernel/max_pool_with_argmax.cpp ✅
+```
+
+### 注意事项
+
+1. 排除：ops-transformer 仓暂不遵守此规则——该仓的 `*_apt.cpp` 文件不判违规
+
+### 专属检视方法
 
 ```bash
 # 1. 在 op_kernel 目录下搜索 _apt 后缀文件
@@ -745,12 +719,12 @@ find . -path '*/op_kernel/*_apt.cpp' ! -path '*/tests/*' 2>/dev/null
 
 **逐步检视**：
 1. 在 `op_kernel/` 目录下搜索文件名含 `_apt.cpp` 的文件
-2. 检查文件是否在 ops-transformer 仓中（ops-transformer 暂不适用此规则）
+2. 检查文件是否在 ops-transformer 仓中——见「注意事项」第 1 条
 3. 对非 ops-transformer 的 `_apt.cpp` 文件标记为违规
 
 ---
 
-## KERNEL-9: 核内同步推荐使用 Lock/Unlock，SetFlag/WaitFlag 不推荐使用 `[适用: Kernel]`
+## KERNEL-9: 核内同步推荐使用 Lock/Unlock，SetFlag/WaitFlag 不推荐使用
 
 **严重级别**：中
 
@@ -769,7 +743,7 @@ Ascend 950PR/950DT 起提供 Mutex 机制（`AscendC::Mutex::Lock` / `AscendC::M
 | SetFlag 与 WaitFlag 模板参数/事件 ID 不匹配引发 timeout | 官方约束 |
 | 相同流水+相同 eventID 连续 SetFlag 属未定义行为，再执行 `PipeBarrier<PIPE_ALL>` 会卡死 | 官方约束 |
 
-### 不推荐示例
+### 错误示例
 
 ```cpp
 // ⚠️ 不推荐（仅 950 代际）：核内 MTE2→V 流水同步使用 SetFlag/WaitFlag
@@ -779,7 +753,7 @@ AscendC::WaitFlag<AscendC::HardEvent::MTE2_V>(EVENT_ID0);
 AscendC::Add(zLocal, xLocal, yLocal, TILE_LEN);
 ```
 
-### 推荐示例
+### 正确示例
 
 ```cpp
 // ✅ 950 代际：Mutex 三段流水同步（MTE2 搬入 → V 计算 → MTE3 搬出）
@@ -798,14 +772,16 @@ AscendC::Mutex::Unlock<PIPE_MTE3>(mutexId);
 AscendC::ReleaseMutexID(mutexId);
 ```
 
-### 迁移注意事项（官方约束）
+### 注意事项
 
 1. Lock 与 Unlock 必须严格成对使用，pipe 与 id 完全一致，Unlock 必须在 Lock 之后，否则未定义行为
 2. 相同 id 的 Lock/Unlock 不得嵌套使用（无论 pipe 是否相同）
 3. 相同 id+pipe 的两对连续 Lock/Unlock **不能**实现单流水内指令间同步——单流水内同步使用 `PipeBarrier`
 4. MutexID 管理：TPipe-TQue 框架范式必须通过 `AllocMutexID`/`ReleaseMutexID` 申请释放；静态 Tensor 范式可自行管理（建议使用 0-27，28-31 系统预留）。自行管理时**不得**与 `TPipe`/`TBufPool`/`TQue`/`TQueBind` 的 InitBuffer/AllocTensor/FreeTensor/EnQue/DeQue 等资源管理接口同时使用（MutexID 冲突导致未定义行为）
 
-### 检视方法
+### 专属检视方法
+
+**文档核实（前置）**：`SetFlag/WaitFlag`、`Mutex::Lock/Unlock`——确认目标代际 Lock/Unlock 支持情况与 Mutex 约束。
 
 **步骤1 — 代际确认**：从 API 预研报告/代码概要「芯片架构参数」确认目标代际。非 950 代际 → 本条 PASS，注明「该代际不支持 Lock/Unlock，SetFlag/WaitFlag 可继续使用」。
 
@@ -815,20 +791,18 @@ AscendC::ReleaseMutexID(mutexId);
 
 **步骤4 — 意见输出**（FAIL + confidence HIGH，措辞为建议性）：
 - problem_desc：核内同步使用 SetFlag/WaitFlag（ISASI 类别，不保证跨硬件兼容）；目标代际为 950，已提供 Lock/Unlock，**不推荐继续使用，建议迁移（非强制，存量代码可保留）**
-- fix_suggestion：按推荐示例给出 Lock/Unlock 改写，并提示迁移注意事项 1-4
+- fix_suggestion：按正确示例给出 Lock/Unlock 改写，并提示注意事项 1-4
 - **去重**：若该调用点已由 KERNEL-10 报出 SetFlag/WaitFlag 配对缺陷，本条跳过（整改缺陷时顺带迁移），避免同一位置重复意见
 
 ---
 
-## KERNEL-10: SetFlag/WaitFlag 必须配对对称 `[适用: Kernel]`
+## KERNEL-10: SetFlag/WaitFlag 必须配对对称
 
 **严重级别**：高
 
 ### 问题描述
 
 核内多流水同步（如 MTE2→V、V→MTE3）使用 `SetFlag`/`WaitFlag`（`HardEvent` 模板参数 + eventID）时，二者必须严格配对对称，否则死锁、timeout 或未定义行为。
-
-> **边界**：本条管核内 `SetFlag`/`WaitFlag` 配对**正确性**（全代际）；核间 `CrossCoreSetFlag`/`CrossCoreWaitFlag` 配对归 KERNEL-4；950 代际 Lock/Unlock 迁移建议归 KERNEL-9。
 
 **核心陷阱**：
 
@@ -838,14 +812,6 @@ AscendC::ReleaseMutexID(mutexId);
 | 多事件共用同一 eventID | 同步信号互相覆盖 | ops-transformer PR#8802 |
 | SetFlag 与 WaitFlag 模板参数（HardEvent）/eventID 不匹配 | timeout/死锁 | 官方约束 |
 | 相同流水+相同 eventID 连续 SetFlag | 未定义行为（再执行 `PipeBarrier<PIPE_ALL>` 会卡死） | 官方约束 |
-
-### 核心原则
-
-1. **配对一致**：每个 `WaitFlag<HardEvent, id>` 必须有配对的 `SetFlag<HardEvent, id>`——模板参数与 eventID **完全一致**
-2. **双向路径完备**：任何路径绕过 `SetFlag` 会使 `WaitFlag` 永久阻塞（死锁）；任何路径跳过 `WaitFlag` 会使 event token 永久占用
-3. **eventID 独占**：多个同步事件不得共用同一 eventID（信号互相覆盖）
-4. **禁连续 Set**：相同流水+相同 eventID 禁止连续两次 `SetFlag`（未定义行为）
-5. **（次要）eventID 生命周期**：经 `AllocEventID` 申请的 eventID 须在同步完成后 `ReleaseEventID` 释放
 
 ### 错误示例
 
@@ -880,7 +846,14 @@ AscendC::Add(zLocal, xLocal, yLocal, TILE_LEN);
 GetTPipePtr()->ReleaseEventID<AscendC::HardEvent::MTE2_V>(eventIdMte2ToV);
 ```
 
-### 检视方法
+### 注意事项
+
+1. 分工边界：本条管核内 `SetFlag`/`WaitFlag` 配对**正确性**（全代际）；核间 `CrossCoreSetFlag`/`CrossCoreWaitFlag` 配对归 KERNEL-4；950 代际 Lock/Unlock 迁移建议归 KERNEL-9
+2. eventID 生命周期（次要）：经 `AllocEventID` 申请的 eventID 须在同步完成后 `ReleaseEventID` 释放（对应步骤 3 检查 6）
+
+### 专属检视方法
+
+**文档核实（前置）**：`SetFlag/WaitFlag`——确认 HardEvent 模板参数与 eventID 配对约束、连续 SetFlag 限制。
 
 **步骤1 — 定位**：`grep -nE '\b(SetFlag|WaitFlag)\s*<' {file}`（词边界天然排除 `CrossCoreSetFlag`/`CrossCoreWaitFlag`——核间同步归 KERNEL-4）。
 
@@ -900,7 +873,7 @@ GetTPipePtr()->ReleaseEventID<AscendC::HardEvent::MTE2_V>(eventIdMte2ToV);
 
 ---
 
-## KERNEL-11: 禁止使用 PipeBarrier<PIPE_ALL> `[适用: Kernel]`
+## KERNEL-11: 禁止使用 PipeBarrier<PIPE_ALL>
 
 **严重级别**：中
 
@@ -909,17 +882,6 @@ GetTPipePtr()->ReleaseEventID<AscendC::HardEvent::MTE2_V>(eventIdMte2ToV);
 `PipeBarrier<PIPE_ALL>()` 会阻塞**所有流水线**中所有先前提交的指令，粒度过粗、打断流水并行、影响执行效率。禁止使用；应按依赖关系选择细粒度同步或队列机制。
 
 > **官方约束**（asc-devkit `SIMD-API/basic_api/sync_control/intra_core_sync/PipeBarrier_ISASI.md`）：「`PipeBarrier<PIPE_ALL>()`会等待所有流水线中所有先前提交的接口完成，这会对性能产生影响。若仅阻塞单条流水线即可解决问题，应避免随意调用`PipeBarrier<PIPE_ALL>()`。」
-
-> **边界**：本条管 PIPE_ALL 粒度禁止（其他以 PIPE_ALL 为模板参数的同步调用同此原则）；核内同步 Lock/Unlock 迁移建议归 KERNEL-9；SetFlag/WaitFlag 配对归 KERNEL-10；核间 CrossCore 同步归 KERNEL-4。细粒度（如 `PIPE_V`）冗余 Barrier 属防御性编程，不告警。
-
-### 替代方案
-
-| 同步场景 | 正确做法 |
-|---------|---------|
-| 单流水内指令依赖（如连续 Vector 计算） | `PipeBarrier<PIPE_V>()`；开启 cce-auto-sync 编译选项时由编译器自动插入、950 系列 PIPE_V 间由硬件保序（无需手动） |
-| DataCopy 目的地址重叠（GM） | `PipeBarrier<PIPE_MTE3>()` 串行化搬出流水 |
-| DataCopy 目的地址重叠（UB） | `PipeBarrier<PIPE_MTE2>()` 串行化搬入流水 |
-| 跨流水依赖（MTE2→V、V→MTE3） | EnQue/DeQue 队列同步或 SetFlag/WaitFlag（KERNEL-10）；950 代际可用 Mutex Lock/Unlock（KERNEL-9） |
 
 ### 错误示例
 
@@ -937,6 +899,15 @@ Cast(...);
 
 ### 正确示例
 
+同步场景与替代方案：
+
+| 同步场景 | 正确做法 |
+|---------|---------|
+| 单流水内指令依赖（如连续 Vector 计算） | `PipeBarrier<PIPE_V>()`；开启 cce-auto-sync 编译选项时由编译器自动插入、950 系列 PIPE_V 间由硬件保序（无需手动） |
+| DataCopy 目的地址重叠（GM） | `PipeBarrier<PIPE_MTE3>()` 串行化搬出流水 |
+| DataCopy 目的地址重叠（UB） | `PipeBarrier<PIPE_MTE2>()` 串行化搬入流水 |
+| 跨流水依赖（MTE2→V、V→MTE3） | EnQue/DeQue 队列同步或 SetFlag/WaitFlag（KERNEL-10）；950 代际可用 Mutex Lock/Unlock（KERNEL-9） |
+
 ```cpp
 // ✅ 正确：细粒度同步（单流水内依赖）
 AscendC::Adds<T>(xLocal, xLocal, 1.0f, count);
@@ -949,25 +920,14 @@ inQueueX.EnQue(xLocal);             // 标记就绪
 auto xIn = inQueueX.DeQue<T>();     // 阻塞等待 MTE2 完成
 ```
 
-### 真实检视案例（均被人工采纳）
+### 注意事项
 
-案例1 — ops-transformer PR#0309，`op_kernel/rope_with_sin_cos_cache_f_bf16.h:631`：
+1. 分工边界：本条管 PIPE_ALL 粒度禁止（其他以 PIPE_ALL 为模板参数的同步调用同此原则）；核内同步 Lock/Unlock 迁移建议归 KERNEL-9，SetFlag/WaitFlag 配对归 KERNEL-10，核间 CrossCore 同步归 KERNEL-4
+2. 细粒度豁免：细粒度（如 `PIPE_V`）冗余 Barrier 属防御性编程，不告警
 
-> 评论：「建议此处不要使用 PipeBarrier<PIPE_ALL>()，应该使用 V 等 MTE2 同步指令。否则会打断其它流水，影响执行效率。」
+### 专属检视方法
 
-```cpp
- 631 |     PipeBarrier<PIPE_ALL>();   // ❌ 此处为 local tensor 间复制，只需 PIPE_V/PIPE_MTE2
-```
-
-案例2 — ops-math PR#3019，`op_kernel/*.h:268`：
-
-> 评论：「PipeBarrier<PIPE_ALL> 同步冗余，会影响流水」
-
-```cpp
- 268 |     PipeBarrier<PIPE_ALL>();   // ❌ DataCopyPad 后接 Cast，只需 MTE2→V 同步
-```
-
-### 检视方法
+**文档核实（前置）**：`PipeBarrier`（PIPE_ALL）——确认 PIPE_ALL 性能约束与各流水类型（PIPE_V/PIPE_MTE2/PIPE_MTE3）适用场景。
 
 **步骤1 — 定位**：`grep -n 'PIPE_ALL' {file}`，命中即存在 PIPE_ALL 粒度同步（以 `PipeBarrier<PIPE_ALL>()` 为主要形态）。
 
@@ -977,11 +937,11 @@ auto xIn = inQueueX.DeQue<T>();     // 阻塞等待 MTE2 完成
 
 **步骤4 — 意见输出**（FAIL + confidence HIGH）：
 - problem_desc：使用 `PipeBarrier<PIPE_ALL>()` 阻塞所有流水（官方文档明示性能影响，应避免），打断流水并行、影响执行效率
-- fix_suggestion：按替代方案表改写——单流水内依赖用细粒度 PipeBarrier（PIPE_V/PIPE_MTE2/PIPE_MTE3），跨流水依赖用 EnQue/DeQue 队列同步或事件/互斥锁同步
+- fix_suggestion：按正确示例中的替代方案表改写——单流水内依赖用细粒度 PipeBarrier（PIPE_V/PIPE_MTE2/PIPE_MTE3），跨流水依赖用 EnQue/DeQue 队列同步或事件/互斥锁同步
 
 ---
 
-## KERNEL-12: 禁止使用 __VEC_SCOPE__，VF 任务必须以具名 VF 函数（__simd_vf__/__simt_vf__）+ asc_vf_call 实现 `[适用: Kernel]`
+## KERNEL-12: 禁止使用 __VEC_SCOPE__，VF 任务必须以具名 VF 函数（__simd_vf__/__simt_vf__）+ asc_vf_call 实现
 
 **严重级别**：高
 
@@ -1040,31 +1000,15 @@ __global__ __vector__ void add_custom(__gm__ float* x, __gm__ float* y, __gm__ f
 }
 ```
 
-### 真实检视案例
-
-案例1（ops-transformer PR#2725）：
-
-> 评论：「【严重】__VEC_SCOPE__ 当前已经不用了，需要整改」
-
-案例2（ops-transformer PR#3124）：
-
-> 评论：【一般】VF要整改，不能使用"  __VEC_SCOPE__"
-
-案例3（ops-transformer PR#5291）：
-
-> 评论：「VF函数建议统一使用 __simd_vf__ 实现」——作者回复：「将于下一笔PR整改」
-
-案例4（ops-transformer PR#7092）：
-
-> 评论：「建议：__VEC_SCOPE__ 替换为 __simd_vf__ 会比较符合现在的编程方式？」
-
 ### 注意事项
 
 1. VF 函数约束（官方）：返回类型必须为 void；入参仅支持内置数据类型及其指针（指针必须指向 GM 或 UB，用 `__gm__`/`__ubuf__` 修饰）
 2. `__launch_bounds__(N)` 可在 VF 入口函数上配置启动线程上限（N ∈ [1, 2048]），建议与启动时 dim3 线程数一致
 3. 线程级 VF（`__simt_vf__`）内只能调用 `__simt_callee__`/`__callee__` 函数；向量级 VF（`__simd_vf__`）内只能调用 `__simd_callee__`/`__callee__` 函数
 
-### 检视方法
+### 专属检视方法
+
+**文档核实（前置）**：`__VEC_SCOPE__`、`__simd_vf__`/`__simt_vf__`、`asc_vf_call`——确认目标代际 VF 限定符与 asc_vf_call 签名约束。
 
 **步骤1 — 定位**：`grep -n "__VEC_SCOPE__" {file}`，命中即存在旧写法。
 
@@ -1074,11 +1018,9 @@ __global__ __vector__ void add_custom(__gm__ float* x, __gm__ float* y, __gm__ f
 - problem_desc：使用 __VEC_SCOPE__ 内联旧写法实现 VF 任务，现行官方文档已淘汰该机制
 - fix_suggestion：按正确示例将计算体提取为具名 VF 函数（__simd_vf__/__simt_vf__），并通过 asc_vf_call 启动；VF 函数约束见注意事项
 
-**步骤4 — 前置核实**：检视时通过 `/ascendc-docs-search` 核实目标代际的 VF 限定符与 asc_vf_call 签名（见本文件「检视前置要求」）。
-
 ---
 
-## KERNEL-13: 向量级 VF 函数实现内部禁止使用 if 分支判断 `[适用: Kernel]`
+## KERNEL-13: 向量级 VF 函数实现内部禁止使用 if 分支判断
 
 **严重级别**：高
 
@@ -1149,21 +1091,6 @@ else      { asc_vf_call<XxxVFOther>(dim3{N, 1, 1}, buf, n); }
 // ✅ 3. 数据级分支改为无分支计算（掩码/极值运算等，视算法而定）
 ```
 
-### 真实检视案例
-
-案例1（ops-nn PR#2847）：
-
-> 评论：「vec_scope里面有ifelse会无法生成硬件循环」
-
-案例2（ops-nn PR#4803）：
-
-> 评论：「vf里的if操作严重影响性能，直接改成for循环即可」
-> 评论：「建议VF内部不要使用if操作指令，会引入cmp指令，严重影响性能」
-
-案例3（ops-math PR#2868）：
-
-> 评论：「这个为啥拆开了，vf里面不支持写if判断」
-
 ### 注意事项
 
 1. `if constexpr` 是 VF 模板函数类型分发的标准写法（编译期展开，不生成运行时 cmp），豁免——真实代码中广泛使用且未被检视批评
@@ -1171,7 +1098,9 @@ else      { asc_vf_call<XxxVFOther>(dim3{N, 1, 1}, buf, n); }
 3. 与 KERNEL-12 联动：旧 `__VEC_SCOPE__` 写法整体由 KERNEL-12 报；本条只管具名 VF 函数（及 callee）实现内部
 4. 本条依据社区检视共识与代码生成机理（官方 API 文档未显式约束），检视时结合 `/ascendc-docs-search` 确认目标代际编译器行为
 
-### 检视方法
+### 专属检视方法
+
+**文档核实（前置）**：向量级 VF（`__simd_vf__`）体内分支（if/switch/?:）——确认目标代际 VF 分支与硬件循环生成约束（仅 `__simd_vf__`，`__simt_vf__` 豁免）。
 
 **步骤1 — 定位 VF 实现范围**：`grep -n "__simd_vf__" {file}` 找**向量级** VF 函数起始行，按大括号配对确定函数体范围，并追踪其调用的 callee（`__simd_callee__`/`__callee__`）；`__simt_vf__`（线程级）及其 callee 不在本条范围（豁免）。
 

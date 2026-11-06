@@ -71,12 +71,12 @@ def _read_text(path: Path) -> str:
 
 INDEX_TABLE_RE_4COL = re.compile(
     r'\|\s*(RB-[\d.]+|SEC-[\d.]+|API-[\d.]+|PERF-[\d.]+|TOPK-[\d.]+|SIMT-[\d.]+'
-    r'|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+|HOST-[\d.]+|RED-[\d.]+)'
+    r'|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+|HOST-[\d.]+|RED-[\d.]+|KERNEL-[\d.]+)'
     r'\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|'
 )
 INDEX_TABLE_RE_3COL = re.compile(
     r'\|\s*(RB-[\d.]+|SEC-[\d.]+|API-[\d.]+|PERF-[\d.]+|TOPK-[\d.]+|SIMT-[\d.]+'
-    r'|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+|HOST-[\d.]+|RED-[\d.]+)'
+    r'|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+|HOST-[\d.]+|RED-[\d.]+|KERNEL-[\d.]+)'
     r'\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|'
 )
 SIDE_TAG_RE = re.compile(r'\[适用:\s*(All|Kernel|Tiling|Host)\]')
@@ -95,6 +95,9 @@ CATEGORY_PRIORITY = {
     '变量': 5, '编码规范': 5, '代码风格': 6, 'LOG API 规范': 6,
     '调试与隐私': 3, '文件操作': 3, '序列化': 3, '异常处理': 3,
     '命名': 6, '格式': 6, '注释': 6, 'API合规': 2,
+    '内存管理': 2, 'API限制': 2, 'API黑名单': 2,
+    '核间同步': 3, '核内同步': 3, 'TilingKey注册': 3, 'Kernel派发': 3,
+    '命名规范': 6,
 }
 
 # === 误报排除规则（数据来源：docs/reports/false_positive_analysis.md + docs/custom.md） ===

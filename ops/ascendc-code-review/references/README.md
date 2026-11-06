@@ -2,6 +2,8 @@
 
 > **声明**：本表**仅供人读**，用于快速了解全部规则文件的分类与定位。机器路由（规则加载、侧别过滤、触发匹配）依赖各规则文件自身的「适用」声明头，**不依赖本表**。任何检视流程不得以「确认文件清单」为由读取本表；主题文件清单以各文件 `<适用>` 声明为准，本概览仅导航不参与判定。新增或修改规则文件时须同步更新本表（见 `docs/architecture.md` 5.1 节）。
 >
+> 最后更新：2026-11-05（ascendc-kernel-rules.md 按写作规范整改骨架层：适用声明头加围栏并按门序重排，删 适用场景/介绍 装饰字段及头后游离块引（合并说明保留于本表 changelog）；触发机制由关键词触发（原 22 个，含 DataCopyPad/CrossCoreSetFlag/CrossCoreWaitFlag 三个被遮蔽项）改为 必须触发（C++/Kernel 侧别即无条件纳入），本表该行触发机制列与特殊机制注记同步；拆解两个顶层模板外章节——检视检查清单删除（被快速索引与条款正文覆盖，且原漏列 KERNEL-6/7/8）、检视前置要求之 API 查阅表 10 行以「文档核实（前置）」分发进对应条款专属检视方法（文件级指令由 clause-review 承载）；13 处 检视方法 统一改名 专属检视方法（补 CLS-5 hook）；快速索引 KERNEL-4/12/13 名称对齐正文标题全称；deterministic_routing.py 白名单补 KERNEL- 前缀、8 个自造类别登记 CATEGORY_PRIORITY（内存管理/API限制/API黑名单/核间同步/核内同步/TilingKey注册/Kernel派发/命名规范），基准恢复 13 条款可见；条款正文 CLS 整改（KERNEL-6/7/8 粗体重构、示例命名统一、模板外子章节拆解、KERNEL-3 补示例等）留待后续独立任务）
+>
 > 最后更新：2026-11-05（ascendc-red-line.md 修复评测用例 4 漏列 Host 侧 RED-8 的枚举缺失：快速索引由「分组子标题+三张子表」改为规范单表 10 行×5 列——[适用: X] 随行标注、规范名称统一为正文标题全称，侧别信息随行不再依赖组标题；适用声明头清理（删 适用场景/介绍/类别(All/Host/Kernel) 装饰字段及 TOPK 残留说明行，按门序重排并加围栏包裹）；deterministic_routing.py 索引前缀白名单补 RED-，基准路由恢复 red-line 10 条款可见（7 All/1 Host/2 Kernel）；RED-2 标题层级异常（####）与条款正文 CLS 整改留待后续独立任务）
 >
 > 最后更新：2026-11-05（ascendc-host-rules.md 立为规则集标杆样例：适用声明头精简为 5 个路由字段并按决策门序重排（语言/侧别/默认启用/领域/触发，环境门与内容门空行分组），删除装饰字段 适用场景 与 介绍；触发机制由关键词触发（9 个）改为 必须触发（C++/Host 侧别即无条件纳入），总表该行触发机制列与特殊机制注记同步（注记行补齐 ascendc-error-code.md 存量漏列并新增 ascendc-host-rules.md）；配套修复 evals/reviewer_bench/scripts/deterministic_routing.py 对 必须触发 保留值的特判缺失——match_references 命中该保留值时跳过关键词命中检查，5 个 必须触发 规则文件在基准路由中由被丢弃恢复为正常纳入）
@@ -35,7 +37,7 @@
 | 9 | ascendc-topk.md | 高频问题清单 | TOPK | C++ | All | 必须触发（无条件启用，不参与内容筛查） | 单波单文件，**最高优先级** | 14 | 检视实践中高频风险点（野指针/特殊值/返回值校验/atomic 清零等） |
 | 10 | [mc2-specific.md](mc2-specific.md) | 领域总览 | MC2 | 不限 | All | 主题文件按关键词或已确认关联关系选规 | 总览不派发；主题文件见下表 | 41（主题文件合计） | MC2 适用范围、主题文件及条款导航 |
 | 11 | ascendc-simt.md | 领域专项 | SIMT | C++ | Kernel | 关键词触发（Simt、simt_api/asc_simt.h） | 单波单文件 | 15 | SIMT API C 风格转换规则（Simt::GetThreadNum→blockDim.x、VF_CALL→asc_vf_call 等 15 条 API 转换），含检视前置要求（先经 /ascendc-docs-search 查 SIMT 头文件核实转换规则）与执行流程（头文件位置/变量名冲突/参数传递/启动方式/UB 使用/线程数/VF 调用检视步骤，吸收原 simt-constraints.md 约束清单），由 simt-api-analysis.md + simt-constraints.md 合并 |
-| 12 | ascendc-kernel-rules.md | AscendC Kernel编码 | KERNEL | C++ | Kernel | 关键词触发（AscendC::、DataCopy、EnQue、TILING_KEY_IS 等 22 个） | 单波单文件 | 13 | Kernel 侧编码规范（KERNEL-1~5 API 使用与硬件约定 + 6~8 TilingKey注册/派发/命名 + 9 核内同步推荐 Lock/Unlock + 10 SetFlag/WaitFlag 配对 + 11 禁 PipeBarrier<PIPE_ALL> + 12 禁 __VEC_SCOPE__ 用具名 VF 函数+asc_vf_call + 13 VF 内禁 if 分支），由 api+perf+op-conventions 合并 |
+| 12 | ascendc-kernel-rules.md | AscendC Kernel编码 | KERNEL | C++ | Kernel | 必须触发（无条件启用，不参与内容筛查） | 单波单文件 | 13 | Kernel 侧编码规范（KERNEL-1~5 API 使用与硬件约定 + 6~8 TilingKey注册/派发/命名 + 9 核内同步推荐 Lock/Unlock + 10 SetFlag/WaitFlag 配对 + 11 禁 PipeBarrier<PIPE_ALL> + 12 禁 __VEC_SCOPE__ 用具名 VF 函数+asc_vf_call + 13 VF 内禁 if 分支），由 api+perf+op-conventions 合并 |
 | 13 | blaze-specific.md | 领域专项 | BLAZE | C++ | Host, Kernel | 关键词触发（blaze/、Blaze::、GemmUniversal、BlockMmad 等 14 个） | 单波单文件 | 21 | Blaze 矩阵乘框架（ops-tensor）：架构分层/核心类模板参数兼容/策略注册与声明头-聚合头约定/编码约束（高阶API禁令、头文件路径与自包含、tile 转发头与 arch35 约定、名称空间、架构宏统一、Params 结构）/命名规范/Tile 层接口风格统一与对外接口严格控制/AIC-AIV Mix 同步（含核类型守卫）/交付件完整性，有 `排除场景` 声明（third_party、纯构建、纯脚本改动排除） |
 
 ## MC2 主题文件
@@ -55,7 +57,7 @@
 |------|---------|
 | ascendc-red-line.md / ascendc-topk.md | 最高优先级规则文件，无条件激活 |
 | cpp-style.md | 专项组（组名 style），全文 Read，结果以 yaml `category: style` 字段输出（无文本前缀），不走假设检验，违反计入报告问题数（severity 取条款声明） |
-| cpp-secure.md / ascendc-red-line.md / ascendc-topk.md / ascendc-error-code.md / ascendc-host-rules.md | `触发: 必须触发` = 不依赖代码命中关键词，无条件激活（文件级匹配即纳入） |
+| cpp-secure.md / ascendc-red-line.md / ascendc-topk.md / ascendc-error-code.md / ascendc-host-rules.md / ascendc-kernel-rules.md | `触发: 必须触发` = 不依赖代码命中关键词，无条件激活（文件级匹配即纳入） |
 | mc2-specific.md | 总览提供主题导航；四份主题文件声明适用与排除条件，plan-design Step 3 按关键词或已确认的调用、注册、构建关系选规 |
 
 ## 维护说明
