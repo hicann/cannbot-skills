@@ -460,9 +460,30 @@ class InspectHardwareInfoTest(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("hbm used(MB) 必须是有限非负数", result.stderr)
 
-    def test_empty_string_is_reported(self):
+    def test_chip_info_query_fallback_may_be_empty(self):
         records = self.copied_records()
         records[1]["chip info"] = ""
+        result = self.inspect_records(records)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        device = next(
+            category
+            for category in output["categories"]
+            if category["name"] == "Device Info"
+        )
+        values = {field["name"]: field["value"] for field in device["fields"]}
+        self.assertEqual(values["chip info"], "")
+
+    def test_other_string_fields_still_reject_empty_values(self):
+        records = self.copied_records()
+        records[1]["arch info"] = ""
+        result = self.inspect_records(records)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("arch info 不能为空", result.stderr)
+
+    def test_whitespace_only_chip_info_is_reported(self):
+        records = self.copied_records()
+        records[1]["chip info"] = "   "
         result = self.inspect_records(records)
         self.assertEqual(result.returncode, 2)
         self.assertIn("chip info 不能为空", result.stderr)

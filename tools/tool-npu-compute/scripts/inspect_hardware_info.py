@@ -77,7 +77,10 @@ def validate_type(category, field, value):
     if json_type == "string":
         if not isinstance(value, str):
             raise InspectionError(f"{category}.{name} 类型应为 string")
-        if not value.strip():
+        allow_empty_chip_info = (
+            category == "Device Info" and name == "chip info" and value == ""
+        )
+        if not value.strip() and not allow_empty_chip_info:
             raise InspectionError(f"{category}.{name} 不能为空")
         return
 
