@@ -127,3 +127,5 @@ cannbot-skills/
 ## 详细规范
 
 详见 [开发规范总集](docs/STANDARDS.md)
+
+> torch.compile 图模式插件 `torch-compile` 的编排、Agent、Hook 和安装入口已迁至 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/torch-compile)；7 个基础 Skill 保持原名，继续在本仓 `graph/` 维护。

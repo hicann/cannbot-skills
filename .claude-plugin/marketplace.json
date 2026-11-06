@@ -467,28 +467,6 @@
       ]
     },
     {
-      "name": "torch-compile",
-      "source": "./plugins-official/torch-compile",
-      "description": "PyTorch torch.compile 图模式编排入口。通过 Subagent 组织不同图模式，当前提供 npugraph_ex 配置、迁移、自定义算子入图和问题诊断。",
-      "version": "1.0.4",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "torch",
-        "torch.compile",
-        "torchair",
-        "npugraph_ex",
-        "npu",
-        "graph-mode",
-        "subagent"
-      ],
-      "category": "development",
-      "dependencies": [
-        "torch-npugraph-ex-skills"
-      ]
-    },
-    {
       "name": "tilelang-op-orchestrator",
       "source": "./plugins-official/tilelang-op-orchestrator",
       "description": "TileLang 算子开发统一入口：本机芯片识别后进入独立 Ascend910 或 Ascend950 工作流。",

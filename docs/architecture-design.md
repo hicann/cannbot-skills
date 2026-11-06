@@ -17,7 +17,6 @@ cannbot-skills/
 ├── plugins-official/                # 官方应用 Plugins
 │   ├── ops-registry-invoke/         # AscendC 算子注册调用开发
 │   ├── pypto-op-orchestrator/       # PyPTO 算子开发
-│   ├── torch-compile/               # torch.compile 图模式
 │   └── tilelang-op-orchestrator/    # TileLang 算子开发
 ├── plugins-community/               # 社区 Plugins
 │   ├── install-helper/              # CANNBot Install Helper 工具
@@ -215,7 +214,7 @@ cannbot-skills/
 
 ### torch.compile 图模式
 
-`torch-compile` 插件编排 npugraph_ex 图捕获与重放流程。Skills（`torch-npugraph-ex-knowledge`、`torch-npugraph-ex-dfx-triage`、`torch-custom-ops-guide` 等）位于 `graph/` 目录，覆盖知识、诊断、模板全链路。详见插件目录下的 `AGENTS.md`。
+`torch-compile` 的编排入口、Agent、Hook、安装脚本与评测由 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/torch-compile) 维护。本仓 `graph/` 保留全部 7 个基础 Skills（`torch-npugraph-ex-knowledge`、`torch-npugraph-ex-dfx-triage`、`torch-custom-ops-guide` 等），名称和内容保持不变，可独立安装；应用仓通过 `plugin-sources.json` 引用这些 Skills。
 
 ### NPU 模型推理优化
 

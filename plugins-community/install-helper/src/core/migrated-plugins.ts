@@ -16,6 +16,18 @@ import type { PluginEntry } from "../types/index.js";
 // these entries do not download source or provide missing plugin assets.
 export const MIGRATED_PLUGINS: PluginEntry[] = [
   {
+    id: "torch-compile",
+    dir: "",
+    displayName: "torch.compile 图模式",
+    script: "cannbot",
+    aliases: ["torch", "compile", "graph"],
+    skills: 7,
+    agents: 1,
+    version: "1.0.4",
+    description: "PyTorch npugraph_ex 图模式编排；已迁移至 cannbot 仓，经托管安装器安装（仅 project 级）",
+    source: "cannbot",
+  },
+  {
     id: "ops-perf-optimize",
     dir: "",
     displayName: "算子性能调优",

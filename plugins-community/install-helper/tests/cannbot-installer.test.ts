@@ -199,7 +199,7 @@ describe("cannbot-installer", () => {
   });
 
   it("findPlugin resolves same-name legacy ids via --source skills semantics", async () => {
-    createFakeInstaller(testDir, "torch-compile");
+    createFakeInstaller(testDir, "pypto-op-orchestrator");
     process.env.CANNBOT_INSTALLER_PATH = testDir;
 
     const { ensureCannbotDiscovery } = await import("../src/core/cannbot-installer.js");
@@ -208,11 +208,11 @@ describe("cannbot-installer", () => {
     await ensureCannbotDiscovery();
 
     // cannbot wins for the same name
-    const cannbotFirst = findPlugin("torch-compile");
+    const cannbotFirst = findPlugin("pypto-op-orchestrator");
     expect(cannbotFirst?.source).toBe("cannbot");
 
     // explicit skills source falls back to the legacy registry entry
-    const legacy = findPlugin("torch-compile", { source: "skills" });
+    const legacy = findPlugin("pypto-op-orchestrator", { source: "skills" });
     expect(legacy?.source).toBeUndefined();
     expect(legacy?.dir).toContain("plugins-official");
 
@@ -231,7 +231,7 @@ describe("cannbot-installer", () => {
     const ok = await ensureCannbotDiscovery();
     expect(ok).toBe(false);
 
-    const plugin = findPlugin("torch-compile");
+    const plugin = findPlugin("pypto-op-orchestrator");
     expect(plugin?.source).toBeUndefined();
     expect(plugin?.dir).toContain("plugins-official");
   });

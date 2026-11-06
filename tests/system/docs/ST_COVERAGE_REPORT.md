@@ -186,7 +186,7 @@
 | ops-registry-invoke | 13 | √ |   | √ | √ | √ |
 | pypto-op-orchestrator | 3 | √ |   | √ |   | √ |
 | tilelang-op-orchestrator | 3 | √ |   | √ |   | √ |
-| torch-compile | 1 |   |   | √ |   | √ |
+| torch-compile（已迁至 cannbot，见应用仓安装测试） | 1 |   |   | √ |   | √ |
 | triton-op-generator | 0 |   |   |   |   |   |
 
 ### plugins-community/（8 Teams，共 0 个用例）

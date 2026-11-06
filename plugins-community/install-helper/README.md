@@ -246,11 +246,12 @@ Codex 的安装布局与其他工具不同（与其插件 `init.sh` 保持一致
 - **AGENTS.md**：项目根 + `.codex/AGENTS.md`
 
 ```bash
-install-helper install torch-compile --tool codex        # 项目级
-install-helper install torch-compile --tool codex --level global  # 全局
+install-helper install torch-compile --tool codex        # 迁移至 cannbot，仅项目级
 ```
 
-> 注意：插件必须自带 `agents/codex/*.toml` 适配文件才能安装 agent；仅提供 init.sh 且未适配 codex 的社区插件会被明确拦截（避免误装到默认目录）。
+`torch-compile` 已迁移至 [cannbot](https://gitcode.com/cann/cannbot/tree/master/plugins-official/torch-compile)，由其统一安装器生成 Codex Agent TOML，并引用本仓 `graph/` 的 7 个共享 Skills；不再使用本仓的旧插件安装逻辑。新插件发布前可在 cannbot 源码目录执行 `bash plugins-official/torch-compile/init.sh project codex <目标项目> --skills <本地 cannbot-skills 路径>`，已发布的旧 npm 包不包含本次迁移。
+
+> 注意：对于仍由本仓安装器处理的插件，插件必须自带 `agents/codex/*.toml` 适配文件才能安装 agent；仅提供 init.sh 且未适配 codex 的社区插件会被明确拦截（避免误装到默认目录）。
 
 ## 开发
 

@@ -2,7 +2,7 @@
 // Copyright (c) 2026 Huawei Technologies Co., Ltd.
 // This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 // CANN Open Software License Agreement Version 2.0 (the "License").
-// Please refer to the License for details. You should not use this file except in compliance with the License.
+// Please refer to the License for details. You may not use this file except in compliance with the License.
 // THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
 // INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
 // See LICENSE in the root of the software repository for the full text of the License.
@@ -76,24 +76,26 @@ function cannbotPluginEntry(id: string): PluginEntry {
 }
 
 /** Creates a minimal skills-repo checkout holding a local copy of
- *  torch-compile: one graph skill, the agent and the AGENTS.md referenced by
- *  the embedded registry entry (the other graph/ installSkills sources are
+ *  pypto-op-orchestrator: one reusable skill, the agent and the AGENTS.md referenced by
+ *  the embedded registry entry (the other ops/ installSkills sources are
  *  intentionally absent — a frozen snapshot may lag behind the cannbot
  *  release). */
 function makeLocalSkillsRepo(): string {
   const repo = join(testDir, "skills-repo");
-  mkdirSync(join(repo, "graph", "torch-npugraph-ex-knowledge"), { recursive: true });
+  mkdirSync(join(repo, "ops", "pypto-op-knowledge"), { recursive: true });
   writeFileSync(
-    join(repo, "graph", "torch-npugraph-ex-knowledge", "SKILL.md"),
-    "---\nname: torch-npugraph-ex-knowledge\ndescription: frozen local copy\n---\n# frozen local copy\n"
+    join(repo, "ops", "pypto-op-knowledge", "SKILL.md"),
+    "---\nname: pypto-op-knowledge\ndescription: frozen local copy\n---\n# frozen local copy\n"
   );
-  const pluginDir = join(repo, "plugins-official", "torch-compile");
+  const pluginDir = join(repo, "plugins-official", "pypto-op-orchestrator");
   mkdirSync(join(pluginDir, "agents"), { recursive: true });
+  // An existing offline dependency directory prevents a network clone.
+  mkdirSync(join(pluginDir, "pypto"), { recursive: true });
   writeFileSync(
-    join(pluginDir, "agents", "torch-npugraph-ex.md"),
-    "---\nname: torch-npugraph-ex\ndescription: agent\n---\nbody\n"
+    join(pluginDir, "agents", "pypto-op-planner.md"),
+    "---\nname: pypto-op-planner\ndescription: agent\n---\nbody\n"
   );
-  writeFileSync(join(pluginDir, "AGENTS.md"), "# torch-compile local instructions\n");
+  writeFileSync(join(pluginDir, "AGENTS.md"), "# pypto-op-orchestrator local instructions\n");
   return repo;
 }
 
@@ -479,7 +481,7 @@ process.exit(0);
   it("installPluginRouted falls back to the local legacy entry when the tool is outside the delegation matrix", async () => {
     // qoder is not declared by the installed (fake) installer: an implicit cannbot-first resolution
     // must fall back to the local copy and produce the legacy layout
-    useFakeInstaller("torch-compile");
+    useFakeInstaller("pypto-op-orchestrator");
     const repo = makeLocalSkillsRepo();
     const target = join(testDir, "fallback-qoder-project");
     mkdirSync(target, { recursive: true });
@@ -487,13 +489,13 @@ process.exit(0);
 
     const { installPluginRouted } = await import("../src/core/cannbot-delegate.js");
     const result = await installPluginRouted({
-      pluginId: "torch-compile",
+      pluginId: "pypto-op-orchestrator",
       tool: "qoder",
       level: "project",
       repoPath: repo,
       installPath: target,
       yes: true,
-      plugin: cannbotPluginEntry("torch-compile"),
+      plugin: cannbotPluginEntry("pypto-op-orchestrator"),
     });
 
     expect(result.errors).toEqual([]);
@@ -501,8 +503,8 @@ process.exit(0);
     expect(result.skillsCount).toBe(1);
     expect(result.agentsCount).toBe(1);
     // legacy qoder layout: skills under .qoder/skills, agents as real copies
-    expect(existsSync(join(target, ".qoder", "skills", "torch-npugraph-ex-knowledge", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(target, ".qoder", "agents", "torch-npugraph-ex.md"))).toBe(true);
+    expect(existsSync(join(target, ".qoder", "skills", "pypto-op-knowledge", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(target, ".qoder", "agents", "pypto-op-planner.md"))).toBe(true);
     // legacy project-root instructions file, no cannbot registry artifacts
     expect(existsSync(join(target, "AGENTS.md"))).toBe(true);
     expect(existsSync(join(target, ".qoder", "cannbot-plugin.json"))).toBe(false);
@@ -515,22 +517,22 @@ process.exit(0);
     // upstream delegation is project-only: a global-level request for a
     // cannbot-resolved plugin falls back to the local copy and installs into
     // the legacy global skills root (~/.config/opencode/skills)
-    useFakeInstaller("torch-compile");
+    useFakeInstaller("pypto-op-orchestrator");
     const repo = makeLocalSkillsRepo();
 
     const { installPluginRouted } = await import("../src/core/cannbot-delegate.js");
     const result = await installPluginRouted({
-      pluginId: "torch-compile",
+      pluginId: "pypto-op-orchestrator",
       tool: "opencode",
       level: "global",
       repoPath: repo,
       yes: true,
-      plugin: cannbotPluginEntry("torch-compile"),
+      plugin: cannbotPluginEntry("pypto-op-orchestrator"),
     });
 
     expect(result.errors).toEqual([]);
     expect(result.success).toBe(true);
-    expect(existsSync(join(sandboxHome, ".config", "opencode", "skills", "torch-npugraph-ex-knowledge", "SKILL.md"))).toBe(true);
+    expect(existsSync(join(sandboxHome, ".config", "opencode", "skills", "pypto-op-knowledge", "SKILL.md"))).toBe(true);
     expect(existsSync(join(sandboxHome, ".config", "opencode", "AGENTS.md"))).toBe(true);
     // the fallback warning carries the level-boundary reason
     expect(result.warnings.join(" ")).toContain("仅支持 project 级安装");
@@ -540,20 +542,20 @@ process.exit(0);
   it("explicit --source cannbot keeps the hard error for unsupported tools", async () => {
     // even with a local copy available, an explicit --source cannbot must
     // not silently downgrade to it — the boundary error stays final
-    useFakeInstaller("torch-compile");
+    useFakeInstaller("pypto-op-orchestrator");
     makeLocalSkillsRepo();
     const target = join(testDir, "explicit-cannbot-qoder");
     mkdirSync(target, { recursive: true });
 
     const { installPluginRouted } = await import("../src/core/cannbot-delegate.js");
     const result = await installPluginRouted({
-      pluginId: "torch-compile",
+      pluginId: "pypto-op-orchestrator",
       tool: "qoder",
       level: "project",
       repoPath: join(testDir, "skills-repo"),
       installPath: target,
       source: "cannbot",
-      plugin: cannbotPluginEntry("torch-compile"),
+      plugin: cannbotPluginEntry("pypto-op-orchestrator"),
     });
 
     expect(result.success).toBe(false);

@@ -32,11 +32,10 @@ import {
   type ChildProcess,
 } from "child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "fs";
-import { join, resolve } from "path";
+import { join } from "path";
 import { tmpdir } from "os";
 
 const PKG_DIR = join(__dirname, "..");
-const REPO_ROOT = resolve(join(PKG_DIR, "..", ".."));
 const CLI_PATH = join(PKG_DIR, "dist", "index.js");
 const SRC_DIR = join(PKG_DIR, "src");
 const LOCALES_DIR = join(PKG_DIR, "src", "locales");
@@ -226,10 +225,21 @@ function makeProject(tag: string): TestProject {
   mkdirSync(home, { recursive: true });
   mkdirSync(join(project, ".opencode"), { recursive: true });
   writeFileSync(join(project, "AGENTS.md"), "# User config\nKeep me safe.\n");
+  // Keep legacy config-file protection independent of plugins migrated to cannbot.
+  const repo = join(sandbox, "skills-repo");
+  const plugin = join(repo, "plugins-official", "pypto-op-orchestrator");
+  mkdirSync(join(repo, ".git"), { recursive: true });
+  mkdirSync(join(repo, "ops", "pypto-op-knowledge"), { recursive: true });
+  writeFileSync(join(repo, "ops", "pypto-op-knowledge", "SKILL.md"), "---\nname: pypto-op-knowledge\ndescription: fixture\n---\n");
+  mkdirSync(join(plugin, "agents"), { recursive: true });
+  writeFileSync(join(plugin, "agents", "pypto-op-planner.md"), "---\nname: pypto-op-planner\ndescription: fixture\n---\n# Planner\n");
+  writeFileSync(join(plugin, "AGENTS.md"), "# Legacy fixture instructions\n");
+  // Skip cloning the legacy entry's external dependency in this offline fixture.
+  mkdirSync(join(plugin, "pypto"), { recursive: true });
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     HOME: home,
-    CANNBOT_REPO_PATH: REPO_ROOT,
+    CANNBOT_REPO_PATH: repo,
     CANNBOT_INSTALLER_PATH: join(sandbox, "missing-installer"),
   };
   return { sandbox, project, env };
@@ -295,7 +305,7 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
   it("A: install without --yes prompts for an unowned AGENTS.md; Enter keeps it", async () => {
     const { sandbox, project, env } = makeProject("a");
     const session = new PtySession(process.execPath, [
-      CLI_PATH, "install", "torch-compile", "--tool", "opencode", "--level", "project",
+      CLI_PATH, "install", "pypto-op-orchestrator", "--tool", "opencode", "--level", "project",
     ], { cwd: project, env });
     try {
       await session.expect("检测到非 CANNBot 安装的配置文件", 180_000);
@@ -306,8 +316,8 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
 
       expect(readFileSync(join(project, "AGENTS.md"), "utf-8")).toBe("# User config\nKeep me safe.\n");
       expect(lstatSync(join(project, "AGENTS.md")).isSymbolicLink()).toBe(false);
-      expect(existsSync(join(project, ".opencode", "skills", "torch-npugraph-ex-knowledge"))).toBe(true);
-      expect(existsSync(join(project, ".opencode", "AGENTS.md"))).toBe(true);
+      expect(existsSync(join(project, ".opencode", "skills", "pypto-op-knowledge"))).toBe(true);
+      expect(existsSync(join(project, ".opencode", "AGENTS.md"))).toBe(false);
     } finally {
       session.close();
       rmSync(sandbox, { recursive: true, force: true });
@@ -318,7 +328,7 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
     const { sandbox, project, env } = makeProject("b");
     try {
       const install = new PtySession(process.execPath, [
-        CLI_PATH, "install", "torch-compile", "--tool", "opencode", "--level", "project",
+        CLI_PATH, "install", "pypto-op-orchestrator", "--tool", "opencode", "--level", "project",
       ], { cwd: project, env });
       try {
         await install.expect("检测到非 CANNBot 安装的配置文件", 180_000);
@@ -337,7 +347,7 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
       expect(readFileSync(join(project, backups[0]), "utf-8")).toBe("# User config\nKeep me safe.\n");
 
       const uninstall = new PtySession(process.execPath, [
-        CLI_PATH, "uninstall", "torch-compile", "--tool", "opencode", "--level", "project",
+        CLI_PATH, "uninstall", "pypto-op-orchestrator", "--tool", "opencode", "--level", "project",
       ], { cwd: project, env });
       try {
         await uninstall.expect("恢复用户文件", 120_000);
@@ -352,7 +362,7 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
       expect(readFileSync(join(project, "AGENTS.md"), "utf-8")).toBe("# User config\nKeep me safe.\n");
       expect(lstatSync(join(project, "AGENTS.md")).isSymbolicLink()).toBe(false);
       expect(readdirSync(project).filter((f) => f.includes(".cannbot-backup.")).length).toBe(0);
-      expect(existsSync(join(project, ".opencode", "skills", "torch-npugraph-ex-knowledge"))).toBe(false);
+      expect(existsSync(join(project, ".opencode", "skills", "pypto-op-knowledge"))).toBe(false);
     } finally {
       rmSync(sandbox, { recursive: true, force: true });
     }
@@ -365,16 +375,16 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
       await pickIndexed(session, "选择安装类型", "安装 Plugin");
       await pickOpenCode(session);
       await pickIndexed(session, "选择安装位置", "project");
-      const pluginCtx = await pickIndexed(session, "选择要安装的插件", "torch.compile 图模式", "[cannbot]");
+      const pluginCtx = await pickIndexed(session, "选择要安装的插件", "PyPTO 算子开发", "[cannbot]");
 
       // confirm step: summary must reflect tool / level / plugin
       await session.expect("[4/4]", 60_000);
       const confirmCtx = await session.expect("❯", 60_000);
       const flat = stripAnsi(confirmCtx);
       expect(flat).toContain("project");
-      expect(flat).toContain("torch.compile 图模式");
+      expect(flat).toContain("PyPTO 算子开发");
       expect(flat).toContain("OpenCode");
-      expect(stripAnsi(pluginCtx)).toContain("torch.compile 图模式");
+      expect(stripAnsi(pluginCtx)).toContain("PyPTO 算子开发");
       session.send("\r"); // 确认安装
 
       await session.expect("检测到非 CANNBot 安装的配置文件", 180_000);
@@ -385,8 +395,8 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
 
       expect(readFileSync(join(project, "AGENTS.md"), "utf-8")).toBe("# User config\nKeep me safe.\n");
       expect(lstatSync(join(project, "AGENTS.md")).isSymbolicLink()).toBe(false);
-      expect(existsSync(join(project, ".opencode", "skills", "torch-npugraph-ex-knowledge"))).toBe(true);
-      expect(existsSync(join(project, ".opencode", "AGENTS.md"))).toBe(true);
+      expect(existsSync(join(project, ".opencode", "skills", "pypto-op-knowledge"))).toBe(true);
+      expect(existsSync(join(project, ".opencode", "AGENTS.md"))).toBe(false);
     } finally {
       session.close();
       rmSync(sandbox, { recursive: true, force: true });
@@ -397,7 +407,7 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
     const { sandbox, project, env } = makeProject("d");
     env.CANNBOT_QODER_LAYOUT = "cli"; // deterministic even without qodercn on PATH
     const session = new PtySession(process.execPath, [
-      CLI_PATH, "install", "torch-compile", "--tool", "qoder", "--level", "project",
+      CLI_PATH, "install", "pypto-op-orchestrator", "--tool", "qoder", "--level", "project",
     ], { cwd: project, env });
     try {
       await session.expect("检测到非 CANNBot 安装的配置文件", 180_000);
@@ -407,8 +417,8 @@ describe.skipIf(!isLinux || !scriptAvailable)("interactive install (real PTY)", 
       expect(await session.waitForExit()).toBe(0);
 
       // qodercn layout: skills in .qoder/skills, agents as copies in .qoder/agents
-      expect(existsSync(join(project, ".qoder", "skills", "torch-npugraph-ex-knowledge"))).toBe(true);
-      const agentPath = join(project, ".qoder", "agents", "torch-npugraph-ex.md");
+      expect(existsSync(join(project, ".qoder", "skills", "pypto-op-knowledge"))).toBe(true);
+      const agentPath = join(project, ".qoder", "agents", "pypto-op-planner.md");
       expect(existsSync(agentPath)).toBe(true);
       expect(lstatSync(agentPath).isSymbolicLink()).toBe(false);
       // project-root AGENTS.md (qodercn memory) preserved as the user's file

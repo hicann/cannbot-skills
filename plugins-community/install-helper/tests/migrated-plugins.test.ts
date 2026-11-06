@@ -239,6 +239,43 @@ describe("migrated plugins — discovery (findPlugin)", () => {
   beforeEach(setup);
   afterEach(teardown);
 
+  it("routes torch-compile and its historical aliases exclusively to cannbot", async () => {
+    const { findPlugin, getAllPlugins, setCannbotPlugins } = await import("../src/core/registry.js");
+    const { isMigratedPlugin } = await import("../src/core/migrated-plugins.js");
+    setCannbotPlugins([]);
+    for (const query of ["torch-compile", "torch", "compile", "graph", "torch-c"]) {
+      const plugin = findPlugin(query);
+      expect(plugin?.id).toBe("torch-compile");
+      expect(plugin?.source).toBe("cannbot");
+      expect(plugin?.dir).toBe("");
+      expect(findPlugin(query, { source: "skills" })).toBeUndefined();
+    }
+    expect(isMigratedPlugin("torch-compile")).toBe(true);
+    expect(getAllPlugins().filter((plugin) => plugin.id === "torch-compile")).toHaveLength(1);
+    setCannbotPlugins([cannbotEntry("torch-compile")]);
+    expect(findPlugin("torch-compile")?.version).toBe("9.9.9");
+    expect(getAllPlugins().filter((plugin) => plugin.id === "torch-compile")).toHaveLength(1);
+  });
+
+  it.each([
+    ["qoder", "project"],
+    ["opencode", "global"],
+  ] as const)("does not revive a removed torch-compile installer for %s/%s", async (tool, level) => {
+    const { findPlugin, setCannbotPlugins } = await import("../src/core/registry.js");
+    const { installPluginRouted } = await import("../src/core/cannbot-delegate.js");
+    setCannbotPlugins([]);
+    const target = join(testDir, "unsupported-target");
+    mkdirSync(target);
+    const result = await installPluginRouted({
+      pluginId: "torch-compile", tool, level, repoPath: testDir, installPath: target,
+      plugin: findPlugin("torch-compile")!, yes: true,
+    });
+    expect(result.success).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.skillsCount).toBe(0);
+    expect(existsSync(join(target, "AGENTS.md"))).toBe(false);
+  });
+
   it("resolves the tombstone by exact id, alias and prefix in a clean snapshot state", async () => {
     const { findPlugin, setCannbotPlugins } = await import("../src/core/registry.js");
     setCannbotPlugins([]);

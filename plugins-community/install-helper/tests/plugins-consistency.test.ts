@@ -578,12 +578,17 @@ describe("plugins consistency — single source of truth", () => {
       expect(yml.skills).toBe(initCount);
     });
 
-    it("torch-compile: yml skills == init.sh INCLUDED_SKILLS count", () => {
-      const yml = parse(readFileSync(join(INSTALL_HELPER_ROOT, "plugins.d", "torch-compile.yml"), "utf-8"));
-      const init = readFileSync(join(REPO_ROOT, "plugins-official", "torch-compile", "init.sh"), "utf-8");
-      const m = init.match(/INCLUDED_SKILLS="([^"]*)"/);
-      const initCount = m![1].split(/\s+/).filter(Boolean).length;
-      expect(yml.skills).toBe(initCount);
+    it("torch-compile leaves only its independently installable shared Skill pack", () => {
+      expect(existsSync(join(INSTALL_HELPER_ROOT, "plugins.d", "torch-compile.yml"))).toBe(false);
+      expect(existsSync(join(REPO_ROOT, "plugins-official", "torch-compile"))).toBe(false);
+      const marketplace = readJson(join(REPO_ROOT, ".claude-plugin", "marketplace.json"));
+      expect(marketplace.plugins.find((plugin: any) => plugin.name === "torch-compile")).toBeUndefined();
+      const pack = marketplace.plugins.find((plugin: any) => plugin.name === "torch-npugraph-ex-skills");
+      expect(pack.source).toBe("./graph");
+      expect(pack.skills).toHaveLength(7);
+      for (const skill of pack.skills) {
+        expect(existsSync(join(REPO_ROOT, "graph", skill, "SKILL.md"))).toBe(true);
+      }
     });
   });
 

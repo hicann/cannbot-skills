@@ -288,7 +288,7 @@ describe("preserved file re-protection on reinstall (review finding)", () => {
   // Must be a registry-resolvable id: the misclassification happens when
   // detectCurrentPlugin resolves the leftover manifest of the same plugin
   // through the plugin registry.
-  const PLUGIN_ID = "torch-compile";
+  const PLUGIN_ID = "pypto-op-orchestrator";
 
   function makeFixture() {
     const repoDir = join(testDir, "repo");

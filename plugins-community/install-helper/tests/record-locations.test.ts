@@ -162,13 +162,13 @@ describe("install summary source scoping (display layer)", () => {
 
   it("printEnhancedSummary points --source skills docs at the legacy entry", async () => {
     const { setCannbotPlugins } = await import("../src/core/registry.js");
-    const cannbotPkgDir = join(testDir, "cannbot-pkg", "dist", "plugins", "torch-compile");
+    const cannbotPkgDir = join(testDir, "cannbot-pkg", "dist", "plugins", "pypto-op-orchestrator");
     mkdirSync(cannbotPkgDir, { recursive: true });
     setCannbotPlugins([
       {
-        id: "torch-compile",
+        id: "pypto-op-orchestrator",
         dir: cannbotPkgDir,
-        displayName: "torch-compile",
+        displayName: "pypto-op-orchestrator",
         script: "cannbot",
         aliases: [],
         skills: 0,
@@ -187,8 +187,8 @@ describe("install summary source scoping (display layer)", () => {
       printEnhancedSummary(
         [
           {
-            pluginId: "torch-compile",
-            displayName: "torch.compile 图模式",
+            pluginId: "pypto-op-orchestrator",
+            displayName: "PyPTO 算子开发",
             success: true,
             skillsCount: 45,
             agentsCount: 6,
@@ -203,7 +203,7 @@ describe("install summary source scoping (display layer)", () => {
     }
 
     const output = logs.join("\n");
-    expect(output).toContain("plugins-official/torch-compile/quickstart.md");
+    expect(output).toContain("plugins-official/pypto-op-orchestrator/quickstart.md");
     expect(output).not.toContain(cannbotPkgDir);
   });
 
