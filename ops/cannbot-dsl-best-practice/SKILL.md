@@ -26,6 +26,7 @@ API 写法以 CANNBotDSL 0.8.0 为例；遇到版本差异时，参考本 skill 
 | 问题或关键词 | 参考 | 解决的问题 |
 |---|---|---|
 | 整体结构、入口、Host、Kernel、@export、Native 导出、生命周期、CV 融合、preload | [整体实现](references/overall-implementation.md) | 公共骨架、导出、程序管理与 preload 流水 |
+| CV 融合编码、C/V 阶段封装、集中调度 | [CV 融合编码示例](references/patterns/cv-fusion.md) | C1→V1→C2→V2 数据交接、错位调度与排空 |
 | 命名、常量、重复、注释、docstring、可读性 | [生产代码](references/production-code.md) | 清楚表达数据、单位与计算意图 |
 | Host 校验、非法输入、约束拦截、dtype、shape、参数组合 | [Host 约束校验](references/patterns/host-validation.md) | 在分配、编译和启动前拒绝非法元数据 |
 | RingBuffer、Buffer、双缓冲、深度、slot | [RingBuffer 与 Buffer](references/patterns/channel-buffer.md) | 存储选择、生命周期和复用 |
