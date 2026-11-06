@@ -8,8 +8,8 @@
       "config": {
         "eval_mode": "text"
       },
-      "prompt": "还没写 kernel，也没有 NPU。想比较 Ascend950 的 RegBase 纯 Vector RMSNorm 设计并制定性能目标，这个技能能做什么？如果换成 Ascend910B 或 MatMul 呢？只说明，不执行。",
-      "expected_output": "说明可以从计算流和用例离线估算理论时延、bound 和目标时延，使用已有标定数据。明确当前只支持 Ascend950/DAV_3510 的 RegBase 纯 Vector；910B、Cube/MatMul 和混合算子超出范围，不能套用 950 Vector 常量。",
+      "prompt": "还没写 kernel，也没有 NPU。想比较 Ascend950 的 RegBase 纯 Vector RMSNorm 设计并制定性能目标，这个技能能做什么？如果换成 Ascend910B 或 MatMul 呢？请分别说明 Roofline 和 OpModel 两条路径的入口、硬件/计算支持范围、成本依据、是否需要 NPU，以及模型结果与设备收益的边界；不能只说明其中一路径。只说明，不执行。",
+      "expected_output": "说明可以从计算流和用例离线估算理论时延、bound 和目标时延。内置 Roofline 仅支持 Ascend950/DAV_3510 的 RegBase 纯 Vector，不能将其标定常量套用于 910B、Cube/MatMul 或混合算子；OpModel 任务读取子目录 ops-opmodel-toolkit/SKILL.md，核对实际 wheel、模型、目标硬件配置与成本依据，不能无条件承诺支持其他芯片。两条模型路径均无需 NPU，设备收益需实测。",
       "files": [],
       "expectations": []
     },
@@ -30,7 +30,7 @@
       "config": {
         "eval_mode": "text"
       },
-      "prompt": "一个纯 Vector 流里混有 Exp 和一拍 ALU，但 tile 很少且指令依赖很强。能直接把 MTE2、Vector、MTE3 三段时间取 max，当成可达目标吗？只解释建模选择。",
+      "prompt": "一个纯 Vector 流里混有 Exp 和一拍 ALU，但 tile 很少且指令依赖很强。能直接把 MTE2、Vector、MTE3 三段时间取 max，当成可达目标吗？请解释有限 tile、核间尾块、执行单元/子管线和发射口如何影响聚合，并分别说明用 target_efficiency 或 dependency=dependent 表达低 ILP 时的两条替代路径，避免在最终公式中重复折减。只解释建模选择，不执行。",
       "expected_output": "说明 max_pipe 是稳态流水重叠的 roofline bound，tile 少时要考虑 fill_drain 和核间尾块均衡。Vector 按执行单元/子管线和发射口约束聚合，超越函数可与 ALU 重叠；低 ILP 可使用 target_efficiency 或 dependency=dependent，不能二者叠加，也不能把吞吐下限直接承诺为可达时延。",
       "files": [],
       "expectations": []
@@ -52,8 +52,30 @@
       "config": {
         "eval_mode": "text"
       },
-      "prompt": "理论时延是 10 us，950 实测为 8 us。是否应判定为优化成功并把 JSON 标定常量调到通过？如果需要重新采集实测或做性能仿真，应调用什么技能？只说明，不执行。",
+      "prompt": "Roofline 理论时延是 10 us，950 实测为 8 us。请按仓内 compare.py 的规则给出容差、数值比较和状态名称，并列出计算流、工作量与硬件/测量口径需要怎样核对。是否应判定为优化成功并把 JSON 标定常量调到通过？如果需要重新采集实测或做 CANN Simulator 性能仿真，应调用什么技能？只说明，不执行。",
       "expected_output": "实测 8 us 低于理论 10 us 超过 3% 容差，应标记 BELOW_FLOOR，核对计算流、工作量和硬件能力/标定口径。不能为让算子通过而修改标定常量；调整常量需 bench 数据背书。实测采集使用 ops-profiling，仿真使用 ops-simulator；性能策略使用 ascendc-perf-optimize。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "嵌套 OpModel 入口与目录定位",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "我只安装了 ops-theoretical-performance-estimation 整个目录，希望使用其中的 OpModel 比较 MatMul DAG 方案。客户端没有单独列出 ops-opmodel-toolkit，是否需要重新安装技能或改用 Vector 引擎？只说明操作路径，不执行。",
+      "expected_output": "直接读取父技能内 ops-opmodel-toolkit/SKILL.md，按其中工作流确认模型、环境和搜索范围；OPMODEL_SKILL_DIR 指向该子目录而非父目录，模型和结果写入用户工作区。不依赖客户端单独发现子技能，不要求重新安装技能，不将 MatMul 输入 Vector Roofline 引擎。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "两条模型路径的结果口径",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "Vector Roofline 给出 10 us，OpModel 的一个局部 DAG 候选给出 8 us。能直接报告提速 1.25 倍，或套用 BELOW_FLOOR 判断 OpModel 出错吗？只解释。",
+      "expected_output": "不能直接比较。Roofline 下界与 OpModel 在声明硬件、成本、调度下的模型耗时含义不同，局部 DAG 与完整 case 的 scope 也不同；先统一输入、硬件、成本和范围，在相同路径内复评候选。不能把 Roofline 的 BELOW_FLOOR 阈值直接用于 OpModel，模型结果也不等于设备收益。",
       "files": [],
       "expectations": []
     }

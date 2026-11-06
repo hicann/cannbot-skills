@@ -1,0 +1,119 @@
+clock_ghz: 2.0
+compute:
+  cube: {}
+  vec:
+    aiv_per_aic: 2
+dtypes:
+  bf16: 2
+  fp16: 2
+  fp32: 4
+  fp4: 0.5
+  fp8: 1
+  int16: 2
+  int32: 4
+  int4: 0.5
+  int64: 8
+  int8: 1
+  uint16: 2
+  uint32: 4
+  uint4: 0.5
+  uint64: 8
+  uint8: 1
+issue_queues:
+  depths:
+    FIX: 32
+    M: 16
+    MTE1: 32
+    MTE2_AIC: 16
+    MTE2_AIV: 16
+    MTE3: 16
+    VEC: 32
+  source: https://asc.gitcode.com/api/SIMD-API/c_api/sys_var/asc_get_pipe_idle_slot_count.html
+l2_size_mb: 128
+memories:
+- name: GM
+  size_kb: null
+- name: L1
+  size_kb: 512
+- name: L0A
+  size_kb: 64
+- name: L0B
+  size_kb: 64
+- name: L0C
+  size_kb: 256
+- name: UB
+  size_kb: 256
+mov_routes:
+- bw: 80
+  bw_tiers:
+    HBM: 80
+    L2: 100
+  dst: L1
+  pipe: MTE2_AIC
+  src: GM
+- bw: 256
+  dst: L0A
+  pipe: MTE1
+  src: L1
+- bw: 256
+  dst: L0B
+  pipe: MTE1
+  src: L1
+- bw: 256
+  dst: UB
+  fixpipe_modes:
+  - NoQuant
+  - F322F16
+  - F322BF16
+  fixpipe_source: https://asc.gitcode.com/api/SIMD-API/c_api/cube_datamove/asc_copy_l0c2ub.html
+  pipe: FIX
+  src: L0C
+- bw: 100
+  dst: GM
+  fixpipe_modes:
+  - NoQuant
+  - F322F16
+  - F322BF16
+  fixpipe_source: https://asc.gitcode.com/guide/programming_guide/programming_model/ai_core_simd_programming/cpp_tensor_programming/cube_matrix_computation.html
+  pipe: FIX
+  src: L0C
+- bw: 40
+  dst: UB
+  pipe: MTE2_AIV
+  src: GM
+- bw: 128
+  dst: L1
+  pipe: MTE3
+  src: UB
+- bw: 100
+  dst: GM
+  pipe: MTE3
+  src: UB
+name: ascend_950DT
+pipelines:
+- MTE2_AIC
+- MTE1
+- M
+- FIX
+- MTE2_AIV
+- VEC
+- MTE3
+shared_services:
+  HBM:
+    bandwidth: 2560
+    qualification: hypothesis
+    source: "\u672A\u6807\u5B9A\u5047\u8BBE\uFF1B\
+      \u7AEF\u53E3\u63A8\u5BFC\u503C\uFF0C\u975E\u6574\u673A\u5B9E\u6D4B\u6216\u5DF2\
+      \u8BC1\u4E0A\u754C\u3002\u8BFB\uFF1A32 * max(80, 40 * 2) = 2560 byte/cycle\u3002\
+      \u5199\u901F\u7387\u6682\u53D6\u8BFB\u901F\u7387\u3002"
+    write_bandwidth: 2560
+  L2:
+    bandwidth: 3200
+    qualification: hypothesis
+    source: "\u672A\u6807\u5B9A\u5047\u8BBE\uFF1B\
+      \u7AEF\u53E3\u63A8\u5BFC\u503C\uFF0C\u975E\u6574\u673A\u5B9E\u6D4B\u6216\u5DF2\
+      \u8BC1\u4E0A\u754C\u3002\u8BFB\uFF1A32 * max(100, 40 * 2) = 3200 byte/cycle\u3002\
+      \u5199\uFF1A32 * max(100, 100 * 2) = 6400 byte/cycle\uFF1B\u5BB9\u91CF\uFF1A\
+      128 MiB\u3002"
+    write_bandwidth: 6400
+usedCoreNum: 32

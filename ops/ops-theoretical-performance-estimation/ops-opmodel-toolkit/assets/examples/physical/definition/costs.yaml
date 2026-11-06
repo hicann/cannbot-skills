@@ -1,0 +1,23 @@
+source: synthetic_hardware
+coefficients:
+  full:
+    value: 240
+    unit: cycles_per_invocation
+    source: synthetic/test-only
+    calibrated: false
+  tail:
+    value: 150
+    unit: cycles_per_invocation
+    source: synthetic/test-only
+    calibrated: false
+native:
+  vf_r32_cycles:
+    refs:
+    - full
+    unit: cycles_per_invocation
+  vf_r16_cycles:
+    refs:
+    - tail
+    unit: cycles_per_invocation
+vf: {}
+sensitivity: {}

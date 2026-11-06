@@ -1,0 +1,103 @@
+name: ascend_950DT
+memories:
+- name: GM
+  size_kb: null
+- name: L1
+  size_kb: 512
+- name: L0A
+  size_kb: 64
+- name: L0B
+  size_kb: 64
+- name: L0C
+  size_kb: 256
+- name: UB
+  size_kb: 256
+dtypes:
+  fp32: 4
+  fp16: 2
+  bf16: 2
+  fp8: 1
+  fp4: 0.5
+  int64: 8
+  int32: 4
+  int16: 2
+  int8: 1
+  int4: 0.5
+  uint64: 8
+  uint32: 4
+  uint16: 2
+  uint8: 1
+  uint4: 0.5
+pipelines:
+- MTE2_AIC
+- MTE1
+- M
+- FIX
+- MTE2_AIV
+- VEC
+- MTE3
+mov_routes:
+- src: GM
+  dst: L1
+  pipe: MTE2_AIC
+  bw: 80
+  bw_tiers:
+    HBM: 80
+    L2: 100
+- src: L1
+  dst: L0A
+  pipe: MTE1
+  bw: 256
+- src: L1
+  dst: L0B
+  pipe: MTE1
+  bw: 256
+- src: L0C
+  dst: UB
+  pipe: FIX
+  bw: 256
+  fixpipe_modes:
+  - NoQuant
+  - F322F16
+  - F322BF16
+  fixpipe_source: https://asc.gitcode.com/api/SIMD-API/c_api/cube_datamove/asc_copy_l0c2ub.html
+- src: L0C
+  dst: GM
+  pipe: FIX
+  bw: 100
+  fixpipe_modes:
+  - NoQuant
+  - F322F16
+  - F322BF16
+  fixpipe_source: https://asc.gitcode.com/guide/programming_guide/programming_model/ai_core_simd_programming/cpp_tensor_programming/cube_matrix_computation.html
+- src: GM
+  dst: UB
+  pipe: MTE2_AIV
+  bw: 40
+- src: UB
+  dst: L1
+  pipe: MTE3
+  bw: 128
+- src: UB
+  dst: GM
+  pipe: MTE3
+  bw: 100
+compute:
+  cube: {}
+  vec:
+    aiv_per_aic: 2
+clock_ghz: 1.65
+usedCoreNum: 32
+l2_size_mb: 128
+shared_services:
+  HBM:
+    bandwidth: 2560
+    write_bandwidth: 2560
+    qualification: hypothesis
+    source: 示例共享服务假设，未做设备标定；单位 byte/cycle。
+  L2:
+    bandwidth: 3200
+    write_bandwidth: 6400
+    capacity_bytes: 134217728
+    qualification: hypothesis
+    source: 示例共享服务假设，未做设备标定；单位 byte/cycle。

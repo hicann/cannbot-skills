@@ -1,0 +1,6 @@
+source: matmul/ascend_950DT_streaming
+coefficients: {}
+native: {}
+vf: {}
+sensitivity:
+- 1.0

@@ -1,0 +1,191 @@
+task_graph:
+  nodes:
+  - Cube
+  - Vector
+  edges: []
+  implementation: {}
+kernels:
+  dtypes:
+    xg: bf16
+    yg: bf16
+    x: bf16
+    y: bf16
+    a: bf16
+    b: bf16
+    out: bf16
+    ygm: bf16
+    c: fp32
+    received: fp32
+  Cube:
+    pools:
+      x:
+        scope: loop
+        owner: k_blocks
+      y:
+        scope: loop
+        owner: k_blocks
+      a:
+        scope: loop
+        owner: k_blocks
+      b:
+        scope: loop
+        owner: k_blocks
+      c:
+        scope: stage
+    body:
+    - loop:
+        id: k_blocks
+        dim: k
+        range: 4
+        body:
+        - move:
+            id: load_x
+            src:
+              tensor: xg
+              mem: GM
+            dst:
+              tensor: x
+              mem: L1
+            size:
+            - &id001
+              expr: rows
+            - 32
+            aiv_presplit: true
+            pool: x
+        - move:
+            id: load_y
+            src:
+              tensor: yg
+              mem: GM
+            dst:
+              tensor: y
+              mem: L1
+            size:
+            - 32
+            - 64
+            aiv_presplit: true
+            pool: y
+        - move:
+            id: load_a
+            src:
+              tensor: x
+              mem: L1
+            dst:
+              tensor: a
+              mem: L0A
+            size:
+            - *id001
+            - 32
+            aiv_presplit: true
+            pool: a
+            use_pools:
+            - x
+        - move:
+            id: load_b
+            src:
+              tensor: y
+              mem: L1
+            dst:
+              tensor: b
+              mem: L0B
+            size:
+            - 32
+            - 64
+            aiv_presplit: true
+            pool: b
+            use_pools:
+            - y
+        - mmad:
+            id: multiply
+            a:
+              tensor: a
+              mem: L0A
+            b:
+              tensor: b
+              mem: L0B
+            c:
+              tensor: c
+              mem: L0C
+            shape:
+            - *id001
+            - 32
+            - 64
+            pool: c
+            use_pools:
+            - a
+            - b
+            accumulate:
+              expr: k > 0
+    - move:
+        id: drain
+        src:
+          tensor: c
+          mem: L0C
+        dst:
+          tensor: received
+          mem: UB
+        size:
+        - *id001
+        - 64
+        aiv_presplit: true
+        use_pools:
+        - c
+        physical_accesses:
+        - storage: input
+          role: write
+          version: 0
+          foreach:
+            var: lane
+            count: 2
+          owner:
+            kind: AIV
+            group:
+              expr: task.owner
+            lane:
+              expr: index.lane
+          source_region:
+          - - expr: index.lane * task.rows // 2
+            - expr: (index.lane + 1) * task.rows // 2
+          - - 0
+            - 64
+          region: &id002
+          - - 0
+            - expr: task.rows // 2
+          - - 0
+            - 64
+    signals: {}
+  Vector:
+    body:
+    - vec:
+        id: relu_cast
+        name: ReluCastVF
+        cycles:
+          expr: vf_cycles
+        aiv_presplit: true
+        physical_accesses:
+        - storage: input
+          role: read
+          version: 0
+          region: *id002
+        - storage: output
+          role: write
+          version: 0
+          region: *id002
+    - move:
+        id: store
+        src:
+          tensor: out
+          mem: UB
+        dst:
+          tensor: ygm
+          mem: GM
+        size:
+        - expr: vf_rows
+        - 64
+        aiv_presplit: true
+        physical_accesses:
+        - storage: output
+          role: read
+          version: 0
+          region: *id002
+    signals: {}

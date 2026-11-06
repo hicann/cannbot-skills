@@ -8,6 +8,12 @@
 | **calibration/** | 标定常量 ⟷ 上板 bench 实测一致（防凑数） | 无（读已记录 bench CSV + 跑引擎） | 当门禁（已并入 `run.py`）；bench 本身周期性上板重采 |
 | **onboard/** | 理论性能上限 vs 950 实测（模型精度，独立验证集） | 950 板 + 真实 kernel | 周期性采集 + 提交后回归 |
 
+以上为 Roofline 路径。OpModel 的验证脚本随子目录保留，按
+[版本与验证](../ops-opmodel-toolkit/references/distribution.md)运行；
+`OPMODEL_SKILL_DIR` 指向 `ops-opmodel-toolkit` 子目录。其 wheel 冒烟验证不并入
+`tests/run.py`，原有离线门禁无需安装 OpModel。两套行为评测分别保留在父、子目录的
+`evals/evals.json` 中。
+
 > 三层分工：bench（calibration/bench_results）**派生**常量 → onboard 算子**独立验证** → calibration 检查**锁死**「常量必须有 bench 背书」。详见 `calibration/README.md`。
 
 ## 验收口径

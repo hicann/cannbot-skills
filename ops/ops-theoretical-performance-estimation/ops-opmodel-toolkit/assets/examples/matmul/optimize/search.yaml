@@ -1,0 +1,88 @@
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
+parameter_space:
+- name: Mb
+  role: outer
+  tiles: M
+  cands:
+  - 64
+  - 128
+  - 256
+  desc: 输出行任务 tile
+- name: Nb
+  role: outer
+  tiles: N
+  cands:
+  - 64
+  - 128
+  - 256
+  desc: 输出列任务 tile
+- name: Kb
+  role: outer
+  tiles: K
+  cands:
+  - 128
+  - 256
+  - 512
+  desc: L1 K 面板
+- name: M_L0
+  role: inner
+  tiles: Mb
+  cands:
+  - 64
+  - 128
+  desc: L0 输出行 tile
+- name: N_L0
+  role: inner
+  tiles: Nb
+  cands:
+  - 64
+  - 128
+  desc: L0 输出列 tile
+- name: K_L0
+  role: inner
+  tiles: Kb
+  cands:
+  - 64
+  - 128
+  desc: MMAD K tile
+rewrite_grammar:
+- rule: split_reduction
+mapping_choices: []
+split_choices:
+- name: greedy_outputs
+  strategy:
+    rule: greedy
+    order:
+    - m
+    - n
+    granularity: task
+    hit_policy: all_miss
+- name: contiguous_outputs
+  strategy:
+    rule: contiguous
+    order:
+    - m
+    - n
+    granularity: task
+    hit_policy: all_miss
+- name: round_outputs
+  strategy:
+    rule: round
+    order:
+    - m
+    - n
+    granularity: task
+    hit_policy: all_miss
+budget:
+  max_candidates: 96
+  simpy_top_k: 8
+stopping:
+  scored_rounds_without_improvement: 2
+  require_trace_evidence: true

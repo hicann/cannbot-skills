@@ -1,0 +1,264 @@
+task_graph:
+  nodes:
+  - C1
+  edges: []
+  implementation:
+    C1:
+    - gemm
+kernels:
+  dtypes:
+    A_GM: bf16
+    B_GM: bf16
+    A_L1: bf16
+    B_L1: bf16
+    L0A: bf16
+    L0B: bf16
+    L0C: fp32
+    O_UB: bf16
+    O_GM: bf16
+  C1:
+    formula_signature: c29a0ead576335b8a4b8f0b9be76757d5deb034f6aef52d84d89c3a0bbe3ac72
+    pools:
+      a_l1:
+        scope: loop
+        owner: input_panels
+      b_l1:
+        scope: loop
+        owner: input_panels
+      l0a_c1:
+        scope: loop
+        owner: compute_slices
+      l0b_c1:
+        scope: loop
+        owner: compute_slices
+      l0c_c1:
+        scope: loop
+        owner: output_tiles
+      o_ub:
+        scope: loop
+        owner: output_tiles
+    body:
+    - loop:
+        id: output_rows
+        dim: _m
+        range:
+          expr: ceil(task_M/M_L0)
+        body:
+        - loop:
+            id: output_tiles
+            dim: _n
+            range:
+              expr: ceil(task_N/N_L0)
+            body:
+            - loop:
+                id: input_panels
+                dim: _k1
+                range:
+                  expr: ceil(K_total/Kb)
+                body:
+                - move:
+                    src:
+                      tensor: A_GM
+                      mem: GM
+                    dst:
+                      tensor: A_L1
+                      mem: L1
+                    size:
+                    - expr: min(M_L0, task_M - _m * M_L0)
+                    - expr: min(Kb, K_total - _k1 * Kb)
+                    pool: a_l1
+                    tier: HBM
+                    region:
+                      role: input
+                      tensor: A_GM
+                      indices:
+                      - i
+                      - r
+                      origin:
+                      - expr: _m * M_L0
+                      - expr: _k1 * Kb
+                      extent:
+                      - expr: min(M_L0, task_M - _m * M_L0)
+                      - expr: min(Kb, K_total - _k1 * Kb)
+                      formula_signature: c29a0ead576335b8a4b8f0b9be76757d5deb034f6aef52d84d89c3a0bbe3ac72
+                      operand: lhs
+                - move:
+                    src:
+                      tensor: B_GM
+                      mem: GM
+                    dst:
+                      tensor: B_L1
+                      mem: L1
+                    size:
+                    - expr: min(Kb, K_total - _k1 * Kb)
+                    - expr: min(N_L0, task_N - _n * N_L0)
+                    pool: b_l1
+                    tier: HBM
+                    region:
+                      role: input
+                      tensor: B_GM
+                      indices:
+                      - r
+                      - j
+                      origin:
+                      - expr: _k1 * Kb
+                      - expr: _n * N_L0
+                      extent:
+                      - expr: min(Kb, K_total - _k1 * Kb)
+                      - expr: min(N_L0, task_N - _n * N_L0)
+                      formula_signature: c29a0ead576335b8a4b8f0b9be76757d5deb034f6aef52d84d89c3a0bbe3ac72
+                      operand: rhs
+                - loop:
+                    id: compute_slices
+                    dim: _k0
+                    range:
+                      expr: ceil((min(Kb, K_total - _k1 * Kb))/K_L0)
+                    body:
+                    - move:
+                        src:
+                          tensor: A_L1
+                          mem: L1
+                        dst:
+                          tensor: L0A
+                          mem: L0A
+                        size:
+                        - expr: min(M_L0, task_M - _m * M_L0)
+                        - expr: min(K_L0, (min(Kb, K_total - _k1 * Kb)) - _k0 * K_L0)
+                        pool: l0a_c1
+                        use_pools:
+                        - a_l1
+                        region:
+                          role: input
+                          tensor: A_GM
+                          indices:
+                          - i
+                          - r
+                          origin:
+                          - expr: _m * M_L0
+                          - expr: _k1 * Kb + _k0 * K_L0
+                          extent:
+                          - expr: min(M_L0, task_M - _m * M_L0)
+                          - expr: min(K_L0, (min(Kb, K_total - _k1 * Kb)) - _k0 *
+                              K_L0)
+                          formula_signature: c29a0ead576335b8a4b8f0b9be76757d5deb034f6aef52d84d89c3a0bbe3ac72
+                          operand: lhs
+                    - move:
+                        src:
+                          tensor: B_L1
+                          mem: L1
+                        dst:
+                          tensor: L0B
+                          mem: L0B
+                        size:
+                        - expr: min(K_L0, (min(Kb, K_total - _k1 * Kb)) - _k0 * K_L0)
+                        - expr: min(N_L0, task_N - _n * N_L0)
+                        pool: l0b_c1
+                        use_pools:
+                        - b_l1
+                        region:
+                          role: input
+                          tensor: B_GM
+                          indices:
+                          - r
+                          - j
+                          origin:
+                          - expr: _k1 * Kb + _k0 * K_L0
+                          - expr: _n * N_L0
+                          extent:
+                          - expr: min(K_L0, (min(Kb, K_total - _k1 * Kb)) - _k0 *
+                              K_L0)
+                          - expr: min(N_L0, task_N - _n * N_L0)
+                          formula_signature: c29a0ead576335b8a4b8f0b9be76757d5deb034f6aef52d84d89c3a0bbe3ac72
+                          operand: rhs
+                    - mmad:
+                        a:
+                          tensor: L0A
+                          mem: L0A
+                        b:
+                          tensor: L0B
+                          mem: L0B
+                        c:
+                          tensor: L0C
+                          mem: L0C
+                        shape:
+                        - expr: min(M_L0, task_M - _m * M_L0)
+                        - expr: min(K_L0, (min(Kb, K_total - _k1 * Kb)) - _k0 * K_L0)
+                        - expr: min(N_L0, task_N - _n * N_L0)
+                        accumulate:
+                          expr: _k1 > 0 or _k0 > 0
+                        unitflag:
+                          expr: use_unitflag and _k1 * Kb + _k0 * K_L0 + min(K_L0,
+                            min(Kb, K_total - _k1 * Kb) - _k0 * K_L0) >= K_total
+                        pool: l0c_c1
+                        use_pools:
+                        - l0a_c1
+                        - l0b_c1
+                        region:
+                          role: contraction
+                          tensor: O_GM
+                          indices:
+                          - i
+                          - j
+                          - r
+                          origin:
+                          - expr: _m * M_L0
+                          - expr: _n * N_L0
+                          - expr: _k1 * Kb + _k0 * K_L0
+                          extent:
+                          - expr: min(M_L0, task_M - _m * M_L0)
+                          - expr: min(N_L0, task_N - _n * N_L0)
+                          - expr: min(K_L0, (min(Kb, K_total - _k1 * Kb)) - _k0 *
+                              K_L0)
+                          formula_signature: c29a0ead576335b8a4b8f0b9be76757d5deb034f6aef52d84d89c3a0bbe3ac72
+            - move:
+                src:
+                  tensor: L0C
+                  mem: L0C
+                dst:
+                  tensor: O_UB
+                  mem: UB
+                size:
+                - expr: min(M_L0, task_M - _m * M_L0)
+                - expr: min(N_L0, task_N - _n * N_L0)
+                pool: o_ub
+                use_pools:
+                - l0c_c1
+                region:
+                  role: output
+                  tensor: O_GM
+                  indices:
+                  - i
+                  - j
+                  origin:
+                  - expr: _m * M_L0
+                  - expr: _n * N_L0
+                  extent:
+                  - expr: min(M_L0, task_M - _m * M_L0)
+                  - expr: min(N_L0, task_N - _n * N_L0)
+                  formula_signature: c29a0ead576335b8a4b8f0b9be76757d5deb034f6aef52d84d89c3a0bbe3ac72
+            - move:
+                src:
+                  tensor: O_UB
+                  mem: UB
+                dst:
+                  tensor: O_GM
+                  mem: GM
+                size:
+                - expr: ceil((min(M_L0, task_M - _m * M_L0))/(output_lanes))
+                - expr: min(N_L0, task_N - _n * N_L0)
+                use_pools:
+                - o_ub
+                region:
+                  role: output
+                  tensor: O_GM
+                  indices:
+                  - i
+                  - j
+                  origin:
+                  - expr: _m * M_L0
+                  - expr: _n * N_L0
+                  extent:
+                  - expr: min(M_L0, task_M - _m * M_L0)
+                  - expr: min(N_L0, task_N - _n * N_L0)
+                  formula_signature: c29a0ead576335b8a4b8f0b9be76757d5deb034f6aef52d84d89c3a0bbe3ac72
+                aiv_presplit: true

@@ -1,15 +1,32 @@
 ---
 name: ops-theoretical-performance-estimation
-description: 从算子设计或计算流估算理论性能上限、瓶颈与目标时延，用于设计期方案比较和性能目标制定。当前仅支持 Ascend950 / DAV_3510 的 AscendC RegBase 纯 Vector 算子，暂不支持 Cube 及 Cube-Vector 混合算子。
+description: 从算子设计或计算流估算性能、分析瓶颈并比较方案，适用于设计期性能目标制定及 OpModel 建模与优化任务。提供 Ascend950 RegBase 纯 Vector Roofline 估算，以及 OpModel 建模、性能评估、DAG 寻优、联合寻优、空泡与数据流分析和设计文档生成；OpModel 支持范围取决于实际 wheel、模型与硬件配置。
 ---
 
 # 算子理论性能估算
 
-用本 skill 把一个 AscendC 算子设计或计算流，转成 Ascend950 纯 Vector 的理论性能估算模型与用例报告。
+用本 skill 把算子设计或计算流转成性能模型与用例报告，按任务选择以下路径。
 
-设计期估算无需 NPU；引擎使用随 skill 提供的微基准标定数据。固定开销默认 0，可依据独立实测通过 `fixed_overhead_us` 显式给定；不提供预置固定开销与 HBM 爬坡修正。实测性能采集与瓶颈分析使用 `ops-profiling`，性能仿真使用 `ops-simulator`，具体优化策略使用 `ascendc-perf-optimize`。
+## 路径选择
 
-当前范围：
+| 任务 | 入口与范围 |
+| --- | --- |
+| Ascend950 / DAV_3510 RegBase 纯 Vector 的理论上限与目标时延 | 本文下方的 Roofline 流程，使用内置标定数据，无需安装 OpModel |
+| 明确使用 OpModel，或需要模型支持的 Cube / Vector / 混合计算、DAG 方案评估与搜索 | 读取 [OpModel 工作流入口](ops-opmodel-toolkit/SKILL.md)，按实际 wheel、模型、硬件配置与成本依据确认支持范围 |
+
+OpModel 子目录整体随本 skill 安装，保留七项工作流、示例、模板、脚本和独立评测。
+进入该路径时直接读取子目录的 `SKILL.md`，无需客户端将它单独发现为技能；将
+`OPMODEL_SKILL_DIR` 设置为该子目录的绝对路径。安装、建模与运行约束均按子入口执行，
+模型和结果保存在用户工作区。已有模型或指定方法的任务沿用其路径。
+
+Roofline 结果是其建模假设下的时延下界；OpModel 结果是声明硬件、成本与调度下的模型耗时。
+报告注明所用路径、完整 case 或局部范围及验证状态，不直接混用两者的排名或验收阈值。
+模型软件运行无需 NPU；设备收益需要同口径实测。设备采集使用 `ops-profiling`，
+CANN Simulator 仿真使用 `ops-simulator`，实现优化策略使用 `ascendc-perf-optimize`。
+
+## Roofline 范围
+
+下文的引擎、计算流、CLI 和标定约束均属于 Roofline 路径。引擎使用随 skill 提供的微基准标定数据。固定开销默认 0，可依据独立实测通过 `fixed_overhead_us` 显式给定；不提供预置固定开销与 HBM 爬坡修正。
 
 - 硬件：Ascend950 / DAV_3510，纯 VectorCore kernel。
 - 计算：RegBase 纯 vector 微指令流。
@@ -68,3 +85,11 @@ python3 scripts/evaluate_a5_vector_roofline.py \
 - **Tiling / 模版**：`tiling` 由 UB 容量推 `tile_count`；`flow_runtime` 把 case 路由到第一个 `select` 命中且 tiling UB 可行的模版。驻留 1-pass vs 行切分（重读 x）由可行性自动落出——大 H 的重读是模版自己的 GM 流量，不是引擎规则。
 
 如果 tile 太少、达不到稳态，就给 `tile_count`/`tiling` 让 fill/drain + 尾块均衡被建模；tile 稀少时不要把稳态 `max_pipe` 的 bound 当作可达目标上报。
+
+说明低 ILP 的最终目标时保持口径一致：可保留吞吐模型并用 `target_efficiency` 表达
+依赖损失；或用 `dependency="dependent"` 修正指令发射，并令 `target_efficiency=1`
+避免再次计入同一损失。不能先说二者互斥，随后又把依赖修正后的时间除以默认 0.60。
+
+理论与实测对照使用 `tests/onboard/compare.py` 的 3% 容差：实测低于
+`theoretical × (1 - 0.03)` 时为 `BELOW_FLOOR`。例如 8 us < 9.7 us，需核对
+计算流、实际工作量、硬件能力和测量／标定口径；不能据此称优化成功或为通过而改常量。

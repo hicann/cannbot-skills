@@ -1,0 +1,230 @@
+name: synthetic_matmul_relu_cast
+hardware: ascend_950DT
+costs: costs.yaml
+params:
+  M: 160
+  N: 64
+  K: 128
+  BM: 64
+  BK: 32
+  groups: 2
+  num_tasks: 1
+  num_groups: 1
+buffers:
+- name: x
+  mem: L1
+  bytes: 4096
+  slots: 1
+- name: y
+  mem: L1
+  bytes: 4096
+  slots: 1
+- name: a
+  mem: L0A
+  bytes: 4096
+  slots: 1
+- name: b
+  mem: L0B
+  bytes: 4096
+  slots: 1
+- name: c
+  mem: L0C
+  bytes: 16384
+  slots: 1
+pipeline:
+  phases:
+  - - Cube
+    - Vector
+  tokens: {}
+  dataflow: []
+run:
+  split_strategy:
+    rule: by_field
+    field: owner
+    ncores:
+      expr: params.groups
+    granularity: task
+    hit_policy: all_miss
+physical_execution:
+  invocation_key:
+  - task.tile
+  task_key:
+  - task.tile
+  - task.role
+  - task.lane
+  programs:
+    cube:
+      select: task.role == 'cube'
+      stages:
+      - Cube
+      placement:
+        kind: AIC
+        group:
+          expr: task.owner
+        lane: 0
+      order_by:
+      - task.tile
+      buffers:
+      - x
+      - y
+      - a
+      - b
+      - c
+      parameters:
+        rows:
+          expr: task.rows
+      task_drain: true
+    vector:
+      select: task.role == 'vector'
+      stages:
+      - Vector
+      placement:
+        kind: AIV
+        group:
+          expr: task.owner
+        lane:
+          expr: task.lane
+      order_by:
+      - task.tile
+      buffers: []
+      task_drain: true
+      parameters:
+        vf_rows:
+          expr: task.rows // 2
+        vf_cycles:
+          expr: select(task.rows == 64, params.vf_r32_cycles, params.vf_r16_cycles)
+      task_metadata:
+        output_region:
+        - begin:
+            expr: task.tile * params.BM + task.lane * task.rows // 2
+          rows:
+            expr: task.rows // 2
+  execution:
+    memory_service: independent
+    issue_queue_mode: unbounded
+    notifications:
+      mode: assumed_zero
+      source: synthetic/test-only
+  event_sets: {}
+  synchronization: {}
+  storage:
+    input:
+      memory: UB
+      programs:
+      - vector
+      physical_bytes: 8192
+      shape:
+      - 32
+      - 64
+      dtype: fp32
+    output:
+      memory: UB
+      programs:
+      - vector
+      physical_bytes: 4096
+      shape:
+      - 32
+      - 64
+      dtype: bf16
+validation:
+  capacity:
+    allocations:
+    - engine_kind: AIC
+      memory: L1
+      expected: 8192
+    - engine_kind: AIC
+      memory: L0C
+      expected: 16384
+  assignment:
+    key:
+    - tile
+    - role
+    - lane
+    domains:
+    - axes:
+        tile:
+        - 0
+        - 1
+        - 2
+        role:
+        - cube
+        lane:
+        - 0
+    - axes:
+        tile:
+        - 0
+        - 1
+        - 2
+        role:
+        - vector
+        lane:
+        - 0
+        - 1
+    assertions:
+    - expr: owner == tile % groups
+    - expr: rows == min(BM, M - tile * BM)
+  metrics:
+  - name: mmad
+    source: instructions
+    select:
+      dag_id: multiply
+    reduce:
+      sum: count
+    expected: 12
+  - name: macs
+    source: instructions
+    select:
+      dag_id: multiply
+    reduce:
+      sum: macs
+    expected: 1310720
+  - name: fix
+    source: instructions
+    select:
+      dag_id: drain
+    reduce:
+      sum: count
+    expected: 3
+  - name: vf
+    source: instructions
+    select:
+      dag_id: relu_cast
+    reduce:
+      sum: count
+    expected: 6
+  - name: output
+    source: instructions
+    select:
+      dag_id: store
+    reduce:
+      sum: count
+    expected: 6
+  - name: output_bytes
+    source: instructions
+    select:
+      dag_id: store
+    reduce:
+      sum: source_bytes
+    expected: 20480
+  regions:
+  - name: complete_output
+    source: task_segments
+    field: output_region
+    select:
+      program: vector
+    key: []
+    origin:
+    - expr: begin
+    - 0
+    extent:
+    - expr: rows
+    - 64
+    expected:
+      domain:
+        axes: {}
+      origin:
+      - 0
+      - 0
+      extent:
+      - 160
+      - 64

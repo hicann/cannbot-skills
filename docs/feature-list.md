@@ -31,7 +31,7 @@
 | **ascendc-registry-invoke-to-direct-invoke** | 注册调用算子转 `<<<>>>` kernel 直调 | [查看](skills-usage.md#ascendc-registry-invoke-to-direct-invoke) |
 | **ascendc-direct-invoke-to-registry-invoke** | `<<<>>>` kernel 直调转注册调用算子 | [查看](skills-usage.md#ascendc-direct-invoke-to-registry-invoke) |
 | **ascendc-direct-invoke-template** | Kernel 直调工程模板，提供验证过的样例工程和修改指南 | — |
-| **ops-theoretical-performance-estimation** | 设计期理论性能估算：访存量、指令吞吐、流水重叠与目标时延；当前仅支持 Ascend950 RegBase 纯 Vector | — |
+| **ops-theoretical-performance-estimation** | 设计期性能建模与方案比较：Ascend950 RegBase 纯 Vector Roofline 估算，以及内置 OpModel 建模、DAG 寻优、空泡分析与设计文档工作流 | [入口](../ops/ops-theoretical-performance-estimation/SKILL.md) |
 | **ops-profiling** | NPU 性能采集与分析，CSV 指标解读、瓶颈定位、优化建议 | — |
 | **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 | — |
 | **ascendc-docs-gen** | 算子文档写作与 ACLNN API 完整生成，按需加载取证、审阅及交付流程 | [入口](../ops/ascendc-docs-gen/SKILL.md) |

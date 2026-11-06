@@ -1,0 +1,71 @@
+parameters:
+  required:
+  - M
+  - N
+  - K
+  defaults:
+    M: 128
+    N: 128
+    K: 256
+    Mb: 128
+    Nb: 128
+    Kb: 256
+    M_L0: 128
+    N_L0: 128
+    K_L0: 128
+derive:
+- name: K_total
+  expr: K
+- name: num_groups
+  expr: ceil(M / Mb) * ceil(N / Nb)
+- name: num_tasks
+  expr: 1
+- name: output_M
+  expr: min(Mb, M_L0)
+- name: task_M
+  expr: Mb
+- name: task_N
+  expr: Nb
+- name: task_m
+  expr: 0
+- name: task_n
+  expr: 0
+assertions:
+- expr: M > 0 and N > 0 and K > 0
+  message: 矩阵维度必须为正
+- expr: Mb > 0 and Nb > 0 and Kb > 0
+  message: 外层 tile 必须为正
+- expr: M_L0 > 0 and N_L0 > 0 and K_L0 > 0
+  message: L0 tile 必须为正
+- expr: Mb % M_L0 == 0 and Nb % N_L0 == 0 and Kb % K_L0 == 0
+  message: L0 tile 必须整除外层 tile
+semantic_bindings:
+  M: M
+  N: N
+  K: K
+hardware_fields:
+  output_lanes:
+    path:
+    - compute
+    - vec
+    - aiv_per_aic
+    default: 2
+core_projection:
+  owner: framework
+  task_source: split_spec
+  task_key:
+  - m
+  - n
+  group_by: []
+  order_by: []
+  allow_empty: true
+  allowed_hit_policies:
+  - all_miss
+  task_assertions: []
+  packed_fields: []
+  group_fields:
+    task_m: m_begin
+    task_n: n_begin
+    task_M: m_extent
+    task_N: n_extent
+    output_M: min(M_L0, m_extent)

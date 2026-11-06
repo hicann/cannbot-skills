@@ -1,0 +1,46 @@
+kind: split_spec
+dimensions:
+  iter:
+  - m
+  - n
+  unit:
+  - m
+  section: []
+constants:
+  Mb: 128
+  Nb: 128
+task_space:
+  axes:
+  - name: m
+    range: ceil(M / Mb)
+  - name: n
+    range: ceil(N / Nb)
+  locals:
+  - name: m_begin
+    expr: m * Mb
+  - name: n_begin
+    expr: n * Nb
+  - name: m_extent
+    expr: min(Mb, M - m_begin)
+  - name: n_extent
+    expr: min(Nb, N - n_begin)
+  variants:
+  - name: output_tile
+    when: m_extent > 0 and n_extent > 0
+    count: 1
+    locals: []
+    fields:
+      m: m
+      n: n
+      m_begin: m_begin
+      n_begin: n_begin
+      m_extent: m_extent
+      n_extent: n_extent
+constraints:
+  atom_key:
+  - m
+  ordered_key:
+  - n
+  splittable_dims:
+  - n
+task_cost: 2 * m_extent * n_extent * K

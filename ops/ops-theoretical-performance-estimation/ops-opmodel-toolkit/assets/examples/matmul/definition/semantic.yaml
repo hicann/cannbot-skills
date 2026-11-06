@@ -1,0 +1,62 @@
+dimensions:
+  M:
+    default: 128
+    min: 1
+    max: 16384
+  N:
+    default: 128
+    min: 1
+    max: 16384
+  K:
+    default: 256
+    min: 1
+    max: 16384
+tensors:
+- name: A
+  shape:
+  - M
+  - K
+  dtype: bf16
+  role: input
+- name: B
+  shape:
+  - K
+  - N
+  dtype: bf16
+  role: input
+- name: C
+  shape:
+  - M
+  - N
+  dtype: bf16
+  role: output
+operations:
+- name: gemm
+  operation: contraction
+  inputs:
+  - tensor: A
+    version: 0
+  - tensor: B
+    version: 0
+  outputs:
+  - tensor: C
+    version: 0
+  attrs: {}
+  state_effects: []
+outputs:
+- tensor: C
+  version: 0
+layouts: []
+final_state_versions: []
+numeric:
+  mode: tolerance
+  atol: 0.02
+  rtol: 0.02
+  equal_nan: false
+tensor_numeric: []
+transform_sources:
+- split
+- reduction
+- materialize
+- route
+- schedule

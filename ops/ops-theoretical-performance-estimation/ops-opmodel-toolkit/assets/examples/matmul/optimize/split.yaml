@@ -1,0 +1,24 @@
+name: split_demo
+shape:
+  M: 256
+  N: 256
+  K: 128
+  Mb: 128
+  Nb: 128
+  Kb: 128
+  M_L0: 64
+  N_L0: 64
+  K_L0: 128
+ncores: 32
+strategy:
+  rule:
+  - greedy
+  - contiguous
+  - round
+  order:
+  - m
+  - n
+  granularity: task
+  hit_policy: all_miss
+search:
+  top_k: 3

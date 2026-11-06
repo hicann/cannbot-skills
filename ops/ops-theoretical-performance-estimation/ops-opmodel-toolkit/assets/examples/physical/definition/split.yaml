@@ -1,0 +1,51 @@
+kind: split_spec
+dimensions:
+  iter:
+  - tile
+  - role
+  - lane
+  unit:
+  - tile
+  - role
+  - lane
+  section: []
+constants: {}
+task_space:
+  axes:
+  - name: tile
+    range: ceil(M / BM)
+  locals:
+  - name: rows
+    expr: min(BM, M - tile * BM)
+  variants:
+  - name: cube
+    when: 1
+    count: 1
+    locals: []
+    fields:
+      tile: tile
+      role: '''cube'''
+      lane: variant_index
+      owner: tile % groups
+      rows: rows
+  - name: vector
+    when: 1
+    count: 2
+    locals: []
+    fields:
+      tile: tile
+      role: '''vector'''
+      lane: variant_index
+      owner: tile % groups
+      rows: rows
+constraints:
+  atom_key:
+  - tile
+  - role
+  - lane
+  ordered_key:
+  - tile
+  - role
+  - lane
+  splittable_dims: []
+task_cost: '1'

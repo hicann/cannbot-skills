@@ -1,0 +1,15 @@
+name: dag_demo
+shape:
+  M: 256
+  N: 256
+  K: 128
+phases: C1
+tiling:
+  Mb: 128
+  Nb: 128
+  Kb: 128
+  M_L0: 64
+  N_L0: 64
+search:
+  top_k: 3
+  replay_top: 3

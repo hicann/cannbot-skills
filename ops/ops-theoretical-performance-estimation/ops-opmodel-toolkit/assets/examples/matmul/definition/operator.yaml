@@ -1,0 +1,67 @@
+name: tutorial_matmul
+hardware: matmul/ascend_950DT_streaming
+run:
+  split_strategy:
+    rule: greedy
+    order:
+    - m
+    - n
+    granularity: task
+    hit_policy: all_miss
+buffers:
+- name: a_l1
+  slots: 2
+  kind: prefetch
+  mem: L1
+  bytes: M_L0 * Kb * bf16
+- name: b_l1
+  slots: 2
+  kind: prefetch
+  mem: L1
+  bytes: Kb * N_L0 * bf16
+- name: l0a_c1
+  slots: 2
+  kind: prefetch
+  mem: L0A
+  bytes: M_L0 * K_L0 * bf16
+- name: l0b_c1
+  slots: 2
+  kind: prefetch
+  mem: L0B
+  bytes: K_L0 * N_L0 * bf16
+- name: l0c_c1
+  slots: 2
+  kind: prefetch
+  mem: L0C
+  bytes: M_L0 * N_L0 * fp32
+- name: o_ub
+  slots: 2
+  kind: prefetch
+  mem: UB
+  bytes: output_M * N_L0 * bf16
+pipeline:
+  phases:
+  - - C1
+  tokens:
+    M:
+    - C1
+  dataflow: []
+params:
+  use_unitflag: 0
+  Mb: 128
+  Nb: 128
+  Kb: 256
+  M_L0: 128
+  N_L0: 128
+  K_L0: 128
+  K_total: 512
+  task_M: 128
+  task_N: 128
+  task_m: 0
+  task_n: 0
+  num_groups: 2
+  num_tasks: 2
+  output_M: 128
+  output_lanes: 2
+  vec_split_dim: output_M
+  vec_split_align: 1
