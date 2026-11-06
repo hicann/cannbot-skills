@@ -1,0 +1,36 @@
+{
+  "skill_name": "docs-basic-aicheck",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "Markdown 文档全面质检（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "帮我检查这篇 Markdown 文档的质量：infra/docs-common-review/docs-basic-aicheck/evals/dataset/intro.md，重点看语言通顺性、内容冗余和写作风格一致性。",
+      "expected_output": "1. 按 SKILL.md 工作流执行：先数据准备（读取 references/rules.md 并按需读取规则引用的参考文件、按 assets/exclude-files.json 生成文档列表、带行号一次性读取待检查文档），再逐规则逐行检查，最后调用 scripts/repeate_char_checker.js 检查重复字/词。\n2. 只使用规则文件中明确定义的规则，规则名称与规则文件完全一致，严禁创造规则或按常识扩展检查范围。\n3. 每处问题独立报告（独立 line_number 和 snippet），行号从带行号的文档内容中直接获取，禁止心算估算。\n4. 结果仅写入 output/general-markdown-check-result.json（统一 issue JSON 结构，含 rule_group/rule_item/rule_type/rule_name/snippet/description/rule_level/file_name/line_number/location/suggestion），无问题的检查项严禁报告；质检期间不输出解释性文字、总结或表格。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "干净内容不虚构问题",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "对这段 Markdown 内容做质检：'本示例演示昇腾 CANN（Compute Architecture for Neural Networks，神经网络计算架构）的安装步骤。'，结果里会有哪些问题？",
+      "expected_output": "回复应给出空问题列表或明确说明未发现问题：只报告真实存在问题的检查项，无问题的检查项严禁报告，不得虚构问题。内容无路径特征时按 Markdown 内容模式处理（写入临时文件后检查），一段内容场景不校验 MD 专属格式（标题层级、代码块等），仅聚焦基础规范和核心正确性。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}

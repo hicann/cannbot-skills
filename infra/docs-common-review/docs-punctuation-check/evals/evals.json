@@ -1,0 +1,36 @@
+{
+  "skill_name": "docs-punctuation-check",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "标点与空格规范性质检（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "检查这篇文档的标点符号和空格规范性：infra/docs-common-review/docs-punctuation-check/evals/dataset/quickstart.md，中英文混排的空格和标点混用重点看。",
+      "expected_output": "1. 按 SKILL.md 步骤依次执行 scripts/ 下检查器：excess_space_checker.js（多余空格）、miss_space_checker.js（缺少空格）、mixed_language_checker.js（中英文符号混用）、excess_punctuation_checker.js（多余标点）、pair_punctuation_checker.js（成对标点不完整）、path_checker.js（路径符号）、code_lint.js（代码块格式）。\n2. 中英文符号混用结果必须二次校验：读取 output/mix_language_check_result.json，逐条对照原文行号与上下文判定真伪，代码块、命令、参数、变量占位符属例外场景不判定为问题，无法确定时保守跳过；不直接信任脚本输出。\n3. 最终结果仅写入 output/punctuation-markdown-check-result.json（统一 issue JSON 结构），无问题的检查项严禁报告；质检期间不输出解释性文字、总结或表格。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "脚本结果不盲信（二次校验纪律）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "mixed_language_checker.js 报了第 227 行 \"${op_name}\" 使用英文花括号是个问题，我该直接把它写进质检结果吗？",
+      "expected_output": "不应该直接写入。按 SKILL.md 二次校验规范：先根据 line_number 和 snippet 在原文档定位该行，查看上下文确认片段是否在代码块、命令、参数、变量名等例外场景中；\"${op_name}\" 是代码变量占位符，属例外场景，应判定为脚本误判并跳过，不写入结果文件；必须对照原文档逐个验证脚本输出，不能直接信任。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}

@@ -1,0 +1,471 @@
+[
+  {
+    "nonstandardTerm": "使能",
+    "standardTerm": "启用/开启",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": ["即使能够"]
+  },
+  {
+    "nonstandardTerm": "图象",
+    "standardTerm": "图像",
+    "errorCategory": "错别字",
+    "correctionSuggestion": "请修改！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "好象",
+    "standardTerm": "好像",
+    "errorCategory": "错别字",
+    "correctionSuggestion": "请修改！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "抽像",
+    "standardTerm": "抽象",
+    "errorCategory": "错别字",
+    "correctionSuggestion": "请修改！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "形像",
+    "standardTerm": "形象",
+    "errorCategory": "错别字",
+    "correctionSuggestion": "请修改！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "放止",
+    "standardTerm": "防止",
+    "errorCategory": "错别字",
+    "correctionSuggestion": "请修改！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "阀值",
+    "standardTerm": "阈值",
+    "errorCategory": "错别字",
+    "correctionSuggestion": "请修改！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "飞浆",
+    "standardTerm": "飞桨",
+    "errorCategory": "错别字",
+    "correctionSuggestion": "请修改！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "按装",
+    "standardTerm": "安装",
+    "errorCategory": "错别字",
+    "correctionSuggestion": "请修改！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "政治",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "公安",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "涉密",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "警种",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "技侦",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "网安",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "国安",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "国保",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "刑侦",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "防恐",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "兵团",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "新疆",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "台湾",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "西藏",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "涉台",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "维族",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "维吾尔",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "穆斯林",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "人种",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "黑人",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "少数民族",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "种族",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "跨镜",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "毒品",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "追缉",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "军工",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "军团",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "军队",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "武警",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "上访",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "布控",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "稽查",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "监狱",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "暴力",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "杀人",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "赌博",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "非法",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "违法",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "诽谤",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "犯罪",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "打击犯罪",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "再教育",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "精神鉴定",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "犯罪预测",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "强迫",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "监听",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "监听人员信息时需修改，监听端口/进程不修改",
+    "exceptions": ["监听端口", "监听进程"]
+  },
+  {
+    "nonstandardTerm": "待补充",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "TODO",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "待测试",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "待开发",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "未完成",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "需用户补齐",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "需用户确认",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "致命",
+    "standardTerm": "关键",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "缺陷",
+    "standardTerm": "问题",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "暴露",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "曝光",
+    "standardTerm": "",
+    "errorCategory": "通用敏感词",
+    "correctionSuggestion": "请删除！",
+    "exceptions": []
+  },
+  {
+    "nonstandardTerm": "Atlas 300T A2",
+    "standardTerm": "",
+    "errorCategory": "已下线产品",
+    "correctionSuggestion": "已下线产品，请删除！",
+    "exceptions": []
+  }
+]

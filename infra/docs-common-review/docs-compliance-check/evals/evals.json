@@ -1,0 +1,36 @@
+{
+  "skill_name": "docs-compliance-check",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "合规质检与脚本检查器协同（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "对 infra/docs-common-review/docs-compliance-check/evals/dataset/overview.md 做合规性检查，重点看术语、敏感词和表格规范，这次跳过标签检查。",
+      "expected_output": "1. 按 SKILL.md 工作流执行：数据准备（读 references/rules.md 及规则引用的 terms-and-abbreviations.md、sensitive-words-internal.md 等参考资料，带行号读取文档）→ 逐规则逐行检查 → 依次执行 scripts/ 下 tag_checker.js（解析到 --skip-tag 时跳过，仓名取项目根目录末级目录名）、encoding_format_checker.js、prohibited_words_checker.js、null_cell_checker.js、catalog_num_checker.js。\n2. 只使用规则文件中明确定义的规则，规则名称与规则文件完全一致（如\"术语检查\"），每处问题独立报告，行号从带行号的文档内容中直接获取。\n3. 结果仅写入 output/compliance-markdown-check-result.json（统一 issue JSON 结构），无问题的检查项严禁报告；质检期间不输出解释性文字；完成后清理中间结果文件（tag_check_result.json 等临时产物）。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "规则之外不扩展",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "文档里有个明显错别字，但合规规则文件里没有针对错别字的规则，质检结果里要不要报这个问题？",
+      "expected_output": "不应该报。仅使用 references/rules.md 中明确定义的规则，严禁创造新规则、修改规则名称或级别，也严禁基于常识或经验进行扩展性检查；遇到规则描述不明确的情况必须跳过而非自行解读；只报告真实存在问题的检查项。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}

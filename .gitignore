@@ -70,3 +70,6 @@ codespell_reports/
 
 # OAT 远程 hook 报告目录
 oat_reports/
+
+# Claude Code 本地会话目录
+.claude/

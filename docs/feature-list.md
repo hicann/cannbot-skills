@@ -335,3 +335,4 @@
 | **CANN 工具链** | 故障信息收集、Device 日志导出、AI Core Error 分析、npu-compute 性能采集与报告分析 | [tools/](../tools/) |
 | **科学计算模型迁移** | 框架级代码 NPU 迁移（环境门禁/脚本适配/精度性能对比） | plugins-community/science-model-npu-migration |
 | **治理与协作** | Skill 审查、GitCode PR/Issue 自动化 | infra/ |
+| **文档通用质检** | 提供Markdown通用质检能力，涵盖文件名规范、标点符号规范、表达合规性，以及上下文语义的正确性与可读性 | [infra/docs-common-review/](../infra/docs-common-review/) |
