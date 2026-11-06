@@ -1,22 +1,23 @@
 # Ascend C Host 侧日志上报规范
 
+```
 <适用>
 语言: C++
 侧别: Host
+默认启用: true
+
 领域: true
 触发: OP_LOGE, OP_LOGI, OP_LOGW, OP_LOGD
-默认启用: true
-适用场景: op_host/**/*.cpp, op_graph/**/*.cpp, op_api/**/*.cpp（覆盖 tiling、InferShape、InferDataType、aclnn 实现）
-介绍: LOG-1 按 cann-error-code-standard 核验日志的实际上报入口和正式语义，禁止推荐治理废弃宏；LOG-2 检查日志中的算子名来源。
 </适用>
+```
 
 
 ## 快速索引
 
-| 规范编号 | 规范名称 | 类别 | 侧别 | 严重级别 |
-|---------|---------|------|------|---------|
-| LOG-1 | 语义可映射时使用目标版本正式入口，不推荐治理废弃宏 | 错误码规范 | Host | 中 |
-| LOG-2 | 日志中打印算子名称必须从 TilingContext 获取，禁止自定义算子名字符串 | 日志规范 | Host | 中 |
+| 规范编号 | 规范名称 | 类别 | 严重级别 | 适用范围 |
+|---------|---------|------|---------|---------|
+| LOG-1 | 语义可映射时核验正式错误上报入口 | 错误码规范 | 中 | [适用: Host] |
+| LOG-2 | 日志中打印算子名称必须从 TilingContext 获取，禁止自定义算子名字符串 | 日志规范 | 中 | [适用: Host] |
 
 ## LOG-1: 语义可映射时核验正式错误上报入口
 
@@ -26,21 +27,24 @@
 
 本条的唯一错误码基准为 `{skill_base}/../cann-error-code-standard/SKILL.md` 及其 `references/development-standard.md`、`references/documented-error-codes.json`。废弃码、注册契约和首报判据分别由 ERR-1~4 定义，不再在日志规则中维护第二份宏码映射表。
 
-不能把所有裸 `OP_LOGE` 都判为 EZ9999，也不能把所有带后缀的 `OP_LOGE_WITH_*` 都判为合规。实际宏来源可能是 op_common、nnopbase 或项目包装；先解析目标 include 链，再判断最终上报叶子。已知下层首报后，外层仅日志并透传；过程信息不能无证据认定为正式上报缺陷。
-
 ### 错误示例
 
 ```cpp
-// 参数错误仍使用已被治理禁用的按 input index 上报码。
+// ❌ 错误：参数错误仍使用已被治理禁用的按 input index 上报码。
 OP_LOGE_WITH_INVALID_INPUT_SHAPE(context->GetNodeName(), 0, actualShape, expectedShape);
 ```
 
 ### 正确示例
 
 ```cpp
-// 目标版本已确认支持该语义宏及其 EZ0008 注册项；使用稳定参数名。
+// ✅ 正确：目标版本已确认支持该语义宏及其 EZ0008 注册项；使用稳定参数名。
 OP_LOGE_FOR_INVALID_SHAPE(context->GetNodeName(), "x", actualShape, expectedShape);
 ```
+
+### 注意事项
+
+1. 分工与去重：LOG-1 管宏选择（用哪个宏）、LOG-2 管算子名来源（名字从哪来），两者独立判定，同现可双报；同一调用点同根因已由 ERR-* 报告时合并为一条意见。已知下层首报后，外层仅日志并透传——过程信息不能无证据认定为正式上报缺陷
+2. 反臆测：不能把所有裸 `OP_LOGE` 都判为 EZ9999，也不能把所有带后缀的 `OP_LOGE_WITH_*` 都判为合规——实际宏来源可能是 op_common、nnopbase 或项目包装，须先解析目标 include 链，再判断最终上报叶子
 
 ### 专属检视方法
 
@@ -74,60 +78,53 @@ Host 侧代码打印日志时需要算子名称的，必须从宿主上下文（
 - 同一算子多文件日志口径不一（有的手写、有的从 context 获取）
 - 调试阶段遗留的假算子名（如 `"xxx-test"`）混入生产日志
 
-### 真实检视案例
-
-案例1 — 第一参数硬编码算子名（ops-math PR#2195）：
-
-> 评论：「第一个参数用了硬编码字符串 "Pow"，其他所有文件统一用的是 context_->GetNodeName()。建议改为 context_->GetNodeName() 保持一致，也避免算子名变更后日志不匹配。」
-
-案例2 — OP_LOGI 调试遗留假名（ops-transformer PR#4089）：
-
-> 评论：「这行 OP_LOGI 用了硬编码的 "alltoallmatmul-test" 作为算子名，看起来是调试阶段留下的日志。生产代码中不应该用 test 后缀的标识符做日志tag，要么删掉这行，要么改成使用实际的 opName 参数。」
-
-案例3 — context 已携带算子标识又手动加前缀（ops-math PR#1767 / #1994）：
-
-> 评论：「context->GetNodeName() 这个已经获取了算子名称，后面打印可以不需要再添加。」
-> 作者采纳后回复：「日志输出中不再手动添加算子名前缀，依赖 context->GetNodeName() 或 context 自动携带的算子标识。」
-
-### 反例
+### 错误示例
 
 ```cpp
-// 反例1: 第一参数硬编码算子名（ops-math PR#2195 同类）
+// ❌ 错误1: 第一参数硬编码算子名（ops-math PR#2195 同类）
 OP_LOGE("Pow", "tiling failed, powNum is %ld.", powNum);                     // ❌ 自定义算子名字符串
 
-// 反例2: 消息里手写算子名前缀——context 已自动携带算子标识（ops-math PR#1767 同类）
+// ❌ 错误2: 消息里手写算子名前缀——context 已自动携带算子标识（ops-math PR#1767 同类）
 OP_LOGE(context, "AddCustom tiling failed, totalNum is %ld.", totalNum);     // ❌ 手动前缀冗余
 
-// 反例3: 调试遗留假名（ops-transformer PR#4089 同类）
+// ❌ 错误3: 调试遗留假名（ops-transformer PR#4089 同类）
 OP_LOGI(context, "alltoallmatmul-test enter, tilingKey = %lu.", tilingKey);  // ❌ 调试遗留
 
-// 反例4: 预定义宏 entityName 传字符串字面量
+// ❌ 错误4: 预定义宏 entityName 传字符串字面量
 OP_LOGE_FOR_INVALID_SHAPEDIM("Pow", "x", "3D", "4D");                        // ❌ entityName 硬编码
 ```
 
-### 正例
+### 正确示例
 
 ```cpp
-// 正例1【优先】: 直接传 context，框架自动携带算子标识
+// ✅ 正确1【优先】: 直接传 context，框架自动携带算子标识
 OP_LOGE(context, "tiling failed, totalNum is %ld.", totalNum);
 
-// 正例2【合规】: 显式 GetNodeName()，不算报错
+// ✅ 正确2【合规】: 显式 GetNodeName()，不算报错
 OP_LOGE(context->GetNodeName(), "tiling failed, totalNum is %ld.", totalNum);
 
-// 正例3【合规】: 预定义宏 entityName 从 context 获取（宏参数为 const char*，无法直接传 context）
+// ✅ 正确3【合规】: 预定义宏 entityName 从 context 获取（宏参数为 const char*，无法直接传 context）
 OP_LOGE_FOR_INVALID_SHAPEDIM(context->GetNodeName(), "x", "3D", "4D");
 
-// 正例4【合规】: tiling 类成员初始化时从 context 获取后复用
+// ✅ 正确4【合规】: tiling 类成员初始化时从 context 获取后复用
 // Init 中: opName_(context->GetNodeName());
 OP_LOGE(opName_, "fail to get platform info");
 
-// 正例5【豁免】: context 判空分支内无 context 可传，允许使用算子名字符串
+// ✅ 正确5【豁免】: context 判空分支内无 context 可传，允许使用算子名字符串
 if (context == nullptr) {
     OP_LOGE("Xxx", "TilingContext is null, cannot get node name.");   // 豁免：判空分支内（建议与注册名一致）
     return ge::GRAPH_FAILED;
 }
 OP_LOGE(context, "tiling failed, totalNum is %ld.", totalNum);        // 分支外仍须从 context 获取
 ```
+
+### 注意事项
+
+1. 优先级：直接传 context > `context->GetNodeName()` > 硬编码字符串（本条报错对象仅为硬编码）
+2. LOG-1 管宏选择（用哪个宏）、LOG-2 管算子名来源（名字从哪来），两者独立判定——裸 OP_LOGE 且算子名硬编码可同时报两条
+3. 预定义宏（`OP_LOGE_WITH_*`/`FOR_*`）的 entityName 参数为 `const char*`，从 `context->GetNodeName()` 获取
+4. 融合算子/多算子共用 tiling 基类场景，可通过基类虚函数返回算子名（每个继承类重写自己的实现），禁止各文件各自硬编码
+5. context 判空分支豁免的边界：仅限 `context == nullptr` / `!context` 保护分支体内，不得以"context 可能为空"为由在正常路径硬编码；存在 context 之外的算子名来源（如 aclnn 入参 `opName`）时仍优先使用该来源；判空分支内使用的字符串建议与算子注册名一致
 
 ### 专属检视方法
 
@@ -146,11 +143,3 @@ OP_LOGE(context, "tiling failed, totalNum is %ld.", totalNum);        // 分支�
 | 疑似算子名但无法确认（字面量与注册名不吻合） | SUSPICIOUS |
 
 **步骤4 — 意见输出**：建议改为**直接传 context（优先）**或 `context->GetNodeName()`；理由引用：算子名变更/复制代码到新算子后日志不匹配、多文件口径不一致。
-
-### 注意事项
-
-1. 优先级：直接传 context > `context->GetNodeName()` > 硬编码字符串（本条报错对象仅为硬编码）
-2. LOG-1 管宏选择（用哪个宏）、LOG-2 管算子名来源（名字从哪来），两者独立判定——裸 OP_LOGE 且算子名硬编码可同时报两条
-3. 预定义宏（`OP_LOGE_WITH_*`/`FOR_*`）的 entityName 参数为 `const char*`，从 `context->GetNodeName()` 获取
-4. 融合算子/多算子共用 tiling 基类场景，可通过基类虚函数返回算子名（每个继承类重写自己的实现），禁止各文件各自硬编码
-5. context 判空分支豁免的边界：仅限 `context == nullptr` / `!context` 保护分支体内，不得以"context 可能为空"为由在正常路径硬编码；存在 context 之外的算子名来源（如 aclnn 入参 `opName`）时仍优先使用该来源；判空分支内使用的字符串建议与算子注册名一致
