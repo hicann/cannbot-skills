@@ -79,7 +79,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 | **Ascend C 注册调用** | ACLNN/GEIR 接入框架的标准算子 | [ops-registry-invoke](plugins-official/ops-registry-invoke/AGENTS.md) |
 | **Catlass** | CATLASS C++ 算子五阶段工作流 | [六个 CATLASS C++ Skills](ops/catlass-cpp-interface/SKILL.md)（插件入口位于 [cannbot](https://gitcode.com/cann/cannbot/tree/master/plugins-official/catlass-op-generator)） |
 | **PyPTO** | 昇腾原生 Python Tile 算子编程 | [pypto-op-orchestrator](plugins-official/pypto-op-orchestrator/AGENTS.md) |
-| **TileLang** | 按本机芯片路由，Ascend910 与 Ascend950 工作流及技能独立 | [tilelang-op-orchestrator](plugins-official/tilelang-op-orchestrator/AGENTS.md) |
+| **TileLang** | 按本机芯片路由，Ascend910 与 Ascend950 工作流及技能独立 | [tilelang-op-orchestrator（cannbot）](https://gitcode.com/cann/cannbot/blob/master/plugins-official/tilelang-op-orchestrator/AGENTS.md) |
 | **Triton** | `triton_ascend` DSL 生成并优化算子 | triton-op-generator（已迁移至 [cannbot](https://gitcode.com/cann/cannbot) 仓 `plugins-official/triton-op-generator`） |
 | **torch.compile 图模式** | npugraph_ex 图捕获与重放 | [torch-compile](plugins-official/torch-compile/AGENTS.md) |
 | **模型推理优化** | 固定阶段优化与 baseline 之上的 SOTA 探索优化 | [model-infer-optimize（cannbot）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize) |
