@@ -57,6 +57,7 @@ error_count=0
 warn_count=0
 summary_skills=0
 summary_agents=0
+summary_count=0
 
 parsed=$(python3 - <<'PYEOF' "$tmp"
 import json, sys
@@ -83,6 +84,7 @@ PYEOF
 while IFS=$'\t' read -r field1 field2 field3; do
     [ -z "$field1" ] && continue
     if [ "$field1" = "SUMMARY" ]; then
+        summary_count=$((summary_count + 1))
         summary_skills="$field2"
         summary_agents="$field3"
         continue
@@ -112,7 +114,13 @@ echo -e "  Errors:           ${RED}$error_count${NC}"
 echo -e "  Warnings:         ${YELLOW}$warn_count${NC}"
 echo ""
 
-if [ $error_count -gt 0 ]; then
+if [ "$exit_code" -ne 0 ] || [ "$summary_count" -ne 1 ] || [ "$error_count" -gt 0 ]; then
+    if [ "$exit_code" -ne 0 ]; then
+        print_error "dependency_validator.py exited with code $exit_code"
+    fi
+    if [ "$summary_count" -ne 1 ]; then
+        print_error "Expected 1 summary record, got $summary_count"
+    fi
     print_status_failed
     echo ""
     echo "Please fix the broken dependency references."
