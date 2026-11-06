@@ -19,9 +19,9 @@ SKILL.md 只保留协议摘要，脚本用法、目录契约、验收方法都�
 <root>/knowledge/index.md
 <root>/governance/schemas/registries.yaml
 <root>/knowledge/contrib/ascendc/index.md
-<root>/knowledge/contrib/ascendc/runbooks/performance/            # Playbook（142）
-<root>/knowledge/contrib/ascendc/optimizations/evolution_strategies/cards/       # 策略卡（161）
-<root>/knowledge/contrib/ascendc/optimizations/evolution_strategies/discovered/  # X 发现（89）
+<root>/knowledge/contrib/ascendc/runbooks/performance/            # Playbook（156）
+<root>/knowledge/contrib/ascendc/optimizations/evolution_strategies/cards/       # 策略卡（175）
+<root>/knowledge/contrib/ascendc/optimizations/evolution_strategies/discovered/  # X 发现（117）
 ```
 
 ---
@@ -109,7 +109,7 @@ bash <plugin>/init.sh project claude \
   "source": "cli|env|project_env|sibling",
   "knowledge_root": "...",
   "git_commit": "...",
-  "counts": {"cards": 161, "playbooks": 142, "discovered": 89, "preconditions": 166},
+  "counts": {"cards": 175, "playbooks": 157, "discovered": 117, "preconditions": 180},
   "index_stats": {"...": "..."},
   "negative_test": {"returncode": 3, "passed": true},
   "checks": {
@@ -171,10 +171,16 @@ python3 scripts/knowledge_local.py pr --project <项目根> --id X90
 
 # 执行到“复制 + 重建索引 + check.sh”，commit/push 仍由人工确认
 python3 scripts/knowledge_local.py pr --project <项目根> --id X90 --execute
+
+# failure_pattern：复制到 failure_patterns/，同步 okf_compat.json，重建 INDEX
+python3 scripts/knowledge_local.py pr --project <项目根> --kind failure_pattern --execute
 ```
 
-生成的步骤：`git checkout -b knowledge/evolution-local` → `cp` 到知识仓 `discovered/`
-→ `knowledge_index.py build` → `check.sh` → `git add/commit/push`。
+生成的步骤：`git checkout -B knowledge/evolution-local` → 按 kind `cp` 到知识仓
+`discovered/` 或 `failure_patterns/` → failure_pattern 额外更新
+`ascendc-evolution-knowledge/references/okf_compat.json` → `knowledge_index.py build`
+→ `generate_index_json.py` 重建 skills `INDEX.json` → `check.sh` →
+`git add/commit/push`（commit/push 仍由人工确认）。
 
 ---
 

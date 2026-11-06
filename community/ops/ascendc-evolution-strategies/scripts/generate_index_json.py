@@ -40,6 +40,7 @@ if _SCRIPT_DIR_FOR_IMPORT not in sys.path:
 
 from knowledge_root import (  # noqa: E402
     KnowledgeRootError,
+    PLAYBOOK_REL,
     discovered_dir,
     resolve_knowledge_root,
 )
@@ -120,8 +121,43 @@ OKF_ROOT = (
     / "okf"
 )
 
+# 三仓分离后，OKF 结构化元数据随发现卡正文迁到 cannbot-knowledge；
+# 新知识卡的 frontmatter 使用通用知识 schema（type/tags/status），不再携带
+# evolution 专用的 op_families/bottlenecks/confidence。这里保留一份按 X id
+# 索引的 compat 元数据（仅结构化字段，不含正文），供 INDEX.json 合并。
+OKF_COMPAT_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "ascendc-evolution-knowledge"
+    / "references"
+    / "okf_compat.json"
+)
+
 SKILL = "ascendc-evolution-strategies"
 OKF_SKILL = "ascendc-evolution-knowledge"
+
+
+def _load_okf_compat() -> dict:
+    """读取旧 OKF 结构化元数据（cards / failure_patterns）；缺失时返回空表。"""
+    try:
+        data = json.loads(OKF_COMPAT_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        LOGGER.warning(
+            "WARN: okf_compat.json 不可读（%s），仅使用知识卡 frontmatter", exc
+        )
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _map_evolution_status(status: str | None) -> str:
+    """把知识仓通用 status 映射到 OKF 生命周期。"""
+    value = (status or "").strip().lower()
+    if value in {"active", "published"}:
+        return "active"
+    if value in {"deprecated", "retired"}:
+        return "deprecated"
+    if value in {"retracted"}:
+        return "retracted"
+    return "stub"
 
 
 def split_frontmatter(text: str):
@@ -268,22 +304,46 @@ def discover_preconditions() -> list[dict]:
     return entries
 
 
-def discover_playbooks() -> list[dict]:
+def discover_playbooks(cli_root: str | None = None) -> list[dict]:
     entries = []
+    indexed_names: set[str] = set()
     for p in sorted(PRECOND_DIR.glob("*.yaml")):
         meta = parse_strategy_meta(p.read_text(encoding="utf-8"))
         if not meta or not meta.get("playbook_path"):
             continue
         slug = meta.get("playbook_slug", meta.get("slug", p.stem))
         sid = meta.get("id", p.stem)
+        doc_path = meta["playbook_path"]
+        indexed_names.add(Path(doc_path).name)
         entries.append(
             {
                 "source_key": f"{SKILL}#playbook/{slug}",
                 "id": sid,
                 "doc_repo": meta.get("doc_repo", "cannbot-knowledge"),
-                "doc_path": meta["playbook_path"],
+                "doc_path": doc_path,
             }
         )
+    # 兜底：知识仓 runbooks/performance/ 下可能存在不绑定具体策略的通用
+    # runbook（如 clock / asc_time_stamp 测量），它们也是 Playbook 正文，
+    # 必须进 INDEX 才能与 knowledge_smoke 的文件计数保持一致。
+    try:
+        root, _ = resolve_knowledge_root(cli_root)
+        playbook_dir = root / PLAYBOOK_REL
+    except KnowledgeRootError:
+        playbook_dir = None
+    if playbook_dir and playbook_dir.is_dir():
+        for p in sorted(playbook_dir.glob("*.md")):
+            if p.name in {"index.md", "SCHEMA.md"} or p.name in indexed_names:
+                continue
+            slug = p.stem
+            entries.append(
+                {
+                    "source_key": f"{SKILL}#playbook/{slug}",
+                    "id": slug,
+                    "doc_repo": "cannbot-knowledge",
+                    "doc_path": f"{PLAYBOOK_REL}/{p.name}",
+                }
+            )
     return entries
 
 
@@ -323,16 +383,71 @@ def discover_discovered(cli_root: str | None = None) -> list[dict]:
         except (OSError, json.JSONDecodeError):
             LOGGER.warning("WARN: 现有 INDEX.json 不可读，discovered 数组为空")
             return []
+    compat = _load_okf_compat()
     entries = []
     for p in sorted(disc_dir.glob("disc_x*.md")):
         slug = p.stem  # disc_x17
         sid = slug.split("_", 1)[1].upper() if "_" in slug else slug  # X17
+        meta: dict = {}
+        try:
+            text = p.read_text(encoding="utf-8")
+            fm, _ = split_frontmatter(text)
+            if fm:
+                meta = parse_yaml_frontmatter(fm) or {}
+        except OSError:
+            LOGGER.warning("WARN: 读取发现卡失败：%s", p)
+        legacy = compat.get("cards", {}).get(sid, {})
         entries.append(
             {
                 "source_key": f"{SKILL}#discovered/{slug}",
                 "id": sid,
                 "doc_repo": "cannbot-knowledge",
                 "doc_path": f"{KNOWLEDGE_DISCOVERED_REL}/{p.name}",
+                "kind": "discovered_strategy",
+                "title": legacy.get("title") or meta.get("title") or sid,
+                "description": legacy.get("description") or meta.get("description", ""),
+                "confidence": legacy.get("confidence")
+                or meta.get("confidence")
+                or "single_op",
+                "status": legacy.get("status")
+                or _map_evolution_status(meta.get("status")),
+                "op_families": legacy.get("op_families")
+                or meta.get("op_families")
+                or [],
+                "bottlenecks": legacy.get("bottlenecks")
+                or meta.get("bottlenecks")
+                or [],
+                "tags": legacy.get("tags") or meta.get("tags") or [],
+            }
+        )
+    return entries
+
+
+def discover_failure_patterns() -> list[dict]:
+    """从 okf_compat.json 的 failure_patterns 段生成失败模式条目。"""
+    compat = _load_okf_compat().get("failure_patterns", {})
+    entries = []
+    for fid, meta in sorted(compat.items()):
+        doc_path = meta.get("doc_path", "")
+        if not doc_path:
+            continue
+        entries.append(
+            {
+                "source_key": f"{SKILL}#failure-pattern/{fid.lower()}",
+                "id": fid,
+                "doc_repo": "cannbot-knowledge",
+                "doc_path": doc_path,
+                "kind": "failure_pattern",
+                "title": meta.get("title", fid),
+                "phenomenon": meta.get("phenomenon", ""),
+                "failed_combination": meta.get("failed_combination", []),
+                "severity": meta.get("severity", ""),
+                "operator_type": meta.get("operator_type", []),
+                "op_families": meta.get("op_families", meta.get("operator_type", [])),
+                "bottlenecks": [],
+                "status": _map_evolution_status(meta.get("status")),
+                "tags": meta.get("tags", []),
+                "description": meta.get("description", ""),
             }
         )
     return entries
@@ -496,9 +611,10 @@ def main(argv: list[str] | None = None) -> int:
     okf = discover_okf()
     cards = cards + okf
     preconds = discover_preconditions()
-    playbooks = discover_playbooks()
+    playbooks = discover_playbooks(args.knowledge_root)
     families = discover_families()
     discovered = discover_discovered(args.knowledge_root)
+    failure_patterns = discover_failure_patterns()
 
     deprecated_count = sum(1 for c in cards if c.get("deprecated", False))
     active_cards = len(cards) - deprecated_count
@@ -520,12 +636,14 @@ def main(argv: list[str] | None = None) -> int:
             "families": len(families),
             "discovered": len(discovered),
             "okf": len(okf),
+            "failure_patterns": len(failure_patterns),
         },
         "cards": cards,
         "preconditions": preconds,
         "playbooks": playbooks,
         "families": families,
         "discovered": discovered,
+        "failure_patterns": failure_patterns,
     }
 
     INDEX_PATH.write_text(

@@ -59,7 +59,7 @@ def _matches(
         hay = " ".join(
             [
                 str(card.get(k, ""))
-                for k in ["id", "title", "description", "path", "tags"]
+                for k in ["id", "title", "description", "path", "doc_path", "tags"]
             ]
         ).lower()
         if keyword.lower() not in hay:
@@ -91,11 +91,13 @@ def main() -> int:
     args = parser.parse_args()
 
     index = json.loads(args.index_path.read_text(encoding="utf-8"))
-    cards = index.get("cards", [])
-    okf_cards = [
-        c
-        for c in cards
-        if c.get("source_key", "").startswith("ascendc-evolution-knowledge#okf/")
+    kinds = {"discovered_strategy", "proven_solution", "failure_pattern"}
+    # 三仓分离后：OKF 正文迁到 cannbot-knowledge，X 卡在 INDEX.json 的
+    # discovered 数组，失败模式在 failure_patterns 数组；旧 okf/ 卡仍在 cards。
+    okf_cards = [c for c in index.get("cards", []) if c.get("kind") in kinds]
+    okf_cards += [c for c in index.get("discovered", []) if c.get("kind") in kinds]
+    okf_cards += [
+        c for c in index.get("failure_patterns", []) if c.get("kind") in kinds
     ]
 
     fc = (
@@ -115,6 +117,7 @@ def main() -> int:
             "op_families": c.get("op_families", []),
             "bottlenecks": c.get("bottlenecks", []),
             "phenomenon": c.get("phenomenon"),
+            "severity": c.get("severity"),
             "failed_combination": c.get("failed_combination", []),
             "tags": c.get("tags", []),
         }

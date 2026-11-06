@@ -5,10 +5,21 @@ description: Domain knowledge base for AscendC evolution optimization covering h
 
 # Evolution Knowledge Base
 
+> **三仓分离迁移说明（以本条为准）**：下文出现的 `references/okf/` 是迁移前布局。
+> 当前 X 卡正文在 `cannbot-knowledge/knowledge/contrib/ascendc/optimizations/evolution_strategies/discovered/`；
+> 旧 OKF 结构化元数据（op_families / bottlenecks / confidence / status）保留在
+> 本 skill 的 `references/okf_compat.json`，由 `generate_index_json.py` 按 X id 合并进
+> `../ascendc-evolution-strategies/references/INDEX.json` 的 `discovered` 数组；
+> 失败模式正文在 `.../evolution_strategies/failure_patterns/`，元数据在
+> `okf_compat.json` 的 `failure_patterns` 段。运行期查询读 `INDEX.json`
+> （`cards` + `discovered` + `failure_patterns`），写入统一走 `knowledge_local.py`
+> （staging），不再直接写 `references/okf/`。
+
+
 AscendC 进化优化领域知识库，分两层：
 
 - **经典层 `references/a3/`**：人工策展的硬件架构、算法洞察、API 陷阱、优化模式与 proven solutions（只读为主）
-- **OKF 自演进层 `references/okf/`**：进化过程中自动沉淀的策略/方案/失败模式卡（结构化 frontmatter，运行期首选读写目标）
+- **OKF 自演进层 `references/okf/`**：进化过程中自动沉淀的策略/方案/失败模式卡（结构化 frontmatter，运行期首选读写目标；目录随首次写入按需创建，查询与索引对空目录均容错）
 
 当前支持 A3 (Ascend 910B) 架构。
 
@@ -17,7 +28,7 @@ AscendC 进化优化领域知识库，分两层：
 ```
 references/
   a3/                           # 经典知识库（Ascend 910B / A3 架构，人工策展）
-    guide.md                    # 顶层快速入口
+    INDEX.md                    # 顶层快速入口
     hardware/
       guide.md                  # 瓶颈诊断启发式、tiling 公式
       ascend910b_arch.md        # 架构详情：UB=196KB, 40核, DMA 模型
@@ -38,11 +49,12 @@ references/
       memory_coalescing.md      # 10-40% (strided access)
     proven_solutions/
       INDEX.md                  # 已验证方案索引（compat 层，可追加写入）
-  okf/                          # OKF 自演进知识库（进化沉淀，带结构化 frontmatter）
+  okf/                          # OKF 自演进知识库（进化沉淀，带结构化 frontmatter；
+                                # 当前为空，随首次写入按需创建，工具链对缺失目录容错）
     index.md
     strategies/discovered/      # X 系列策略（discovered_strategy，OKF 增强版；
                                 # 原始发现在 cannbot-knowledge 仓 optimizations/evolution_strategies/discovered/）
-    runbooks/proven-solutions/  # 跨算子已验证方案（proven_solution，6 条）
+    runbooks/proven-solutions/  # 跨算子已验证方案（proven_solution）
     runbooks/failure-patterns/  # 失败模式（failure_pattern，用于 anti 提示）
 ```
 

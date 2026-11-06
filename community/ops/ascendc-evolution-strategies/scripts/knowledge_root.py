@@ -61,6 +61,9 @@ CONTRIB_REL = KNOWLEDGE_REL / "contrib" / "ascendc"
 PLAYBOOK_REL = CONTRIB_REL / "runbooks" / "performance"
 CARDS_REL = CONTRIB_REL / "optimizations" / "evolution_strategies" / "cards"
 DISCOVERED_REL = CONTRIB_REL / "optimizations" / "evolution_strategies" / "discovered"
+FAILURE_PATTERN_REL = (
+    CONTRIB_REL / "optimizations" / "evolution_strategies" / "failure_patterns"
+)
 
 REQUIRED_REL_PATHS = (
     KNOWLEDGE_REL / "index.md",

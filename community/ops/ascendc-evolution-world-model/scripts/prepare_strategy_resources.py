@@ -46,7 +46,7 @@ import json
 import logging
 import os
 import re
-import subprocess
+import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -99,7 +99,7 @@ def step_1_filter(args, candidate_ids: list[str]) -> dict:
         cmd.extend(["--node-id", args.node_id])
 
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)  # nosec B603
     except subprocess.TimeoutExpired:
         return {
             "_error": "filter-candidates timed out",
@@ -143,7 +143,7 @@ def step_2_load_playbook(passed_ids: list[str]) -> str:
         ",".join(passed_ids),
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)  # nosec B603
     except subprocess.TimeoutExpired:
         return "⚠️  load_playbook.py timed out"
 
@@ -167,7 +167,7 @@ def step_3_get_excluded(evo_dir: str) -> str:
         "markdown",
     ]
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)  # nosec B603
     except subprocess.TimeoutExpired:
         return ""
     if proc.returncode != 0:
@@ -498,7 +498,9 @@ def _build_failure_patterns_anti_md(passed_ids: list[str]) -> str:
     idx = _load_strategy_index()
     passed_set = set(passed_ids)
     alerts = []
-    for c in idx.get("cards", []):
+    # 三仓分离后失败模式在 INDEX.json 的 failure_patterns 数组；旧 okf/ 卡
+    # 仍在 cards 数组中，两处都查以保持兼容。
+    for c in [*idx.get("cards", []), *idx.get("failure_patterns", [])]:
         if c.get("kind") != "failure_pattern":
             continue
         fc = c.get("failed_combination") or []
@@ -523,9 +525,12 @@ def _build_failure_patterns_anti_md(passed_ids: list[str]) -> str:
             f"组合 `{' + '.join(a.get('failed_combination', []))}` → "
             f"{a.get('phenomenon', '?')}（severity: {a.get('severity', '?')}）"
         )
-        lines.append(
-            f"  - 详见 `{a.get('doc_path', '')}`，先读其中的 Resolution 再决定是否规避。"
-        )
+        doc_path = a.get("doc_path", "")
+        if a.get("doc_repo") == "cannbot-knowledge" and doc_path:
+            knowledge_root = _resolve_knowledge_root()
+            if knowledge_root is not None:
+                doc_path = str(knowledge_root / doc_path)
+        lines.append(f"  - 详见 `{doc_path}`，先读其中的 Resolution 再决定是否规避。")
     return "\n".join(lines) + "\n"
 
 

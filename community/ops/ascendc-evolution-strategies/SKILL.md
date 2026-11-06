@@ -1,11 +1,11 @@
 ---
 name: ascendc-evolution-strategies
-description: AscendC kernel optimization strategy library with 250 strategies (161 curated P/D/A/R + 89 discovered X), supporting tiered retrieval, compatibility checking, and autonomous strategy discovery. 当需要为 AscendC kernel 选择优化策略、按瓶颈/算子族筛选策略、检查策略兼容性或登记进化发现的新策略时使用。
+description: AscendC kernel optimization strategy library with 292 strategies (175 curated P/D/A/R + 117 discovered X), supporting tiered retrieval, compatibility checking, and autonomous strategy discovery. 当需要为 AscendC kernel 选择优化策略、按瓶颈/算子族筛选策略、检查策略兼容性或登记进化发现的新策略时使用。
 ---
 
 # Evolution Strategies
 
-AscendC 内核优化策略库，包含 250 策略（161 精选 + 89 进化发现），覆盖数据类型 (D)、性能 (P)、精度 (A)、A5 架构 (R)、进化发现 (X) 五大系列。
+AscendC 内核优化策略库，包含 292 策略（175 精选 + 117 进化发现），覆盖数据类型 (D)、性能 (P)、精度 (A)、A5 架构 (R)、进化发现 (X) 五大系列。
 
 ## 文件布局
 

@@ -33,7 +33,7 @@ import argparse
 import hashlib
 import json
 import os
-import subprocess
+import subprocess  # nosec B404
 import sys
 from pathlib import Path
 
@@ -123,7 +123,7 @@ def _negative_test() -> dict:
         "P1",
         "--list-only",
     ]
-    proc = subprocess.run(
+    proc = subprocess.run(  # nosec B603
         cmd, capture_output=True, text=True, env=env, timeout=120, check=False
     )
     return {
@@ -134,6 +134,95 @@ def _negative_test() -> dict:
         if proc.stderr.strip()
         else "",
     }
+
+
+def _query_semantics_check(index_stats: dict | None) -> tuple[bool, dict]:
+    """验证 OKF 读链路：INDEX 中 X 卡有结构化字段，query CLI 能按算子族命中。"""
+    detail: dict = {"enriched_discovered": 0, "query": None}
+    if not INDEX_PATH.is_file():
+        return False, detail
+    try:
+        index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        detail["error"] = f"INDEX.json 不可读: {exc}"
+        return False, detail
+    enriched = [
+        e
+        for e in index.get("discovered", [])
+        if e.get("kind") == "discovered_strategy" and e.get("op_families")
+    ]
+    detail["enriched_discovered"] = len(enriched)
+    if not enriched:
+        return False, detail
+    family = enriched[0]["op_families"][0]
+    query_py = (
+        SKILL_ROOT.parent / "ascendc-evolution-knowledge" / "scripts" / "query.py"
+    )
+    if not query_py.is_file():
+        detail["error"] = f"query.py 不存在: {query_py}"
+        return False, detail
+    proc = subprocess.run(  # nosec B603
+        [
+            sys.executable,
+            str(query_py),
+            "--kind",
+            "discovered_strategy",
+            "--op-family",
+            str(family),
+            "--status",
+            "all",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    detail["query"] = {
+        "op_family": family,
+        "returncode": proc.returncode,
+        "stderr_tail": proc.stderr[-300:],
+    }
+    if proc.returncode != 0:
+        return False, detail
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        detail["query"]["stdout_tail"] = proc.stdout[-300:]
+        return False, detail
+    count = len(result.get("results", []))
+    detail["query"]["results"] = count
+    if count <= 0:
+        return False, detail
+    failure_count = len(index.get("failure_patterns", []))
+    detail["failure_patterns"] = failure_count
+    if failure_count:
+        proc = subprocess.run(  # nosec B603
+            [
+                sys.executable,
+                str(query_py),
+                "--kind",
+                "failure_pattern",
+                "--status",
+                "all",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        detail["failure_query"] = {
+            "returncode": proc.returncode,
+            "stderr_tail": proc.stderr[-300:],
+        }
+        if proc.returncode != 0:
+            return False, detail
+        try:
+            failure_result = json.loads(proc.stdout)
+        except json.JSONDecodeError:
+            detail["failure_query"]["stdout_tail"] = proc.stdout[-300:]
+            return False, detail
+        detail["failure_query"]["results"] = len(failure_result.get("results", []))
+        if detail["failure_query"]["results"] <= 0:
+            return False, detail
+    return True, detail
 
 
 def run(knowledge_root: str | None, corpus: str = "knowledge") -> tuple[dict, bool]:
@@ -209,6 +298,11 @@ def run(knowledge_root: str | None, corpus: str = "knowledge") -> tuple[dict, bo
             False,
             "INDEX.json 缺失或不可解析（先运行 generate_index_json.py）",
         )
+
+    # 三仓分离后 OKF 读链路回归：X 卡必须带结构化元数据，且 query CLI 能按
+    # 算子族命中；失败模式有卡时也必须能按 kind 命中。
+    query_ok, query_detail = _query_semantics_check(index_stats)
+    check("query_semantics", query_ok, query_detail)
 
     fingerprints = _fingerprint(corpus_dirs)
     check(

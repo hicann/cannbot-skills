@@ -24,6 +24,10 @@
   ``references/strategy-index.md``；
 * 检索侧（skill 的 load_playbook / query_strategies）不读本目录；需要让新知识
   参与检索时，先 ``promote``，再由 ``pr --execute`` 同步到知识仓并重建索引；
+* ``pr --kind failure_pattern`` 会把正文复制到
+  ``knowledge/contrib/ascendc/optimizations/evolution_strategies/failure_patterns/``，
+  并把 ``key/phenomenon/severity/failed_combination/operator_type`` 合并进
+  skills 侧 ``okf_compat.json``，随后重建知识仓检索索引与 skills ``INDEX.json``；
 * 所有落盘内容必须满足知识仓 OKF frontmatter 契约（type/title/description/
   tags/status/sources/created_at/updated_at/platforms）。
 
@@ -57,12 +61,20 @@ if _SCRIPT_DIR not in sys.path:
 from knowledge_root import (  # noqa: E402
     KnowledgeRootError,
     DISCOVERED_REL,
+    FAILURE_PATTERN_REL,
     git_commit,
     resolve_knowledge_root,
 )
 
 LOCAL_DIRNAME = Path(".cannbot") / "knowledge-local"
 STATUSES = ("staging", "promoted", "rejected")
+SKILLS_ROOT = Path(__file__).resolve().parents[2]
+OKF_COMPAT_PATH = (
+    SKILLS_ROOT / "ascendc-evolution-knowledge" / "references" / "okf_compat.json"
+)
+GENERATE_INDEX_PY = (
+    SKILLS_ROOT / "ascendc-evolution-strategies" / "scripts" / "generate_index_json.py"
+)
 REQUIRED_FRONTMATTER = (
     "type",
     "title",
@@ -275,12 +287,105 @@ def list_entries(project: str | Path, status: str | None = None) -> list[dict]:
     return entries
 
 
+def _dest_rel(entry: dict) -> Path:
+    if str(entry.get("kind", "")).lower() == "failure_pattern":
+        return FAILURE_PATTERN_REL
+    return DISCOVERED_REL
+
+
+def _yaml_list_from_frontmatter(text: str, key: str) -> list[str]:
+    lines = text.splitlines()
+    in_fm = False
+    collecting = False
+    values: list[str] = []
+    for line in lines:
+        if line.strip() == "---":
+            if in_fm:
+                break
+            in_fm = True
+            continue
+        if not in_fm:
+            continue
+        match = re.match(rf"^{re.escape(key)}\s*:\s*(.*)$", line)
+        if match:
+            raw = match.group(1).strip()
+            if raw.startswith("[") and raw.endswith("]"):
+                return [
+                    x.strip().strip("'\"") for x in raw[1:-1].split(",") if x.strip()
+                ]
+            collecting = True
+            continue
+        if collecting:
+            item = re.match(r"^\s*-\s+(.*)$", line)
+            if item:
+                values.append(item.group(1).strip().strip("'\""))
+                continue
+            if line.strip():
+                break
+    return values
+
+
+def _body_meta(text: str) -> dict[str, str]:
+    meta: dict[str, str] = {}
+    for line in text.splitlines():
+        match = re.match(r"^>\s*([A-Za-z_][A-Za-z0-9_]*)\s*:\s*(.*)$", line)
+        if match:
+            meta[match.group(1)] = match.group(2).strip()
+    return meta
+
+
+def _json_list(value: str | None) -> list:
+    raw = (value or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else [parsed]
+    except json.JSONDecodeError:
+        return [x.strip().strip("'\"") for x in raw.strip("[]").split(",") if x.strip()]
+
+
+def _update_okf_compat(entry: dict, src: Path) -> None:
+    fid = str(entry.get("id", "")).upper()
+    text = src.read_text(encoding="utf-8")
+    fm, _ = _frontmatter_keys(text)
+    meta = _body_meta(text)
+    compat: dict = {}
+    if OKF_COMPAT_PATH.is_file():
+        try:
+            compat = json.loads(OKF_COMPAT_PATH.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            compat = {}
+    failure_patterns = compat.setdefault("failure_patterns", {})
+    operator_type = _json_list(meta.get("operator_type", "[]"))
+    failure_patterns[fid] = {
+        "title": fm.get("title", "").strip("'\""),
+        "key": meta.get("key", fid).strip("'\""),
+        "phenomenon": meta.get("phenomenon", "").strip("'\""),
+        "severity": meta.get("severity", "").strip("'\""),
+        "status": fm.get("status", "draft").strip("'\""),
+        "failed_combination": _json_list(meta.get("failed_combination", "[]")),
+        "operator_type": operator_type,
+        "occurrences": int((meta.get("occurrences", "1") or "1").strip("'\"")),
+        "tags": _yaml_list_from_frontmatter(text, "tags"),
+        "description": fm.get("description", "").strip("'\""),
+        "doc_path": str(FAILURE_PATTERN_REL / src.name),
+        "op_families": list(operator_type),
+    }
+    OKF_COMPAT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    OKF_COMPAT_PATH.write_text(
+        json.dumps(compat, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    print(f"updated okf_compat.json: {fid}")
+
+
 def _pr_commands(
     root: Path, entries: list[dict], knowledge_root: Path
 ) -> tuple[list[list[str]], list[list[str]]]:
     """返回 (自动执行命令, 人工执行命令)。
 
-    均为 argv 列表，用 shell=False 执行，防注入/空格断链。
+    均为 argv 列表，用 shell=False 执行，防注入/空格断链。failure_pattern
+    的目标目录为 failure_patterns/，其余仍写 discovered/。
     """
     branch = "knowledge/evolution-local"
     index_py = (
@@ -291,22 +396,24 @@ def _pr_commands(
         / "scripts"
         / "knowledge_index.py"
     )
-    # 自动执行：建分支 + 复制 promoted 条目 + 重建索引 + 知识仓校验
     auto: list[list[str]] = [
-        ["git", "-C", str(knowledge_root), "checkout", "-b", branch],
+        ["git", "-C", str(knowledge_root), "checkout", "-B", branch],
     ]
     for entry in entries:
         src = root / entry["path"]
-        dst = knowledge_root / DISCOVERED_REL / src.name
+        dst = knowledge_root / _dest_rel(entry) / src.name
+        auto.append(["mkdir", "-p", str(dst.parent)])
         auto.append(["cp", str(src), str(dst)])
     auto.append(["python3", str(index_py), "build"])
+    auto.append(
+        ["python3", str(GENERATE_INDEX_PY), "--knowledge-root", str(knowledge_root)]
+    )
     auto.append(["bash", str(knowledge_root / "check.sh")])
-    # 人工执行：commit/push 由人确认后自行运行
     manual: list[list[str]] = [
         ["git", "-C", str(knowledge_root), "add"]
         + [
             str(
-                (knowledge_root / DISCOVERED_REL / (root / e["path"]).name).relative_to(
+                (knowledge_root / _dest_rel(e) / (root / e["path"]).name).relative_to(
                     knowledge_root
                 )
             )
@@ -330,16 +437,25 @@ def _format_argv(argv: list[str]) -> str:
 
 
 def submit_pr(
-    project: str | Path, entry_id: str | None, knowledge_root: str | None, execute: bool
+    project: str | Path,
+    entry_id: str | None,
+    knowledge_root: str | None,
+    execute: bool,
+    kind: str | None = None,
 ) -> int:
     project_path = Path(project).expanduser().resolve()
     root = local_root(project_path)
     entries = [e for e in _read_manifest(root) if e.get("status") == "promoted"]
+    if kind:
+        entries = [e for e in entries if str(e.get("kind", "")).lower() == kind.lower()]
     if entry_id:
         wanted = entry_id.lower()
         entries = [e for e in entries if str(e.get("id", "")).lower() == wanted]
     if not entries:
-        print("没有 promoted 条目可提 PR（先运行 promote）")
+        print(
+            "没有 promoted 条目可提 PR（先运行 promote；"
+            "failure_pattern 加 --kind failure_pattern）"
+        )
         return 1
 
     try:
@@ -352,13 +468,20 @@ def submit_pr(
     auto_cmds, manual_cmds = _pr_commands(root, entries, kroot)
     if not execute:
         print(
-            "\n# 待执行命令（加 --execute 仅执行复制/索引/校验，不执行 commit/push）："
+            "\n# 待执行命令（加 --execute 执行复制/兼容元数据/索引/校验，"
+            "不执行 commit/push）："
         )
         for argv in auto_cmds + manual_cmds:
             print(_format_argv(argv))
+        if any(str(e.get("kind", "")).lower() == "failure_pattern" for e in entries):
+            print(f"# 另外会更新 failure_patterns 元数据：{OKF_COMPAT_PATH}")
         return 0
 
-    # 自动执行全部分组一（建分支/复制/重建索引/check.sh）；commit/push 交由人工确认。
+    # failure_pattern 先把结构化元数据合并进 okf_compat.json，再重建 INDEX。
+    for entry in entries:
+        if str(entry.get("kind", "")).lower() == "failure_pattern":
+            _update_okf_compat(entry, root / entry["path"])
+
     for argv in auto_cmds:
         print(f"$ {_format_argv(argv)}")
         rc = subprocess.run(argv, shell=False, check=False).returncode
@@ -412,6 +535,12 @@ def main(argv: list[str] | None = None) -> int:
     p_pr = sub.add_parser("pr", help="生成/执行提 PR 命令")
     p_pr.add_argument("--project", default=os.getcwd())
     p_pr.add_argument("--id", default=None)
+    p_pr.add_argument(
+        "--kind",
+        choices=("discovered", "failure_pattern"),
+        default=None,
+        help="只处理指定 kind 的 promoted 条目",
+    )
     p_pr.add_argument("--knowledge-root", default=None)
     p_pr.add_argument("--execute", action="store_true")
 
@@ -436,7 +565,13 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "reject":
             reject(args.project, args.id, args.reason)
         elif args.command == "pr":
-            return submit_pr(args.project, args.id, args.knowledge_root, args.execute)
+            return submit_pr(
+                args.project,
+                args.id,
+                args.knowledge_root,
+                args.execute,
+                kind=args.kind,
+            )
     except SystemExit:
         raise
     except Exception as exc:  # pragma: no cover - CLI 兜底

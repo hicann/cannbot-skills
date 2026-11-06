@@ -30,7 +30,7 @@ import json
 import logging
 import math
 import os
-import subprocess
+import subprocess  # nosec B404
 import sys
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -157,9 +157,9 @@ def _maybe_update_state_stage(
             stage,
             f" (round={round_num})" if round_num is not None else "",
         )
-    except Exception:
+    except Exception as exc:
         # state.json sync is optional; never let it break wm_ops
-        pass
+        LOGGER.debug("state sync skipped: %s", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -2569,6 +2569,11 @@ def _run_deep_profiling_script(args) -> tuple:
     script_path = os.path.abspath(script_path)
     result_path = os.path.join(args.work_dir, "deep_profiling_result.json")
 
+    if not os.path.exists(script_path):
+        # 降级路径：ascendc-profiling-analysis 未随三仓交付时，基于该节点已有
+        # 的 pipeline 数据合成 evidence（与 attach-baseline-evidence 同一口径）。
+        return _synthesize_evidence_from_workdir(args)
+
     cmd = [
         sys.executable,
         script_path,
@@ -2579,7 +2584,7 @@ def _run_deep_profiling_script(args) -> tuple:
         "--output",
         result_path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)  # nosec B603
     if proc.returncode != 0:
         return None, f"deep-profiling: run_deep_profiling.py failed:\n{proc.stderr}"
 
@@ -2589,6 +2594,57 @@ def _run_deep_profiling_script(args) -> tuple:
     evidence = prof_result.get("profiling_evidence")
     if not evidence:
         return None, "deep-profiling: no profiling_evidence produced"
+    return evidence, None
+
+
+def _synthesize_evidence_from_workdir(args) -> tuple:
+    """降级路径：run_deep_profiling.py 未交付时，从 work_dir 已有数据合成 evidence。
+
+    数据源：evaluation_results.json 的 evolved.pipeline（Phase 1.5 --compare 采集
+    后写入）+ evolved.bottleneck；与 cmd_attach_baseline_evidence 同一套
+    synthesize/extract 口径。指令级字段（d_class_pct / dma_efficiency 等）缺省。
+
+    Returns (evidence, error_msg)；无 pipeline 数据时 error_msg 非 None。
+    """
+    eval_path = os.path.join(args.work_dir, "evaluation_results.json")
+    if not os.path.exists(eval_path):
+        return None, (
+            "deep-profiling: run_deep_profiling.py not available and "
+            f"evaluation_results.json not found in {args.work_dir}"
+        )
+    with open(eval_path, "r", encoding="utf-8") as f:
+        eval_data = json.load(f)
+    evolved = eval_data.get("evolved") or {}
+    pipeline = evolved.get("pipeline")
+    if not pipeline:
+        return None, (
+            "deep-profiling: run_deep_profiling.py not available and "
+            "evolved.pipeline is missing/null in evaluation_results.json"
+        )
+
+    try:
+        from profiling_evidence import (
+            synthesize_analysis_from_pipeline,
+            extract_profiling_evidence,
+        )
+    except ImportError:
+        _proj_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..")
+        )
+        sys.path.insert(0, _proj_root)
+        from profiling_evidence import (
+            synthesize_analysis_from_pipeline,
+            extract_profiling_evidence,
+        )
+
+    bottleneck_hint = evolved.get("bottleneck")
+    profiling_analysis = synthesize_analysis_from_pipeline(pipeline, bottleneck_hint)
+    evidence = extract_profiling_evidence({"profiling_analysis": profiling_analysis})
+    if not evidence:
+        return None, "deep-profiling: pipeline synthesis produced no evidence"
+    evidence["synthesis_source"] = (
+        "pipeline_synthesis (run_deep_profiling.py unavailable)"
+    )
     return evidence, None
 
 

@@ -222,8 +222,20 @@ def _count_pattern_in_file(fp: str, regex) -> int:
         return 0
 
 
+def _normalize_regex_pattern(pattern: str) -> str:
+    """把单引号 YAML 中过度转义的 `\\\\` 归一为 `\\`。
+
+    preconditions/*.yaml 常见写法是单引号 `'for\\s*...'`；YAML 单引号不处理
+    转义，解析后得到字面量 `\\s`，re.compile 会把它当成“反斜杠 + s”，而不是
+    正则空白符，导致 grep_count/grep_value 系统性误判（P1/P5/P10/P14 等）。
+    对确实要匹配字面反斜杠的 `\\\\`（四字符）也会归一为 `\\`（两字符），
+    在正则中仍表示一个反斜杠，语义不变。
+    """
+    return pattern.replace("\\\\", "\\") if pattern else pattern
+
+
 def exec_grep_count(check: dict, kernel_dir: str) -> tuple[bool, str]:
-    pattern = check.get("pattern", "")
+    pattern = _normalize_regex_pattern(check.get("pattern", ""))
     files = resolve_files(check.get("files", []), kernel_dir)
     if not files:
         return False, f"grep_count: 无匹配文件集（files={check.get('files')}）"
@@ -256,7 +268,7 @@ def _first_group_in_file(fp: str, regex):
 
 
 def exec_grep_value(check: dict, kernel_dir: str) -> tuple[bool, str]:
-    pattern = check.get("pattern", "")
+    pattern = _normalize_regex_pattern(check.get("pattern", ""))
     files = resolve_files(check.get("files", []), kernel_dir)
     expected_value = str(check.get("expected_value", ""))
 

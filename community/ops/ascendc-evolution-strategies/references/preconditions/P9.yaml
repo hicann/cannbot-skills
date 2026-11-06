@@ -28,7 +28,7 @@ checks:
 
   - id: has_order_sensitive_write
     type: grep_count
-    pattern: "AtomicAdd|AtomicMax|outputGm.*=|+=.*outputGm"
+    pattern: "AtomicAdd|AtomicMax|outputGm.*=|\\+.*outputGm"
     files: [kernel]
     expected: ">= 1"
     fail_msg: "算子无多核写冲突或顺序敏感操作 → 输出天然确定。考虑 P4 负载均衡或 P67 Counter 模式"
