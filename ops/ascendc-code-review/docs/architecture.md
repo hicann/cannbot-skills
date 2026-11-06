@@ -38,7 +38,6 @@ ascendc-code-review/
 │   ├── ...                          另有 cpp-style、ascendc-simt、mc2-specific 等
 │
 ├── scripts/                         工具脚本：{tool}.py
-│   ├── clause.check_bounds.py              数值边界静态分析
 │   ├── get_gitcode_pr_diff.py        PR diff获取
 │   ├── clone_pr_source.py            PR源码克隆
 │   └── ...

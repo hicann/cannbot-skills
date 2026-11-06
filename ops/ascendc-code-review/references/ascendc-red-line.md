@@ -14,6 +14,8 @@
 
 ## 快速索引
 
+本清单共 10 条，严重级别均为高：All 侧 7 条、Host 侧 1 条、Kernel 侧 2 条。
+
 | 规范编号 | 规范名称 | 类别 | 严重级别 | 适用范围 |
 |---------|---------|------|---------|---------|
 | RED-1 | 确保除法和余数运算不会导致除以零的错误 | 数值安全 | 高 | [适用: All] |
@@ -36,197 +38,44 @@
 
 ### RED-1 确保除法和余数运算不会导致除以零的错误 `[适用: All]`
 
-> **Kernel 侧说明**：
-> - Kernel 中的除法/取余运算，按除数来源分类判定（见下方 Step 2）。
-> - **硬件 API 返回值**（`GetBlockNum()`、`GetTaskRation()` 等）和 **TilingData 字段**（`tilingData->*`）作除数时，适用 Kernel 侧排除规则，无需零值守卫。
-> - 仅对 Kernel 内部独立计算的运行时变量（非白名单 API、非 TilingData）要求零值守卫。
-
-**【检视策略】**
-
-**Step 1 — 识别除法/取余运算**
-
-扫描代码中所有 `/` 和 `%` 运算符（含 `CeilDiv`/`CeilDivide` 工具函数调用），提取除数表达式。
-
-**Step 2 — 除数来源分类**
-
-| 优先级 | 除数来源 | 识别方法 | 信任等级 |
-|--------|---------|---------|---------|
-| P0 | 编译期常量 | `constexpr` 声明、字面量、`AscendC::BLOCK_CUBE` 等框架常量 | 自动 PASS |
-| P1 | 硬件 API 返回值 | 白名单 API 直接调用或赋值链可追溯 | Kernel 侧自动 PASS |
-| P2 | TilingData 字段 | `tilingData->xxx` / `tilingData_.xxx` | Kernel 侧自动 PASS |
-| P3 | 外部输入 | `shape->GetDim()`、`context->GetAttr()`、`GetActualSeqLen()` | 严格：必须有守卫 |
-| P4 | 设计过程参数 | Tiling/Kernel 内部多步计算的中间值 | 严格：必须有守卫 |
-
-**硬件 API 白名单（P1）**：
-
-| 侧别 | 白名单 API | 典型变量名 |
-|------|-----------|-----------|
-| Kernel | `AscendC::GetBlockNum()` | `coreNum`, `blockNum_` |
-| Kernel | `AscendC::GetTaskRation()` | `taskRation`, `coreRation` |
-| Kernel | `AscendC::GetSubBlockNum()` | `bn`, `subBlockNum` |
-| Tiling | `ascendcPlatform.GetCoreNumAic()` | `aicNum` |
-| Tiling | `ascendcPlatform.GetCoreNumAiv()` | `aivNum` |
-| Tiling | `ascendcPlatform.GetCoreNum()` | `coreNum` |
-| Tiling | `ascendcPlatform.GetCoreMemSize(...)` | `ubSize`, `l1Size` 等 |
-
-> **适用条件**：除数直接来自上述 API 返回值，或赋值链可追溯到上述 API 的变量。若除数经过算术运算（如 `GetBlockNum() - 1`），需另行分析运算结果是否可能为零。
-
-**Step 3 — 按来源判定**
-
-- **P0（编译期常量）**：值非零 → PASS。值为零 → FAIL。
-- **P1（硬件 API）**：Kernel 侧自动 PASS（见排除规则）。tiling 代码必须有零值守卫（见严格模式）。
-- **P2（TilingData）**：Kernel 侧自动 PASS。tiling 代码作为中间值按 P3/P4 处理。
-- **P3（外部输入）**：必须有有效守卫模式之一 → 无守卫则 FAIL。
-- **P4（设计过程参数）**：必须有有效守卫，或可追溯到 P0/P1 的非零值 → 否则 FAIL。
-
-**边界收集**（P3/P4 需要时）：按本条例 Step 2 方法收集除数边界，按 Step 4 判定表做判定。
-
-**【Kernel 侧排除规则】**
-
-以下情况在 Kernel 侧自动排除，无需零值守卫：
-
-| 排除条件 | 参数模式示例 | 排除原因 |
-|---------|-------------|----------|
-| 除数来自硬件 API 白名单 | `GetBlockNum()`, `GetTaskRation()` | 芯片出厂固定非零，异常场景由 tiling 代码兜底 |
-| 除数来自 TilingData | `tilingData->tileSize`, `tilingData->coreNum` | Tiling 阶段已校验非零 |
-| 编译期常量 | `constexpr uint32_t BLOCK = 32` | 编译期固定非零 |
-
-**判定方法**：
-- 除数表达式直接匹配白名单 API 调用 → 直接判定 PASS
-- 除数变量赋值链可追溯到白名单 API 或 `tilingData->xxx` → 直接判定 PASS
-- 除数为 `constexpr` 且值非零 → 直接判定 PASS
-
-**【Kernel 侧需校验场景】**
-
-以下情况在 Kernel 侧仍需零值守卫：
-
-| 校验条件 | 参数来源 | 代码模式 |
-|---------|---------|----------|
-| Kernel 内部计算的中间值 | 非 TilingData、非硬件 API | `if (computedDivisor == 0) { return; }` |
-| 动态序列长度 | `GetActualSeqLen()` 运行时获取 | `if (actS1Size == 0) { return; }` |
-| 条件分支中的计算值 | 依赖运行时条件的派生值 | `if (curMode == X && div != 0) { ... }` |
-
-**【有效守卫模式】**
-
-以下 6 种模式视为有效的零值守卫（任一存在 → PASS）：
-
-| 模式 | 名称 | 代码形式 | 适用侧别 |
-|------|------|---------|---------|
-| A | OP_CHECK_IF | `OP_CHECK_IF(div == 0, LOG, return FAIL)` | Tiling |
-| B | if-guard+return | `if (div == 0) return;` | 两侧 |
-| C | std::max 保底 | `safeDiv = std::max(div, 1U)` | 两侧 |
-| D | 三元运算符 | `safe = (div > 0) ? div : 1` | 两侧 |
-| E | zero-flag+skip | `if (div==0) flag=true; if(!flag) { a/b }` | 两侧 |
-| F | ASSERT | `ASSERT(div != 0)` | Kernel（仅 moe/ 族） |
-
-> **ASSERT 注意**：ASSERT 在 Release 编译中可能被移除，仅在 moe/ 算子族的 Kernel 代码中视为有效守卫。其他场景的 ASSERT 降级为 SUSPICIOUS。
-
-**【CeilDiv/CeilDivide 特殊说明】**
-
-`CeilDiv(a, b)` / `CeilDivide(a, b)` 是算子仓最广泛使用的除法工具函数（3,000+ 处），但其标准实现 `(a + b - 1) / b` **本身不提供零值保护**。
-
-- **禁止**将 `CeilDiv` 调用视为守卫模式
-- `CeilDiv` 的除数参数（第二个参数）仍需按 P0-P4 分类判定：
-  - 来自 P0/P1/P2 → PASS
-  - 来自 P3/P4 且有守卫 → PASS
-  - 来自 P3/P4 无守卫 → FAIL
-
-**【tiling 代码硬件参数校验 — 严格模式】**
-
-tiling 代码负责所有硬件参数的校验（业务约定）。当硬件 API 返回值（P1）用作除数时，**必须**在 Tiling 代码中有显式零值守卫，否则判定为 FAIL。
-
-| 除数来源 | 校验方式 | 示例 |
-|---------|---------|------|
-| `GetCoreNumAic/Aiv()` | `OP_CHECK_IF(aicNum == 0, return GRAPH_FAILED)` | 核数获取后立即校验 |
-| `GetCoreMemSize()` | `OP_CHECK_IF(ubSize == 0, return GRAPH_FAILED)` | 内存大小获取后立即校验 |
-| `context->GetBlockDim()` | `if (blockDim == 0) return GRAPH_FAILED` | 使用前校验 |
-
-**【tiling 代码校验示例】**
-
-```cpp
-// Tiling 阶段校验外部输入非零（P3）
-OP_CHECK_IF(keyShape->GetStorageShape().GetDim(DIM_2) == 0,
-           OP_LOGE(context_, "dim N2 is 0."), return ge::GRAPH_FAILED);
-fBaseParams.g = queryShape->GetStorageShape().GetDim(DIM_2) /
-                keyShape->GetStorageShape().GetDim(DIM_2);
-OP_CHECK_IF(fBaseParams.g == 0, OP_LOGE(context_, "g is 0"), return ge::GRAPH_FAILED);
-
-// Tiling 阶段校验硬件参数非零（P1 严格模式）
-totalCoreNum_ = static_cast<uint64_t>(ascendcPlatform.GetCoreNumAiv());
-if (totalCoreNum_ == 0UL) {
-    OP_LOGE(context_->GetNodeName(), "coreNum is 0");
-    return ge::GRAPH_FAILED;
-}
-
-// Tiling 阶段校验设计过程参数非零（P4）
-uint32_t tileSize = ComputeTileSize(totalSize, coreNum);
-OP_CHECK_IF(tileSize == 0, OP_LOGE(context_, "tileSize is 0"), return ge::GRAPH_FAILED);
-uint32_t loopTimes = totalSize / tileSize;
-```
-
-**【Kernel 侧校验示例】**
-
-```cpp
-// ✅ Kernel 侧排除规则 — 硬件 API 除数，自动 PASS（P1）
-uint32_t coreIdx = GetBlockIdx();
-uint32_t coreNum = GetBlockNum();     // P1 白名单
-uint32_t taskIdx = coreIdx / coreNum; // 无需守卫
-
-// ✅ Kernel 侧排除规则 — TilingData 除数，自动 PASS（P2）
-uint32_t tileSize = tilingData->tileSize;  // P2 TilingData
-uint32_t loops = totalSize / tileSize;     // 无需守卫
-
-// ✅ Kernel 侧需校验 — 运行时动态值（P3）
-GetS1S2ActualSeqLen(bIdx, actS1Size, actS2Size);
-if ((actS1Size == 0) || (actS2Size == 0)) {
-    curActSeqLenIsZero = true;
-    return;  // 早期退出，避免后续除法
-}
-// 后续计算：loopTimes = actS1Size / mBaseSize（actS1Size 已确保非零）
-```
+> **Kernel 侧说明**：Host 侧已校验，Kernel 侧不用校验。
 
 **【描述】**
-整数的除法和取余运算的第二个操作数值为0会导致程序产生未定义的行为，因此使用时要确保整数的除法和余数运算不会导致除零错误。
+
+整数除法和取余运算的除数为 0 会导致未定义行为，必须确保执行运算时除数非零。检查范围包括 `/`、`%` 以及封装这些运算的工具函数。
+
+不限定校验或保护的具体写法，应结合完整控制流和数据流判断是否已保证除数非零。
+
+Host 侧获取的硬件参数用作除数前，必须校验其非零。
+
+`CeilDiv` / `CeilDivide` 等向上取整函数不能仅凭函数名视为具备除零保护，应检查其实现和调用前的非零保证。
+**除数来源分类**
+
+| 除数来源 | 判断要求 |
+|----------|----------|
+| 编译期常量 | 确认常量值非零。 |
+| 硬件参数 | Host 侧用作除数前校验非零。 |
+| TilingData 字段 | Host 侧已校验，Kernel 侧不用校验。 |
+| 外部输入 | 根据输入约束和使用路径确认除数非零。 |
+| 内部计算的中间值 | 根据实际计算结果判断是否可能为零，不能仅凭原始输入非零认定结果非零。 |
+
+分类用于追踪除数来源，不限定校验写法。Kernel 侧统一遵循本条说明：Host 侧已校验，Kernel 侧不用校验。
 
 ---
 
-#### RED-2 外部数据作为数组索引时必须确保在数组大小范围内 `[适用: All]`
+### RED-2 外部数据作为数组索引时必须确保在数组大小范围内 `[适用: All]`
 
 > **Kernel 侧说明**：Kernel 中使用 blockIdx、tileLength 等变量访问 GM/UB，需确保索引不越界。
 
-**【Kernel 侧排除规则】**
-
-以下情况在 Kernel 侧自动排除，无需校验：
-
-| 排除条件 | 参数模式示例 | 排除原因 |
-|---------|-------------|----------|
-| 索引来自 TilingData | `constInfo.*`, `baseInfo.*` | Tiling 阶段已校验范围（如 Shape 维度校验） |
-| 循环边界内索引 | `for (i = 0; i < bound; i++)` 内的 `arr[i]` | 循环条件保证索引在范围内 |
-| GM/UB Buffer 内偏移 | `gmTensor[offset]`，offset 来自 Tiling | Tiling 阶段计算偏移范围 |
-
-**判定方法**：
-- 识别索引变量名匹配 `constInfo.*|baseInfo.*` 时，直接判定为 PASS
-- 识别索引在循环边界内使用时，直接判定为 PASS
-
 **【Kernel 侧需校验场景】**
 
-以下情况在 Kernel 侧仍需校验：
+Kernel 侧需要关注的索引和偏移场景包括：
 
 | 校验条件 | 参数来源 | 代码模式 |
 |---------|---------|----------|
 | aiCoreIdx 核索引 | `GetBlockIdx()` 运行时获取 | `if (aiCoreIdx >= usedCoreNum) { return; }` |
 | bIdx batch 累积差值边界 | TND 布局 `actualSeqLen[bIdx] - actualSeqLen[bIdx-1]` | `if (bIdx > 0) { ... } else { return actualSeqLen[0]; }` |
 | 动态计算的偏移 | 运行时计算值 | 边界判断逻辑 |
-
-**【tiling 代码校验示例】**
-
-```cpp
-// Tiling 阶段校验 Shape 维度范围
-OP_CHECK_IF(shape->GetDimNum() != expectedDim, 
-           OP_LOGE(context_, "dim num mismatch"), return ge::GRAPH_FAILED);
-OP_CHECK_IF(shape->GetDim(i) > MAX_SIZE,
-           OP_LOGE(context_, "dim %d exceeds limit", i), return ge::GRAPH_FAILED);
-```
 
 **【Kernel 侧校验示例】**
 
@@ -259,7 +108,7 @@ static Dev devs[DEV_NUM];
 int set_dev_id(size_t index, int id)
 {
     if (index >= DEV_NUM) {
-        ... // 错误处理
+        return -1; // 越界时退出，禁止继续访问
     }
     devs[index].id = id;
     return 0;
@@ -268,293 +117,120 @@ int set_dev_id(size_t index, int id)
 
 ### RED-3 确保有符号整数运算不溢出 `[适用: All]`
 
-> **Kernel 侧说明**：Kernel 中使用 `uint32_t` 等固定宽度类型进行循环索引和 Buffer 偏移计算，需防止溢出。
-
 **【描述】**
-有符号整数溢出是未定义的行为。出于安全考虑，对外部数据中的有符号整数值在如下场景中使用时，需要确保运算不会导致溢出：
 
-- 指针运算的整数操作数(指针偏移值)
-- 数组索引
-- 变长数组的长度(及长度运算表达式)
-- 内存拷贝的长度
-- 内存分配函数的参数
-- 循环判断条件
+有符号整数溢出是未定义行为。所有有符号整数运算都必须保证结果处于实际计算类型的可表示范围内，不限于外部输入或特定用途，也包括内部派生值和中间表达式。
 
-在精度低于int的整数类型上进行运算时，需要考虑整数提升。程序员还需要掌握整数转换规则，包括隐式转换规则，以便设计安全的算术运算。
+需要关注加、减、乘、自增、自减、取负、绝对值、累加和连乘，以及最小负值除以或取余于 `-1` 等边界。移位还需检查移位位数和所用语言标准对操作数、结果的限制。
 
-**乘法示例（int32_t 乘法溢出）：**
+检查范围包括但不限于地址偏移、数组索引、Shape 和元素总数、长度与容量、内存申请和搬运参数、对齐与分块计算、循环计数及终止条件。
 
-```cpp
-// 错误写法 — 两个 int32_t 相乘，结果可能超出 int32_t 范围
-int32_t calcHeightAlign = GetAlignedSize(...);  // 对齐后高度，可达 65536
-int32_t calcWidth = GetWidth(...);              // 宽度，可达 65536
-int32_t size = calcHeightAlign * calcWidth;     // 65536 × 65536 = 4,294,967,296 溢出！
-
-// 正确写法 — 提升为 int64_t 计算
-int64_t size = static_cast<int64_t>(calcHeightAlign) * calcWidth;
-```
-
-**取反示例（INT64_MIN 取反溢出，红线问题）：**
-
-```cpp
-// 错误写法 — delta 取 INT64_MIN 时，-delta 溢出
-int64_t delta = input2 - input1;       // 可能为 INT64_MIN = -9223372036854775808
-int64_t absDelta = -delta;             // -(-9223372036854775808) = 9223372036854775808 > INT64_MAX!
-// 有符号整数溢出是未定义行为（C++ 红线）
-
-// 正确写法 — 转换为无符号类型后再求绝对值
-uint64_t absDelta = (delta < 0) ? static_cast<uint64_t>(-delta) : static_cast<uint64_t>(delta);
-```
-
-**多维连乘示例（多维 shape 连续累乘溢出）：**
-
-```cpp
-// 错误写法 — 多维 shape 用 int32_t 连乘，极易溢出
-int32_t totalSize = dim0 * dim1 * dim2 * dim3 * dim4;
-// dim0=1024, dim1=1024, dim2=128, dim3=64 时积 ≈ 8.6 × 10^9 > INT32_MAX
-
-// 正确写法 — 使用 int64_t 并提前提升
-int64_t totalSize = static_cast<int64_t>(dim0) * dim1 * dim2 * dim3 * dim4;
-```
-
-**【检视策略 — 工具驱动】**
-
-核心流程：运行 clause.check_bounds.py → 读取敏感性分析 → 按行动指引验证关键边界 → 必要时重跑 → 收敛结论
-
-**Step 1 — 提取表达式与类型**
-
-扫描代码，提取每个有符号算术表达式。识别操作数的 C++ 类型。
-
-**Step 2 — 首次工具运行**
-
-为操作数设定初始边界后运行 clause.check_bounds.py：
-
-边界设定规则：
-① 编译期常量 / 代码守卫 (if/assert) → 使用精确值
-② 从赋值链推导 → 使用推导范围
-③ 无代码证据 → 使用合理保守值（禁止用类型全范围——那必定违规，无意义）
-
-禁止行为：
-- 虚构变量关系作为安全证据（如声称 "X ≤ Y" 但找不到对应代码行）
-- 用类型标签代替边界（"int64_t 所以够大不会溢出"——int64_t 的值可以是 1）
-
-```bash
-python3 {skill_base}/scripts/clause.check_bounds.py \
-  --expr "{表达式}" \
-  --vars "a=int32_t:0:47" "b=int32_t:3:3" "c=int64_t:100:1000000" \
-  --check overflow
-```
-
-表达式中的 C++ 写法（`func()`、`a->b`）直接用作变量名。
-
-**Step 3 — 按工具输出行动**
-
-工具输出包含「边界敏感性分析」逐变量标注安全临界值，以及「行动指引」分步指令。**严格按行动指引执行，不要跳过。**
-
-【结果: 安全 ✅】
-  看「最敏感变量」及余量：找出余量最小的那个变量
-    余量 > 10x 临界值 → 安全余量充足，PASS
-    余量 ≤ 10x → 回代码核实该变量的边界是否来自 A/B 级代码证据
-      有证据 → PASS。无证据 → 向不利方向放宽边界重跑，重跑后判断
-
-【结果: 存在风险 ⚠️】
-  看反例中「触及上限/下限」的变量：
-    来自 constexpr/守卫 (A 级) → 边界可靠，确认 FAIL
-    来自推测 (B/C 级) → Grep 找该变量的真实限定值
-      找到 → 修正边界重跑。找不到 → SUSPICIOUS + 标注边界不确定
-
-**Step 4 — 收敛（最多 1 次重跑）**
-
-重跑后按 Step 3 逻辑判断。仍不确定 → SUSPICIOUS + 标注关键变量及缺失的代码证据。
+判断时应考虑整数提升、隐式转换、符号混用以及每一步中间计算的类型。需要扩大计算范围时，应在运算发生前提升操作数；仅将最终结果赋给更宽类型不能修复已经发生的溢出。
 
 ---
 
 ### RED-4 确保无符号整数运算不回绕 `[适用: All]`
 
-> **Kernel 侧说明**：Kernel 中大量使用 `uint32_t` 进行 tileLength、blockLength 计算，需防止回绕。
-
 **【描述】**
-涉及无符号操作数的计算永远不会溢出，因为超出无符号整数类型表示范围的计算结果会按照（结果类型可表示的最大值 + 1）的数值取模。这种行为更多时候被非正式地称为无符号整数回绕。
 
-**乘法示例（uint32_t 乘法回绕后再 cast uint64_t——值已经错了）：**
+无符号整数运算超出结果类型的可表示范围时，会按该类型最大值加 1 取模。必须避免回绕使数值、索引、长度、容量或控制条件偏离预期。
 
-```cpp
-// 错误写法 — 乘法在 uint32_t 完成，回绕发生后才 cast 到 uint64_t，无法恢复
-uint32_t blockSize = 65536;    // 来自 TilingData
-uint32_t strideKV = 65536;     // 来自 TilingData
-uint64_t result = blockSize * strideKV;
-// blockSize * strideKV 在 uint32_t 空间计算：65536 × 65536 = 4,294,967,296 > UINT32_MAX
-// 实际结果: (65536 × 65536) mod 2^32 = 0 → 回绕后的 0 再 cast 到 uint64_t = 0
+检查加法、乘法、累加和自增的上界，以及减法、自减的下界；同时关注对齐、分块、多维连乘和有符号/无符号混合运算。负数转换为无符号数可能成为极大的正数。
 
-// 正确写法 — 乘法前至少一个操作数提升为 uint64_t
-uint64_t result = static_cast<uint64_t>(blockSize) * strideKV;
-```
-
-**减法示例（uint32_t 减法回绕——结果用作数组索引）：**
-
-```cpp
-// 错误写法 — aivIdx * singleCoreSize 可能大于 totalOutputSize，减法回绕
-uint32_t tailSize = totalOutputSize - aivIdx * singleCoreSize;
-// totalOutputSize=100, aivIdx=47, singleCoreSize=3:
-//   47 × 3 = 141, 100 - 141 按 uint32_t 计算 = 4294967255（回绕）
-//   tailSize 被误认为合法大小，后续 DataCopy 搬运 4GB 数据 → 越界崩溃
-
-// 正确写法 — 先判断大小关系，或使用 int64_t 中间结果
-int64_t tailSizeSigned = static_cast<int64_t>(totalOutputSize) - 
-                         static_cast<int64_t>(aivIdx) * singleCoreSize;
-uint32_t tailSize = (tailSizeSigned > 0) ? static_cast<uint32_t>(tailSizeSigned) : 0;
-```
-
-**类型混合示例（size_t 与 int64_t 混合运算——负数回绕成极大值）：**
-
-```cpp
-// 错误写法 — N_ALIGN 是 size_t 常量（无符号），numIters 是 int64_t
-// 按 C++ 整型提升规则 int64_t → size_t，负数变成极大正数
-constexpr size_t N_ALIGN = 128;
-int64_t normSize = N_ALIGN * DOUBLE_SIZE * numIters * T * n0;
-// 若 numIters 为 0 或负值，提升为 size_t 后回绕成 2^64-127 级别的极大值
-// 再经 SetDim 传出，得到非预期的 shape，后续所有计算均错
-
-// 正确写法 — 统一为有符号类型
-constexpr int64_t N_ALIGN = 128;
-int64_t normSize = N_ALIGN * DOUBLE_SIZE * numIters * T * n0;
-```
-
-**【检视策略 — 工具驱动】**
-
-核心流程：运行 clause.check_bounds.py → 读取敏感性分析 → 按行动指引验证关键边界 → 必要时重跑 → 收敛结论
-
-**Step 1 — 提取表达式与类型**
-
-扫描代码，提取每个无符号算术表达式（减法、乘法、混合运算）。识别操作数的 C++ 类型。
-
-**Step 2 — 首次工具运行**
-
-为操作数设定初始边界后运行 clause.check_bounds.py：
-
-边界设定规则：
-① 编译期常量 / 代码守卫 (if/assert) → 使用精确值
-② 从赋值链推导 → 使用推导范围
-③ 无代码证据 → 使用合理保守值（禁止用类型全范围——那必定违规，无意义）
-
-禁止行为：
-- 虚构变量关系作为安全证据（如声称 "a ≥ b 恒成立" 但找不到对应代码行）
-- 用类型标签代替边界（"uint64_t 所以够大不会回绕"——uint64_t 的值可以是 0）
-
-```bash
-python3 {skill_base}/scripts/clause.check_bounds.py \
-  --expr "{表达式}" \
-  --vars "a=uint32_t:0:47" "b=uint32_t:3:3" "c=int64_t:100:1000000" \
-  --check wraparound
-```
-
-表达式中的 C++ 写法（`func()`、`a->b`）直接用作变量名。
-
-**Step 3 — 按工具输出行动**
-
-工具输出包含「边界敏感性分析」逐变量标注安全临界值，以及「行动指引」分步指令。**严格按行动指引执行，不要跳过。**
-
-【结果: 安全 ✅】
-  看「最敏感变量」及余量：找出余量最小的那个变量
-    余量 > 10x 临界值 → 安全余量充足，PASS
-    余量 ≤ 10x → 回代码核实该变量的边界是否来自 A/B 级代码证据
-      有证据 → PASS。无证据 → 向不利方向放宽边界重跑，重跑后判断
-
-【结果: 存在风险 ⚠️】
-  看反例中「触及上限/下限」的变量：
-    来自 constexpr/守卫 (A 级) → 边界可靠，确认 FAIL
-    来自推测 (B/C 级) → Grep 找该变量的真实限定值
-      找到 → 修正边界重跑。找不到 → SUSPICIOUS + 标注边界不确定
-
-**Step 4 — 收敛（最多 1 次重跑）**
-
-重跑后按 Step 3 逻辑判断。仍不确定 → SUSPICIOUS + 标注关键变量及缺失的代码证据。
+应依据实际运算类型检查中间结果。需要使用更宽类型时，应在运算前提升操作数，不能依赖结果赋值后的类型转换消除回绕。
 
 ---
 
 ### RED-5 禁止使用未初始化的变量 `[适用: All]`
 
-> **Kernel 侧说明**：Kernel 模板类的成员变量必须在 `Init()` 函数中初始化，UB Buffer 通过 `AllocTensor` 获取后才能使用。
+**【描述】**
 
-这里的变量，指的是局部动态变量，并且还包括内存堆上申请的内存块。因为他们的初始值都是不可预料的，所以禁止未经有效初始化就直接读取其值。
+变量或内存中的数据在读取前，必须在所有可达路径上完成有效初始化。申请到存储空间不等于其中的数据已经初始化。
 
-```cpp
-void foo(...)
-{
-    int data;
-    bar(data); // 错误：未初始化就使用
-    ...
-}
-```
+- 覆盖局部变量、类成员、结构体字段、数组元素、动态申请的内存，以及参与计算或搬运的缓冲区。
+- 构造、初始化函数及条件分支必须保证后续读取的成员和字段已赋值；不要求固定采用某个初始化函数。
+- 接口通过输出参数返回数据时，必须确认接口执行成功且已写入目标数据，不能在失败路径读取未写入的结果。
+- 部分赋值、部分清零或部分搬运，只能保证对应区域已初始化；尾块、填充区和其他未写入区域不得被后续计算或搬运读取。
+- Kernel 中获取 `LocalTensor` 或绑定 `GlobalTensor` 不代表数据已初始化；首次读取前必须已有有效写入，异步写入还须满足完成及同步要求。
+- 缓冲区复用时，不得将上一轮残留数据当作本轮有效输入；依赖累加初值的操作必须保证初值有效。
 
 ### RED-6 指针操作，使用前必须要判空 `[适用: All]`
 
-> **Kernel 侧说明**：Kernel 中 `GlobalTensor` 和 `LocalTensor` 通过 API 获取，一般不需要判空，但 GM 地址偏移需校验。
-
 **【描述】**
-解引用空指针会导致程序产生未定义行为，通常会造成程序异常终止。
 
-- 指针变量在使用前，一定要做好初始化的赋值，严禁对空指针进行访问
-- 对于指针所代表的地址空间的任何操作，一定要保证空间的有效性
-- 指针指向的内存释放后，需要调用者将指针显式置为NULL，防止"野指针"
+可能为空的指针在解引用、成员访问或传入要求非空的接口前，必须确认非空。判空仅验证空值，还必须保证目标对象的生命周期、可访问范围和读写权限有效。
+
+- 外部输入、内存申请、对象查询及其他可能返回空指针的接口结果，必须在使用前检查；检查失败的路径不得继续访问。
+- 可选输入只允许在确认存在的分支中访问；Kernel 中可选 GM 输入同样必须满足对应分支条件。
+- 已由上游校验的指针，可复用该校验结果，但必须确认校验覆盖当前使用路径，且指针未被重新赋值、释放或失效；不能仅凭变量名称或来源推定非空。
+- 指针重新赋值、偏移或转换后，应确认当前访问仍然有效；原始指针非空不能证明派生地址有效。
+- 不得返回或保存生命周期已结束的局部对象地址，不得使用释放后的内存、失效的容器元素地址或迭代器。
+- 释放资源后，应防止原指针及其他别名被再次使用；将单个指针置空不能消除其他别名的悬空风险。
+- `GlobalTensor`、`LocalTensor` 等封装对象按其接口约定检查有效性，不机械套用裸指针判空；仍须确认初始化、底层存储和访问范围有效。
 
 ### RED-7 需要避免数据竞争 `[适用: All]`
 
-> **Kernel 侧说明**：Kernel 中 `GlobalTensor` 和 `LocalTensor` 通过 API 获取，一般不需要判空，但 GM 地址偏移需校验。
-
 **【描述】**
-数据竞争是一种未定义行为，它的发生通常是线程之间需要要通信，如：一个线程修改或者读取一个资源（比如共享内存、全局变量等），同时另外一个线程也在修改这个资源。如果线程是独立的，则不会导致数据竞争。在开发多线程或多进程代码过程中，如果涉及对同一个资源的操作，必须考虑数据竞争问题。
 
-- 锁的职责尽量单一，每个锁只锁一个唯一共享资源/变量/内存，范围尽量小，只锁对应资源的操作代码，从而避免死锁和多线程执行效率低的问题。
-- 使用锁解决数据竞争问题时，要避免死锁，死锁最明显的漏洞是拒绝服务，在某些情况下，在密集循环中有锁检查时，会出现cpu消耗过高的情况。
-- c++中避免数据竞争的机制包括：std::atomic变量和原子内存操作，收益线程的创建和jion，及使用锁（mutex,shared mutex）、条件变量等。
+并发执行单元访问同一或重叠的存储区域，至少一方执行写入，且缺少有效同步或适用的原子访问保证时，存在数据竞争。检视应明确访问位置、重叠区域、读写关系及缺失的同步，不能仅因使用共享内存或多核执行便判定违规。
 
-**错误示例**
-```cpp
-// ❌ 错误：g_data可能有数据竞争
-static long g_data;
-void IncreaseData(long icData)
-{
-    g_data += icData;
-}
+**【确定性场景】**
 
-void DecreaseData(long icData)
-{
-    g_data -= icData;
-}
-```
+| 场景 | 违规条件 |
+|------|----------|
+| 多核输出切分 | 不同核的输出范围发生重叠，且存在并发写入；重点覆盖尾块、对齐扩展、步长及空分片处理 |
+| atomic 与初始化 | 对同一目标区域的普通写入或清零，与其他核的 atomic 更新可能并发执行，且初始化完成前没有有效同步 |
+| atomic 与普通访问 | 对同一区域的 atomic 更新与普通读写并发发生，缺少保证访问顺序的同步；部分访问使用 atomic 不能保护其他普通访问 |
+| 生产与消费 | 消费者读取共享数据时，生产者可能尚未完成写入，且缺少保证数据就绪和可见性的同步 |
+| 计算与通信 | 计算和通信并行访问重叠区域，至少一方写入，且相应任务之间缺少有效依赖或同步 |
+| 异步缓冲区复用 | 异步计算、搬运或通信仍在读取或写入缓冲区时，另一执行单元已改写、复用或释放该区域 |
+| Host 共享状态 | 多线程或并发算子调用访问同一全局变量、静态变量、缓存、容器或共享对象，至少一方写入，且未通过锁、原子操作或其他有效同步保护 |
 
-**正确示例**
+**【判定要求】**
 
-```cpp
-// ✅ g_data无数据竞争
-atomic_long g_data;
-void IncreaseData(long icData)
-{
-    g_data += icData;
-}
+- 对核间切分，应结合实际起始位置、访问长度和尾块处理确认区间是否重叠；不能仅凭核索引不同认定安全。
+- atomic 操作的源数据与目标初值必须在使用前准备完成。初值错误或未初始化本身分别按对应规则检查；只有存在上述并发冲突时才判定为数据竞争。
+- 同步必须覆盖相关执行单元及实际读写区域，并保证所需的执行顺序和可见性；代码中出现同步调用不等于相关访问已受保护。
+- 有明确并发冲突且无有效同步保障时判定 `FAIL`；已证明访问范围不重叠或访问受有效同步保护时判定 `PASS`；并发关系、范围或同步语义缺少证据时判定 `SUSPICIOUS`，注明待核实信息。
 
-void DecreaseData(long icData)
-{
-    g_data -= icData;
-}
-```
+**【交叉引用】**
 
+atomic 初始化参见 `ascendc-topk.md` 第 8 条。`SyncAll` 与 Host `SetScheduleMode` 的绑定配置、全核同步参与要求分别参见该文件第 13、14 条；配置不匹配或参与核不完整可能导致死锁，应按对应条款单独检查，不直接等同于数据竞争。
 
-### RED-8 资源泄露（内存、句柄、锁等） `[适用: Host]`
-
-> **Kernel 侧不适用**：Kernel 无动态内存、无锁、无句柄，Buffer 静态分配无需释放。
+### RED-8 资源泄漏防护（内存、句柄、锁等） `[适用: Host]`
 
 **【描述】**
 
-- 资源申请和释放必须匹配，包括：内存类的malloc/free/alloc_page/free_page, 锁lock/unlock、文件open/close等
-- 释放结构体/类/数组/各类数据容器指针前，必须先释放成员指针
-- 对外接口处理涉及资源申请但未释放，引起资源泄露，导致拒绝服务
-- C++捕获异常时确保恢复程序的一致性; 建议使用RAII模式，确保资源在异常发生时自动释放
+对本代码拥有释放责任的资源，必须保证申请与释放匹配，并覆盖正常结束及全部异常退出路径。借用资源和框架托管资源按其所有权约定处理，不得重复释放。以下场景用于覆盖主要资源类型；遇到其他具有申请、占用、注册或引用获取语义的接口，同样检查其释放责任。
 
-### RED-9 gm内存偏移或大小必须用int64表示 `[适用: Kernel]`
+**【资源类型】**
 
-> **交叉引用**：整数溢出检视策略参见本条例3、条例4。
+| 资源 | 必须检查的场景 |
+|------|----------------|
+| 内存 | 堆内存、数组、对齐内存、Host/Device 内存、锁页内存、共享内存和内存映射；使用匹配的释放方式 |
+| 对象及容器 | 对象拥有的成员资源、嵌套资源、容器中的拥有型指针；销毁外层对象时完整清理其拥有资源 |
+| 文件与网络 | 文件、目录流、文件描述符、套接字和连接；打开或建立成功后按约定关闭 |
+| 锁及同步资源 | 已获取的锁、信号量占用及其他需归还的同步资源；覆盖提前退出，并按约定销毁同步对象 |
+| 线程与任务 | 线程、线程池和后台任务；按约定停止、等待或移交生命周期管理，避免退出后持续占用资源 |
+| 运行时资源 | 上下文、流、事件、描述符、模型、执行对象和工作区等；按实际接口的所有权及销毁顺序清理 |
+| 动态库 | 动态加载的库句柄；按加载、使用和卸载生命周期释放，卸载前确保没有仍在执行的调用或回调 |
+| 注册和引用 | 回调注册、监听订阅、引用计数、资源池借用和缓存条目；按约定注销、减引用、归还或淘汰 |
+
+**【生命周期场景】**
+
+- 正常完成、错误返回、提前返回、异常、取消、超时及重试路径均须释放已获取且仍由本代码拥有的资源。
+- 多步初始化或批量申请部分成功时，后续失败必须回收此前成功获取的资源；构造失败也不得遗留资源。
+- 循环、重复调用、重新初始化及对象替换时，不得覆盖尚未释放的资源引用；重分配失败不得丢失原资源。
+- 所有权转移应明确成功与失败两种结果的释放责任；禁止无人释放、重复释放或转移后继续由原持有者释放。
+- 异步操作使用的资源必须保留到操作完成，并在完成或取消后的安全时点回收；不得以提前释放代替正确清理。
+- 长期缓存、资源池和全局资源应有明确容量及回收生命周期，不能用长期持有掩盖无界增长。
+- 单元测试、系统测试、测试夹具及其失败路径同样适用；框架托管资源按框架生命周期核实清理责任。
+- 优先使用 RAII、智能指针及容器管理资源；已由其正确管理的资源无需手工释放，但仍须检查自定义释放器、引用环和显式解除托管后的责任。
+- 释放接口可能失败时，按接口约定处理失败后的资源状态，不得仅调用一次释放接口便认定资源已回收。
+
+### RED-9. gm内存偏移或大小必须用int64表示 `[适用: Kernel]`
+
+> **交叉引用**：整数溢出和回绕要求参见本文件第 3、4 条。
 
 **问题说明**
 
@@ -564,9 +240,9 @@ void DecreaseData(long icData)
 
 **典型溢出场景**
 
-多维张量的 GM 偏移量在大模型场景下极易超过 `uint32_t` 上限（~4GB）：
+多维张量需要区分元素偏移和字节偏移，并按实际类型检查上界。例如以下张量占用 2 GiB，已经超出有符号 32 位整数可表示的字节大小：
 
-- batch=32, heads=32, seqLen=8192, headDim=128, FP16 → 32×32×8192×128×2 = **54GB**
+- batch=32, heads=32, seqLen=8192, headDim=128, FP16 → 32×32×8192×128×2 = **2 GiB**
 
 **隐蔽错误**
 
@@ -586,7 +262,7 @@ int64_t offset = batchIdx * numHeads * seqLen * headDim;
 **正确示例**
 
 ```cpp
-// ✅ Host侧 Tiling：使用 int64_t
+// ✅ Host 侧 Tiling：使用 int64_t
 int64_t totalLength = shape[0] * shape[1] * shape[2];
 
 // ✅ Kernel侧：类成员变量使用 int64_t
@@ -605,25 +281,38 @@ int64_t offset = batchOffset * seqLen * headDim;
 
 表达式中有 2 个及以上维度相乘时，检查第一个操作数是否已显式转换为 `int64_t`。
 
+**专属检视方法**
+
+1. 枚举所有 GM 起始地址、GM 下标和 GM 搬运长度表达式：
+   - `SetGlobalBuffer((__gm__ T*)ptr + expr, size)`
+   - `GlobalTensor[expr]` / `xGm[gmBias]` / `yGm[progress]`
+   - `CopyIn(gmBias)` / `CopyOut(progress)` / `DataCopy*(gm[expr], ...)`
+   - 名称含 `gmBias`、`gm_bias`、`offset`、`progress`、`blockOffset` 的变量，以及 stride 类变量（`\w*[Ss]tride\w*`，如 `blockTablesStride`、`srcStride`、`dstStride`、`strideW`、`strideH`）
+2. 对每个表达式检查声明类型和右侧计算域。若表达式中存在 `blockIdx/indexOuter/i_o/mIdx/nIdx` 与 `blockFactor/rowFactor/numCol/num_col/tiling->n`、stride（`\w*[Ss]tride\w*`）等多因子相乘，必须在第一次乘法前显式提升到 `int64_t` 或 `uint64_t`。
+3. 不能只看最终变量类型。若 `uint64_t gmBias = i_o * rowFactor * numCol;` 中右侧操作数全是 32 位，仍按 32 位先回绕，判 FAIL。
+4. `SetGlobalBuffer` 的第二个 size 参数同样要检查。`rowWork * numCol`、`blockFactor * numCol` 等可能超过 32 位时，也必须先提升。
+5. 反推最大可能值：若合法 shape 或 tiling 使线性元素位置可能达到或超过 `2^32`，且乘法前未进入 64 位计算域，判 FAIL；无法确认上界但表达式用于 GM 偏移且全为 32 位操作数，至少判 SUSPICIOUS。
+
 ---
 
 ### RED-10 在支持superKernel场景，禁止直接对GM地址进行读写，需要改用GetValue或SetValue `[适用: Kernel]`
 
-> **Kernel 侧说明**：Kernel 中 `GlobalTensor` 和 `LocalTensor` 通过 API 获取，一般不需要判空，但 GM 地址偏移需校验。
-
 **【描述】**
-在superKernel场景，直接对GM地址进行读写不保证精度，需要改用GetValue或SetValue，因为superKernel场景编译器不会在算子末尾添加DataCacheCleanAndInvalid指令，不会刷新整个Dcache(数据缓存)。
+
+在支持 superKernel 的场景下，禁止通过 GM 裸指针解引用或下标操作直接读取、写入数据。标量读取和写入应通过 `GlobalTensor` 的 `GetValue`、`SetValue` 接口完成；批量搬运使用相应的 Ascend C 数据搬运接口。
 
 **错误示例**
+
 ```cpp
-// ❌ 错误：直接通过指针访问GM地址
+// 错误：直接通过指针访问 GM 数据
 auto scale = *(__gm__ float*)scaleGm;
+*(__gm__ float*)scaleGm = scale;
 ```
 
 **正确示例**
 
 ```cpp
-// ✅ 改用GetValue访问GM地址
-auto scaleGlobal = GlosbalTensor<float>(...);
+// scaleGlobal 为已绑定有效 GM 存储的 AscendC::GlobalTensor<float>
 auto scale = scaleGlobal.GetValue(0);
+scaleGlobal.SetValue(0, scale);
 ```
