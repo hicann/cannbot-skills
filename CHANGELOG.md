@@ -78,6 +78,9 @@
 - 【插件清理】删除 `plugins-community/collaborative-agent-kernel-evolution`（cake）插件目录：该插件已迁移至 [cannbot](https://gitcode.com/cann/cannbot) 仓同名路径维护，安装方式不变（install-helper 自动指向 cannbot 仓）。同步移除市场注册 `cake` 条目、OAT.xml 的 Chart.js filteritem、`tests/unit/test-cake-absolute-paths.sh` 门禁及其在 run-tests.sh 的登记。
 - 【代码检视】下线 `ops-code-reviewer` 插件编排层，删除专属 Agent、hooks、安装脚本及插件评测；保留同名市场入口，仅提供 `ascendc-code-review` Skill，检视流程由 Skill 自身编排。
 
+#### 缺陷修复 Bug Fixes
+- 【CANNBotDSL 测试】补齐白盒 active 行的 `expected` 契约，生成阶段拒绝空值、无效判定及缺少可观察行为的纯断言用例，避免校验通过后固定 runner 无法执行。
+
 ### 【2026-10-20】
 #### 变更 Changes
 - 【插件清理】删除 `plugins-community/ascendc-port-orchestrator` 插件及专属市场注册，移除 ST 测试白名单与覆盖率条目，保留公共 Skills。

@@ -28,7 +28,7 @@ metadata:
 
 1. 黑盒：读取 inventory 后，在正式 `TEST_DIR/testcase.csv` 创建固定表头并写入已确认的 L0 核心用例，再分批补 L1/L2；已有 CSV 只更新 blackbox 行，保留其他分组。
 2. Golden 与入口：只读 spec 和设计中相关数学/接口章节，保存完整可解析的 Golden，运行 `prepare_golden.py` 校验并安装固定入口，再进行 CPU 数值复核。完成这一步后再展开白盒和全部 Unit。
-3. 白盒：按设计索引逐个读取真实执行分支，完成一批即写入 whitebox 行；无需预读 Unit。
+3. 白盒：按设计索引逐个读取真实执行分支，完成一批即写入 whitebox 行；每个 active 行显式填写 `expected`，判定选择见[用例契约](references/cases.md#白盒)；无需预读 Unit。
 4. TDD：按 Unit 依赖顺序逐份读取 YAML，逐批保存相应义务的 tdd 行；最后执行全量义务、依赖与关联检查。
 
 每批写入后先检查 CSV/YAML/Python 能否解析及本批字段、ID/引用是否正确；当前脚本的完整覆盖检查留到对应模块补齐后执行。部分内容缺失时记录待补项，不用 excluded 或放宽校验掩盖未完成。中断恢复先读已有产物和缺项，不重建已确认内容。分批保存不降低最终验收要求，也不增加独立计划文件或中间格式。

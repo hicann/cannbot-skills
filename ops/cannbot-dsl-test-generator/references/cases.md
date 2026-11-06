@@ -18,7 +18,11 @@ CSV 使用 `csv.DictWriter` 等标准 CSV 序列化器写入，JSON 单元格先
 
 ## 白盒
 
-每行 ID 为 `WB-<分支 ID>`，`design_ref` 为所提供设计文件中的实际条目，`condition` 描述分支条件。active 行的 `inputs_json` 是公开输入配方，`note` 统一写 `return_value` 或 `dst_args`；后者还需在 `output_json` 提供全部输出配方。无法执行的 DESIGN 分支写 excluded 行及理由。白盒校验器直接核对 DESIGN 引用、输入和输出；不创建分支图副本。
+每行 ID 为 `WB-<分支 ID>`，`design_ref` 为所提供设计文件中的实际条目，`condition` 描述分支条件。active 行的 `inputs_json` 是公开输入配方，`note` 统一写 `return_value` 或 `dst_args`；后者还需在 `output_json` 提供全部输出配方。
+
+每个 active 白盒行必须显式填写 `expected`：数值分支写 `match_golden`；规格要求传播 NaN 的分支写 `match_golden_nan`；仅验证可观察行为时写 `assertions`，并在 `assertions_json` 提供输出形状、类型、设备、与输入相等或输入不变性等断言。`assertions` 的每次调用（含连续调用）都必须有可观察行为断言，仅输入条件或执行控制不构成结果判定。数值比较可同时附带行为断言；不得为绕过数值失败改成 `assertions` 或放宽 NaN 语义。错误码行为使用黑盒的 `raises_error:<spec 错误码>`。
+
+无法执行的 DESIGN 分支写 excluded 行及理由，`expected` 可留空。白盒校验器直接核对 DESIGN 引用、输入、输出及执行判定，拒绝 active 行的空白或不支持的 `expected`；脚本只校验 CSV，不代填判定或创建分支图副本。已有数值白盒行缺少 `expected` 时，由测试设计者核对规格后补写 `match_golden`，重新校验并执行固定入口。
 
 ## 实现单元 TDD
 

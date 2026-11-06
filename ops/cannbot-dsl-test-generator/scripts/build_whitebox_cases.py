@@ -19,7 +19,10 @@ import sys
 import argparse
 import json
 import re
+from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "assets"))
+from case_contract import case_calls
 from casebook import read_casebook
 from recipe_validation import validate_tensor, validate_tensor_list
 from generator_support import (
@@ -94,6 +97,8 @@ def parse_branch_row(row):
         )
     except ValueError as exc:
         fail(f"{row['case_id']}: invalid JSON: {exc}")
+    if row["status"] == "active":
+        validate_branch_expectation(row, suggested)
     return {
         "id": row["case_id"][3:],
         "design_ref": row["design_ref"],
@@ -103,6 +108,26 @@ def parse_branch_row(row):
         "status": "draft" if row["status"] == "active" else "excluded",
         "exclude_reason": row["exclude_reason"],
     }
+
+
+def validate_branch_expectation(row, inputs):
+    case_id = row["case_id"]
+    expectation = row["expected"]
+    if expectation not in ("match_golden", "match_golden_nan", "assertions"):
+        fail(
+            f"{case_id}: expected must be match_golden, match_golden_nan or assertions; "
+            f"got {expectation!r}"
+        )
+    try:
+        assertions = json.loads(row["assertions_json"] or "[]")
+        _, _, calls = case_calls(inputs, int(row["seed"] or 42), assertions)
+    except ValueError as exc:
+        fail(f"{case_id}: invalid execution contract: {exc}")
+    if expectation == "assertions" and any(
+        not any(a["kind"] != "input_conditions" for a in call["assertions"])
+        for call in calls
+    ):
+        fail(f"{case_id}: assertions case lacks observable behavior in each call")
 
 
 def validate_branch(raw, seen, spec, design, call_style):
