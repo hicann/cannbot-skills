@@ -114,6 +114,9 @@
      - 纯 Cube（仅 matmul）→ 需要 L1 + L0A/L0B/L0C
      - 混合（matmul + element-wise 后处理）→ 核间流水线，需要 CV 融合
      - **Host 预处理**：如 im2col 等 Python 侧预处理步骤，标明在 design 的 §1 和 §4 中
+     - **稀疏 MLA 注意力变体**：算子名 `SparseFlashMla`，或输入含 `cmp_kv` / `cmp_sparse_indices` 时（`sinks`/`metadata` 为辅助信号），先做场景判定——SWA / DSpark / HCA / CSA 由输入张量存在性唯一确定（arch22 = A2/A3/910B）。命中即先读 [references/decision-tree.md](references/decision-tree.md) §2「稀疏 MLA 注意力变体结构选型」强制分支与 `examples/sparse_flash_mla_design.md` 权威示例（910B 硬件验证）；**覆盖范围门禁**：TileLang 设计完整支持 SWA / HCA，CSA（块粒度索引 gather）为显式扩展点，未覆盖必须在「风险点」声明且 wrapper 显式抛 `NotImplementedError`，禁止静默降级
+     - **硬约束预检**：`D=512`、`KV_N=1`（K/V 共享存储）、`N1 % BLOCK_H == 0`；`BLOCK_H` 由 L0C 容量倒推（PV tile `[BLOCK_H, D]` fp32 ≤ 128KB，D=512 时 BLOCK_H=32），head 维以 32 行分块循环
+     - **CV 同步不变量**（attention 类 CV 融合必查）：双段/分块 KV 循环为动态边界时用 `T.serial` 不用 `T.Pipelined`；全部跨 pipe 拷贝集中在**一个 serial 循环**（AUTO_CV_SYNC 按 workspace 配对 cube/vec 同步点计数，拆循环即破坏不变量）；AIV 写 P 必须先于 AIC 的 PV gemm（防环形跨核等待）；kernel body 内 helper 函数的语句会被 trace 静默丢弃（仅返回 TIR 表达式的标量 helper 可用），语句必须直写
      - **im2col 设计记号**：可用 `T.tile.im2col(dst_l0a, src_l1, image_shape, kernel, stride, dilation, padding, pos_m, pos_k, valid_m, valid_k)` 表达 NC1HWC0 L1 → L0A tile
      - **实现门禁**：`T.tile.im2col` 仅供 design 使用，当前未注册、不可编译或执行；实现阶段不得视为可用 API
      - **Conv 类算子（conv2d / img2col+GEMM）强制分支**：

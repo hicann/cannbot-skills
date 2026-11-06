@@ -46,6 +46,14 @@
 │       │
 │    典型算子: W4A8 GEMM, Flash Attention, 量化 GEMM
 │
+├─ 含注意力 / flash-softmax（Attention、FlashAttention、MLA 变体）
+│   判定: QK^T + online softmax + PV 三段式，matmul + 归约 + element-wise 的 CV 融合
+│   ├─ 标准 Attention（FlashAttention 等）
+│   │   → 上方「matmul + element-wise → CV 融合算子」分支（Developer 默认）
+│   └─ 稀疏 MLA 变体（SparseFlashMla：输入含 cmp_kv / cmp_sparse_indices）
+│       → 强制分支：见本节下方「稀疏 MLA 注意力变体结构选型」
+│       权威示例: examples/sparse_flash_mla_design.md
+│
 ├─ 含卷积（nn.Conv* / F.conv*）→ Conv 类算子，强制三模式选型（详见下文「Conv 类算子结构选型」）
 │   结构: img2col + GEMM（LoadData3D 随路展开 / T.tile.im2col 设计记号）
 │   模板: 先读 examples/conv2d-template.md，再走 design-template.md 通用骨架
@@ -87,6 +95,49 @@
 └─ 其他复杂算子
     强制步骤: 先搜索本项目 examples/
 ```
+
+**稀疏 MLA 注意力变体结构选型（SparseFlashMla 强制分支）**
+
+稀疏 MLA 注意力（算子名 `SparseFlashMla` / 输入含 `cmp_kv`、`cmp_sparse_indices` 特征，平台 arch22 = A2/A3/910B）必须按以下顺序显式选型，并在设计文档中记录结论：
+
+**场景判定（先于一切）**——由输入张量存在性唯一确定（无 cmp_topk 之类判定 attr）：
+
+| scenario | ori_kv | ori_sparse_indices | cmp_kv | cmp_sparse_indices |
+|----------|--------|--------------------|--------|--------------------|
+| SWA | ✓ | – | – | – |
+| SWA 稀疏 ori_kv（DSpark） | ✓ | ✓（配 ori_topk_length） | – | – |
+| HCA | ✓ | – | ✓ | – |
+| CSA | ✓ | – | ✓ | ✓ |
+| ORI_CMP_SPARSE | ✓ | ✓ | ✓ | ✓ |
+
+A2/A3 平台约束（tiling 层 OP_CHECK）：HCA `cmp_ratio=128`、CSA `cmp_ratio∈{1,2,4}`、
+CSA/HCA `cmp_mask_mode=3`、DSpark `ori_mask_mode=0` 且 win 非负、非 DSpark
+`ori_mask_mode=4`/`win_left=127`/`win_right=0`；D=512、KV_N=1、Q_N∈{1..128}。
+
+**硬约束**（算子定义，违反即不成立）：
+
+- `D = 512`、`KV_N = 1`（K/V 共享存储）、`N1 % BLOCK_H == 0`
+- `BLOCK_H` 由 L0C 容量倒推：PV 输出 tile `[BLOCK_H, D]` fp32，`BLOCK_H=128, D=512` 时 `128×512×4 = 256KB > 128KB` L0C 上限 → 取 `BLOCK_H=32`（64KB + QK 分数 16KB = 80KB ≤ 128KB），head 维以 32 行分块循环
+- `KV_N=1` 时 `group = heads`，q_head 与 kv_head 一一对应，无 head-sharing 分派
+
+**TileLang 覆盖范围门禁**：
+
+- SWA / HCA → 本分支完整支持（双段 KV 单循环 + flash-softmax），**权威示例 `examples/sparse_flash_mla_design.md`**（910B 硬件验证通过）
+- CSA（`cmp_sparse_indices` **块粒度** gather：元素 × sparseBlockSize = 行基址，-1 项跳过）→ **显式扩展点**：需片上按块 gather（`T.tile.gather` 或按块动态 GM 拷贝）；设计未覆盖时必须在「风险点」声明，wrapper 对 CSA 输入显式抛 `NotImplementedError`，禁止静默降级
+- 与 DeepSeek MLA（`q_nope/q_rope`、Dqk≠Dv）区分：本分支无 rope 拆分、K/V 共享存储；命中信号与契约见 `community/ops/tilelang2ascend-translator/references/attention-patterns/references/sparse_flash_mla_package_op.md`
+
+**强制设计规则**（不满足须在「风险点」写明理由）：
+
+- **双段 KV 拼单循环**：ori 窗口段 + cmp 前缀段必须在**同一个 `T.serial`** 中按块拼接（共享 flash-softmax 状态机）；s2 不拆核（状态跨块串联），多核并行只能沿 (batch, head, q 行) 切
+- **掩码而不是跳过**：越界 KV 列不裁剪循环，用乘加式掩码 `scores*valid + MASK_FILL*(1-valid)`（`MASK_FILL=-2e38`，与打包算子参考实现一致，exp 下溢为 0）；**禁止加法式** `scores + MASK_FILL`（fp32 大数相消吞掉有效列）；窗口界为查询行 s 的 TIR 表达式，prefill/decode 同一份代码
+- **flash-softmax 状态机契约**：sinks 为虚拟 key——`m_i` 初值 = sinks（`T.copy(sinks[...], m_i)`）、`sumexp` 初值 = 1（`T.tile.fill`，= exp(sinks-m_i)）、sinks 只进分母不进分子；epilogue `out = acc_o / sumexp`
+- **动态边界不用软件流水**：双段循环边界是 s 的 TIR 表达式（动态），该循环用 `T.serial` 不用 `T.Pipelined`；`AUTO_CV_SYNC` 要求全部跨 pipe 拷贝集中在**一个 serial 循环**内（拆循环复用 workspace 破坏 cube/vec 同步点计数不变量，实测错序/死锁）
+- **语句顺序防环形等待**：AIV 写 P（AIC 读）不得排在 AIC 的 acc_o 中转之后——P cast / UB→L1 先于 PV gemm；PV 每块 `init=True` re-init，O 累加在 UB（`alpha*acc_o + new`）完成
+- **helper 函数陷阱**：tilelang-ascend trace 会静默丢弃 kernel body 内调用的 helper 函数的**语句**（返回 TIR 表达式的标量 bound helper 可用）——kernel body 必须直写
+- **非整除尾块（decode 形态）**：S 维不整除 BLOCK_N 时**禁止 host pad/拼接**（`torch.zeros`+切片赋值、`torch.cat`/`F.pad` 均违反 ascend-constraints §5，且在 NPU 上触发 aclnn，评测环境可能裁剪）。kernel 内按 `valid = clamp(seg_end - seg_t*BLOCK_N, 0, BLOCK_N)` 用 `T.copy` BufferRegion 动态切片搬入 `kv_l1[:, :valid]`（`pad_value=0.0` 填 pad 行），pad 列落在所有查询窗口之外、由乘加式掩码双保险清零；双段在同一 `T.serial` 内经 `T.if` 选段，共享 flash-softmax 状态
+- **输入分布要求**：softmax 类算子测试数据必须同时覆盖正分布（`rand*2`）与含符号分布（`rand*4-2`）；含负输入使输出过零、近零元素 rel_err 放大，由混合容差判据（atol+rtol）兜底，超判据按真实精度缺陷修复，禁止限定输入符号规避
+
+**完整 sparse_flash_mla 设计样例**：权威示例 `examples/sparse_flash_mla_design.md`——按 `examples/design-template.md` 模板 §1–§10 填写（§11 交付清单/proto.yaml 不在示例内），含场景判定（§1.2/§2）、CV 同步不变量（§7/§8）与坑位清单（§10.2）。生成 MLA 类算子时先读该示例，再走通用骨架。
 
 ### Conv 类算子结构选型（conv2d / img2col+GEMM 强制分支）
 

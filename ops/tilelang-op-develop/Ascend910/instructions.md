@@ -55,6 +55,7 @@ design.md 可能很长，**只提取以下字段，忽略其余内容**：
 | 归一化（softmax/layernorm/rmsnorm） | `examples/softmax/`、`examples/normalization/` |
 | Pooling（avg_pool/max_pool） | [tilelang-op-design/references/pooling/](../../tilelang-op-design/Ascend910/references/pooling)（5 篇设计模式参考: 布局策略、行粒度 tile、reduce_d 快路径、自适应池化经验、反向梯度语义；转译/实现篇在 tilelang2ascend-translator Pooling 类别 `references/pooling-patterns/`） |
 | GEMM | `examples/gemm/`、`examples/developer_mode/gemm_developer.py` |
+| 稀疏 MLA 注意力（SparseFlashMla，SWA/HCA/CSA） | [tilelang-op-design/examples/sparse_flash_mla_design.md](../../tilelang-op-design/Ascend910/examples/sparse_flash_mla_design.md)（设计文档含 tile 级 kernel + block 级骨架内联代码（golden/验证见模板 §9，proto.yaml 不在示例内），910B 硬件验证通过；严格遵循其场景判定与 CV 同步不变量） |
 | 卷积（conv2d/img2col+GEMM） | 以 design.md 的 Conv 强制分支结构选型为准；`T.tile.im2col` 未注册不可执行（仅设计记号），TileLang 侧按 normal 结构表达，但 k'=(ci,kh,kw) 解码必须段连续块/向量化表达，**禁止默认标量逐元素 gather**；fused img2col 优化由 AscendC 转译阶段落实 |
 | 融合算子 | `examples/flash_attention/`、`examples/pipeline/`、`examples/developer_mode/matmul_add_developer.py` |
 | Developer 模式 | `examples/developer_mode/` |
@@ -147,6 +148,8 @@ GM 标量访问、逐元素 div/mod、active cores、每核串行任务和最大
 基于 design.md 的 API 映射 + 参考示例的代码风格，生成**两个文件**：`{op}.py`（纯 kernel）与 `test_{op}.py`（golden + L0 + main，L1/L2/Boundary 留桩，从 `{op}.py` import kernel）。完整文件结构骨架与融合算子注意事项见 [examples/code-skeleton.md](examples/code-skeleton.md)。
 
 > **写代码时遇到**具体编码规范问题（Buffer 分配 / 索引一致性 / 同步 / 广播 / 测试模板）查 [references/coding-conventions.md](references/coding-conventions.md)。
+>
+> **Attention / flash-softmax 类**（含稀疏 MLA 变体）：掩码用乘加式 `scores*valid + MASK_FILL*(1-valid)`，禁止加法式 `scores + MASK_FILL`（fp32 大数相消吞有效列）；flash 状态初始化 `m_i=sinks`（T.copy）、`sumexp=1`/`acc_o=0`（T.tile.fill），sinks 只进分母；跨 pipe 拷贝集中在**一个 serial 循环**（AUTO_CV_SYNC 同步点计数不变量），AIV 写 P 先于 AIC 的 PV gemm；动态边界循环用 `T.serial` 不用 `T.Pipelined`；kernel body 内 helper 函数的语句会被静默丢弃，语句必须直写（仅返回 TIR 表达式的标量 helper 可用）。
 >
 > **Conv 类算子**：严格遵循 design.md 的 Conv 强制分支结构选型与「保留的优化结构清单」；k' 解码禁止退化为标量逐元素 gather（标量仅限平台限制豁免且须注释理由）
 >

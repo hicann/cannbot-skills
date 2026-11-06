@@ -706,13 +706,89 @@ for i, j in T.Parallel(block_M // VEC_NUM, block_N):
 T.tile.exp(b_ub, a_ub)
 ```
 
-### 4.14 T.tile.im2col（仅设计占位）
- 
+### 4.14 Attention / flash-softmax 计算的 API 组合约束
+
+> 本节沉淀 attention 类（含稀疏 MLA 变体 SparseFlashMla）CV 融合 kernel 的
+> API 组合规则，经 910B 硬件验证（权威示例：
+> `ops/tilelang-op-design/Ascend910/examples/sparse_flash_mla_design.md`）。
+> 单项 API 语义见 §4.1-§4.12，本节只约束**组合方式**。
+>
+> 本节符号沿用权威示例：`hb = BLOCK_H/2 = 16`（MIX 双 Vector 核每核半块行）、
+> `lo2f / hi2f` 为本块内有效列区间（`lo2/hi2` 的 f32 形式，见设计文档 §6.4）。
+
+**flash-softmax 状态机初始化（sinks 语义）**：
+
+```python
+T.copy(sinks[h_lo + vid * hb : h_lo + vid * hb + hb], m_i)  # m_i 初值 = sinks（虚拟 key 的 max）
+T.tile.fill(sumexp, T.float32(1.0))     # = exp(sinks - m_i)，sinks 只进分母不进分子
+T.tile.fill(acc_o_ub, T.float32(0.0))
+# epilogue: T.tile.div(acc_o_ub, acc_o_ub, sumexp)
+```
+
+**行归约 + rescale 链**（online softmax 单块更新）：
+
+```python
+T.copy(m_i, m_old)
+T.reduce_max(scores_ub, m_i, dim=-1)    # 行 max
+T.tile.max(m_i, m_i, m_old)             # 与历史 max 合并
+T.tile.sub(m_old, m_old, m_i); T.tile.exp(m_old, m_old)   # alpha = exp(m_old - m_i)
+for r in range(hb):
+    T.tile.sub(scores_ub[r, :], scores_ub[r, :], m_i[r])  # 按行广播减（无 broadcast 重载，逐行写）
+T.tile.exp(scores_ub, scores_ub)
+T.reduce_sum(scores_ub, rowsum, dim=-1)
+T.tile.mul(sumexp, sumexp, m_old); T.tile.add(sumexp, sumexp, rowsum)
+```
+
+**窗口掩码：乘加式，禁止加法式**。
+
+```python
+# ✅ 正确：valid ∈ {0,1}，scores*valid + MASK_FILL*(1-valid)
+T.tile.add(mask_lo, idx_ub, 1.0); T.tile.sub(mask_lo, mask_lo, lo2f); T.tile.max(mask_lo, mask_lo, 0.0); T.tile.min(mask_lo, mask_lo, 1.0)  # clamp(idx+1-lo2)：idx 从 0 起，见 sparse_flash_mla_design §6.4
+T.tile.mul(mask_hi, idx_ub, -1.0); T.tile.add(mask_hi, mask_hi, hi2f)
+T.tile.max(mask_hi, mask_hi, 0.0); T.tile.min(mask_hi, mask_hi, 1.0)
+T.tile.mul(mask_lo, mask_lo, mask_hi)                       # valid
+T.tile.mul(mask_hi, mask_lo, -1.0); T.tile.add(mask_hi, mask_hi, 1.0)   # 1 - valid
+T.tile.mul(mask_col, mask_hi, T.float32(MASK_FILL))         # MASK_FILL = -2e38（与打包算子参考实现一致）
+# 逐行: T.tile.mul(scores_ub[r, :], scores_ub[r, :], mask_lo)
+#       T.tile.add(scores_ub[r, :], scores_ub[r, :], mask_col)
+# ❌ 错误：scores + MASK_FILL —— fp32 有效值（~1e2）被 MASK_FILL 级大数吞没，有效列被吞
+```
+
+**前序顺序约束**：`T.tile.mul(scores_ub, scores_ub, sm_scale)`（×scale）必须先于
+掩码与 rescale 链执行；P cast `T.copy(scores_ub, p_ub)`（f32→目标 dtype）在 exp
+之后、`T.copy(p_ub, p_l1, tmp=p_ub_nz)` 之前（见权威示例 §8.4 顺序）。
+
+**GEMM 组合（QK / PV 双 gemm_v0）**：
+
+```python
+T.gemm_v0(q_l1, kv_l1, scores_l0c, transpose_B=True, init=True)  # QK：L1 操作数，L0C 全量初始化
+T.copy(scores_l0c, scores_ub)                                     # L0C → UB（CV 中转）
+# ... ×scale → 掩码 → AIV flash-softmax（rescale 链见上）...
+T.copy(scores_ub, p_ub)                                           # P cast：f32 → bf16
+T.copy(p_ub, p_l1, tmp=p_ub_nz)                                   # UB → L1，nz tmp 抑制非规范化
+T.gemm_v0(p_l1, kv_l1, acc_o_l0c, init=True)                      # PV：每块 re-init（L0C 不跨块驻留状态）
+T.copy(acc_o_l0c, acc_o_new)                                      # L0C → UB，O 累加在 UB 完成
+```
+
+**跨 pipe 拷贝的单循环不变量（AUTO_CV_SYNC）**：同一组 workspace 上的全部
+cube→vec / vec→cube 拷贝（`scores_l0c→scores_ub`、`p_ub→p_l1`、`acc_o_l0c→acc_o_new`）
+必须位于**同一个 `T.serial` 循环**体内——该 pass 按 workspace 配对 cube/vec 两侧
+同步点计数，拆成第二个循环复用同 workspace 即破坏计数、错序或死锁。
+
+**trace 陷阱**：kernel body 内调用的 helper 函数的**语句**（`T.copy` / `T.tile.*`）
+会被 tilelang-ascend trace 静默丢弃，表现为计算缺失型精度错误；仅返回 TIR
+表达式的标量 bound helper（如窗口上下限计算）可用。语句必须直写 body。
+
+**动态边界**：attention 的分块 KV 循环边界是查询行的 TIR 表达式（每行窗口不同），
+用 `T.serial` 表达，**不要** `T.Pipelined`（软件流水不支持动态边界）。
+
+### 4.15 T.tile.im2col（仅设计占位）
+
 `T.tile.im2col(dst_l0a, src_l1, image_shape, kernel, stride, dilation, padding, pos_m, pos_k, valid_m, valid_k)`
 表示从 NC1HWC0 `src_l1` 提取 im2col tile 到 `dst_l0a`。
- 
+
 参数：`image_shape`、`kernel`、`stride`、`dilation`、`padding` 描述卷积；
 `pos_m`、`pos_k` 指定输出 tile 起点；`valid_m`、`valid_k` 指定有效范围。
- 
+
 **重要**：这是 design-only 记号，当前未注册，不能编译或执行。
 实现阶段不得将其视为可用 API，必须改用已注册原语或先完成 API 实现与注册。

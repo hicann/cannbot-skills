@@ -9,7 +9,7 @@
 | 文档 | 涵盖内容 | 典型场景 |
 |------|---------|---------|
 | [api-kernel-memory.md](references/api-kernel-memory.md) | Kernel 定义（T.prim_func, T.Kernel, @jit）、内存分配（Developer: T.alloc_shared/fragment/var, Expert: T.alloc_ub/L1/L0x，两套功能可互换、常规 kernel 默认 Developer）、数据搬运（T.copy） | Kernel 编写、片上存储管理、数据搬运 |
-| [api-compute.md](references/api-compute.md) | 矩阵计算（T.gemm_v0, T.mma）、归约（T.reduce_sum/max/min）、Element-wise（T.Parallel + 符号 API）、Tile 扩展原语（含 T.tile.atomic_add）及 design-only `T.tile.im2col` | GEMM、Softmax、逐元素计算、排序、原子累加、im2col 设计 |
+| [api-compute.md](references/api-compute.md) | 矩阵计算（T.gemm_v0, T.mma）、归约（T.reduce_sum/max/min）、Element-wise（T.Parallel + 符号 API）、Tile 扩展原语（T.tile.xxx，含 T.tile.atomic_add）、Attention/flash-softmax 组合约束（§4.14）、design-only `T.tile.im2col`（§4.15） | GEMM、Softmax、逐元素计算、排序、原子累加、attention CV 融合、im2col 设计 |
 | [api-schedule-sync.md](references/api-schedule-sync.md) | 循环（T.serial, T.unroll）、流水线（T.Pipelined）、持久化调度（T.Persistent）、同步（T.set_flag/wait_flag, T.barrier_all, T.set_cross_flag）、调试（T.printf, T.dump_tensor） | 流水线优化、多核均衡、同步、调试 |
 
 ---
@@ -20,6 +20,7 @@
 |---------|---------|---------|
 | **GEMM 矩阵乘** | [api-compute](references/api-compute.md), [api-kernel-memory](references/api-kernel-memory.md) | shared→fragment 层级搬运、init 参数、T.barrier_all |
 | **Softmax/LayerNorm** | [api-compute](references/api-compute.md) | T.reduce_max/sum、T.tile.exp/sub/div |
+| **Attention（flash-softmax / sinks / 窗口掩码）** | [api-compute](references/api-compute.md) §4.14 | 乘加式掩码（禁加法式 MASK_FILL）、flash 状态初始化（m_i=sinks / sumexp=1）、跨 pipe 拷贝单循环不变量、QK/PV 双 gemm_v0 |
 | **逐元素计算** | [api-compute](references/api-compute.md) | T.Parallel + 符号 API 或 T.tile.xxx 两种范式 |
 | **多 block/core 累加到 GM** | [api-compute](references/api-compute.md) | T.tile.atomic_add(dst_gm, src_local)，调用前显式清零 GM |
 | **CV 融合算子** | [api-kernel-memory](references/api-kernel-memory.md), [api-schedule-sync](references/api-schedule-sync.md) | workspace 索引一致性、AUTO_CV_COMBINE、vid 并行化 |
