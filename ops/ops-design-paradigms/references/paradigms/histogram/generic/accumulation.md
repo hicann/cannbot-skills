@@ -84,19 +84,23 @@ See LICENSE in the root of the software repository for the full text of the Lice
 当**累加值为 int（计数 `+1`）而输出数据类型为 float** 时，计数累加本身是确定的整数原子加，**无需生成确定性模板**；
 仅需在计数完成后补一步 int→float cast 后处理写回输出。两模板处理步骤：
 
+**原地 cast 优先（免 workspace）**：若输出能够原地从 int 数据类型 cast 到 float 数据类型（int32 计数与 float 输出同宽），则直接在输出 GM 上进行原地 cast 操作——计数目标即输出的 int 视图，**无需申请 workspace**；下述步骤中的「workspace」在该形态下均替换为「输出的 int 视图」。
+
 **局部直方图模板（§2）：**
 
-1. 申请 int 数据类型 workspace；
+1. 申请 int 数据类型 workspace（或原地形态：直接以输出的 int 视图为累加目标，见上）；
 2. 将局部累加结果 atomic add 到所有 bins 的 workspace 中；
 3. 全核同步；
 4. 使用 SIMT VF 读取 workspace 中所有 bins 的 int 累加值，cast 成 float 后写入输出 GM；本步 SIMT VF 线程采用全局排布，不再对每个核做 bins 切分。
 
 **无局部直方图模板（§3）：**
 
-1. 申请 int 数据类型 workspace；
+1. 申请 int 数据类型 workspace（或原地形态：直接以输出的 int 视图为累加目标，见上）；
 2. SIMT VF 直接累加 int 到 workspace 中；
 3. 全核同步；
 4. 使用 SIMT VF 读取 workspace 中所有 bins 的 int 累加值，cast 成 float 后写入输出 GM；本步 SIMT VF 线程采用全局排布，不再对每个核做 bins 切分。
+
+> 语言落地注意：无局部直方图模板 float 输出路径的 DCache 一致性强制约束（计数/cast SIMT VF 的 GM 参数须加 `volatile`）属 Ascend C 语言细节，见 [../adapters/ascendc/kernel-skeleton.md](../adapters/ascendc/kernel-skeleton.md) §8.4。
 
 ## 5 两模板对比
 

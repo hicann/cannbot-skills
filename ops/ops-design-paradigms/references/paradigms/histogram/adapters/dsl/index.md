@@ -20,7 +20,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 通用算法/模型（generic/）× DSL 实现细节（本目录）→ CANNBotDSL 设计与代码产出
 ```
 
-Histogram 的核心是「分桶计数 + 冲突累加收敛」：前两模板（局部直方图 / 无局部直方图）在 DSL 下的差异落到**片上局部直方图 Buffer/Channel 与原子/归并能力**的选择，确定性模板（第三模板）无原子依赖、走 GM 点赋值串行累加；三者落地见 [capability-mapping.md](capability-mapping.md) 与 [implementation-guide.md](implementation-guide.md)。
+Histogram 的核心是「分桶计数 + 冲突累加收敛」：前两模板（局部直方图 / 无局部直方图）在 DSL 下的差异落到**片上局部直方图 Buffer/RingBuffer 与原子/归并能力**的选择，确定性模板（第三模板）无原子依赖、走 GM 点赋值串行累加；三者落地见 [capability-mapping.md](capability-mapping.md) 与 [implementation-guide.md](implementation-guide.md)。
 
 ## 2 能力映射
 
@@ -31,7 +31,7 @@ Histogram 的核心是「分桶计数 + 冲突累加收敛」：前两模板（�
 | 任务阶段 | 入口 | 内容 |
 |------|------|------|
 | 方案设计 | [../../generic/index.md](../../generic/index.md)（通用层算法）→ [capability-mapping.md](capability-mapping.md)（谓词真值） | bin 模型 / bin index / 累加策略 / 线程切分 / 同步等语言中立算法，叠加 DSL 能力真值与落地差异 |
-| DSL 代码组织与实现 | [implementation-guide.md](implementation-guide.md) | 三模板数据流骨架到 DSL 入口/Host/Kernel 三层的映射、Buffer/Channel 规划、分批 bins、原子累加与归并、确定性模板、同步 |
+| DSL 代码组织与实现 | [implementation-guide.md](implementation-guide.md) | 三模板数据流骨架到 DSL 入口/Host/Kernel 三层的映射、Buffer/RingBuffer 规划、分批 bins、原子累加与归并、确定性模板、同步 |
 
 ## 4 补充输入
 

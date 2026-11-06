@@ -20,7 +20,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 | 模板 | 通用层阶段 | DSL 落地 | 关键约束 |
 |------|-----------|---------|---------|
-| 局部直方图（`bins/inputsize < GM_ATOMIC_ADD_FACTOR`） | 分批清 0 → 计数 → DMA 归并，循环 | Kernel 内：片上局部直方图 Buffer 按 `` `ONCHIP_HIST_CAPACITY` `` 分批（每批清 0 → bin index + 片上原子累加 → 搬运归并到 GM 输出），循环至所有 bins | 片上原子累加依赖 `` `LOCAL_HIST_ATOMIC` ``（已证实）；归并依赖 `` `LOCAL_HIST_FLUSH` ``（已证实）；计数→归并交接若跨执行阶段用 Channel 的 acquire/commit/wait/release |
+| 局部直方图（`bins/inputsize < GM_ATOMIC_ADD_FACTOR`） | 分批清 0 → 计数 → DMA 归并，循环 | Kernel 内：片上局部直方图 Buffer 按 `` `ONCHIP_HIST_CAPACITY` `` 分批（每批清 0 → bin index + 片上原子累加 → 搬运归并到 GM 输出），循环至所有 bins | 片上原子累加依赖 `` `LOCAL_HIST_ATOMIC` ``（已证实）；归并依赖 `` `LOCAL_HIST_FLUSH` ``（已证实）；计数→归并交接若跨执行阶段用 RingBuffer 的 `head_next()`（写游标）/`tail_next()`（读游标）（独立游标，同步由数据访问推导；据仓内源码证据，待上板实测确认） |
 | 无局部直方图（`bins/inputsize ≥ GM_ATOMIC_ADD_FACTOR`） | 直接 GM 原子累加 | Kernel 内：读 input → bin index → GM 输出逐元素原子累加 | 依赖 `` `GLOBAL_MERGE_ATOMIC` ``（已证实）；不分配片上局部直方图 Buffer |
 | 确定性（第三模板，确定性标志触发） | bins 分核 + 核内 stride 串行遍历全部 input | Kernel 内：bins 分核 → 核内线程 stride 命中本核 bins → 每线程按固定顺序遍历全部 input，命中的 bin 用 GM 点赋值 `hist[bin] += 1/weight` | **无原子依赖**；不用 `cb.simt.atomic_add`；GM 点赋值不受限（[capability-mapping.md](capability-mapping.md) §4 规则 7）；累加顺序确定 |
 
@@ -34,13 +34,13 @@ See LICENSE in the root of the software repository for the full text of the Lice
 | Host launcher | 读 shape/dtype/device 元数据、分配输出/workspace、建立零拷贝视图、计算切分参数（核数、每核分块、单批 bins 容量）后发起 DSL kernel | 只做元数据 / 分配 / 零拷贝视图；torch 调用若触发设备算子或复制即越界（见 [capability-mapping.md](capability-mapping.md) §4 规则 1） |
 | Kernel | 按 bin index 计算、原子累加、分批归并、越界丢弃拆阶段方法 | 模板选择、边界条件、越界丢弃、min==max 特判均在 kernel 内，不因 DSL 而改变语义 |
 
-## 3 局部直方图 Buffer/Channel 规划
+## 3 局部直方图 Buffer/RingBuffer 规划
 
 1. 片上局部直方图是**每核一份、分批复用**的临时量：单批 `` `BATCH_BINS × sizeof(HistT)` `` 受 `` `ONCHIP_HIST_CAPACITY` `` 约束（[../../generic/bin-model.md](../../generic/bin-model.md) §4），`` `nbins` 超单批容量时按批切分循环
-2. 阶段内反复读写的局部直方图用 **Buffer**（计数阶段内清 0 → 累加，不跨阶段交接）；仅当「计数」与「归并」真属两个执行阶段需生产/消费同步时用 **Channel**，produce/consume 成对、不越生命周期
+2. 阶段内反复读写的局部直方图用 **Buffer**（计数阶段内清 0 → 累加，不跨阶段交接）；仅当「计数」与「归并」真属两个执行阶段需多槽位流水交接时用 **RingBuffer**，`head_next()`（写游标）/`tail_next()`（读游标）独立推进游标、无 FIFO 满/空检查（据仓内源码证据，待上板实测确认）
 3. 单批 bins 数量由 Host 按运行时片上容量 + dtype 字节数计算后传入；对齐粒度以 [capability-mapping.md](capability-mapping.md) `` `ALIGN_GRANULARITY` `` 真值为准（= 32 字节；行宽填充元素数 = 32 / sizeof(HistT)）
 4. **Buffer 静态 shape**（capability-mapping.md §4 规则 5）：DSL Buffer 仅编译期静态 shape，分批 Buffer 建成 `` `batchTotalBins = min(totalBins, MAX_BATCH_BINS) ≤ MAX_BATCH_BINS` `` 不变量，Buffer 物理 shape 统一编译期 `` `MAX_BATCH_BINS` ``，运行时只用前 `` `batchTotalBins` `` 槽位；Host 负责 clamp
-5. 双缓冲（本范式 ascendc 侧为 `` `TQue` `` depth 2）在 DSL 侧对应「分批复用 + 计数/归并并行」：若 DSL 的 Channel/搬运支持异步交接，可重叠下一批计数与本批归并；是否支持以 DSL 搬运/同步能力为准（待验证），不支持则串行分批
+5. 双缓冲（本范式 ascendc 侧为 `` `TQue` `` depth 2）在 DSL 侧对应「分批复用 + 计数/归并并行」：若 DSL 的 RingBuffer/搬运支持异步交接，可重叠下一批计数与本批归并；是否支持以 DSL 搬运/同步能力为准（待验证），不支持则串行分批
 
 ## 4 原子累加、归并与同步
 
@@ -64,6 +64,6 @@ See LICENSE in the root of the software repository for the full text of the Lice
 适用前提 → 最小代码位置/伪代码 → 生命周期或同步不变量 → 对应 Unit 测试
 ```
 
-- 数学语义（hist[i][j] = count/sum 落桶）、shape/dtype 以当前算子规格为准；Buffer/Channel 容量、同步关系按实际数据流及资源预算推导
+- 数学语义（hist[i][j] = count/sum 落桶）、shape/dtype 以当前算子规格为准；Buffer/RingBuffer 容量、同步关系按实际数据流及资源预算推导
 - 引用待验证谓词的结论，按 [capability-mapping.md](capability-mapping.md) §3 声明假设并给出验证义务
 - 用独立 Golden 覆盖支持的 dtype、shape、模板边界（`bins/inputsize=GM_ATOMIC_ADD_FACTOR`）、越界丢弃、min==max、N=0/N=1 极值、双输出 bin_edges

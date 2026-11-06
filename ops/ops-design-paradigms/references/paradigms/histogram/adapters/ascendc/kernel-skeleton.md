@@ -368,6 +368,15 @@ __simt_vf__ __aicore__ __launch_bounds__(SIMT_THREADS_PER_BLOCK) inline void His
 2. **UB 预算与 DCache 预留**：VF 无 `__ubuf__` 局部直方图，`SetLocalMemorySize` 传入值不再受 `` `BATCH_BINS_RAW × sizeof(HistT)` `` 约束，但**仍须传 `ubSize − DCACHE_SIZE`、禁止 `SetLocalMemorySize(0)`**——DCache 预留职责不变（见 §7.1）。
 3. **输出清零**：`hist` 由 host 预清零（推荐）或 VF 内每核分块清零（见 8.2）。
 
+### 8.4 无局部直方图模板 float 输出（int 计数 + float cast）强制约束
+
+> 对应通用层 [../../generic/accumulation.md](../../generic/accumulation.md) §4.1。累加值为 int 计数而输出 dtype 为 float 时，计数走 int 原子加（无需确定性模板），末步 int→float cast 写回输出；无局部直方图模板的该路径须满足下列 `volatile` 强制约束（第 1、2 点为必须执行项，MANDATORY）：
+
+1. **（必须执行）计数 SIMT VF 的输出 GM 参数必须增加 `volatile` 关键字修饰**（形如 `volatile __gm__ int32_t*` 计数目标）——以避免计数写通过 DCache 写出后，输出 GM 内容会被 DCache 中内容（过期脏行回写）覆盖；
+2. **（必须执行）cast SIMT VF 的输入 GM 参数必须增加 `volatile` 关键字修饰**（形如 `volatile __gm__ int32_t*` 计数源）——直接从输入 GM 中读取数据，以免读取到 DCache 中过期数据。
+
+> 强制性说明：上两点为无局部直方图模板 float 输出路径的**必须执行项**，不可省略、不可用其他同步原语替代。缺失 `volatile` 时，跨核计数结果对 kernel 内后继读（cast 段）存在被 DCache 过期内容覆盖/污染的确定性行为（实测表现为 bin 计数丢失）。
+
 ## 9 确定性模板（模板三）
 
 > 与 §2/§8 两模板并列的第三模板：**bins 并行 + input 串行 + 无原子累加**，确保浮点累加顺序确定。

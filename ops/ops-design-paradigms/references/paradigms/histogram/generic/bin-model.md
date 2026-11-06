@@ -52,7 +52,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
   - `` `totalBins × sizeof(HistT) ≤ 1024` `` 字节 → `` `useDoubleBuffer = 0` ``：bins 数据量过少，全部驻片**单批一次性**计算完成（depth 1 单缓冲或不建队列，无分批循环、无双缓冲）。
   - 两条件的**触发**相互独立，但 `depth` 参与单批容量计算：`` `BATCH_BINS` `` 由片上容量 `` `ONCHIP_HIST_CAPACITY` `` 决定（决定是否分批），`` `useDoubleBuffer` `` 由 1024 字节阈值决定（决定是否双缓冲）；双缓冲（depth 2）下片上占用翻倍、`BATCH_BINS` 相应减半，故上式 `depth` 因子不可省略；D 维时 `totalBins` 取总桶数 `` `∏ nbins_axis` ``。
 
-`` `ONCHIP_HIST_CAPACITY` `` 真值以命中语言适配层的 capability-mapping 为准（Ascend C 需预留 DCache，见 [../adapters/ascendc/capability-mapping.md](../adapters/ascendc/capability-mapping.md) §1）。`sizeof(HistT)` 为输出 dtype 字节数（int32 计数 = 4B；float 权重 = 4B；int64 计数 = 8B）。行宽填充依赖 `` `ALIGN_GRANULARITY` ``。D 维时上式中的 `nbins` 替换为总桶数 `` `∏ nbins_axis` ``，见 §5。
+`` `ONCHIP_HIST_CAPACITY` `` 真值以命中语言适配层的 capability-mapping 为准（Ascend C 需预留 DCache、DSL 需预留 SIMT kernel 上下文，见各适配层 capability-mapping.md §1）。`sizeof(HistT)` 为输出 dtype 字节数（int32 计数 = 4B；float 权重 = 4B；int64 计数 = 8B）。行宽填充依赖 `` `ALIGN_GRANULARITY` ``。D 维时上式中的 `nbins` 替换为总桶数 `` `∏ nbins_axis` ``，见 §5。
 
 ## 5 二维 / 多维 bins 模型
 
