@@ -220,7 +220,7 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "model-train-precision-determinism", description: "PyTorch on NPU 训练非确定性诊断", source: "model" },
       { id: "model-train-log-visualization", description: "NPU 大模型训练日志可视化与对比", source: "model" },
       { id: "model-train-oom-analysis", description: "PyTorch on NPU 训练 OOM 内存诊断与优化", source: "model" },
-      { id: "science-model-npu-migration", description: "NPU 代码级迁移（环境门禁/脚本适配/精度性能对比）", source: "plugins-community/science-model-npu-migration", filePath: "plugins-community/science-model-npu-migration/SKILL.md" },
+      { id: "science-model-npu-migration", description: "NPU 代码级迁移（环境门禁/脚本适配/精度性能对比）", source: "community/model", filePath: "community/model/science-model-npu-migration/SKILL.md" },
       { id: "model-infer-perf-breakdown", description: "NPU 性能数据拆解技能。把 kernel_details.csv 按用户描述的模型结构切成 component 实例（每层 attn / ffn / moe…），再按用户给的 cluster ...", source: "model" },
       { id: "model-infer-profiling", description: "NPU 性能分析数据采集技能。用于华为昇腾NPU上的 PyTorch 模型性能分析。 触发场景： - 用户需要采集 NPU 性能数据 - 用户提到 profiling、性能分析、tensorbo...", source: "model" },
       { id: "model-infer-quantization", description: "infer 仓模型量化适配改造技能。分析并接入既有 compressed-tensors 量化方案和权重，完成量化产物契约检查、结构参考匹配、量化 runtime 映射、权重加载、post-lo...", source: "model" },

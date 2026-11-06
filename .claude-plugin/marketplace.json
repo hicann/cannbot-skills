@@ -793,6 +793,27 @@
         "./shmem-ops-code-review",
         "./shmem-ops-torch-bind"
       ]
+    },
+    {
+      "name": "science-model-npu-migration-skills",
+      "description": "科学模型 NPU 迁移 Skill：环境门禁、脚本与依赖适配、代码迁移、精度/性能对比与交付归档。",
+      "source": "./community/model",
+      "strict": false,
+      "version": "0.1.0",
+      "author": {
+        "name": "CANNBot Community"
+      },
+      "keywords": [
+        "npu-migration",
+        "ascend",
+        "torch_npu",
+        "mindspore",
+        "migration"
+      ],
+      "category": "skills",
+      "skills": [
+        "./science-model-npu-migration"
+      ]
     }
   ]
 }

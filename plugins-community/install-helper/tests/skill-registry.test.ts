@@ -88,7 +88,7 @@ describe("skill-registry", () => {
     it("skills with a source outside the scanDirs land in the Other catch-all, never dropped", () => {
       const categories = getAllCategories();
       const otherCat = categories.find((c) => c.id === "other");
-      // science-model-npu-migration's source is a plugins-community path
+      // science-model-npu-migration's source is a community/model path
       expect(otherCat).toBeDefined();
       expect(otherCat!.skills.some((s) => s.id === "science-model-npu-migration")).toBe(true);
     });

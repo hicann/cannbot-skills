@@ -21,8 +21,7 @@ cannbot-skills/
 ├── plugins-community/               # 社区 Plugins
 │   ├── install-helper/              # CANNBot Install Helper 工具
 │   ├── ops-qa-suite/                # 算子测试套件
-│   ├── tilelang2ascendc-ops-generator/   # AscendC 算子自动生成 Team（实验性）
-│   └── science-model-npu-migration/ # 科学计算模型 NPU 迁移
+│   └── tilelang2ascendc-ops-generator/   # AscendC 算子自动生成 Team（实验性）
 ├── infra/                           # 基础设施维护 Skills
 ├── docs/                            # 项目文档
 └── tests/                           # 自动化测试框架
@@ -233,4 +232,4 @@ cannbot-skills/
 
 ### 科学计算模型迁移
 
-`science-model-npu-migration` 是社区 Plugin（位于 `plugins-community/`），提供框架级代码 NPU 迁移全流程：环境门禁、脚本适配、精度/性能对比与 `mig_docs` 交付归档，覆盖 `torch_npu` / MindSpore Ascend。无 Plugin/Agent 编排，以 Skill 形式直接提供服务。
+`science-model-npu-migration` 是原子 Skill（由 `plugins-community/` 插件目录归位至 `community/model/`），提供框架级代码 NPU 迁移全流程：环境门禁、脚本适配、精度/性能对比与 `mig_docs` 交付归档，覆盖 `torch_npu` / MindSpore Ascend。无 Plugin/Agent 编排，以 Skill 形式直接提供服务。

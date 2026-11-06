@@ -316,14 +316,6 @@
 | **tool-npu-check** | `memcheck` 设备全局内存（GM）访问检查、`synccheck` 同步操作配对检查、命令执行及检查报告解读 | — |
 | **npu-objdump-toolkit** | npu-objdump/msobjdump 算子编译产物分析：查看元数据与 ELF、提取 device ELF、反汇编 Ascend AICore 指令，并将异常 PC 定位到 OPP 对象、MIX AIC/AIV 物理符号和窄指令窗口 | — |
 
-## 社区 Plugins
-
-> 以下 Plugin 位于 `plugins-community/` 目录，属社区维护，可能存在平台或能力限制。
-
-| Plugin | 功能 | 使用样例 |
-|--------|------|---------|
-| **science-model-npu-migration** | 框架级代码 NPU 迁移全流程：环境门禁、脚本适配、精度/性能对比与 mig_docs 交付归档；覆盖 torch_npu / MindSpore Ascend | — |
-
 ## 领域目录入口（自 README 索引表移入）
 
 > 目录级入口，非官方插件；官方插件索引保留在 [README](../README.md)。
@@ -333,6 +325,6 @@
 | **GE** | 图模式相关问题定位 | [graph/](../graph/) |
 | **Runtime** | Runtime LLT 开发与接口迁移 | [runtime/](../runtime/) |
 | **CANN 工具链** | 故障信息收集、Device 日志导出、AI Core Error 分析、npu-compute 性能采集与报告分析 | [tools/](../tools/) |
-| **科学计算模型迁移** | 框架级代码 NPU 迁移（环境门禁/脚本适配/精度性能对比） | plugins-community/science-model-npu-migration |
+| **科学计算模型迁移** | 框架级代码 NPU 迁移（环境门禁/脚本适配/精度性能对比） | [community/model/science-model-npu-migration/](../community/model/science-model-npu-migration/) |
 | **治理与协作** | Skill 审查、GitCode PR/Issue 自动化 | infra/ |
 | **文档通用质检** | 提供Markdown通用质检能力，涵盖文件名规范、标点符号规范、表达合规性，以及上下文语义的正确性与可读性 | [infra/docs-common-review/](../infra/docs-common-review/) |
