@@ -98,9 +98,9 @@ def _remove_managed_path(path):
 
 
 def relink(dst, src):
-    """等价 ln -sfn：替换已存在的目标为指向 src 的符号链接。"""
+    """等价 ln -sfn：用绝对源路径替换已有目标，避免相对链接基准漂移。"""
     _remove_managed_path(dst)
-    dst.symlink_to(src)
+    dst.symlink_to(src.absolute())
 
 
 def git(args, cwd=None):
