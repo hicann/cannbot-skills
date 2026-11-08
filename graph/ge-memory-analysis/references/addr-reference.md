@@ -156,6 +156,12 @@ RT2.0 无模型级 args 表，地址由内存算子在执行时产生。**三类
 
 **input_N/output_N 归属划分**：同算子的 `Launch args-args addresses info` 行中 `ArgsInputsAddr(address/length)`、`ArgsOutputsAddr(address/length)` 给出输入/输出指针数（length/8），据此切分地址列表——前 N 个为 input_0..N-1，其余为 output_0..M-1。常量类 input 显示为 V 区地址（0x12c1...）；Reduce 类算子的 input_0 可能是 host/axis 区地址（如 0x3ffff...），数据 input 在 input_1。
 
+缺少同算子的 `Launch args` 输入/输出计数时，`addr_extract.py` 无法判定地址归属，会提示缺失的 `ArgsInputsAddr/ArgsOutputsAddr` 日志，并以 `addr_N` 保留地址顺序和尺寸。此时回复仍说明 `length/8` 的切分规则，但不得把未知地址当作 output；需补充计数日志后再确认 input/output。显式记录的零输入计数仍可正常识别为 output。
+
+**逐轮回复要求**：每条结果注明算子、step/时间戳（日志给出时）、实际地址、字节数和约合 MiB；用户给出名义档位时明确对应档位，不能只罗列档位序列让用户换算。比如 33619968 B ≈ 32.06 MiB，对应约 32M 档（保留实际字节数，不当成精确 32 MiB）。输入/输出归属仍须同次执行的计数证据；缺失时沿用上文 `addr_N`，不得从算子名或大小猜测。
+
+只有一次执行行时，仅能报告该轮地址；其余档位/轮次的地址组未知，明确要求补充对应 `Input/Output addresses`、`Input/Output sizes` 和 `Launch args` 行。不编造缺失地址，也不宣称多轮地址必然相同或必然不同。
+
 **② input 地址（= 前驱的 output 地址）**——RT2 中 tensor 经数据流传递，算子输入地址即前驱算子 AllocMemHbm 分配的地址（或图输入/常量的加载地址：`Load file constant ... to addr` / `Copy constant ... to device addr`，DEBUG 级）。按计算图拓扑找到前驱算子后查其 AllocMemHbm 记录。
 
 **③ workspace 地址（同样走 Alloc 算子）**——有独立 workspace 的算子，Lowering 同样插入 Alloc 请求，日志格式同 ①；elementwise 类小算子常无独立 workspace（如 dy.log 全图无 workspace 分配记录），属正常。

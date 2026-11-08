@@ -86,6 +86,18 @@ GE 仓 [memory_assigner_manual_test.cc](https://gitcode.com/cann/ge/blob/master/
 
 **markdown 环境用 markdown 表格**（中文列名，渲染对齐由 markdown 保证）；脚本终端输出为 ASCII 列名表格 + 中文图例行（中文字符宽度在不同终端/字体下渲染不一致，终端版保证任何等宽环境对齐）。
 
+**先区分脚本契约与运行测量**：[mem_tuning.sh](../scripts/mem_tuning.sh) 已定义默认 `topo=[0 1 2 3] × mop=[default MemoryPriority]`。用户按该脚本默认维度给出模式名称时，使用下列映射给出编号，不把仓内已知定义写成“待日志确认”的占位值。实际生效名称有日志时仍核对；用户明确覆盖 `GE_MT_MODES` / `GE_MT_MOPS` 或使用不同版本时，按其已知配置和日志解释，不能将默认菜单冒称为已确认的自定义运行事实。
+
+| topo 编号 | 模式名 |
+|---|---|
+| 0 | BFS |
+| 1 | DFS |
+| 2 | RDFS |
+| 3 | StableRDFS |
+
+`default` 表示不设置 `ge.exec.memoryOptimizationPolicy`；不要写成字面值“default”或空字符串。`MemoryPriority` 才添加 `ge.exec.memoryOptimizationPolicy="MemoryPriority"`。推荐配置中的 `ge.topoSortingMode` 使用表中编号。未说明覆盖、只说本脚本常规4×2维度时，应注明按仓内默认菜单解释，两个策略名为default与MemoryPriority，而不是“策略1/2名称未知”。这些定义来自脚本，不是从用户的内存数值反推。
+
+
 ```markdown
 ==== 内存寻优结果: <dump图名> ====
 维度: topo=[...] x 内存策略=[...]
@@ -101,14 +113,17 @@ GE 仓 [memory_assigner_manual_test.cc](https://gitcode.com/cann/ge/blob/master/
 ```
 
 展示规则：
+
+- **输入不完整**：仍按下列列序输出已知结果组合，未提供的测量指标标为“未提供”；只对已知复用后大小的行排序，未知值放后面。脚本菜单与枚举按上述来源引用，不能混同为缺失测量；未报告组合的结果保持未知，不补造数值或冒称实测。在表后说明数据范围，再索取补充日志；不能用索要完整日志代替当前对比表。
 - **列序**：序号(#)、**总内存大小、复用后大小、理论最小值**（三个内存指标在前，体现"总量→复用后→极限"的收敛关系）、**集中清零大小、流数**（两个辅助指标紧随，源自 imas 汇总行 atomic+continuous 之和与 streams）、**topo、内存策略**（参数标识在最后两列）
 - **指标来源**：各组合日志由 imas 工具（`imas total`，与 `imas report` 汇总行同源）解析，多图/多memtype 时内存指标求和、流数取最大值
 - **集中清零大小**：imas 汇总行 `atomic`（集中清零）与 `continuous`（连续内存）之和，两者均为不可复用内存，值越大说明结构性的浪费越大
 - **流数**：imas 汇总行 `streams`，流越多并发越高但复用通常越差
-- **topo 列**：值+实际生效名，如 `0(BFS)`（从日志 `topo_mode[...]` 确认）
+- **topo 列**：编号+名称，如 `0(BFS)`、`3(StableRDFS)`；有 `topo_mode[...]` 日志时核对实际生效名，已提供名称且按本脚本默认维度时直接使用上表编号。只有版本/覆盖或日志存在冲突时再列待核项，不能为已知映射留下不可执行的配置占位。
 - **大小格式**：`字节数 (可读值)`，如 `6743040 (6.43M)`；可读值自动换算 K/M/G
 - **排序**：按复用后大小**从小到大**（最优在第 1 行，紧邻结论）；大小相同时**内存策略 default 排前**（同效果优先推荐默认策略，免额外配置）
-- **结论**：最优组合行（含可读值）+ 推荐配置（可直接使用的 option 串）+ imas 深入分析命令
+- **结论**：明确推荐一个最优组合（topo编号与名称、内存策略、复用后字节数及可读值）+ 可直接使用的option串 + imas深入分析命令。同一topo的default与MemoryPriority并列时，按同值default优先推荐default，仅设置对应 `ge.topoSortingMode`，省略策略option；不能只列两者并列或用模式名占位代替编号。
+- **并列的证据范围**：只说明本轮所给组合在该指标上未见差异，不能推出策略在该图所有指标或其他运行条件下“不起作用”。其余未提供组合与指标仍未知；离线推荐始终须重新编译真实验证。
 
 ## 5. 注意
 

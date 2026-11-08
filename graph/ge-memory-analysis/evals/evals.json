@@ -24,7 +24,7 @@
         "eval_mode": "text"
       },
       "prompt": "分析一下这个静态图的内存。devmm 统计 GE 模块 MEM_DEV_HUGE_HBM allocated_peak_size=274726912 是大头；imas total 显示 Used total 394.61M：GE 260.03M（StaticGraph 256.03M/Variable 2M/davinci_model_load 2M）、APP 128M、HCCL 6.57M。imas_mem_graph.csv summary：memory_size 268470272(256.03M), reuse rate:0%, reach_theory_rate:100.00, io:134218752(128.00M), no_reuse:134218752, atomic:0, continuous:0, streams:3。怎么优化？",
-      "expected_output": "应判定为静态图（GE-StaticGraph 大头）。reach_theory_rate=100% 说明复用算法已最优、无算法优化空间；reuse rate 0% 根因在图结构——4 个 64M 大块生命周期持续到模型结束互相重叠无法共享 offset；io=128M 为两个零拷贝块（设计如此不可复用）。优化方向应指向图结构/零拷贝配置而非改 topo 或复用算法参数。",
+      "expected_output": "应判定为Device显存的静态图场景，GE及GE-StaticGraph是大头。reach_theory_rate=100%表示在当前布局和既定约束的理论模型内复用算法已达界限，无由topo/复用算法参数或离线重放寻优直接带来的余量，reuse rate=0%不能据此判定算法没生效；进一步压缩应核查图结构、生命周期与配置约束。io是已经采用用户I/O地址的零拷贝块属性统计，不是尚待开启零拷贝、可再省128M的金额。题干仅有summary，不能还原具体块数、单块大小或模型级永久生命周期，也不能仅因io与no_reuse的数值相等就断定二者是同一批块。应索取imas_mem_graph.csv的算子行，按offset/size、lt及r:c:z:s核对块身份、生命周期重叠和零拷贝标记后再给具体归因与优化建议。允许明确引用参考文件第6节作为有来源限定的条件示例，但不得把该例的4个约64M块、2个零拷贝块直接当作本题summary已提供的事实；不得将已有io再计作新增128M节省，也不默认推荐调整topo或复用算法参数。",
       "files": [],
       "expectations": []
     },
@@ -37,7 +37,7 @@
         "eval_mode": "text"
       },
       "prompt": "动态 shape 图（RT2.0）日志，imas total 显示 GE-MemoryPool 50331648(48.00M)，ge_2 allocator：reuse_rate 77.68% reach_theory_rate 83.33% total 215.04M after_reuse 48.00M theory_min 40.00M。日志里 MallocPhysicalPage 记录 21 次 × 8388608。按 lb/le 错峰模拟峰值活跃是 160.25M@t=9（另一轮次数据同构）。为啥和理论最小值有差距，是不是碎片没消除？",
-      "expected_output": "应判定动态 shape 图（GE-MemoryPool）。差距 8M 是 ExpandableActiveMemoryAllocator 的 8M 最小申请粒度取整台阶而非碎片：峰值活跃 40.25M 超出 5×8M 仅 0.25M 即需第 6 个 8M 单元（48M），物理申请 21×8M 与 imas 报告吻合；块明细层无空洞。不应建议继续消除碎片。",
+      "expected_output": "应先明确这是RT2.0动态shape/GE-MemoryPool场景。按题干计算21×8388608=168MiB，以及ceil(160.25/8)×8=168MiB；后者只有在同一allocator、同一轮次且160.25MiB确为实测并发峰值、同时驻留量确为168MiB时，才支持8MiB申请粒度的取整解释。应指出ge_2报告的after_reuse=48MiB、theory_min=40MiB与160.25MiB峰值不能默认同一口径，累计申请次数也不等于同时驻留页数；要求同pool、同cycle的实测峰值、物理驻留和块明细以核对48/40差额。40MiB已按8MiB对齐，不能仅从该下界推断额外一页。可以条件说明：若另有已核实的同口径峰值P满足40MiB<P≤48MiB，则最少整页容量为48MiB；不能将该假设作为已提供的峰值。不得凭空把160.25MiB替换为40.25MiB，也不得仅凭汇总断言块明细无空洞或确认存在碎片；缺少证据时不默认推荐调整碎片策略。",
       "files": [],
       "expectations": []
     },
@@ -89,7 +89,7 @@
         "eval_mode": "text"
       },
       "prompt": "RT2.0 动态 shape 日志里有 [KernelTrace][LaunchKernelWithHandle_Add_1_325]Input/Output addresses: 0x12df37ff0000 0x12c180000800 0x12df35fe0000 , Input/Output sizes: 33619968 65568 33619968，同算子 5 次执行（32M/8M/16M/4M/32M 档位）。Add_1 的实际下发地址是多少？",
-      "expected_output": "1. 回复应给出 input_0=0x12df37ff0000、input_1=0x12c180000800、output_0=0x12df35fe0000 三个实际下发地址的对应关系，并说明该次为 32M 档\n2. 回复应说明地址切分依据：ArgsInputsAddr/ArgsOutputsAddr 的 length/8 决定指针个数，Add 为两个输入一个输出\n3. 回复应说明仅凭给出的这一条日志无法判定其余档位（8M/16M/4M）的地址组，需要补充对应执行行，而不是编造",
+      "expected_output": "1. 回复应保留本次执行的三个确定地址及尺寸：addr_0=0x12df37ff0000（33619968B）、addr_1=0x12c180000800（65568B）、addr_2=0x12df35fe0000（33619968B），并说明约为32M档。题干未提供同次Args输入/输出计数，实际角色保持待确认，不将未知地址确定为output。\n2. 回复应明确ArgsInputsAddr/ArgsOutputsAddr的length/8分别决定输入/输出指针个数，并据此前N个输入、后M个输出切分。缺少同次计数时保留addr_N并请求对应计数行，不仅凭Add名称、地址数或尺寸推断两输入一输出。\n3. 回复应说明仅凭这一条launch不能确定其余8M/16M/4M及另一个32M轮次的地址组，需要补充对应执行的addresses、sizes和Args计数行，不编造缺失轮次或断言多轮地址相同/不同。",
       "files": [],
       "expectations": []
     },
@@ -116,6 +116,36 @@
       },
       "prompt": "我们模型显存占用特别高，肯定是 GE 泄漏了，帮我定位下根因。日志现在还没有。",
       "expected_output": "应说明无日志证据不能定位根因，要求用户提供 run 阶段 plog（devmm 统计）和 debug 阶段 plog（imas 解析），无日志时给出日志开关（ASCEND_GLOBAL_LOG_LEVEL=1，atc 加 --log=info）重新采集的指引；不得凭现象直接断言 GE 泄漏或给出根因结论。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "RT2显式Args计数：二输入一输出的正向切分",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "以下为仓内CLI回归构造的同次RT2日志片段：\n\n[KernelTrace][LaunchKernelWithHandle_Add_1]Launch args-args addresses info: ArgsInputsAddr(address/length): 0x4000/16, ArgsOutputsAddr(address/length): 0x5000/8\nI (123):2026-10-11-09:00:00.000 [executor_tracer.cc:100]123 OnExecuteEvent:[KernelTrace][LaunchKernelWithHandle_Add_1]Input/Output addresses: 0x1000 0x2000 0x3000 , Input/Output sizes: 16 16 16\n\n请给出本次执行的input/output实际下发地址，并解释角色划分的计数依据。",
+      "expected_output": "1. 回复应根据同次Add_1的ArgsInputsAddr长度16字节、ArgsOutputsAddr长度8字节，分别除以8得到2个输入指针和1个输出指针。\n2. 回复应按实际Input/Output addresses顺序给出input_0=0x1000、input_1=0x2000、output_0=0x3000，三个尺寸均为16B；0x4000与0x5000是Args元数据表地址，不是这三个实际下发地址。\n3. 本题同次输入/输出计数已经明确，不应退回未知addr_N或声称计数缺失；角色判定应来自计数记录，而非仅凭算子名。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 11,
+      "title": "静态图明细正例：生命周期与零拷贝块身份归因",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "max_tokens": 120000,
+        "eval_mode": "text"
+      },
+      "prompt": "分析一下这个静态图的内存。devmm 统计 GE 模块 MEM_DEV_HUGE_HBM allocated_peak_size=274726912 是大头；imas total 显示 Used total 394.61M：GE 260.03M（StaticGraph 256.03M/Variable 2M/davinci_model_load 2M）、APP 128M、HCCL 6.57M。imas_mem_graph.csv summary：memory_size 268470272(256.03M), reuse rate:0%, reach_theory_rate:100.00, io:134218752(128.00M), no_reuse:134218752, atomic:0, continuous:0, streams:3。怎么优化？\n\n本题明确补充同一静态图、同一口径的以下块明细，取自仓内 references/imas-report-reference.md 第6节的实测allreduce图；这些行是给定输入，不是要求从summary猜测。请结合offset、大小、生命周期和零拷贝标记定位reuse rate为0的具体原因，并说明优化方向。\n\n| 算子名（节点全名） | 类别 | offset | 大小(字节) | lt | r:c:z:s |\n|---------------------|----------|--------|------------|----|---------|\n| data_x_HcclContinuousMemcpyPass_Identity | output_0 | 0 | 67109376 | 2→∞ | 1:0:0:1 |\n| allreduce_op | output_0 | 67109376 | 67109376 | 3→∞ | 1:0:0:1 |\n| identity_0_Node_Output_MemLayoutConflict_0 | output_0 | 134251520 | 67109376 | 1→∞ | 0:0:1:1 |\n| data_x | output_0 | 201360896 | 67109376 | 0→∞ | 0:0:1:1 |\n| allreduce_op | workspace_0 | 134218752 | 32768 | 3→3 | 1:0:0:1 |\n\n脚注：\n- `data_x_HcclContinuousMemcpyPass_Identity` = HcclContinuousMemcpyPass 在 data_x 后插入的 Identity（optype=Identity）\n- `identity_0_Node_Output_MemLayoutConflict_0` = MemLayoutConflict 插入（optype=Identity，零拷贝）\n- `allreduce_op` = 原图 HcomAllReduce（output_0 输出 / workspace_0 工作区）；`data_x` = 原图 Data 输入节点（零拷贝）\n- lt = 生命周期；∞ = 模型生命周期（4294967295/4294967294）；r:c:z:s = 复用:连续:零拷贝:同流",
+      "expected_output": "1. 应判定GE-StaticGraph为大头；reach_theory_rate=100%说明当前布局与约束下复用算法已达理论界限，不把reuse rate=0%解释为算法未生效或默认调topo/复用算法参数。\n2. 应从明确给定的表识别4个67109376B（各约64MiB）大块，分别在t=0/1/2/3开始且均持续到模型结束；在t=3同时活跃，生命周期重叠，不能共享offset。这些块事实来自本题算子行，不是从summary反推。\n3. 应按r:c:z:s确认data_x与identity_0_Node_Output_MemLayoutConflict_0两个块均r=0、z=1，是已采用用户I/O地址的模型级零拷贝块；它们合计134218752B（约128.00MiB），与本题io及no_reuse对应。块身份一致由这两行标记核实，不是仅由两项汇总相等推断。不能把它们再当成开启零拷贝可新增节省的128M。\n4. 应指出另外两个约64MiB块为data_x_HcclContinuousMemcpyPass_Identity和allreduce_op的output_0，r=1但生命周期2→∞、3→∞互相重叠、无法在当前图中复用；32768B的allreduce_op workspace_0为3→3的小额工作区，不能误算成第5个64M块。4×67109376+32768=268470272B，与memory_size一致。\n5. 优化方向应针对图结构和已核实的块约束，例如缩短大张量/AllReduce输出生命周期、消除可避免的Identity/TensorMove拷贝或评估零拷贝配置占比；当前结构下不靠调整topo或复用算法参数获取未证实收益。",
       "files": [],
       "expectations": []
     }

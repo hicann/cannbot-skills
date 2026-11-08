@@ -9,7 +9,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------
 
-"""提取 RT2.0 动态执行日志中算子实际下发地址（input_N/output_N 格式，按执行序）。
+"""提取 RT2.0 动态执行日志中算子实际下发地址（input_N/output_N，缺失计数时 addr_N，按执行序）。
 
 用法: python3 addr_extract.py <日志文件>
 原理（见 references/addr-reference.md 路径三）:
@@ -90,9 +90,16 @@ def main():
             )
         seen.add(op_id)
         logger.info(f"[{op_id}]")
-        n_in, _ = counts.get(op_id, (0, 0))
+        n_in = counts[op_id][0] if op_id in counts else None
+        if n_in is None:
+            logger.warning(
+                f"[{op_id}] 缺少 Launch args 的 ArgsInputsAddr/ArgsOutputsAddr 计数，"
+                "无法确认 input/output 归属；按 addr_N 显示地址实值，请补充同算子的计数日志。"
+            )
         for i, a in enumerate(addrs):
-            tag = f"input_{i}" if i < n_in else f"output_{i - n_in}"
+            tag = f"addr_{i}"
+            if n_in is not None:
+                tag = f"input_{i}" if i < n_in else f"output_{i - n_in}"
             sz = sizes[i] if i < len(sizes) else 0
             logger.info(f"    {tag:9s} {a}  ({hsz(sz)})")
     return 0

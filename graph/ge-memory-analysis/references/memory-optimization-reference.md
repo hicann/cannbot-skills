@@ -45,7 +45,7 @@ grep -n 'def __init__\|def add_graph' api/python/ge/ge/session/session.py
 | 手段 | 适用场景（触发指标） | 配置项及推荐值 | 参考文档（仓库内，与 hiascend.com 同源） |
 |------|---------------------|--------|------------------------------------------|
 | 外置权重 | 权重/常量占大头 | — | https://gitcode.com/cann/ge/blob/master/docs/zh/design/features/external_weight.md |
-| 零拷贝 | 用户输入输出占比高（io 大） | — | https://gitcode.com/cann/ge/blob/master/docs/zh/design/features/zero_copy.md |
+| 零拷贝 | 核实仍有用户 I/O 冗余拷贝；已统计的 io 不可重复计算新增收益 | — | https://gitcode.com/cann/ge/blob/master/docs/zh/design/features/zero_copy.md |
 | 减少流数 | streams 多导致复用差 | — | https://gitcode.com/cann/ge/blob/master/docs/zh/design/features/stream_allocator.md |
 | 档位合并 | 多档位取 max 导致偏大 | — | https://gitcode.com/cann/ge/blob/master/docs/zh/design/features/dynamic_gear.md |
 | 消除冗余拷贝 | TensorMove 多 | — | https://gitcode.com/cann/ge/blob/master/docs/zh/design/features/tensormove_delete.md |

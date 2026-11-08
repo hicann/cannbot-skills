@@ -108,22 +108,32 @@ devmm 定位到 GE 是大头后，用 `imas total` 看 GE 内部构成：
 - **非空 → 静态 shape 图**：走本节流程，分析 `imas_mem_graph.csv`（imas total 显示 GE-StaticGraph）
 - **空 → 动态 shape 图（RT2.0 执行）**：imas_mem_graph.csv 无数据（imas total 显示 GE-MemoryPool），改分析 `imas_mem_pool.csv`（address 聚合看物理占用、块粒度损耗、页占用等分析要点见 [imas-report-reference.md](references/imas-report-reference.md) 第 2 节）；**不支持 1.5 节离线重放寻优**，优化手段见 [memory-optimization-reference.md](references/memory-optimization-reference.md)
 
-#### 分析第一步：先读最后一行 summary
+动态池回复按以下顺序完成，详细证据门槛见参考文件第 2 节“动态池输出验收”：
 
-**先看 imas_mem_graph.csv 最后一行的内存复用汇总（summary）** —— 不逐行翻算子明细，先从汇总指标定优化层级，再决定是否需要算子级核查。两个核心指标：**reuse rate**（低 → 拓扑/图结构问题）和 **reach_theory_rate**（<100% → 复用算法有空间），公式与全部指标含义见参考文件第 3 节。
+1. **场景**：先明确 RT2.0 动态 shape / GE-MemoryPool 及依据；用户已给定的类别应直接归纳，不能因数值口径待核实而省略。 依据只引用已给出的题干或日志；类别已知不代表文件存在/空内容等状态已观察，缺失的观测仍未知。
+2. **分口径账本**：分别列累计申请量 `A`、并发活跃峰值 `P`、同时驻留物理量 `R`、报告的 after_reuse / theory_min，注明 allocator/pool、cycle/时间窗和来源；缺项写“未知”，不互相替代。 数值不相容只能说明这些口径/时点或采集完整性需核对，不能据此断言已经证实不同pool/cycle。
+3. **计算与结论分开**：对整体P单次取整的数学下界为 `Q=ceil(P/U)×U`，该单次尾差为 `T=Q-P`；报告差 `D=after_reuse-theory_min` 是另一个量，不能拿 `D` 代替 `T` 检验 `0≤T<U`，也不能仅因差一整页就定性为尾差。即使累计 `A=Q`，也不证明实际 `R=Q`。只有同 pool、同 cycle、同存活范围的 `P` 和 `R` 均核实后，才解释页级取整；条件未确认时，每处结论都保留条件，不能在后文改成确定的“不是碎片”或“无空洞”。
+4. **补证清单**：列出同 pool/cycle 的 lb/le 峰值清单、支持同时驻留量的分配/释放及缓存/预留记录、address/size/生命周期块明细。不能只索取重算峰值而遗漏驻留和块明细。未补齐时只给可验证算术与待确认项，不默认推荐碎片策略。
+
+#### 静态图分析第一步：先读最后一行 summary
+
+**先看 imas_mem_graph.csv 最后一行的内存复用汇总（summary）** —— 不逐行翻算子明细，先从汇总指标定优化层级，再决定是否需要算子级核查。两个核心指标：先看 **reach_theory_rate** 是否已达理论界限，再用 **reuse rate** 与块约束判断优化方向；未达界限也须先核查实际分配约束，不能直接等同于算法可改进，公式与全部指标含义见参考文件第 3 节。
 
 #### 归因决策树
 
 ```
-reuse rate 低？
-├── 是 → 改拓扑排序算法（topo）或加控制边改图结构
-│        → 目标：提升 reuse rate，降低 after_reuse
-└── 否 → reach_theory_rate < 100%？
-    ├── 是 → 优化复用算法 → after_reuse 逼近 theory_min
-    └── 否 → 当前拓扑下已最优
+reach_theory_rate 已达 100%？
+├── 是 → 当前统计口径下 after_reuse 已达 theory_min
+│        → reuse rate 低：核查块身份、重叠生命周期及图结构
+│        → 不默认推荐 topo、复用参数或离线寻优试跑
+└── 否 → 先核查连续内存、对齐、多流及不可复用约束
+         → 确认存在布局空间后，再比较 topo / 复用策略
+         → 改变图结构或执行时序后，重新生成报告核验
 ```
 
 再检查不可复用项占比：`io` / `no_reuse` / `atomic` / `streams` / `continuous`（含义见参考文件指标表）。
+
+`io` 已表示零拷贝用户 I/O 内存，不是尚未开启零拷贝的待优化分配；不得把它再次计为“开启零拷贝可省”的收益。`io`、`no_reuse` 等属性统计可能重叠；数值相等也不能证明是同一批块。未核对块身份前不能默认互斥相加或相互扣除，并据此推断普通块的大小或是否存在。`reach_theory_rate=100%` 时，先从图结构、块生命周期及现有零拷贝占比核查，不能仅凭 reuse rate 低就承诺改 topo/复用算法可省内存。块数、单块大小和生命周期须来自用户算子行；参考文件第 6 节是已提供明细的实测例，不能将其中的四个约 64M 块直接当成仅含 summary 的用户图事实。
 
 **reach_theory_rate < 100% 的常见根因**（after_reuse 与 theory_min 的差距来源）：连续内存整块生命周期长（最常见）、整块 best-fit 失配、io 块隔离放置、512 字节对齐膨胀、多流并行——各根因的机制、报告特征与排查方法（含水值模拟法）见 [imas-report-reference.md](references/imas-report-reference.md) 第 3 节"reach_theory_rate < 100% 常见根因与排查"；reach_theory_rate 在 90%~100% 属分配器模型精度的正常水平，非结构性浪费。
 
@@ -135,11 +145,11 @@ reuse rate 低？
 
 复用变化（网络结构变化/手动配置不复用）导致算子精度问题时，按五类根因排查：① 复用错误踩踏（内存报告即可分析）；② 算子多写踩踏（复用正确，看执行算子顺序和内存相邻性）；③ 算子多读脏数据（从被复用过的内存读到脏数据）；④ 算子少写（如内存 1024 实际只写 512，被复用过即残留脏数据）；⑤ VA/PA 映射冲突（**仅动态 shape + `staticMemoryPolicy` 3/4**：Va1 与 Va2 虚拟地址不重叠但绑定相同物理页 Pa，报告均为 VA 维度无法发现，须开 INFO 日志查 GE 内置 VA/PA 校验报错）。静态图实测定位嫌疑算子用 dump watch 模式：怀疑哪个算子输出内存被踩就把该算子配成 watcher，每个算子执行后 dump 一份被观察内存，谁执行后非预期变化谁就是嫌疑（复用错误和算子踩踏均适用）。根因分类、stomping 模拟检测步骤、数据级验证特征、watch 模式、不复用配置（`OP_NO_REUSE_MEM` / `ge.exec.disableReuseMemory` / `--disable_reuse_memory`）、VA/PA 映射冲突检测见参考文件第 5 节。需算子实际下发到 device 的 input/output/workspace 地址（踩踏实址核查/地址对账）时，见 [addr-reference.md](references/addr-reference.md)。
 
-#### 分析工作流
+#### 静态图分析工作流
 
 1. 生成报告：`./imas report <debug>/plog/plog*`
 2. **先读 imas_mem_graph.csv 最后一行 summary**：reuse rate + reach_theory_rate 两个指标定优化层级
-3. 走归因决策树（reuse rate 低 → 拓扑/图结构；reach_theory_rate < 100% → 复用算法）
+3. 走归因决策树：先判 reach_theory_rate 是否达界限，再结合 reuse rate 和实际块约束；已达界限时不默认安排 topo/复用参数试跑
 4. 检查不可复用项占比：io / no_reuse / atomic / streams / continuous
 5. 需要时算子级核查（按展示规则输出 Top 10，核查 offset、生命周期重叠、isref 链）
 6. 必要时做 stomping 检测
@@ -163,6 +173,8 @@ reuse rate 低？
 
 完整搭建与执行步骤（GE 开发环境 / imas 安装 / UT 编译 / 一键寻优脚本）、dump 图获取与阶段要求、脚本参数（维度子集/日志目录/UT 路径）、UT 环境变量、结果展示格式，均见 [memory-tuning-reference.md](references/memory-tuning-reference.md)。
 
+解读已有寻优结果时，先按该 reference 第 4 节列出已知组合的对比表，再给最优组合和可直接使用的配置；不得只给文字结论。仓内脚本已定义的topo名称/编号与默认策略菜单应按来源引用（含StableRDFS→3），不能与缺失测量混为“未知”。同值优先default，省略额外策略option；只说本轮所给组合未见差异，不断言策略全局不起作用。数据不全也先展示已有行，缺失指标/未报告结果保留未知，不编造其余数值；离线结论须重新编译真实验证。
+
 ## 场景 2：Host 内存泄漏排查（通用方法）
 
 Host 内存泄漏是**通用问题**，与普通 C/C++ 程序排查方法一致：**TMT 首选**（免编译 LD_PRELOAD、动态开关、高性能泄漏栈定位，适合已构建产物/现网进程），备选 ASan（可重编译+查越界）/valgrind（小程序）。
@@ -178,6 +190,8 @@ Host 内存泄漏是**通用问题**，与普通 C/C++ 程序排查方法一致�
 | 静态图（V1 task sink） | imas addr 地址映射；dfx args 表看 device 实收（需 `GE_DAVINCI_MODEL_PROFILING=2`，先查开关判定行，未开提示重跑） | `static_addr_extract.py` 一键提取 |
 | RT2.0 动态执行 | launch 日志 `Input/Output addresses` 实值 + AllocMemHbm 池块 | `addr_extract.py` 按 step 轮次提取 |
 
+RT2 地址回复须明确对应执行轮次、大小档位和归属证据：令 `N=ArgsInputsAddr.length/8`、`M=ArgsOutputsAddr.length/8`，同次addresses的前N个依次为input_0..input_(N-1)，随后M个为output_0..output_(M-1)，sizes按相同顺序对应。计数缺失时仍明确解释这条“前N输入、后M输出”的规则，但不猜N/M或具体角色，以 `addr_N` 保留实际地址并索取对应计数行。只有一轮日志时，明确其余轮次地址未知并索取对应launch行。详见 addr-reference.md 第 4 节。
+
 零拷贝（z=1 块）实际地址 = 当轮 `user_addr`（logical_addr 仅占位，零拷贝复用模式下未分配）；多轮槽值变化 = 用户 buffer 轮换非 GE 漂移；槽级 refreshable（支持刷新）与模型级 UpdatePolicy（需要刷新）正交。机制细节与展示规则见 addr-reference.md。
 
 ## 执行纪律
@@ -185,8 +199,8 @@ Host 内存泄漏是**通用问题**，与普通 C/C++ 程序排查方法一致�
 - 日志是唯一判据：只在用户提供的日志/报告上检索分析，命令可直接复制执行；无日志时先向用户索要（run/debug plog、dump 图、含 dfx 的运行日志），不得凭现象断言根因。
 - 日志内容校验先行：分析前先验证必要标志行（run plog 的 `svm_mem_stats_show`、debug plog 的 `MallocMemory`、dfx 的开关判定行）；日志文件存在但内容缺失时，明确告知缺什么、需开启哪个日志开关，指引重新获取，**不得在内容不足的日志上硬分析或凭现象推断**。
 - 分诊先行：未确认 Device 显存 / Host 内存前不得进入分析路径；地址类问题直接进场景 3。
-- 结论须可溯源：归因结论附命中的日志关键行（原样粘贴）或报告指标出处；池化不归还、粒度台阶等**设计行为明确标注"非缺陷"**，不得当泄漏/问题上报。
-- 参数取值以正式发布文档为准（GE 仓文档链接已绝对化，版本演进以 GE 仓为源），不凭记忆输出配置取值。
+- 结论须可溯源：归因结论附日志关键行或报告指标出处；只有已核实的池化不归还、粒度台阶等设计行为才标注“非缺陷”。整页差值或某种设计机制存在，不等于本次差额已由该机制解释；原因待确认时不定性为设计尾差、非结构性浪费或泄漏。
+- 参数取值以匹配版本的正式发布文档为准（版本演进以GE仓为源），不凭记忆补值；本仓工具明确定义的枚举映射与默认命令菜单可引用对应脚本。运行日志用于核对实际生效项，不因缺少重复日志而拒绝给出已知脚本映射；版本/覆盖冲突时明确列出并核实，不用默认值替代已知自定义事实。
 - 展示格式先读 reference：输出展示类内容（表格/格式）前，必须先读对应 reference 章节（如算子明细表 → imas-report-reference.md 第 4 节、寻优对比表 → memory-tuning-reference.md 第 4 节、地址表 → addr-reference.md），不得凭 SKILL.md 概述自行组织格式。
 - 零拷贝/地址结论必须区分 logical_addr（占位）与 user_addr（实际下发）：未分配的 logical_addr 出现在实际下发中即标注为故障特征，不得当作正常地址呈现。
 
