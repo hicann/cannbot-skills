@@ -8,7 +8,12 @@
 // See LICENSE in the root of the software repository for the full text of the License.
 // ----------------------------------------------------------------------------------------------------------
 
-import { describe, it, expect } from "vitest";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, beforeEach, describe, it, expect } from "vitest";
 
 // Equivalent of install.ps1 Compare-SemVer and install.sh sort -V comparison
 function compareSemVer(a: string, b: string): boolean {
@@ -40,19 +45,6 @@ function buildMirrorOrder(preferred: string | null, all: string[]): string[] {
     if (m !== preferred) result.push(m);
   }
   return result;
-}
-
-function resolveArchitecture(arch: string): string {
-  switch (arch) {
-    case "x86_64":
-    case "amd64":
-      return "x64";
-    case "arm64":
-    case "aarch64":
-      return "arm64";
-    default:
-      return "x64";
-  }
 }
 
 function shouldFixExecutionPolicy(policy: string): boolean {
@@ -148,25 +140,82 @@ describe("install-scripts", () => {
     });
   });
 
-  describe("resolveArchitecture", () => {
-    it("x86_64 → x64", () => {
-      expect(resolveArchitecture("x86_64")).toBe("x64");
+  describe.skipIf(process.platform === "win32")("install.sh platform selection", () => {
+    const installer = resolve(dirname(fileURLToPath(import.meta.url)), "../../../install.sh");
+    let sandbox: string;
+
+    beforeEach(() => {
+      sandbox = mkdtempSync(join(tmpdir(), "cannbot-install-platform-"));
+      // Isolate PATH from Node.js and record registry requests without network access.
+      for (const tool of ["tr", "grep", "sed", "head", "cut"]) {
+        symlinkSync(`/usr/bin/${tool}`, join(sandbox, tool));
+      }
+      writeFileSync(join(sandbox, "uname"), `#!/bin/sh
+case "$1" in
+  -s) printf '%s\\n' "$CANNBOT_TEST_OS" ;;
+  -m) printf '%s\\n' "$CANNBOT_TEST_ARCH" ;;
+esac
+`, { mode: 0o755 });
+      writeFileSync(join(sandbox, "curl"), `#!/bin/sh
+printf '%s\\n' "$*" >> "$CANNBOT_TEST_REQUESTS"
+exit 1
+`, { mode: 0o755 });
     });
 
-    it("arm64 → arm64", () => {
-      expect(resolveArchitecture("arm64")).toBe("arm64");
+    afterEach(() => {
+      rmSync(sandbox, { recursive: true, force: true });
     });
 
-    it("aarch64 → arm64", () => {
-      expect(resolveArchitecture("aarch64")).toBe("arm64");
+    function runInstaller(os: string, arch: string) {
+      const requestsFile = join(sandbox, "requests");
+      const result = spawnSync("/bin/bash", [installer], {
+        encoding: "utf8",
+        timeout: 5000,
+        env: {
+          PATH: sandbox,
+          CANNBOT_TEST_OS: os,
+          CANNBOT_TEST_ARCH: arch,
+          CANNBOT_TEST_REQUESTS: requestsFile,
+        },
+      });
+      expect(result.error).toBeUndefined();
+      const requests = existsSync(requestsFile)
+        ? readFileSync(requestsFile, "utf8").trim().split("\n")
+        : [];
+      return { ...result, requests };
+    }
+
+    it.each([
+      ["x86_64", "x64"],
+      ["amd64", "x64"],
+      ["aarch64", "arm64"],
+      ["arm64", "arm64"],
+    ])("queries the Linux %s package as %s", (arch, expected) => {
+      const result = runInstaller("Linux", arch);
+      expect(result.status).toBe(1); // The mock registry is unavailable.
+      expect(result.requests).toHaveLength(2);
+      for (const request of result.requests) {
+        expect(request).toContain(`@cannbot-ai/install-helper-linux-${expected}/latest`);
+      }
     });
 
-    it("amd64 → x64", () => {
-      expect(resolveArchitecture("amd64")).toBe("x64");
+    it.each([
+      ["Linux", "riscv64"],
+      ["Linux", "i686"],
+      ["Linux", "ppc64le"],
+      ["FreeBSD", "x86_64"],
+    ])("rejects %s/%s before querying a native package", (os, arch) => {
+      const result = runInstaller(os, arch);
+      expect(result.status).toBe(1);
+      expect(result.requests).toEqual([]);
+      expect(result.stdout).toContain(`${os.toLowerCase()}-${arch}`);
     });
 
-    it("unknown → x64 (default)", () => {
-      expect(resolveArchitecture("riscv64")).toBe("x64");
+    it("keeps the macOS Node.js installation guidance", () => {
+      const result = runInstaller("Darwin", "arm64");
+      expect(result.status).toBe(1);
+      expect(result.requests).toEqual([]);
+      expect(result.stdout).toContain("https://nodejs.org/zh-cn/download");
     });
   });
 

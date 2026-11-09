@@ -147,10 +147,19 @@ ARCH=$(uname -m)
 
 PLATFORM="linux"
 
-case "$ARCH" in
-    x86_64|amd64)  ARCHITECTURE="x64" ;;
-    arm64|aarch64) ARCHITECTURE="arm64" ;;
-    *)             ARCHITECTURE="x64" ;;
+case "${OS}-${ARCH}" in
+    linux-x86_64|linux-amd64)  ARCHITECTURE="x64" ;;
+    linux-arm64|linux-aarch64) ARCHITECTURE="arm64" ;;
+    *)
+        echo -e "${RED}❌ 暂未提供 ${OS}-${ARCH} 的预编译安装包${NC}"
+        echo ""
+        echo "请参照官网安装 Node.js:"
+        echo "  https://nodejs.org/zh-cn/download"
+        echo ""
+        echo "安装完成后执行:"
+        echo "  npm install -g @cannbot-ai/install-helper@${CHANNEL}"
+        exit 1
+        ;;
 esac
 
 SUBPKG_NAME="@cannbot-ai/install-helper-${PLATFORM}-${ARCHITECTURE}"
