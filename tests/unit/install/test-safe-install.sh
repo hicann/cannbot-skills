@@ -18,8 +18,10 @@
 #   4. Project mode overwrite with backup (non-interactive)
 #   5. Merge structure validation
 #
-# Sources the function definition from ops-registry-invoke/init.sh
-# as the canonical implementation.
+# 插件内容持续向 cannbot 仓迁移，单一硬编码实现路径会在对应插件删除时失效，
+# 故按插件目录遍历动态发现 safe_install_file() 的规范实现（首命中优先）；
+# 全部插件迁走（无可发现实现）时显式 SKIP，诚实反映覆盖现状。
+# 迁移韧性看护见 test-safe-install-resilience.sh。
 # =============================================================================
 
 set -euo pipefail
@@ -28,7 +30,25 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/../../lib/test-helpers.sh"
 
 SKILLS_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-INIT_FILE="$SKILLS_DIR/plugins-official/ops-registry-invoke/init.sh"
+
+# 动态发现：遍历现存插件 init.sh，取首个含 safe_install_file() 的实现
+INIT_FILE=""
+for base_dir in "$SKILLS_DIR/plugins-official" "$SKILLS_DIR/plugins-community"; do
+    [ -d "$base_dir" ] || continue
+    for init_sh in "$base_dir"/*/init.sh; do
+        [ -f "$init_sh" ] || continue
+        if grep -q "^safe_install_file" "$init_sh"; then
+            INIT_FILE="$init_sh"
+            break 2
+        fi
+    done
+done
+
+if [ -z "$INIT_FILE" ]; then
+    print_skip "未发现含 safe_install_file() 的插件 init.sh（插件可能已全部迁移至 cannbot 仓），跳过"
+    exit 0
+fi
+print_info "规范实现来源: ${INIT_FILE#"$SKILLS_DIR"/}"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -47,11 +67,8 @@ run_check() {
 
 # =============================================================================
 # Source safe_install_file() and its helpers from the canonical init.sh
+# （INIT_FILE 由上方动态发现保证存在，无需再检查）
 # =============================================================================
-if [ ! -f "$INIT_FILE" ]; then
-    print_fail "Source init.sh not found: $INIT_FILE"
-    exit 1
-fi
 
 # Create a temporary script containing only the helper functions + safe_install_file
 SAFE_FUNC_TMP=$(mktemp)

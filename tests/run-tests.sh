@@ -348,6 +348,37 @@ parse_args() {
 # Incremental Testing Functions
 # =============================================================================
 
+# 域技能根：现行技能布局的顶层域目录（参考 tests/system/config/st-test.config
+# 的 skill_dirs，并补其漏配项——communication/、community/model/ 均有在役技能；
+# 插件目录不在此列——插件内嵌 skills/<name>/ 布局由下方函数兼容，agents/ 由
+# agent 模式处理。新增域时需与 st-test.config 的 skill_dirs、test-helpers.sh
+# 的全量发现路径三方同步）
+SKILL_ROOTS=("ops" "community/ops" "community/model" "graph" "model" "infra" "runtime" "tools" "communication")
+
+# 从变更文件路径识别域技能名；非技能路径返回非零（输出空）。
+# 看护测试：tests/unit/test-runner-incremental.sh（RI-01..RI-09）
+detect_skill_name_from_path() {
+    local file="$1"
+    local root rel
+    for root in "${SKILL_ROOTS[@]}"; do
+        if [[ "$file" == "$root/"* ]]; then
+            rel="${file#"$root"/}"
+            # 必须位于技能子目录内（直接落在域根下的文件不算技能变更）
+            if [[ "$rel" == */* ]]; then
+                echo "${rel%%/*}"
+                return 0
+            fi
+            return 1
+        fi
+    done
+    # 插件内嵌 skills/<name>/ 布局（如 triton-optimizer/skills/triton-npu-optimize）
+    if [[ "$file" =~ (^|/)skills/([^/]+)/ ]]; then
+        echo "${BASH_REMATCH[2]}"
+        return 0
+    fi
+    return 1
+}
+
 # Check if we're in a git repository
 is_git_repo() {
     git -C "$SKILLS_DIR" rev-parse --is-inside-work-tree &>/dev/null
@@ -450,16 +481,12 @@ analyze_changes() {
             fi
         done
 
-        # Detect skill changes
-        # Patterns: skills/<name>/, ops/skills/<name>/, model/skills/<name>/
-        if [[ "$file" =~ (skills/([^/]+)/) ]] || \
-           [[ "$file" =~ /skills/([^/]+)/SKILL\.md$ ]] || \
-           [[ "$file" =~ /skills/([^/]+)/references/ ]]; then
-            local skill_name="${BASH_REMATCH[2]:-${BASH_REMATCH[1]}}"
-            if [ -n "$skill_name" ]; then
-                CHANGED_SKILLS["$skill_name"]=1
-                echo -e "  ${GREEN}[SKILL]${NC} $skill_name <- $file"
-            fi
+        # Detect skill changes（现行域布局：ops/<skill>/、community/ops/<skill>/ 等；
+        # 插件内嵌 skills/<name>/ 布局由 detect_skill_name_from_path 兼容保留）
+        local skill_name
+        if skill_name="$(detect_skill_name_from_path "$file")"; then
+            CHANGED_SKILLS["$skill_name"]=1
+            echo -e "  ${GREEN}[SKILL]${NC} $skill_name <- $file"
         fi
 
         # Detect agent changes
@@ -592,6 +619,8 @@ get_tests_for_category() {
             echo "unit/test-line-endings.sh:fast"
             echo "unit/test-dependency-graph.sh:fast"
             echo "unit/test-markdown-anchors.sh:fast"
+            echo "unit/test-tilelang-source-paths.sh:fast"
+            echo "unit/test-runner-incremental.sh:fast"
             echo "unit/test-evolution-diagnosis-contract.sh:fast"
             echo "unit/test-evolution-evaluation-contract.sh:fast"
             echo "unit/infra/test-gitcode-issue-workflow.sh:fast"
@@ -612,6 +641,7 @@ get_tests_for_category() {
             echo "unit/install/test-init-tool.sh --tool codearts:fast"
             echo "unit/install/test-safe-install.sh:fast"
             echo "unit/install/test-install-integrity.sh:fast"
+            echo "unit/install/test-safe-install-resilience.sh:fast"
             ;;
         behavior)
             # test-universal.sh contains all 9 behavior rules (B-TRIG, B-SAFE, B-INTA, B-BND)

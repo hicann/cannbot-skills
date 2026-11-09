@@ -129,7 +129,9 @@ class TestIniLayer(unittest.TestCase):
     )
 
     def _fake_ini_dir(self, tmpdir):
-        cfg = os.path.join(tmpdir, "x86_64-linux", "data", "platform_config")
+        # get_arch_dir() 随宿主机架构变化（x86_64-linux / aarch64-linux），
+        # fixture 须与被测代码同源推导，否则仅 x86 宿主机可跑
+        cfg = os.path.join(tmpdir, g.get_arch_dir(), "data", "platform_config")
         os.makedirs(cfg)
         with open(os.path.join(cfg, "Ascend950PR_9579.ini"), "w") as f:
             f.write(self.INI_CONTENT)
