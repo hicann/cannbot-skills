@@ -153,13 +153,11 @@
 
 ## 六、一致性同步义务（SYNC）
 
-**SYNC-1 总览表**：新增/修改规则文件 → 同步更新 `references/README.md` 总览表对应行（分类/前缀/语言/侧别/触发机制/派发方式/条款数/内容定位）。
+**SYNC-1 总览表**：新增/修改/删除规则文件 → 同步更新/移除 `references/README.md` 总览表对应行（规则分类/条款数/规则描述/规则缩写/适用语言/侧别）。
 
-**SYNC-2 changelog**：在 `references/README.md` 顶部 changelog 块加「最后更新：日期（变更说明）」行。
+**SYNC-2 前缀双登记**：新条款前缀 → architecture.md §4.6 前缀表 + benchmark `INDEX_TABLE_RE` 白名单，两处必须同步（见 FILE-3）。
 
-**SYNC-3 前缀双登记**：新条款前缀 → architecture.md §4.6 前缀表 + benchmark `INDEX_TABLE_RE` 白名单，两处必须同步（见 FILE-3）。
-
-**SYNC-4 类别登记**：新类别值 → `deterministic_routing.py` 的 `CATEGORY_PRIORITY`，可选同步 §4.3 常见范畴词表。
+**SYNC-3 类别登记**：新类别值 → `deterministic_routing.py` 的 `CATEGORY_PRIORITY`，可选同步 §4.3 常见范畴词表。
 
 ## 七、提交前自查清单（CHECK）
 
@@ -192,4 +190,4 @@
 - [ ] CLS-9 无五节之外的任何 `###` 章节（章节名白名单强校验）
 
 同步：
-- [ ] SYNC-1~4 四处登记/更新齐全
+- [ ] SYNC-1~3 三处登记/更新齐全
