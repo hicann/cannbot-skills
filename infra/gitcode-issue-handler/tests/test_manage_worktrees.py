@@ -44,7 +44,8 @@ class WorktreeHarness:
         self.repo = root / "repo"
         self.worktrees = root / "worktrees"
         self.manifest = root / "manifests" / "run-1.json"
-        run("git", "init", "-b", "master", str(self.repo))
+        run("git", "init", str(self.repo))
+        run("git", "symbolic-ref", "HEAD", "refs/heads/master", cwd=self.repo)
         run("git", "config", "user.name", "Test User", cwd=self.repo)
         run("git", "config", "user.email", "test@example.com", cwd=self.repo)
         (self.repo / "README.md").write_text("base\n", encoding="utf-8")
