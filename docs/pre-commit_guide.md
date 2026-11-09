@@ -11,7 +11,7 @@ cd /path/to/cannbot-skills
 pre-commit install        # 取消：pre-commit uninstall
 
 # 3. 配置 git pc 别名（对指定范围提交运行检查，每个环境执行一次）
-git config --global alias.pc '!f() { pre-commit run --files $(git diff --name-only "$@"); }; f'
+git config --global alias.pc '!f() { git diff --name-only -z "$@" | xargs -0 pre-commit run --files; }; f'
 git pc HEAD~x        # 检查最近x笔提交
 ```
 
@@ -46,7 +46,7 @@ cd /path/to/cannbot-skills
 pre-commit install        # 取消：pre-commit uninstall
 
 # 3. 配置 git pc 别名（对指定范围提交运行检查，每个环境执行一次）
-git config --global alias.pc '!f() { pre-commit run --files $(git diff --name-only "$@"); }; f'
+git config --global alias.pc '!f() { git diff --name-only -z "$@" | xargs -0 pre-commit run --files; }; f'
 git pc HEAD~x        # 检查最近x笔提交
 ```
 
