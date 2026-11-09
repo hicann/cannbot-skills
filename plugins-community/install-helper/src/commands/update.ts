@@ -95,11 +95,18 @@ export async function updateCommand(
         continue;
       }
 
-      const legacyMatches = installed.filter((p) => p.id === (legacyPlugin?.id || anyPlugin?.id || name));
+      const legacyMatches = cannbotMatches.length === 0 && legacyPlugin
+        ? installed.filter((p) => p.id === legacyPlugin.id)
+        : [];
+
+      const migratedLegacy = cannbotMatches.length === 0 && !legacyPlugin && isMigratedPlugin(name)
+        ? installed.filter((p) => p.id === name)
+        : [];
 
       const matches = [
         ...cannbotMatches.map((e) => ({ pluginId: e.id, tool: e.tool as AITool, level: "project" as InstallLevel, source: "cannbot" as const })),
         ...legacyMatches.map(legacyUpdateTarget),
+        ...migratedLegacy.map((p) => ({ pluginId: p.id, tool: p.tool, level: p.level, source: "cannbot" as const })),
       ];
 
       if (matches.length > 0) {
