@@ -14,7 +14,7 @@ CSV 使用 `csv.DictWriter` 等标准 CSV 序列化器写入，JSON 单元格先
 
 ## 黑盒
 
-先运行 `build_blackbox_cases.py --inventory` 读取标准输出的必需 spec 路径及因子目标。每个 active 行用 `BB-...` ID，`design_ref` 以逗号分隔真实 spec 路径，`condition` 写 `L0`、`L1` 或 `L2`，`note` 写用例目的，`inputs_json` 写公开输入配方，`expected` 写 `match_golden`、`match_golden_nan` 或 `raises_error:<spec 错误码>`。L2 只能对应 spec 声明的异常；NaN 比较须回指相应语义。无法执行的必需 spec 路径写单独 excluded 行，`design_ref` 只写该路径并说明理由。校验器验证所有必需路径均被覆盖或排除，并可用 `--coverage` 在标准输出重算取值、成对组合和未命中目标。路径被引用不等于取值覆盖。
+先运行 `build_blackbox_cases.py --inventory` 读取标准输出的必需 spec 路径及因子目标。每个 active 行用 `BB-...` ID，`design_ref` 以逗号分隔真实 spec 路径，`condition` 写 `L0`、`L1` 或 `L2`，`note` 写用例目的，`inputs_json` 写公开输入配方，`expected` 写 `match_golden`、`match_golden_nan` 或 `raises_error:<spec 错误码>`。属性输入与 spec 声明的 `list[...]` 类型一致时可写 JSON 数组（元素为标量）。L2 只能对应 spec 声明的异常；NaN 比较须回指相应语义。无法执行的必需 spec 路径写单独 excluded 行，`design_ref` 只写该路径并说明理由。校验器验证所有必需路径均被覆盖或排除，并可用 `--coverage` 在标准输出重算取值、成对组合和未命中目标。路径被引用不等于取值覆盖。
 
 ## 白盒
 
@@ -26,8 +26,10 @@ CSV 使用 `csv.DictWriter` 等标准 CSV 序列化器写入，JSON 单元格先
 
 ## 实现单元 TDD
 
-每行 ID 为 `TD-<原生 Unit ID 小写>-<用例名>`，`unit_id` 为原生 ID 小写，`obligation_ids` 以逗号分隔该 Unit 的真实验证义务，`branch_ids` 可关联 active 白盒分支。每条原生义务至少被一个 TDD 行覆盖。数值义务使用 `expected=match_golden`；可观察行为使用 `expected=assertions` 或与 Golden 联合验证。纯结构承诺通过调用方的 review_evidence 验收，不生成结构探针用例。CSV 中的 `inputs_json`、`output_json` 和 `assertions_json` 是唯一用例内容；不生成适配 Unit、桥接计划或 TDD JSON 副本。
+每行 ID 为 `TD-<原生 Unit ID 小写>-<用例名>`，`unit_id` 为原生 ID 小写，`obligation_ids` 以逗号分隔该 Unit 的真实验证义务，`branch_ids` 可关联 active 白盒分支。每条原生义务至少被一个 TDD 行覆盖。数值义务使用 `expected=match_golden`，规格要求传播 NaN 的义务使用 `expected=match_golden_nan`；可观察行为使用 `expected=assertions` 或与 Golden 联合验证。纯结构承诺通过调用方的 review_evidence 验收，不生成结构探针用例。CSV 中的 `inputs_json`、`output_json` 和 `assertions_json` 是唯一用例内容；不生成适配 Unit、桥接计划或 TDD JSON 副本。
 
 TDD 义务类型与判定必须对应：`semantic` 至少包含 output_shape、output_dtype、output_equals_input 或 input_unchanged；`device` 包含 output_device。旧 `structural`、`performance` 与未知类型拒绝进入 TDD，性能目标须另有实际测量条件与判据。数值判定与输出/输入不变性断言可由同一次调用共同承担；不以普通 Golden 比较覆盖非数值义务。错误码行为使用黑盒的 raises_error 用例。
+
+输出类断言（output_shape、output_dtype、output_device、output_equals_input）作用于算子全部返回值；算子返回元组/列表时可加 `index`（非负整数）定位单个输出，返回字典时可加 `output`（非空字符串）按名定位；未定位时同一断言须对每个输出元素成立。属性输入与 spec 声明的 `list[...]` 类型一致时可写 JSON 数组（元素为标量）。
 
 实际触发条件、确定性值配方、输入不变性及连续调用使用 [TDD 证据契约](evidence.md)。CSV 列保持不变，扩展均写入 assertions_json；新增条件必须由实际输入触发。

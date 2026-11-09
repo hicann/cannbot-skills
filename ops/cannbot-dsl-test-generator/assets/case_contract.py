@@ -127,6 +127,15 @@ def validate_assertions(assertions):
                 raise ValueError(
                     "input_unchanged requires unique nonempty Tensor input names"
                 )
+        else:
+            index = assertion.get("index")
+            if index is not None and (type(index) is not int or index < 0):
+                raise ValueError("output index must be a nonnegative integer")
+            output = assertion.get("output")
+            if output is not None and (
+                not isinstance(output, str) or not output.strip()
+            ):
+                raise ValueError("output name must be a nonempty string")
     if executions > 1:
         raise ValueError("one execution control per case is allowed")
 

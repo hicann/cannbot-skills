@@ -545,32 +545,81 @@ def _unchanged_names(assertions):
     }
 
 
+def _assertion_targets(actual, assertion):
+    """Resolve the tensor targets an output assertion applies to.
+
+    Operators may return a tuple/list of outputs or a dict of named outputs.
+    An assertion can target one element via ``index`` (tuple/list) or
+    ``output`` (dict name); without targeting it applies to every element.
+    Returns ``(targets, label)`` where ``label`` describes the selection.
+    """
+    index = assertion.get("index")
+    name = assertion.get("output")
+    if isinstance(actual, (tuple, list)):
+        if index is not None:
+            if type(index) is not int or not 0 <= index < len(actual):
+                raise AssertionError(
+                    f"output index {index} outside {len(actual)} outputs"
+                )
+            return [actual[index]], f"[{index}]"
+        return list(actual), ""
+    if isinstance(actual, dict):
+        if name is not None:
+            if name not in actual:
+                raise AssertionError(
+                    f"output {name!r} not among {sorted(actual)}"
+                )
+            return [actual[name]], f".{name}"
+        return list(actual.values()), ""
+    return [actual], ""
+
+
 def _observe_assertion(actual, inputs, assertion, device):
     kind = assertion.get("kind")
     if kind == "input_unchanged":
-        observed = True  # Checked around the actual device invocation in _invoke.
-    elif kind == "output_shape" and isinstance(actual, torch.Tensor):
-        observed = list(actual.shape)
-        if observed != assertion.get("shape"):
-            raise AssertionError(f"output shape {observed} != {assertion.get('shape')}")
-    elif kind == "output_dtype" and isinstance(actual, torch.Tensor):
-        observed = str(actual.dtype).removeprefix("torch.")
-        if observed != assertion.get("dtype"):
-            raise AssertionError(f"output dtype {observed} != {assertion.get('dtype')}")
-    elif kind == "output_device" and isinstance(actual, torch.Tensor):
-        observed = actual.device.type
-        if observed != torch.device(device).type:
-            raise AssertionError(f"output device {observed} != {device}")
-    elif kind == "output_equals_input" and isinstance(actual, torch.Tensor):
-        source = inputs.get(assertion.get("input"))
-        if not isinstance(source, torch.Tensor) or not torch.equal(
-            actual, source.to(actual.device)
-        ):
-            raise AssertionError("output differs from specified input")
-        observed = True
-    else:
+        return {"kind": kind, "observed": True}  # Checked around the actual device invocation in _invoke.
+    if kind not in (
+        "output_shape",
+        "output_dtype",
+        "output_device",
+        "output_equals_input",
+    ):
         raise ValueError(f"unsupported or inapplicable assertion: {assertion!r}")
-    return {"kind": kind, "observed": observed}
+    targets, label = _assertion_targets(actual, assertion)
+    observed = []
+    for target in targets:
+        if not isinstance(target, torch.Tensor):
+            raise AssertionError(f"output{label} is not a Tensor")
+        if kind == "output_shape":
+            value = list(target.shape)
+            if value != assertion.get("shape"):
+                raise AssertionError(
+                    f"output{label} shape {value} != {assertion.get('shape')}"
+                )
+        elif kind == "output_dtype":
+            value = str(target.dtype).removeprefix("torch.")
+            if value != assertion.get("dtype"):
+                raise AssertionError(
+                    f"output{label} dtype {value} != {assertion.get('dtype')}"
+                )
+        elif kind == "output_device":
+            value = target.device.type
+            if value != torch.device(device).type:
+                raise AssertionError(f"output{label} device {value} != {device}")
+        else:
+            source = inputs.get(assertion.get("input"))
+            if not isinstance(source, torch.Tensor) or not torch.equal(
+                target, source.to(target.device)
+            ):
+                raise AssertionError(
+                    f"output{label} differs from specified input"
+                )
+            value = True
+        observed.append(value)
+    return {
+        "kind": kind,
+        "observed": observed[0] if len(observed) == 1 else observed,
+    }
 
 
 if __name__ == "__main__":

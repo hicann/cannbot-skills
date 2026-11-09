@@ -28,6 +28,7 @@ ASSETS = Path(__file__).resolve().parents[1] / "assets"
 sys.path.insert(0, str(ASSETS))
 from case_contract import validate_assertions
 import case_cache
+import case_contract
 
 
 class EvidenceChainTests(unittest.TestCase):
@@ -438,6 +439,175 @@ class EvidenceChainTests(unittest.TestCase):
             write_rows(work, rows)
             result = run_script("build_tdd_cases.py", work)
             self.assertNotEqual(result.returncode, 0)
+
+
+class FixedRunnerOutputTargetingTests(unittest.TestCase):
+    """Tuple/dict operator outputs with optional index/output targeting."""
+
+    @classmethod
+    def setUpClass(cls):
+        sys.modules.setdefault("cannbotdsl_case_cache", case_cache)
+        sys.modules.setdefault("cannbotdsl_case_contract", case_contract)
+        spec = importlib.util.spec_from_file_location(
+            "fixed_runner_probe", ASSETS / "test.py"
+        )
+        cls.runner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.runner)
+
+    def test_tuple_output_assertions(self):
+        import torch
+
+        outputs = (
+            torch.zeros(2, 3),
+            torch.ones(4, 5),
+            torch.zeros(4, 5),
+        )
+        observe = self.runner._observe_assertion
+        record = observe(
+            outputs, {}, {"kind": "output_shape", "shape": [4, 5], "index": 1}, "cpu"
+        )
+        self.assertEqual(record["observed"], [4, 5])
+        record = observe(
+            outputs,
+            {},
+            {"kind": "output_dtype", "dtype": "float32", "index": 0},
+            "cpu",
+        )
+        self.assertEqual(record["observed"], "float32")
+        record = observe(outputs, {}, {"kind": "output_device", "index": 2}, "cpu")
+        self.assertEqual(record["observed"], "cpu")
+        record = observe(outputs, {}, {"kind": "output_device"}, "cpu")
+        self.assertEqual(record["observed"], ["cpu", "cpu", "cpu"])
+        source = torch.zeros(2, 3)
+        record = observe(
+            outputs,
+            {"query": source},
+            {"kind": "output_equals_input", "input": "query", "index": 0},
+            "cpu",
+        )
+        self.assertTrue(record["observed"])
+
+    def test_tuple_output_assertions_reject_mismatch(self):
+        import torch
+
+        outputs = (torch.zeros(2, 3), torch.ones(4, 5))
+        observe = self.runner._observe_assertion
+        with self.assertRaises(AssertionError):
+            observe(
+                outputs, {}, {"kind": "output_shape", "shape": [4, 5]}, "cpu"
+            )  # untargeted applies to every output
+        with self.assertRaises(AssertionError):
+            observe(
+                outputs, {}, {"kind": "output_shape", "shape": [4, 5], "index": 2}, "cpu"
+            )
+        with self.assertRaises(AssertionError):
+            observe(
+                outputs,
+                {},
+                {"kind": "output_dtype", "dtype": "float32", "index": "1"},
+                "cpu",
+            )
+
+    def test_dict_output_and_single_tensor_passthrough(self):
+        import torch
+
+        outputs = {"dq": torch.zeros(2, 3), "dk": torch.ones(4, 5)}
+        observe = self.runner._observe_assertion
+        record = observe(
+            outputs, {}, {"kind": "output_dtype", "dtype": "float32", "output": "dk"}, "cpu"
+        )
+        self.assertEqual(record["observed"], "float32")
+        with self.assertRaises(AssertionError):
+            observe(
+                outputs,
+                {},
+                {"kind": "output_dtype", "dtype": "float32", "output": "dv"},
+                "cpu",
+            )
+        record = observe(
+            outputs["dq"], {}, {"kind": "output_shape", "shape": [2, 3]}, "cpu"
+        )
+        self.assertEqual(record["observed"], [2, 3])
+
+
+class AssertionTargetingContractTests(unittest.TestCase):
+    def test_index_and_output_fields_validated(self):
+        validate_assertions(
+            [
+                {"kind": "output_shape", "shape": [1], "index": 0},
+                {"kind": "output_dtype", "dtype": "float32", "output": "dq"},
+                {"kind": "output_device"},
+            ]
+        )
+        for bad in ({"index": -1}, {"index": "0"}, {"index": 1.5}, {"output": ""}, {"output": 3}):
+            with self.assertRaises(ValueError):
+                validate_assertions([dict({"kind": "output_device"}, **bad)])
+
+
+class SpecListAttributeTests(unittest.TestCase):
+    """Attributes typed list[...] in the spec accept JSON list values."""
+
+    ATTRIBUTE_TYPES = {"actual_seq_qlen": "list[int64]", "head_num": "int"}
+
+    def test_blackbox_accepts_spec_list_attributes(self):
+        from build_blackbox_cases import validate_input_recipes
+
+        validate_input_recipes(
+            "c1",
+            {"actual_seq_qlen": [256, 256], "head_num": 4},
+            {},
+            None,
+            self.ATTRIBUTE_TYPES,
+        )
+        for bad in (
+            {"head_num": [2]},
+            {"actual_seq_qlen": {"0": 1}},
+            {"actual_seq_qlen": [[1], 2]},
+        ):
+            with self.assertRaises(ValueError):
+                validate_input_recipes("c1", bad, {}, None, self.ATTRIBUTE_TYPES)
+
+    def test_tdd_accepts_spec_list_attributes(self):
+        from build_tdd_cases import CaseContext, validate_execution_inputs
+
+        context = CaseContext(
+            {"actual_seq_qlen", "head_num"},
+            {"actual_seq_qlen", "head_num"},
+            {},
+            None,
+            {},
+            self.ATTRIBUTE_TYPES,
+        )
+        validate_execution_inputs(
+            ("U01", 0),
+            {"inputs": {"actual_seq_qlen": [4, 4], "head_num": 2}},
+            context,
+        )
+        for bad in ({"head_num": [2]}, {"actual_seq_qlen": [[1], 2]}):
+            with self.assertRaises(ValueError):
+                validate_execution_inputs(
+                    ("U01", 0), {"inputs": bad}, context
+                )
+
+    def test_tdd_accepts_match_golden_nan(self):
+        from build_tdd_cases import validate_obligation_evidence, validate_unit_evidence
+
+        row = {
+            "case_id": "TD-u01-nan",
+            "inputs_json": "{}",
+            "output_json": "{}",
+            "assertions_json": "[]",
+            "expected": "match_golden_nan",
+        }
+        inputs, outputs, assertions, expected = validate_unit_evidence(row, {}, [])
+        self.assertEqual(expected, "match_golden_nan")
+        validate_obligation_evidence(
+            row, {"VO-1": {"kind": "numerical"}}, ["VO-1"], expected, assertions
+        )
+        with self.assertRaises(ValueError):
+            validate_unit_evidence(
+                dict(row, expected="golden_plus"), {}, []
+            )
 
 
 if __name__ == "__main__":

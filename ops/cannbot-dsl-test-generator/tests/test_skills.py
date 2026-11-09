@@ -529,6 +529,19 @@ class CpuCaseCacheTests(unittest.TestCase):
             {p.name: p.stat().st_mtime_ns for p in self.cache.root.glob("*.pt")},
         )
 
+    def test_external_cache_is_shared_by_generation_and_execution(self):
+        self.assertEqual(self.cache.root, self.test_dir / ".case_cache")
+        root = self.work / "external cache with spaces"
+        with mock.patch.dict(os.environ, {"CANNBOTDSL_CASE_CACHE_DIR": str(root)}):
+            result = run_script("build_tdd_cases.py", self.work)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            cache = self.cache_module.CaseCache(self.test_dir, self.golden)
+            self.assertEqual(cache.root, root)
+            cache.get(self.case, self.call(), 0)
+            self.assertEqual((cache.built, cache.hits), (0, 1))
+        self.assertTrue(list(root.glob("*.pt")))
+        self.assertFalse((self.test_dir / ".case_cache").exists())
+
     def test_hit_skips_input_generation_and_golden(self):
         first = self.cache.get(self.case, self.call(), 0)
         self.assertEqual(self.counts, {"inputs": 2, "golden": 1})

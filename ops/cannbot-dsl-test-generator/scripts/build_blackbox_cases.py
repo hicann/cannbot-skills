@@ -365,7 +365,11 @@ def validate_case_inputs(case_id, raw, spec, refs, error_code):
             semantic.get("forbidden") or []
         ) & set(inputs):
             fail(f"{case_id}: {ref} required/forbidden inputs do not match case")
-    validate_input_recipes(case_id, inputs, input_meta, error_code)
+    attribute_types = {
+        item["name"]: str(item.get("type") or "")
+        for item in spec.get("attributes") or []
+    }
+    validate_input_recipes(case_id, inputs, input_meta, error_code, attribute_types)
     if expected == "match_golden_nan" and not any(
         isinstance(value, dict)
         and value.get("fill")
@@ -517,7 +521,7 @@ def validate_input_names(case_id, inputs, spec, error_code):
     return input_meta
 
 
-def validate_input_recipes(case_id, inputs, input_meta, error_code):
+def validate_input_recipes(case_id, inputs, input_meta, error_code, attribute_types):
     for name, value in inputs.items():
         if name in input_meta and input_meta[name].get("role", "tensor") == "tensor":
             if value is None and error_code == "null_input":
@@ -526,6 +530,13 @@ def validate_input_recipes(case_id, inputs, input_meta, error_code):
         elif name in input_meta and input_meta[name].get("role") == "tensor_list":
             validate_tensor_list(case_id, name, value, input_meta[name], error_code)
         elif isinstance(value, (dict, list)):
+            spec_type = attribute_types.get(name)
+            if isinstance(value, list) and spec_type and spec_type.startswith("list["):
+                if any(isinstance(item, (dict, list)) for item in value):
+                    fail(
+                        f"{case_id}.{name}: list attribute elements must be JSON scalars"
+                    )
+                continue
             fail(f"{case_id}.{name}: scalar or attribute must be a JSON scalar")
 
 

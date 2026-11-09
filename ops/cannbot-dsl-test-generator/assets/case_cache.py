@@ -15,6 +15,7 @@
 import hashlib
 import importlib.util
 import json
+import os
 import pickle
 import tempfile
 from pathlib import Path
@@ -56,7 +57,8 @@ def _check_cpu_data(value):
 
 class CaseCache:
     def __init__(self, test_dir, golden):
-        self.root = Path(test_dir) / ".case_cache"
+        cache_dir = os.environ.get("CANNBOTDSL_CASE_CACHE_DIR")
+        self.root = Path(cache_dir).expanduser() if cache_dir else Path(test_dir) / ".case_cache"
         self.golden = golden
         self.identity = {
             "version": CACHE_VERSION,

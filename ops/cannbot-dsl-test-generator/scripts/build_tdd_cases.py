@@ -85,6 +85,7 @@ class CaseContext:
     input_meta: dict
     draft: dict | None
     branches: dict
+    attribute_types: dict
 
 
 def validate_test_contracts(native):
@@ -194,7 +195,17 @@ def main():
     units = units_doc.get("units") or []
     if not isinstance(units, list) or not units:
         fail("native Unit needs nonempty units")
-    context = CaseContext(input_names, public_names, input_meta, draft, branches)
+    context = CaseContext(
+        input_names,
+        public_names,
+        input_meta,
+        draft,
+        branches,
+        {
+            item["name"]: str(item.get("type") or "")
+            for item in spec.get("attributes") or []
+        },
+    )
     seen, cases = set(), []
     for unit in units:
         unit_id = unit.get("id")
@@ -237,8 +248,10 @@ def validate_unit_evidence(row, obligations, refs):
     if expected == "assertions":
         if not any(item["kind"] != "input_conditions" for item in runtime):
             fail(f"{row['case_id']}: assertions needs an observable behavior")
-    elif expected != "match_golden":
-        fail(f"{row['case_id']}: expected must be match_golden or assertions")
+    elif expected not in ("match_golden", "match_golden_nan"):
+        fail(
+            f"{row['case_id']}: expected must be match_golden, match_golden_nan or assertions"
+        )
     validate_obligation_evidence(row, obligations, refs, expected, assertions)
     return inputs, outputs, assertions, expected
 
@@ -446,7 +459,7 @@ def validate_execution_case(item, index, unit, context):
 def validate_obligation_evidence(row, obligations, refs, expected, assertions):
     if (
         any(obligations[ref]["kind"] == "numerical" for ref in refs)
-        and expected != "match_golden"
+        and expected not in ("match_golden", "match_golden_nan")
     ):
         fail(f"{row['case_id']}: numerical obligation requires Golden")
     assertion_kinds = {item.get("kind") for item in assertions}
@@ -485,6 +498,17 @@ def validate_execution_inputs(label, item, context):
     for name, recipe in item["inputs"].items():
         if name not in input_meta:
             if isinstance(recipe, (dict, list)):
+                spec_type = context.attribute_types.get(name)
+                if (
+                    isinstance(recipe, list)
+                    and spec_type
+                    and spec_type.startswith("list[")
+                ):
+                    if any(isinstance(entry, (dict, list)) for entry in recipe):
+                        fail(
+                            f"{unit_id}: case {index} attribute {name} elements must be JSON scalars"
+                        )
+                    continue
                 fail(f"{unit_id}: case {index} attribute {name} must be a JSON scalar")
             continue
         meta = input_meta[name]
