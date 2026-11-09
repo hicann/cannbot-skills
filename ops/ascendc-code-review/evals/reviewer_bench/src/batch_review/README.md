@@ -19,7 +19,7 @@
 
 使用 Claude Code 的 headless 模式（`claude -p`），通过 `--settings` 文件实现 Key 隔离。
 
-配置示例（`review-config-claude.json`）：
+配置示例（[review_config_claude.json](review_config_claude.json)）：
 
 ```json
 {
@@ -46,7 +46,7 @@ Claude 引擎特有配置：
 
 使用 `opencode run` 非交互模式，通过环境变量注入实现 Key 隔离。
 
-配置示例（`review-config.json`）：
+配置示例（[review-config.json](review-config.json)）：
 
 ```json
 {
