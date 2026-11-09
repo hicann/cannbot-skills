@@ -20,7 +20,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 | 模板 | 通用层阶段 | DSL 落地 | 关键约束 |
 |------|-----------|---------|---------|
-| 局部直方图（`bins/inputsize < GM_ATOMIC_ADD_FACTOR`） | 分批清 0 → 计数 → DMA 归并，循环 | Kernel 内：片上局部直方图 Buffer 按 `` `ONCHIP_HIST_CAPACITY` `` 分批（每批清 0 → bin index + 片上原子累加 → 搬运归并到 GM 输出），循环至所有 bins | 片上原子累加依赖 `` `LOCAL_HIST_ATOMIC` ``（已证实）；归并依赖 `` `LOCAL_HIST_FLUSH` ``（已证实）；计数→归并交接若跨执行阶段用 RingBuffer 的 `head_next()`（写游标）/`tail_next()`（读游标）（独立游标，同步由数据访问推导；据仓内源码证据，待上板实测确认） |
+| 局部直方图（`bins/inputsize < GM_ATOMIC_ADD_FACTOR`） | 分批清 0 → 计数 → DMA 归并，循环 | Kernel 内：片上局部直方图 Buffer 按 `` `ONCHIP_HIST_CAPACITY` `` 分批（每批清 0 → bin index + 片上原子累加 → 搬运归并到 GM 输出），循环至所有 bins | 片上原子累加依赖 `` `LOCAL_HIST_ATOMIC` ``（已证实）；归并依赖 `` `LOCAL_HIST_FLUSH` ``（已证实）；计数→归并交接若跨执行阶段用 RingBuffer 的 `next_write()`（写游标）/`next_read()`（读游标）（独立游标，同步由数据访问推导；已上板实测，见 capability-mapping.md §4 规则 3） |
 | 无局部直方图（`bins/inputsize ≥ GM_ATOMIC_ADD_FACTOR`） | 直接 GM 原子累加 | Kernel 内：读 input → bin index → GM 输出逐元素原子累加 | 依赖 `` `GLOBAL_MERGE_ATOMIC` ``（已证实）；不分配片上局部直方图 Buffer |
 | 确定性（第三模板，确定性标志触发） | bins 分核 + 核内 stride 串行遍历全部 input | Kernel 内：bins 分核 → 核内线程 stride 命中本核 bins → 每线程按固定顺序遍历全部 input，命中的 bin 用 GM 点赋值 `hist[bin] += 1/weight` | **无原子依赖**；不用 `cb.simt.atomic_add`；GM 点赋值不受限（[capability-mapping.md](capability-mapping.md) §4 规则 7）；累加顺序确定 |
 
@@ -37,10 +37,10 @@ See LICENSE in the root of the software repository for the full text of the Lice
 ## 3 局部直方图 Buffer/RingBuffer 规划
 
 1. 片上局部直方图是**每核一份、分批复用**的临时量：单批 `` `BATCH_BINS × sizeof(HistT)` `` 受 `` `ONCHIP_HIST_CAPACITY` `` 约束（[../../generic/bin-model.md](../../generic/bin-model.md) §4），`` `nbins` 超单批容量时按批切分循环
-2. 阶段内反复读写的局部直方图用 **Buffer**（计数阶段内清 0 → 累加，不跨阶段交接）；仅当「计数」与「归并」真属两个执行阶段需多槽位流水交接时用 **RingBuffer**，`head_next()`（写游标）/`tail_next()`（读游标）独立推进游标、无 FIFO 满/空检查（据仓内源码证据，待上板实测确认）
+2. 阶段内反复读写的局部直方图用 **Buffer**（计数阶段内清 0 → 累加，不跨阶段交接）；仅当「计数」与「归并」真属两个执行阶段需多槽位流水交接时用 **RingBuffer**，`next_write()`（写游标）/`next_read()`（读游标）独立推进游标、无 FIFO 满/空检查（已上板实测，见 capability-mapping.md §4 规则 3）
 3. 单批 bins 数量由 Host 按运行时片上容量 + dtype 字节数计算后传入；对齐粒度以 [capability-mapping.md](capability-mapping.md) `` `ALIGN_GRANULARITY` `` 真值为准（= 32 字节；行宽填充元素数 = 32 / sizeof(HistT)）
 4. **Buffer 静态 shape**（capability-mapping.md §4 规则 5）：DSL Buffer 仅编译期静态 shape，分批 Buffer 建成 `` `batchTotalBins = min(totalBins, MAX_BATCH_BINS) ≤ MAX_BATCH_BINS` `` 不变量，Buffer 物理 shape 统一编译期 `` `MAX_BATCH_BINS` ``，运行时只用前 `` `batchTotalBins` `` 槽位；Host 负责 clamp
-5. 双缓冲（本范式 ascendc 侧为 `` `TQue` `` depth 2）在 DSL 侧对应「分批复用 + 计数/归并并行」：若 DSL 的 RingBuffer/搬运支持异步交接，可重叠下一批计数与本批归并；是否支持以 DSL 搬运/同步能力为准（待验证），不支持则串行分批
+5. 双缓冲（本范式 ascendc 侧为 `` `TQue` `` depth 2）在 DSL 侧对应「分批复用 + 计数/归并并行」：DSL 的 RingBuffer/搬运**已上板实测支持异步交接**（`RingBuffer(UB, int32, depth=2)` + `next_write()`计桶/`next_read()`flush，见 capability-mapping.md §4 规则 3）。depth 判据与 AscendC/通用层一致，均为 `` `totalBins×sizeof > 1024` `` 字节（见 capability-mapping.md §4 规则 10）；depth2 使单批容量减半，`` `MAX_BATCH_BINS` `` 的 depth 因子必须与同一 depth 一致
 
 ## 4 原子累加、归并与同步
 
