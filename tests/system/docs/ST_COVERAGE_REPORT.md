@@ -12,6 +12,8 @@
 
 > **2026-11-04 SHMEM 迁出增量**：删除 `shmem-ops-generator` 旧插件副本，Team 减少 1；该副本没有 `evals/evals.json`，启用用例变化为 0，`community/ops/` 下的 10 个 SHMEM Skill 保留。下表保留历史条目并标注迁出，未重新生成全量报告。
 
+> **2026-11-06 aiss-tiling-solver 归位增量**：该 Skill（含 5 个用例）由 `ops/` 迁至 `community/ops/`，用例随技能整体迁移、总数不变；下表保留历史条目并标注新位置，未重新生成全量报告。
+
 > **统计口径**：统计代码仓内所有符合结构要求的 Skill（`skill_dirs` 下含 `SKILL.md`）与 Team（`team_dirs` 下含 `AGENTS.md` + `.claude-plugin/plugin.json`），与是否携带 `evals/evals.json` 无关——无 evals 的实体用例数计 0。
 
 ## 1. 五维看护说明
@@ -35,7 +37,7 @@
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
-| aiss-tiling-solver | 5 |   |   | √ |   | √ |
+| aiss-tiling-solver（2026-11-06 已迁至 community/ops/） | 5 |   |   | √ |   | √ |
 | ascendc-api-best-practices | 10 | √ |   | √ |   | √ |
 | ascendc-api-docs-gen | 4 |   |   | √ |   | √ |
 | ascendc-blaze-best-practice | 15 |   |   | √ |   | √ |

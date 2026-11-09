@@ -71,7 +71,7 @@
     {
       "name": "aiss-tiling-solver",
       "description": "AISS-TilingSolver：Ascend C 算子 Tiling 参数自动求解工具（MatMul / Vector）。下载安装、构造 JSON 输入、运行求解、结果解读与故障排查。",
-      "source": "./ops",
+      "source": "./community/ops",
       "strict": false,
       "version": "1.0.0",
       "author": {

@@ -45,7 +45,6 @@
 | **ascendc-performance-best-practices** | 按算子族组织的性能优化经验与参考代码总结 | — |
 | **ascendc-regbase-best-practice** | DAV_3510 RegBase 算子 API 约束、实现结构、常见陷阱及真实参考算子 | — |
 | **cann-env-setup** | 昇腾 NPU CANN 安装与环境配置指导 | — |
-| **aiss-tiling-solver** | AISS-TilingSolver 工具自动求解最优 Tiling 参数，覆盖安装、输入构造、运行求解、结果解读 | — |
 <!-- skills-table-end -->
 
 ### Agents
@@ -58,6 +57,16 @@
 | **ascendc-ops-reviewer** | 代码检视专家，支持快速检视和全功能检视两种模式 |
 
 直调插件的 Agent 清单已迁至 [cannbot 中的 ops-direct-invoke](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke)，不再作为本仓本地 Agent 列出。
+
+## AISS Tiling 参数求解
+
+> 以下 Skill 位于 `community/ops/` 目录，属社区贡献（AISS Group at HIT），实验/非正式版本，可能存在平台或能力限制。
+
+### Skills（1 个）
+
+| Skill | 功能 |
+|-------|------|
+| **aiss-tiling-solver** | AISS-TilingSolver 工具自动求解最优 Tiling 参数（MatMul / Vector），覆盖下载安装、构造 JSON 输入、运行求解、结果解读与故障排查 |
 
 ## TileLang2AscendC 算子开发
 
