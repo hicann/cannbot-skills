@@ -29,6 +29,7 @@ export interface ScannedSkill {
 
 export interface ScanCache {
   skills: ScannedSkill[];
+  repoPath?: string;
   repoCommit: string;
   timestamp: number;
 }

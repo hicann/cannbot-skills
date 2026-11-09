@@ -9,7 +9,7 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { existsSync, mkdirSync, readFileSync, rmSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 import { execa } from "execa";
 import { parse as parseYaml } from "yaml";
@@ -87,6 +87,7 @@ export class RepositoryManager {
 
   async ensureRepoAndScan(options: { updateCwd?: boolean } = {}): Promise<string> {
     const repoPath = await this.ensureRepo();
+    const resolvedRepoPath = resolve(repoPath);
 
     if (this.managedCache || (options.updateCwd && this.cwdCheckout)) {
       await this.updateRepo();
@@ -95,17 +96,18 @@ export class RepositoryManager {
     enrichPluginMetadata(repoPath);
 
     const cache = readScanCache();
-    if (cache && cache.repoCommit === getCurrentCommit(repoPath)) {
+    if (cache && cache.repoPath === resolvedRepoPath && cache.repoCommit === getCurrentCommit(resolvedRepoPath)) {
       initFromScan(cache.skills);
       return repoPath;
     }
 
-    const skills = scanSkills(repoPath);
+    const skills = scanSkills(resolvedRepoPath);
     initFromScan(skills);
 
     writeScanCache({
       skills,
-      repoCommit: getCurrentCommit(repoPath),
+      repoPath: resolvedRepoPath,
+      repoCommit: getCurrentCommit(resolvedRepoPath),
       timestamp: Date.now(),
     });
 
