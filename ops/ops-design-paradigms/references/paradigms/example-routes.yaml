@@ -34,6 +34,9 @@ routes:
     Broadcast:
       ascendc:
         - references/paradigms/broadcast/adapters/ascendc/example/xdivy_custom_package
+    ArgReduce:
+      ascendc:
+        - references/paradigms/argreduce/adapters/ascendc/example/arg_max_with_value_package
     IndexGather:
       ascendc:
         - references/paradigms/indexgather/adapters/ascendc/example/examples-custom-gather-code

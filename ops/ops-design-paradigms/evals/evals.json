@@ -120,6 +120,36 @@
       "expected_output": "1. 应指出能力谓词以对应语言的 capability-mapping.md 为依据；标注「待验证」的项必须作为假设和验证义务输出，不能当作已确认事实直接写入结论。\n2. 应指出必须明确资料对应的平台：兼容性经验不能直接作为 ascend950/regbase 的已验证结论；ascend910b/membase 资料只在明确的兼容性问题中参考并核对适用平台。\n3. 应说明设计输出应能追溯到规格和参考资料，缺少 API、资源或运行证据时报告具体缺口。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 9,
+      "title": "ArgReduce 场景判定与语义约束",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "请加载并使用 ops-design-paradigms 技能回答（可阅读该技能文档，但不要实际运行脚本或修改代码）。我要用 AscendC 开发一个自定义算子 ArgMaxCustom：输入 x shape [2, 100, 4000] fp16，dimension=1，keep_dims=false，输出 indices int32。请给出场景判定结论和设计必须落实的语义约束。",
+      "expected_output": "1. 应给出轴折叠 A1=2、R=100、A0=4000，判定为 ARA 场景（A0>1，R 跨步）。\n2. 应指出三项语义声明缺一不可：平局规则（first/last-occurrence）、NaN 语义（与参考实现一致为传播恒胜）、空 R 输出约定；规格未声明时报告输入缺口。\n3. 应给出位置精度结论（等宽选型原理）：位置寄存器与值通道等宽（fp16→uint16，块内偏移上界 65536，UB 反解天然满足仍须核对）；全局位置 = 块基址+块内偏移拼接 → int32 输出上限 2^31；float32/2^24 为 DAV_2201 历史口径，arch35 不适用。\n4. 应说明 ARA 场景不能用无位置输出的 Pattern 归约 API，须走向量比较+掩码选择（Compare+Select）或 NDDMA 重排手法，并经 mode-mapping 决策树选模式（该 shape 命中双轴切核候选）。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 10,
+      "title": "ArgReduce 泛化变体推导（find_index / arg_topk）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "请加载并使用 ops-design-paradigms 技能回答（可阅读该技能文档，但不要实际运行脚本或修改代码）。我将来要做两个新算子：① FindIndexCustom——返回沿 dim 第一个等于目标值 target 的元素位置，无命中返回 -1；② ArgTopKCustom——返回沿 dim 前k个最大值的位置。ArgReduce 范式没有这两个算子的现成实现，它能支撑吗？怎么支撑？",
+      "expected_output": "1. 应识别两个算子为 ArgReduce 变体：find_index 命中谓词首达（predicate-first），等价于把主键从值比较替换为命中判定（argmax over (pred, -position)）；arg_topk 命中 top-k 变体（宽度 k=N，select 从二选一推广为两个有序列表归并）。\n2. 应说明变体挂载原则：只替换选择段内部的比较与输出逻辑，场景判定（AR/ARA/COPY/EMPTY）、切分、GroupReduce、位置流、精度约束全部复用，不复制粘贴知识。\n3. 应论证可结合性：谓词命中为布尔键 + position 平局裁决满足结合律；top-k 列表归并满足结合律——因此跨块/跨核结构不变。\n4. 应提示 find_index 的无命中输出约定（如 -1）与 top-k 的资源增量（buffer ×k）为算子级需声明事项。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ops-design-paradigms"

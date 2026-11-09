@@ -1,6 +1,6 @@
 ---
 name: ops-design-paradigms
-description: 当需要设计或修订 Broadcast、Reduction、Contraction 等算子范式方案，或查询对应算法、资源规划、语言实现约束和故障经验时使用；提供 Ascend C regbase 与 CANNBotDSL 的设计依据、适用条件和验证要点。
+description: 当需要设计或修订 Broadcast、Reduction、ArgReduce、Contraction 等算子范式方案，或查询对应算法、资源规划、语言实现约束和故障经验时使用；提供 AscendC regbase 与 CANNBotDSL 的设计依据、适用条件和验证要点。
 ---
 
 # 算子通用设计知识与范式指导
@@ -13,6 +13,7 @@ description: 当需要设计或修订 Broadcast、Reduction、Contraction 等算
 - 缺少语言或范式信息时，返回具体缺项；确认后再选择专用参考。
 - 输出：适用的算法与实现建议、约束及其依据、资源与同步分析、尚待验证的事实。产物格式和保存位置由调用方确定。
 - 路由类问题的回答必须逐条覆盖三项：① 判定依据（命中的规则，并说明标签匹配按**集合包含**判断、**顺序与额外标签不影响**）；② 资料路径（实际读取的文件与加载顺序，含按需加载条件）；③ 入口纪律（方案语言无关、按步骤推进并按需加载；芯片规格等前置信息缺失时向用户补齐，无法提供则标注"待提供"，不猜测）。
+  ④ 当问题同时包含设计方法诉求（如"未注册范式的 Tiling 设计怎么做"）时，除①-③外还必须按所用方法论**逐项概述设计要素**，不能只做算子定制化展开：走通用方法论兜底时须覆盖多核切分策略（负载均衡、数据局部性、尾块处理）、UB 切分与 chunk 规划（按目标芯片 UB 容量预算）、buffer 规划（inQueue/outQueue/中间 buffer、double buffer、总和校验）、分支场景覆盖（dtype/shape/对齐/边界/架构差异）、TilingKey 与 Tiling 字段设计，并显式说明命中专用范式时优先专用范式知识、通用方法论仅作为通用基线。
 
 ## 范式与语言选择
 

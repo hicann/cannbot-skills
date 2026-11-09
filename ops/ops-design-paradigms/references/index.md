@@ -15,6 +15,7 @@
 |---|---|
 | Broadcast 算法、形状归一化与切分 | [Broadcast 入口](paradigms/broadcast/patterns.md) |
 | Reduction 归约轴、缓存树与资源规划 | [Reduction 入口](paradigms/reduction/patterns.md) |
+| ArgReduce 选择语义、场景分类（AR/ARA）与模式映射 | [ArgReduce 入口](paradigms/argreduce/patterns.md) |
 | Contraction 指标映射、选块、任务调度与分层缓冲 | [Contraction 入口](paradigms/contraction/patterns.md) |
 | IndexGather 读收集（A/B/C 三型解码、越界、合轴、SIMT 线程排布） | [IndexGather 入口](paradigms/indexgather/patterns.md) |
 | ScatterUpdate 写散射 assign 覆盖写（nondet 直写 / det 段尾覆盖、双模板、冲突域） | [ScatterUpdate 入口](paradigms/scatterupdate/patterns.md) |

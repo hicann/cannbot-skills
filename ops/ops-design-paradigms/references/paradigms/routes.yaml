@@ -27,7 +27,7 @@
 #   SlidingWindow,
 #   Spectral,
 #   CollectiveCommunication, FusedComposite,
-#   以及 Elementwise, ReductionComposite, ArgReduce,
+#   以及 Elementwise, ReductionComposite,
 #   LayoutTransform, Quantization, Recurrence, NumericalStable, DynamicShape,
 #   VariableOutput, MaskPredicate, Stateful
 
@@ -39,6 +39,8 @@ routes:
       - references/paradigms/sortselect/patterns.md
     Reduction:
       - references/paradigms/reduction/patterns.md
+    ArgReduce:
+      - references/paradigms/argreduce/patterns.md
     Contraction:
       - references/paradigms/contraction/patterns.md
     IndexGather:

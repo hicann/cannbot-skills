@@ -1,0 +1,575 @@
+{
+  "op_type": "ArgMaxWithValue",
+  "op_list": [
+    {
+      "bin_filename": "ArgMaxWithValue_093a9c399321376b38a75cfb730e3bd5",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "bfloat16",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "bfloat16",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_c956995141babe6b46a07ca335faa2f6",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "bfloat16",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "bfloat16",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_6e7f02d790c19489aa959f7a0decd9ba",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "float16",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "float16",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_03c0542f2023bc999d5085c3cf4d9b0b",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "float16",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "float16",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_59875a0ff8228b3015d96baf3c81bb9e",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "float32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "float32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_7a09f5b7af4126487a7f726a9aac7548",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "float32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "float32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_8b4ec10fbb39c5c0a65192c606400b29",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_084655047edb72b366482aa51e18034b",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_65b8831ee054f9f32f9460360bd29bf1",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int32",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    },
+    {
+      "bin_filename": "ArgMaxWithValue_0d745295987e1c668b2ec8b2844aeada",
+      "inputs": [
+        {
+          "name": "x",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "indice",
+          "index": 0,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        },
+        {
+          "name": "values",
+          "index": 1,
+          "dtype": "int64",
+          "format": "ND",
+          "paramType": "required",
+          "shape": [
+            -2
+          ],
+          "format_match_mode": "FormatAgnostic"
+        }
+      ],
+      "attrs": [
+        {
+          "name": "dimension",
+          "dtype": "int",
+          "value": 0
+        },
+        {
+          "name": "keep_dims",
+          "dtype": "bool",
+          "value": null
+        },
+        {
+          "name": "indice_dtype",
+          "dtype": "int",
+          "value": 3
+        }
+      ]
+    }
+  ]
+}
