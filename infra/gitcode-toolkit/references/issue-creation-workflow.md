@@ -256,45 +256,46 @@ Thanks for sending an requirement! Please fill in the following template to help
 **API**
 
 ```
-POST https://api.gitcode.com/api/v5/repos/{owner}/{repo}/issues
+POST https://api.gitcode.com/api/v5/repos/{owner}/issues
 ```
 
 | 参数 | 必填 | 类型 | 说明 |
 |------|:----:|------|------|
+| `repo` | Y | string | 目标仓库路径（不带 owner） |
 | `title` | Y | string | Issue 标题（最大 255 字符） |
 | `body` | Y | string | Issue 描述（支持 Markdown） |
 | `labels` | | **string** | 标签名称，**单个字符串**（如 `"bug-report"`），不支持数组 |
-| `assignees` | | **string** | 指派用户名，**单个字符串**，不支持数组 |
+| `assignee` | | **string** | 负责人 username；多个用户名使用英文逗号分隔，不支持数组 |
 
-> **重要**：GitCode API 的 `labels` 和 `assignees` 必须使用字符串格式，不支持 JSON 数组。多个标签可用逗号分隔（如 `"bug,enhancement"`）。
+> **重要**：创建 Issue 使用 owner 级接口，目标仓库由必填的 body 字段 `repo`
+> 指定；`labels` 和 `assignee` 必须使用字符串格式，不支持 JSON 数组。
+> 官方接口说明：[创建 Issue](https://docs.gitcode.com/docs/apis/post-api-v-5-repos-owner-issues/)。
 
 **curl 命令**
 
 ```bash
 token="${GITCODE_TOKEN}"
+payload=$(jq -n \
+  --arg repo "${repo}" \
+  --arg title "${issue_title}" \
+  --arg body "${issue_body}" \
+  --arg labels "${labels}" \
+  '{repo: $repo, title: $title, body: $body, labels: $labels}')
 
-curl -X POST "https://api.gitcode.com/api/v5/repos/${owner}/${repo}/issues?access_token=${token}" \
+curl -X POST "https://api.gitcode.com/api/v5/repos/${owner}/issues?access_token=${token}" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json" \
-  -d '{
-    "title": "${issue_title}",
-    "body": "${issue_body}",
-    "labels": "${labels}"
-  }' \
+  -d "${payload}" \
   --connect-timeout 30
 ```
 
 **使用 PRIVATE-TOKEN 方式**（更安全）
 
 ```bash
-curl -X POST "https://api.gitcode.com/api/v5/repos/${owner}/${repo}/issues" \
+curl -X POST "https://api.gitcode.com/api/v5/repos/${owner}/issues" \
   -H "PRIVATE-TOKEN: ${token}" \
   -H "Content-Type: application/json" \
-  -d '{
-    "title": "${issue_title}",
-    "body": "${issue_body}",
-    "labels": "${labels}"
-  }'
+  -d "${payload}"
 ```
 
 **成功响应 (HTTP 201)**
@@ -325,7 +326,7 @@ curl -X POST "https://api.gitcode.com/api/v5/repos/${owner}/${repo}/issues" \
 | 401 | Token 无效 | 提示用户提供新 token |
 | 403 | 无权限 | 降级为手动提交（提供提交链接） |
 | 404 | 项目不存在 | 确认仓库路径是否正确 |
-| 422 | 参数验证失败 | 检查参数格式（labels 是否为字符串） |
+| 422 | 参数验证失败 | 检查 `repo`/`title`/`body` 是否补齐，以及 `labels`/`assignee` 是否为字符串 |
 
 **手动提交 fallback**
 
@@ -356,7 +357,7 @@ echo "Issue 内容见文件：${issue_file}"
 
 **Q2: 创建失败，提示 403 Forbidden**：用户权限不足（Guest 级），提供手动提交链接。
 
-**Q3: labels 参数报错**：必须使用字符串格式 `"bug-report"`，不能用数组 `["bug-report"]`。
+**Q3: labels 或 assignee 参数报错**：两者都必须使用字符串格式，不能用数组。
 
 **Q4: Issue body 过长**：GitCode 支持长内容，但如果超过限制，分多次 PATCH 更新。
 

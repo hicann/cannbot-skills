@@ -75,6 +75,12 @@ AskUserQuestion 一次只问一个。
 
 仓库实际可用的模板与推荐不同时，按"实际存在 ∩ 推荐项"取交集；推荐项不存在则按 `requirement` → `feature-request` → `bug-report` 顺序降级。
 
+当用户询问"应选什么模板 / Issue body 包含哪些部分"时，回答必须同时说明：
+
+1. Step 0 环境预检是必经步骤；
+2. Issue body 至少包含背景信息、价值/作用、设计方案和关联 PR；
+3. Step 7 提交确认是实际写入前的必经卡点，草稿本身不会自动提交。
+
 ### Step 0：环境预检（必经）
 
 > 详见 [gitcode-toolkit/references/env-check.md](../gitcode-toolkit/references/env-check.md)
@@ -88,7 +94,13 @@ token / git / curl / python3 / /tmp 任一缺失 → AskUserQuestion 询问（�
 3. **克隆代码** → `/tmp/gitcode-issue-gen_${owner}_${repo}_${ts}`（详见 [gitcode-toolkit/references/clone-and-checkout.md](../gitcode-toolkit/references/clone-and-checkout.md)）
 4. **展示变更列表** → `git diff --numstat` + `--name-status` 表格展示，**直接进入下一步**（不询问）
 5. **查找 Issue 模板** → 分别检查 `.gitcode/ISSUE_TEMPLATE/` 与 `.github/ISSUE_TEMPLATE/`（必须独立检查，禁止 `&&` 链式）；收集所有可用模板后按上文「Issue 模板按变更类型推荐」自动选定，文本说明"已识别可用模板：[…]，自动选用 X，原因：…"
-6. **生成 Issue body** → 使用模板填充，结尾固定追加 `关联 PR：https://gitcode.com/${owner}/${repo}/pull/${pr_number}`（模板格式见 [references/issue-templates.md](references/issue-templates.md)）
+6. **生成 Issue body** → 使用模板填充，至少包含：
+   - **背景信息**：当前问题、上下文和触发场景；
+   - **价值/作用**：改动解决的问题、预期收益和影响范围；
+   - **设计方案**：本次改动内容和验证方式；
+   - 结尾固定追加 `关联 PR：https://gitcode.com/${owner}/${repo}/pull/${pr_number}`。
+
+   模板格式见 [references/issue-templates.md](references/issue-templates.md)。
 
 ### Step 7：最终提交确认（流程中**唯一**的提交确认）
 
@@ -276,20 +288,27 @@ POST https://api.gitcode.com/api/v5/repos/{owner}/issues
 | 参数 | 位置 | 必填 | 说明 |
 |------|------|------|------|
 | `access_token` | query | 是 | GitCode API Token |
-| `repo` | formData | 是 | 仓库路径 |
-| `title` | formData | 是 | Issue 标题 |
-| `body` | formData | 否 | Issue 正文 |
-| `labels` | formData | 否 | 逗号分隔的标签 |
+| `repo` | JSON body | 是 | 目标仓库路径（不带 owner） |
+| `title` | JSON body | 是 | Issue 标题 |
+| `body` | JSON body | 是 | Issue 正文 |
+| `labels` | JSON body | 否 | 逗号分隔的标签 |
+| `assignee` | JSON body | 否 | 负责人 username；多个用户名使用英文逗号分隔 |
 
 示例：
 
 ```bash
 curl --location --request POST "https://api.gitcode.com/api/v5/repos/{owner}/issues?access_token=$GITCODE_TOKEN" \
-  --form "repo={repo}" \
-  --form "title={title}" \
-  --form "body={body}" \
-  --form "labels={labels}"
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo": "{repo}",
+    "title": "{title}",
+    "body": "{body}",
+    "labels": "{labels}"
+  }'
 ```
+
+> 创建 Issue 使用 owner 级接口；读取、更新和评论 Issue 仍使用
+> `/repos/{owner}/{repo}/issues...` 路径。
 
 #### 认证方式
 
@@ -310,7 +329,7 @@ export GITCODE_TOKEN="your_token_here"
 
 GitCode API、Token、HTTP 状态码错误处理统一详见：
 
-- [gitcode-toolkit/references/gitcode-api.md](../gitcode-toolkit/references/gitcode-api.md)（注意 `labels`/`assignees` 必须字符串而非数组）
+- [gitcode-toolkit/references/gitcode-api.md](../gitcode-toolkit/references/gitcode-api.md)（注意 `labels`/`assignee` 必须为字符串而非数组）
 - [gitcode-toolkit/references/env-check.md](../gitcode-toolkit/references/env-check.md) / [token-config.md](../gitcode-toolkit/references/token-config.md)
 
 本 skill 的本地约束：

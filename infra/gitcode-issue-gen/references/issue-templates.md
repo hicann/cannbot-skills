@@ -17,6 +17,21 @@
 关联 PR：https://gitcode.com/{owner}/{repo}/pull/{pr_number}
 ```
 
+## Documentation
+
+```markdown
+#### 一、背景信息
+[当前文档存在什么问题，涉及哪些用户场景]
+
+#### 二、价值/作用
+[本次文档更新解决的问题、预期收益和影响范围]
+
+#### 三、设计方案
+[文档结构调整、内容补充或纠错方式，以及如何验证]
+
+关联 PR：https://gitcode.com/{owner}/{repo}/pull/{pr_number}
+```
+
 ## Bug Report
 
 ```markdown

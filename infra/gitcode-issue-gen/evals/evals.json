@@ -96,7 +96,7 @@
         "eval_mode": "text"
       },
       "prompt": "我想用 gitcode-issue-gen 给 PR 自动创建 Issue，能介绍一下整个工作流程和涉及的 API 吗？",
-      "expected_output": "回复应至少覆盖 gitcode-issue-gen 的核心工作流阶段：Step 0 环境预检、PR 解析与代码克隆、变更列表展示、Issue 模板查找与选择、Issue body 生成、提交确认、Issue 创建与 PR 关联、可选 Assign。应提及 GitCode API 端点如 repos/issues 和双向关联机制。",
+      "expected_output": "回复应至少覆盖 gitcode-issue-gen 的核心工作流阶段：Step 0 环境预检、PR 解析与代码克隆、变更列表展示、Issue 模板查找与选择、Issue body 生成、提交确认、Issue 创建与 PR 关联、可选 Assign。应提及 owner 级 Issue 创建端点 /api/v5/repos/{owner}/issues、body 中必填的 repo 字段和双向关联机制。",
       "files": [],
       "expectations": []
     },

@@ -271,31 +271,41 @@ curl -s "https://api.gitcode.com/api/v5/repos/${owner}/${repo}/issues/${issue_nu
 
 ### 创建 Issue
 
-```bash
-POST /repos/{owner}/{repo}/issues
+GitCode 创建 Issue 使用 owner（仓库所属组织或个人）级接口，目标仓库通过必填的
+`repo` 字段指定：
 
-curl -X POST 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/issues?access_token={token}' \
+```bash
+POST /repos/{owner}/issues
+
+curl -X POST 'https://api.gitcode.com/api/v5/repos/{owner}/issues?access_token={token}' \
 -H 'Content-Type: application/json' \
 -H 'Accept: application/json' \
 -d '{
+  "repo": "{repo}",
   "title": "Issue 标题",
   "body": "Issue 描述内容",
   "labels": "requirement",
-  "assignees": "username"
+  "assignee": "username"
 }'
 ```
+
+> 创建接口路径不含 `{repo}` 段。获取、更新、评论 Issue 等接口仍使用
+> `/repos/{owner}/{repo}/issues...` 路径，不能与创建接口混用。
 
 **参数说明**：
 
 | 参数 | 必填 | 类型 | 说明 |
 |------|:----:|------|------|
+| `repo` | Y | string | 目标仓库路径（不带 owner） |
 | `title` | Y | string | Issue 标题（最大 255 字符） |
 | `body` | Y | string | Issue 描述（支持 Markdown） |
 | `labels` | | **string** | 标签名称，**单个字符串**（如 `"requirement"`），不支持数组格式 |
-| `assignees` | | **string** | 指派用户名，**单个字符串**（如 `"username"`），不支持数组格式 |
+| `assignee` | | **string** | 负责人 username；多个用户名使用英文逗号分隔，不支持数组格式 |
 | `milestone` | | int | 里程碑 ID |
 
-> **重要**：GitCode API 的 `labels` 和 `assignees` 参数与 GitHub API 不同，**必须使用字符串格式**，不支持 JSON 数组。传入数组（如 `["bug", "enhancement"]`）会导致 `400 BAD_REQUEST` 错误。多个标签可用逗号分隔（如 `"bug,enhancement"`）。
+> **重要**：`labels` 和 `assignee` 必须使用字符串格式，不支持 JSON 数组。
+> 多个标签或负责人可用英文逗号分隔，例如 `"bug,enhancement"`。
+> 官方接口说明：[创建 Issue](https://docs.gitcode.com/docs/apis/post-api-v-5-repos-owner-issues/)。
 
 ### 获取 Issue 列表
 
@@ -318,8 +328,8 @@ curl -X PATCH 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/issues/{numbe
 }'
 ```
 
-更新负责人使用单数字段 `{"assignee":"<login>"}`，不要把创建接口的 `assignees`
-照搬到 PATCH。更新后 GET 核对 `assignee.login`/`assignees[].login`。
+创建和更新负责人均使用单数字段 `{"assignee":"<login>"}`，不要使用 `assignees`。
+更新后 GET 核对 `assignee.login`/`assignees[].login`。
 依据：[Issue API 更新参数](https://docs.gitcode.com/v1-docs/docs/openapi/repos/issues/)；
 已在 `xujiachen8/ops-math` 实测该字段。
 
@@ -547,10 +557,10 @@ curl -X POST "https://api.gitcode.com/api/v5/repos/$OWNER/$REPO/pulls?access_tok
 # 获取 Issue 详情
 curl "https://api.gitcode.com/api/v5/repos/$OWNER/$REPO/issues/$ISSUE?access_token=$TOKEN"
 
-# 创建 Issue
-curl -X POST "https://api.gitcode.com/api/v5/repos/$OWNER/$REPO/issues?access_token=$TOKEN" \
+# 创建 Issue（owner 级接口，body 中必须传 repo）
+curl -X POST "https://api.gitcode.com/api/v5/repos/$OWNER/issues?access_token=$TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"title":"标题","body":"描述"}'
+  -d "{\"repo\":\"$REPO\",\"title\":\"标题\",\"body\":\"描述\"}"
 
 # 提交 Issue 评论
 curl -X POST "https://api.gitcode.com/api/v5/repos/$OWNER/$REPO/issues/$ISSUE/comments?access_token=$TOKEN" \

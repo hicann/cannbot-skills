@@ -92,7 +92,7 @@
         "eval_mode": "text"
       },
       "prompt": "我需要通过 API 在 cann/ops-math 仓库创建一个 Bug Report Issue，请问完整的操作流程是什么？API 参数需要注意什么？",
-      "expected_output": "回复应说明通过 GitCode API 或 MCP 工具创建 Issue 的方法和流程，包括 API 参数（title、body、labels）和注意事项。应提及创建 Issue 所需的权限等级和 labels 参数的特殊要求（字符串格式而非 JSON 数组）。",
+      "expected_output": "回复应说明通过 GitCode API 或 MCP 工具创建 Issue 的方法和流程，包括 owner 级创建端点 /api/v5/repos/{owner}/issues，以及 repo、title、body 必填、labels 和 assignee 可选的参数要求。应提及创建 Issue 所需的权限等级，以及 labels/assignee 必须使用字符串而非 JSON 数组。",
       "files": [],
       "expectations": []
     },

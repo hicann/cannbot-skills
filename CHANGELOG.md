@@ -81,6 +81,9 @@
 #### 缺陷修复 Bug Fixes
 - 【CANNBotDSL 测试】补齐白盒 active 行的 `expected` 契约，生成阶段拒绝空值、无效判定及缺少可观察行为的纯断言用例，避免校验通过后固定 runner 无法执行。
 
+#### 缺陷修复 Bug Fixes
+- 【GitCode 工具链】修复 Issue 创建文档与官方 OpenAPI 不一致的问题（issue #896）：统一为 owner 级创建接口，补齐必填 `repo`，负责人字段改为 `assignee`，并同步示例、评测期望、文档类 Issue 模板及 Step 0/7 流程提示。
+
 ### 【2026-10-20】
 #### 变更 Changes
 - 【插件清理】删除 `plugins-community/ascendc-port-orchestrator` 插件及专属市场注册，移除 ST 测试白名单与覆盖率条目，保留公共 Skills。
