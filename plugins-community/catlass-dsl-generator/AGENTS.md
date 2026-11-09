@@ -49,9 +49,9 @@ finish`，每一步进入前必须运行对应门禁并通过：
 python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|optimize|benchmark|finish> --workspace <项目根>
 ```
 
-- design：五件交付物齐备、definition/workload 合法、dev 子集 30~40 条（用户用例不足
-  30 条时全选，可少于 30 条）、DESIGN.md 记录
-  SHA-256，并声明 `执行模式` 与 `性能要求`；
+- design：五件交付物齐备、definition/workload 合法、dev 子集总数 ≤40（用户用例 ≥30 条
+  时为 30~40 条，不足 30 条时全选，无用户用例时按覆盖需要自定，不以下限 30 为目标）、
+  DESIGN.md 记录 SHA-256，并声明 `执行模式` 与 `性能要求`；
 - develop：skeleton 与 focused test 记录、`solution.json` 与实现文件一致；
 - fulltest：当前 kernel 的 full test #1 或 #2 已 `passed` 且有证据；
 - optimize：模式 A ≥1 轮、模式 B ≥3 轮的完整账本；

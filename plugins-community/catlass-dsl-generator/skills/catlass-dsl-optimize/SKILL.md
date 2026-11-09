@@ -42,7 +42,7 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 - **Benchmark inputs** — `<solution.json>, <definition.json>, <workload_dev.jsonl>`
 - **Correctness / benchmark** — `<resolved argv>`
 - **Device** — `<npu:index>`
-- **Target** — `<metric direction threshold；无目标写 explore（模式 B）>`
+- **Target** — `<metric direction threshold；用户未给数值门槛时写 explore（模式 B）>`
 - **Iteration limit** — `<max_iterations>; stall=<stall_threshold>`
 - **Knowledge** — `<operator family, keywords, adopted concept paths>`
 
@@ -52,12 +52,21 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 
 | 模式 | 触发条件 | 停止条件 |
 |---|---|---|
-| A 达标 | 用户提示或 `DESIGN.md` 给出明确性能目标 | best candidate 达到 threshold 且至少完成 1 轮 |
+| A 达标 | 用户明确给出的数值门槛（`DESIGN.md` 仅转述用户原话；agent 自定、知识/基线/roofline 推算值不算） | best candidate 达到 threshold 且至少完成 1 轮 |
 | B 探索 | 没有明确性能目标 | 至少完成 3 轮已记录迭代 |
+
+门槛只能来自用户提示或用户确认。由知识条目、基线实现或 roofline 推算出的数值只能作为
+轮次内的参考目标，不得写入 `threshold` 触发模式 A；`DESIGN.md` 中由 agent 自定的数值
+目标不构成模式 A 的依据。用户只提出“更快”“性能差”“需要优化”等相对诉求而未给具体
+指标时，按模式 B 执行（`threshold: none`），性能采集要求按 `性能要求` 行单独判定。
+
+唯一例外：`性能要求：none` 且用户用例平均 MFU 已达 90% 时，按模式 A 记录
+`threshold: MFU ≥ 90%`，用 1 轮判定收口，见 Setup and baseline 第 5 步。
 
 模式在开始时确定并写入 `ITERATIONS.md`，中途不得切换。模式 B 在无用户确认时也必须执行
 至少三轮，不得以“感觉差不多了”提前收口；模式 A 即使 baseline 已经达标也必须记录至少
-一轮，避免把未优化的首版实现直接当作达标交付。
+一轮，避免把未优化的首版实现直接当作达标交付。`性能要求：none` 且 dev 子集内用户用例
+平均 MFU 已达 90% 的收口例外见 Setup and baseline 第 5 步。
 
 停止条件只看账本：模式 B 未满 3 轮、模式 A 未满 1 轮或未达标时必须继续下一轮。不得中途
 结束回合、不得汇报“优化完成”、不得询问用户是否继续。认为没有新方向时，仍要选一个可
@@ -94,8 +103,8 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 
 ## 评测口径（控温仅在 optimize 阶段执行）
 
-- 性能计时只使用 design 冻结的 `workload_dev.jsonl`（30~40 条；用户用例不足 30 条时全选），
-  所有轮次共用同一份样本。
+- 性能计时只使用 design 冻结的 `workload_dev.jsonl`（用户用例 ≥30 条时为 30~40 条；
+  不足 30 条时全选；无用户用例时按覆盖需要自定，总数 ≤40），所有轮次共用同一份样本。
 - 逐例配对：同一用例先跑 candidate 再跑 reference，在同一张卡相邻时间完成，抵消温度
   漂移；有对标实现时不得只跑 candidate。测量契约见
   [`catlass-dsl-bench`](../catlass-dsl-bench/SKILL.md)。
@@ -114,6 +123,15 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 3. 运行全部 correctness 命令，再用已解析命令生成 baseline；确认结果的
    `solution.source_sha256` 与当前 kernel SHA-256 一致。
 4. 在 `ITERATIONS.md` 写入 `## Optimization Policy` 与第 0 行 baseline。
+5. **MFU 收口判定（仅 `性能要求：none`）**：baseline 完成后，只用 **`workload_dev.jsonl`
+   中 `origin=user` 的行**计算平均 MFU（逐例 MFU = 实际 FLOPs ÷ (mean_ms × 峰值算力)，
+   FLOPs 算式与峰值来源写入账本）。口径是"子集内筛选出的用户用例"，不是
+   `workload.jsonl` 里全部用户用例：不得为判定额外采集子集外用例的性能（用户用例总数
+   远超子集规模时，只算子集内选中的那些，禁止先跑全量）。子集内没有 `origin=user`
+   用例时该例外不适用，按模式 B 执行。平均 MFU ≥ 90% 时不再进入三轮优化：
+   `Optimization Policy` 按模式 A 记录 `threshold: MFU ≥ 90%`，只写 1 轮判定行
+   （Decision 为 `rejected`，Reason 写明 MFU 数值、参与计算用例的 uuid 列表与峰值来源），
+   随后直接进入 finalization。agent 补充用例只承担正确性覆盖，不参与该判定。
 
 ## Optimization loop
 
@@ -126,6 +144,12 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    若 fresh profile 中 `mac` 或 `mte2` 单项达到墙钟的 0.7 以上，本轮轴按
    `knowledge/dsl/pattern-gemm-optimization-ladder` 的阶梯顺序选取（波次量化 → L1 双缓冲
    → L0 双侧双缓冲），不要在同一阶段反复微调参数。
+
+   若 `kernel_details.csv` 缺失、目标 kernel 行 task duration 为 0，或该时长与配对计时
+   相差一个数量级，先按 `knowledge/profiler/torch-npu-profiler-dsl-kernels.md` 的
+   Level1 + AiCMetrics 配置重采（上限 2 次）；仍不可用时，在账本写明「profiling 不可用」
+   及原因，本轮允许用 makespan 算术与单变量消融归因。benchmark 交付前仍须有 kernel 级
+   产物，或写明「profiling 不可用」。
 
 2. **Query knowledge.** 读 `knowledge/optimization/index.md` 与相关分类索引，按算子族、
    `c310`、瓶颈关键词定位候选条目，再完整读取实际采用的条目；检查适用条件、验证记录和

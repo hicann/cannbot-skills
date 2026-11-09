@@ -81,6 +81,11 @@ class 或模板。
 
 说明初始 tile、线程/核映射、逻辑布局与物理布局策略，以及选择这些参数的理由。
 
+搬运量核算（必填）：
+
+- 总搬运字节 = Σ（各输入的重读次数 × 其体积），给出具体数字，并折算成带宽下界时间
+- tiling 参数与参考样例不同时，逐项说明差异、理由及对搬运量的影响
+
 ### 内存与同步
 
 说明 GM/L1/L0/UB 等内存空间、buffer、pipeline、flag、mutex 或 barrier 的使用方式。
@@ -102,10 +107,11 @@ class 或模板。
 
 ### Dev Workload 子集
 
-`workload_dev.jsonl` 共 `<30~40>` 条（用户用例不足 30 条时全部选入即可，不要求补齐），
+`workload_dev.jsonl` 共 `<N>` 条（总数 ≤40；用户用例 ≥30 条时为 30~40 条，不足 30 条时
+全部选入，不要求补齐；无用户用例时按覆盖需要自定，不以下限 30 为目标），
 文件内 `uuid` 顺序即用例顺序；`origin=user` 为
-`<列出覆盖的用户用例>`，`origin=agent_supplemented` 为 `<列出补充用例及选取理由>`。
-用户用例（`workload.jsonl` 中的 required case）不超过 40 条时全覆盖；超过 40 条时至少包含
+`<列出用户提供的用例>`，`origin=agent_supplemented` 为 `<列出 agent 补充用例及选取理由>`。
+用户用例（`workload.jsonl` 中 `origin=user` 的行）不超过 40 条时全覆盖；超过 40 条时至少包含
 30 条用户用例。全部 optimize 轮次共用该子集，不每轮换样本。
 
 ## 性能目标

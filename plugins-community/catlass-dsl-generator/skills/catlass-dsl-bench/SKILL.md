@@ -120,12 +120,41 @@ Python 代码，必须来自用户信任的来源；测量脚本不提供安全�
 4. **同步 warmup**：每例 candidate 执行 1 次并同步，不计时。
 5. **配对计时**：同一例先 candidate 后 reference，或奇偶例交替先后（`paired`）；使用
    `torch.npu.Event` 或等价设备事件记录单次 `run` 到同步完成的耗时，采集 `trials` 次
-   （默认 2；需要更稳时取 5 次中位数）。输入生成和 clone 不计入算子时延。
+   （默认 2；需要更稳时取 5 次中位数）。输入生成和 clone 不计入算子时延。计时必须与
+   profiling 分两次运行：计入 `mean_ms` 的运行关闭 profiler，profiling 单独跑一次，其
+   wall 时间只用于 kernel 级归因，不写入性能结论。
 6. **聚合**：逐例 `mean_ms`、`std_ms`，再计算全部用例的均值；speedup =
    `reference_mean / candidate_mean`。
-7. **profiling**：NPU 上用 `torch_npu.profiler` 文本导出，保留每例的
-   `kernel_details.csv` 与 `step_trace_time.csv`；优先用 `step_trace_time.csv` 的
-   `Computing` 总时间除以 trials，缺失时回退到 `kernel_details.csv` 的 kernel 总时长。
+7. **profiling**：NPU 上用 `torch_npu.profiler` 文本导出。采集必须显式开到 kernel 级，
+   否则不会生成 `kernel_details.csv`，`op_summary` 也不带 AIC 指标：
+
+   ```python
+   cfg = torch_npu.profiler._ExperimentalConfig(
+       profiler_level=torch_npu.profiler.ProfilerLevel.Level1,
+       aic_metrics=torch_npu.profiler.AiCMetrics.PipeUtilization,
+       export_type=[torch_npu.profiler.ExportType.Text],
+       data_simplification=True,
+   )
+   ```
+
+   `data_simplification=True` 已能生成带 AIC/AIV 指标的 `kernel_details.csv`；只有还需要
+   `op_summary` 时才改为 `False`，后者会显著放大导出体积。完整采集骨架（`activities`、
+   `schedule`、`trace_handler` 与产物路径）见
+   `knowledge/profiler/torch-npu-profiler-dsl-kernels.md`。
+
+   导出后先过两道断言，再落性能结论：
+
+   - `kernel_details.csv` 存在，且目标 kernel 行的 task duration > 0；
+   - 该时长与配对计时的量级一致（相差一个数量级以上即视为采集失败）。
+
+   任一不满足都必须修配置重采，不得用 `op_summary` 的 task 级数字或 wall 差值代替
+   kernel 级耗时。重采上限 2 次（先核对 `profiler_level` 与 `aic_metrics`，再检查 `activities` 与
+   `schedule`）；仍拿不到
+   kernel 级产物时，在 `ITERATIONS.md` 写明「profiling 不可用」及已试配置与报错，性能
+   结论只用配对计时的 `mean_ms`，并注明缺少 kernel 级归因，不得继续重试。保留每例的
+   `kernel_details.csv` 与 `step_trace_time.csv`，只用于归因：可对比 `step_trace_time.csv`
+   的 `Computing` 与 kernel 总时长，判断 host/device 占比与串行空洞，不得作为 `mean_ms`
+   的来源。
 8. **落盘**：即使某例失败也写入结果，失败用例标记 `status=failed` 并附错误摘要；正确性
    失败的用例不产生有效性能结论。
 
@@ -221,7 +250,8 @@ def timed(run, args, trials):
   `tla` API，不存在模块级可变配置或 closure；
 - 候选源码不调用 `torch` / `torch.nn` / `torch.ops` 或 Tensor 计算算子替代 DSL；
   只允许 dtype/device/shape 元数据检查和空输出分配；
-- 每个 candidate trace 的 `kernel_details.csv` 只出现该 kernel 名，记录数与 trials 一致；
+- 单独一次 profiling 产出的 `kernel_details.csv` 只出现该 kernel（warmup 与主采集各
+  一条），不得出现替代计算的 torch / aclnn 算子；
 - 任何一项不满足即判定本轮无效，不产生性能结论。
 
 默认 `performance` 模式不做上述审计，允许多 kernel 和 GM 中间张量。
@@ -229,8 +259,8 @@ def timed(run, args, trials):
 ## 与其它阶段的衔接
 
 - full test 使用完整 `workload.jsonl`；benchmark 使用完整 workload 并逐例配对。
-- optimize 使用 design 冻结的 `workload_dev.jsonl`（30~40 条；用户用例不足 30 条时全选），
-  每轮复用同一份样本。
+- optimize 使用 design 冻结的 `workload_dev.jsonl`（用户用例 ≥30 条时为 30~40 条；
+  不足 30 条时全选；无用户用例时按覆盖需要自定，总数 ≤40），每轮复用同一份样本。
 - benchmark 正确性失败时回到 develop 的 debug 流程；环境缺失时结果记 `blocked` /
   `not_run`，不得写成通过。
 - 模板位于 [`templates/`](templates/)；脚本与结果路径必须记录到 `ITERATIONS.md`。

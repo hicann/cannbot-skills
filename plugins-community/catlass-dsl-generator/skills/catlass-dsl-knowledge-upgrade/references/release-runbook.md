@@ -6,17 +6,19 @@
 
 | 基线 | 用途 | 取值方式 |
 |---|---|---|
-| 已安装 wheel / 发布 tag | 判断"客户能用什么"：API 是否存在、签名、语义、样例 | `importlib.metadata.version("ascend-catlass-dsl")` 或 `git show <tag>:...` |
+| 已安装 wheel / 发布 tag | 判断"客户能用什么"：API 是否存在、签名、语义 | `importlib.metadata.version("ascend-catlass-dsl")` 或 `git show <tag>:...` |
 | 客户 master | 判断"文件在哪"：目录结构、样例路径、文档位置 | `git ls-tree -r <ref>` + 样例解析脚本 |
 
 冲突处理顺序：**wheel > tag > master**。master 只提供路径，不提供能力结论。
 
-典型冲突：master 把样例从 `python/tla_dsl/examples/end_to_end/simt/` 移到
-`examples/python/tla_dsl/simt/`，而 v2.2.0 wheel 只认前者。此时：
+典型冲突：历史文档按 `python/tla_dsl/examples/` 引用样例，而 master 已把样例移到
+`examples/python/tla_dsl/`；实测 2.2.0 wheel 不随包分发样例目录，样例只能以 master
+为准。此时：
 
 - 知识库正文的能力描述按 v2.2.0 写；
 - 样例引用只写**逻辑名**（如 `simt/basic_vadd_simt`），由样例解析脚本解析；
-- 若必须写路径，标注"以已安装版本为准"。
+- 若必须写路径，统一写 master 的 `examples/python/tla_dsl/<逻辑名>`，不得写
+  `python/tla_dsl/examples/`。
 
 ## 2. master 每天更新怎么办
 

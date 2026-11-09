@@ -220,7 +220,12 @@ def digest(path):
 
 
 def build_design(
-    workspace, dev_count=30, mode="remote-connected", perf="requested", workload_count=1
+    workspace,
+    dev_count=30,
+    mode="remote-connected",
+    perf="requested",
+    workload_count=1,
+    workload_origin="user",
 ):
     reference = "import torch\n\n\ndef run(x):\n    return x + 1\n"
     write(workspace / "reference.py", reference)
@@ -233,7 +238,11 @@ def build_design(
     }
     write(workspace / "definition.json", json.dumps(definition))
     workload = [
-        {"uuid": "case-{:04d}".format(index), "inputs": {"x": [1, 2, 3, 4]}}
+        {
+            "uuid": "case-{:04d}".format(index),
+            "inputs": {"x": [1, 2, 3, 4]},
+            "origin": workload_origin,
+        }
         for index in range(workload_count)
     ]
     write(
@@ -244,14 +253,14 @@ def build_design(
     for index in range(dev_count):
         if index < workload_count:
             uuid = "case-{:04d}".format(index)
-            dev.append(
-                {
-                    "uuid": uuid,
-                    "inputs": {"x": [1, 2, 3, 4]},
-                    "origin": "user",
-                    "source": uuid,
-                }
-            )
+            row = {
+                "uuid": uuid,
+                "inputs": {"x": [1, 2, 3, 4]},
+                "origin": workload_origin,
+            }
+            if workload_origin == "user":
+                row["source"] = uuid
+            dev.append(row)
         else:
             dev.append(
                 {
@@ -438,6 +447,17 @@ def test_gate_design_requires_30_user_cases_above_40(tmp_path):
     result = run_gate("design", tmp_path)
     assert result.returncode == 1
     assert "至少包含 30 条用户用例" in result.stdout
+
+
+def test_gate_design_allows_small_agent_generated_dev_subset(tmp_path):
+    build_design(
+        tmp_path,
+        dev_count=6,
+        workload_count=12,
+        workload_origin="agent_supplemented",
+    )
+    result = run_gate("design", tmp_path)
+    assert result.returncode == 0, result.stdout
 
 
 def test_gate_develop_requires_focused_test_record(tmp_path):

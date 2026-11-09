@@ -85,11 +85,11 @@ finish。
 
 | 门禁 | 命令（`<ws>` 为工作区根） | 强制要求 |
 |---|---|---|
-| design | `python3 <SKILL_DIR>/scripts/gate.py design --workspace <ws>` | 五件交付物齐备；definition/workload 合法；dev 子集 30~40 条（用户用例不足 30 条时全选）；DESIGN.md 记录三个文件的 SHA-256；声明执行模式与性能要求 |
+| design | `python3 <SKILL_DIR>/scripts/gate.py design --workspace <ws>` | 五件交付物齐备；definition/workload 合法；dev 子集总数 ≤40（用户用例 ≥30 条时为 30~40 条；不足 30 条时全选，不要求补齐；无用户用例时按覆盖需要自定，不以下限 30 为目标）；DESIGN.md 记录三个文件的 SHA-256；声明执行模式与性能要求 |
 | develop | `python3 <SKILL_DIR>/scripts/gate.py develop --workspace <ws>` | design 通过；skeleton 与 focused test 记录；`solution.json` 与实现文件一致 |
 | fulltest | `python3 <SKILL_DIR>/scripts/gate.py fulltest --workspace <ws>` | 当前 kernel 的 full test passed 记录与证据 |
 | optimize | `python3 <SKILL_DIR>/scripts/gate.py optimize --workspace <ws>` | full test 通过；模式 A ≥1 轮或模式 B ≥3 轮的完整账本 |
-| benchmark | `python3 <SKILL_DIR>/scripts/gate.py benchmark --workspace <ws>` | 当前 kernel 有全量测试 passed（优化改动了 kernel 时须为 full test #2）；`性能要求：requested` 时还要求当前 kernel 的 benchmark passed；`none` 时跳过 |
+| benchmark | `python3 <SKILL_DIR>/scripts/gate.py benchmark --workspace <ws>` | 当前 kernel 有全量测试 passed（优化改动了 kernel 时须为 full test #2）；`性能要求：requested` 时还要求当前 kernel 的 benchmark passed；`none` 时跳过 benchmark 与 profiling |
 | finish | `python3 <SKILL_DIR>/scripts/gate.py finish --workspace <ws>` | `性能要求：requested` 时 benchmark 已通过；final review passed；Final Verdict 存在 |
 
 `gate.py` 是只读脚本：只检查产物和 `ITERATIONS.md`，不执行算子，也不写状态文件。
@@ -161,7 +161,8 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
   通过后才算通过。失败用例一次收集、批量修复、逐例复验后再重跑整轮。
 - benchmark 使用完整 `workload.jsonl`，逐例配对 candidate/reference；正确性已在 full test
   覆盖时可跳过逐例校验，但必须在结果中引用 full test 的证据路径。
-- optimize 使用 design 冻结的 `workload_dev.jsonl`（30~40 条；用户用例不足 30 条时全选），
+- optimize 使用 design 冻结的 `workload_dev.jsonl`（用户用例 ≥30 条时为 30~40 条；不足
+  30 条时全选；无用户用例时按覆盖需要自定，总数 ≤40），
   所有轮次共用同一份样本。
 
 ## 4. 证据真实性
@@ -246,8 +247,11 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
      知识库兜底，不得把残留旧目录当作最新 master。
 
   下载、解压和移动的具体命令按当前平台选择，只要求每次任务启动都重新获取最新 master。
-  优先查阅 `examples/python/tla_dsl/experimental` 与 `examples/python/tla_dsl/tla` 中
-  计算结构相似的样例，并记录源码路径。
+
+  样例分布在 `examples/python/tla_dsl/` 下的 `tla/kernel`、`experimental/kernel`、
+  `dsl_tutorials`、`helpers` 四类目录，挑选参考前先全量浏览（例如
+  `find <refs>/examples/python/tla_dsl -name '*.py' | sort`），避免只看顶层或单个子树
+  而漏掉 `experimental/kernel/matmul/...` 这类深层样例。
 - 用户指定标杆代码并禁止参考兄弟目录时：标杆文件、其用例文件与 catlass 参考源码仍可读，
   禁止扫描同工程其他算子目录。
 - 用户暂未提供上板信息时：design 与代码生成照常推进，验证与性能记 `blocked` /

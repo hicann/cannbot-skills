@@ -152,6 +152,17 @@ def normalize_stage(value):
     return re.sub(r"[\s_\-]+", "", value.lower())
 
 
+def status_of(cells):
+    """里程碑表 Result 列的状态裸词，允许列内附带括号说明。
+
+    只取开头的 ASCII 状态词，`deferred（等待远端）` 与 `deferred` 等价，
+    说明文字放表格内还是表格外不影响门禁判定。
+    """
+    text = strip_ticks(cells[4]).strip().lower()
+    match = re.match(r"[a-z_\-]+", text)
+    return match.group(0) if match else ""
+
+
 def require_evidence(ws, value, context):
     value = strip_ticks(value)
     if not value:
@@ -244,7 +255,7 @@ def deferred_row(rows, prefixes, context, exclude=()):
             continue
         if not any(stage.startswith(prefix) for prefix in prefixes):
             continue
-        if cells[4].strip().lower() != "deferred":
+        if status_of(cells) != "deferred":
             continue
         command = strip_ticks(cells[3])
         if not command or command in ("-", "n/a"):
@@ -276,12 +287,19 @@ def check_design(ws):
     if not workload:
         fail("workload.jsonl 没有用例")
     uuids = []
+    user_uuids = []
     for row in workload:
         if not isinstance(row, dict) or not row.get("uuid"):
             fail("workload.jsonl 存在缺少 uuid 的行")
         if "inputs" not in row:
             fail("用例 {} 缺少 inputs".format(row["uuid"]))
-        uuids.append(str(row["uuid"]))
+        origin = row.get("origin")
+        if origin not in (None, "user", "agent_supplemented"):
+            fail("用例 {} 的 origin 非法: {}".format(row["uuid"], origin))
+        uuid = str(row["uuid"])
+        uuids.append(uuid)
+        if origin == "user":
+            user_uuids.append(uuid)
     if len(set(uuids)) != len(uuids):
         fail("workload.jsonl 存在重复 uuid")
 
@@ -305,13 +323,13 @@ def check_design(ws):
             fail("补充用例 {} 不得声明 source".format(uuid))
         dev_uuids.append(uuid)
 
-    user_case_count = len(uuids)
-    missing = sorted(set(uuids) - set(dev_uuids))
+    user_case_count = len(user_uuids)
+    missing_user = sorted(set(user_uuids) - set(dev_uuids))
     if user_case_count < DEV_MIN:
-        if missing:
+        if missing_user:
             fail(
-                "workload.jsonl 只有 {} 条用户用例（少于 {}），子集必须全部选入，缺少: {}".format(
-                    user_case_count, DEV_MIN, ", ".join(missing[:5])
+                "用户用例只有 {} 条（少于 {}），子集必须全部选入，缺少: {}".format(
+                    user_case_count, DEV_MIN, ", ".join(missing_user[:5])
                 )
             )
         if len(dev) > DEV_MAX:
@@ -328,10 +346,10 @@ def check_design(ws):
                 )
             )
         if user_case_count <= DEV_MAX:
-            if missing:
+            if missing_user:
                 fail(
                     "用户用例不超过 {} 条时子集必须全覆盖，缺少: {}".format(
-                        DEV_MAX, ", ".join(missing[:5])
+                        DEV_MAX, ", ".join(missing_user[:5])
                     )
                 )
         else:
@@ -371,7 +389,7 @@ def check_develop(ws):
                 index,
                 normalize_stage(cells[1]),
                 strip_ticks(cells[2]),
-                cells[4].strip().lower(),
+                status_of(cells),
                 cells,
             )
         )
@@ -395,9 +413,8 @@ def check_develop(ws):
             return "{}；focused test 已推迟（代码生成完成，等待远端连接）".format(note)
         fail(
             "缺少当前源码（{}）的 focused test passed 记录；只有 remote-detached 模式可在代码生成"
-            "完成后把 focused test 记为 deferred（附精确重跑命令），其余情况必须真实执行".format(
-                digest[:8]
-            )
+            "完成后把 focused test 记为 deferred（Command 列附精确重跑命令）。Result 列须以状态"
+            "裸词开头（passed / failed / blocked / not_run / deferred）".format(digest[:8])
         )
     require_evidence(ws, focused[-1][1][5], "focused test")
     return "{}；focused test 通过".format(note)
@@ -407,7 +424,7 @@ def fulltest_rows(rows, digest, stages):
     matched = []
     for index, cells in rows:
         stage = normalize_stage(cells[1])
-        result = cells[4].strip().lower()
+        result = status_of(cells)
         if stage in stages and result == "passed" and sha_match(cells[2], digest):
             matched.append((index, cells))
     return matched
@@ -476,7 +493,7 @@ def check_optimize(ws):
         (index, cells)
         for index, cells in rows
         if normalize_stage(cells[1]) in FIRST_FULLTEST
-        and cells[4].strip().lower() == "passed"
+        and status_of(cells) == "passed"
     ]
     if not baseline:
         fail("缺少 full test #1 passed 记录；optimize 必须在 full test #1 通过后开始")
@@ -517,7 +534,7 @@ def check_benchmark(ws):
         (index, cells)
         for index, cells in rows
         if normalize_stage(cells[1]).startswith("benchmark")
-        and cells[4].strip().lower() == "passed"
+        and status_of(cells) == "passed"
         and sha_match(cells[2], digest)
     ]
     if not benchmarks:
@@ -539,7 +556,7 @@ def check_finish(ws):
     deferred = [
         "{}（{}）".format(strip_ticks(cells[1]), strip_ticks(cells[3]))
         for _, cells in rows
-        if cells[4].strip().lower() == "deferred"
+        if status_of(cells) == "deferred"
     ]
     if deferred:
         fail(
@@ -550,7 +567,7 @@ def check_finish(ws):
         (index, cells)
         for index, cells in rows
         if normalize_stage(cells[1]).startswith("finalreview")
-        and cells[4].strip().lower() == "passed"
+        and status_of(cells) == "passed"
         and sha_match(cells[2], digest)
     ]
     if not reviews:

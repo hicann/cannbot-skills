@@ -120,7 +120,9 @@ def run(*inputs):
 
 - `definition.json`：输入输出规格及完整 Torch `reference` 源码，`axes` 固定为空对象，
   `reference` 必须与同批生成的 `reference.py` 逐字一致；
-- `workload.jsonl`：每行一个 required case，`uuid` 等于 `case_id`；
+- `workload.jsonl`：每行一个 required case，`uuid` 等于 `case_id`；可选 `origin`
+  标记来源——用户明确提供的用例写 `user`，agent 自行补充的写 `agent_supplemented`，
+  缺省按 `agent_supplemented` 处理；
 - `solution.json` 由 develop 在实现完成后生成，不属于 design 输出。
 
 case 规则：
@@ -143,15 +145,17 @@ case 规则：
 
 除全量 `workload.jsonl` 外，design 还必须冻结 `workload_dev.jsonl` 供 optimize 迭代：
 
-- 条数：用户用例不少于 30 条时冻结 **30~40** 条；不足 30 条时全部选入即可，
-  不要求补齐到 30 条，总数不超过 40 条；文件内 `uuid` 顺序即用例顺序；
+- 条数：`workload_dev.jsonl` 总数不超过 40 条。用户用例（`workload.jsonl` 中
+  `origin=user` 的行）不少于 30 条时冻结 **30~40** 条；不足 30 条时全部选入即可，
+  不要求补齐；没有用户用例时按覆盖需要自定条数，不以下限 30 为目标；文件内 `uuid`
+  顺序即用例顺序；
 - 每行必须是对象，只允许 `uuid`、`inputs`（必填）和 `axes`、`tolerance`、`origin`、
   `source`（可选）；`uuid` 唯一且符合安全 ID 规则；
 - 每行标注 `origin`：
   - `origin=user`：`uuid` 必须同时是 `workload.jsonl` 中的 required case，`source` 等于 `uuid`；
   - `origin=agent_supplemented`：不得声明 `source`，该行必须能真实执行；
-- 用户用例（`workload.jsonl` 中的 required case）不超过 40 条时子集必须全覆盖；超过 40 条时
-  至少包含 30 条用户用例，其余用补充用例补齐；
+- 用户用例不超过 40 条时子集必须全覆盖；超过 40 条时至少包含 30 条用户用例，
+  其余用补充用例补齐；
 - 子集必须覆盖代表性用例与用户点名/文档反复举例的用例。全部 optimize 轮次共用这份子集，
   不得每轮换样本。
 
@@ -186,6 +190,8 @@ case 规则：
 7. 使用 CATLASS Python DSL API 给出融合范围、各 kernel 职责与调用顺序、中间张量、
    tiling/layout、内存空间、pipeline 和同步方案，解释性能选择依据。tiling 块数按核数
    取整，行块对齐 cube fractal（16 行），依据见 `dsl/pattern-gemm-optimization-ladder`。
+   同时给出搬运量核算（Σ 重读次数 × 体积）与对应的带宽下界，tiling 参数偏离参考样例时
+   逐项说明差异及对搬运量的影响。
    写明 `fusion.mode` 及单融合是否由用户明确提出；没有实测支持的性能判断标记为待验证
    假设。
 8. 明确正确性 oracle、required cases、`focused_cases`、focused/full test 命令、风险、
@@ -227,6 +233,7 @@ evidence/reference-cases.json      # 自行生成的一次性校验结果
 ```
 
 `DESIGN.md` 必须冻结 benchmark 命令、metric JSON path，并设置 profiling 要求。
-声明性能门槛时还必须写明方向、阈值、迭代上限、停滞阈值和最小提升比例。没有性能门槛
-不表示跳过 optimize：无门槛时进入模式 B（explore），至少执行三轮优化；也不表示跳过
-benchmark 或 profiling。
+声明性能门槛时还必须写明方向、阈值、迭代上限、停滞阈值和最小提升比例。门槛只能来自
+用户提示或用户确认；由知识条目、基线实现或 roofline 推算出的数值只是参考目标，不得
+写成本设计的门槛。没有性能门槛不表示跳过 optimize：无门槛时进入模式 B（explore），
+至少执行三轮优化；也不表示跳过 benchmark 或 profiling。

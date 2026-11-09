@@ -33,7 +33,7 @@ description: Generate a complete CATLASS Python DSL operator from a frozen DESIG
 - **Implementation** — 一个主 Python 文件，可包含多个 DSL kernel。
 - **Fusion** — `performance`（默认）或用户明确指定的 `single_kernel`。
 - **Benchmark inputs** — `solution.json`、`definition.json`、`workload.jsonl`。
-- **Dev subset** — design 冻结的 `workload_dev.jsonl`（30~40 条；用户用例不足 30 条时全选），optimize 专用。
+- **Dev subset** — design 冻结的 `workload_dev.jsonl`（用户用例 ≥30 条时为 30~40 条；不足 30 条时全选；无用户用例时按覆盖需要自定，总数 ≤40），optimize 专用。
 - **Commands / required cases** — 实际 argv、case IDs、设备与环境。
 - **Risk / Performance / Knowledge** — 评审重点、性能目标或只测量、查询条件。
 
@@ -112,8 +112,8 @@ export ASCEND_RT_VISIBLE_DEVICES=<id>; timeout -k 5 60s <run>
 骨架成形前允许验证少数不确定机制，但验证必须有计数上限、有出口、可复用：
 
 - **默认不写独立探针**。优先使用 catlass 样例中已覆盖的写法：master 源码在
-  `examples/python/tla_dsl/`，已安装的旧版本 wheel 在 `python/tla_dsl/examples/`；
-  examples 未覆盖但能通过编译或一次数值对比判断的，直接写入主实现后再验证。
+  `examples/python/tla_dsl/`；examples 未覆盖但能通过编译或一次数值对比判断的，
+  直接写入主实现后再验证。
 - 只有同时满足三条才允许写独立探针：examples 未覆盖；失败会推翻已冻结设计；无法用编译
   检查或分段运行判断。
 - 单个探针只回答一个是/否命题，自带断言与退出码，单次运行 ≤60 秒；同一探针修改 3 次
@@ -124,25 +124,9 @@ export ASCEND_RT_VISIBLE_DEVICES=<id>; timeout -k 5 60s <run>
 
 ## 高风险接口选型
 
-`tla.gather` 在当前 DSL 版本上属于高风险接口：表宽受单寄存器限制（f32 ≤64 lane，超限报
-`valid_lanes must be <= 64`），索引必须来自向量运算（裸载入的向量会静默返回全 0），多块
-组合时还容易触发后端 legalize 失败。**默认不要用它，能不用就不用。**
-
-需要按索引从大缓冲区取数时，采用已实测性能最优的做法：
-
-**预计算索引（bucket + 链表）+ SIMT 标量读**
-
-- 阶段 1（每个 M 块一次）：把每个 id 映射到 V 方向桶，桶内用链表串起同桶的 k 位置；
-- 阶段 2（每个 V 块一次）：沿链表游标，用 SIMT 标量读 `x[row, tok - v_block_offset]`
-  直接写 payload；
-- 每个 id 在整个 V 循环里只被访问一次，总量 `O(M·K + M·V/BN)`，与 V 无关。
-
-约束与实现细节见 `knowledge/dsl/pattern-precomputed-index-structure`。只有在索引方案
-确实不可行时才考虑逐 lane 标量读，最后才是 `gather`（须遵守 2.1.0 契约并用已知表对拍）。
-选型理由写入 `DESIGN.md`。
-
-catlass 源码仓（工作区 `.catlass-dsl/references/catlass`）的 `examples/python/tla_dsl/`
-下有不用 `tla.gather` 完成 gather 语义的样例，实现前先检索参考。
+`tla.gather` 接口使用限制多，默认不用它。需要实现 gather 操作时，必须参考并使用
+`**/indexer/gather/gather.py` 样例的 SIMT 标量读写法；样例写法不适用时，可参考知识库
+`knowledge/dsl/pattern-precomputed-index-structure` 中的方案进行扩展，理由写入 `DESIGN.md`。
 
 ## 里程碑与日志
 
@@ -228,8 +212,8 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
 
 评测口径：
 
-1. **只用 dev 子集**：基线与每轮复测都跑 design 冻结的 `workload_dev.jsonl`（30~40 条；
-   用户用例不足 30 条时全选），
+1. **只用 dev 子集**：基线与每轮复测都跑 design 冻结的 `workload_dev.jsonl`（用户用例
+   ≥30 条时为 30~40 条；不足 30 条时全选；无用户用例时按覆盖需要自定，总数 ≤40），
    不得每轮换样本，也不得改用全量 workload 计时。
 2. **逐例配对**：同一用例先跑 candidate 再跑 reference（或交替先后），在同一张卡相邻时间
    完成；有对标实现时不得只跑 candidate。
