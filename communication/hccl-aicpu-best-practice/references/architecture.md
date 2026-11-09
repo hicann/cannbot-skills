@@ -107,6 +107,23 @@ executor 模板参数，负责拓扑匹配与分层计算（2026-09 重构后位
 | `TopoMatchConcurrent` | 并发 mesh+clos |
 | `TopoMatchUbx` | UBX 机型 |
 
+### 3.1 复用与适配约束
+
+新增或修改算法时，**优先复用已有 TopoMatch，并在已有文件中做必要适配，尽量不新增 TopoMatch 文件**。
+
+- 先按目标算法的层数、rank 分组和物理网络需求，核对已有匹配器及公共基类。已有实现满足需求时直接绑定；存在缺口时优先扩展现有匹配逻辑或公共辅助函数，不因算法名不同就复制一套匹配器。
+- 适配应由目标版本已有的算法属性、引擎和真实拓扑信息驱动，保持其他算法的匹配语义与不支持拓扑的拒绝行为。不能为匹配成功而伪造 rank 分组、物理层或放宽必要校验。
+- 核对注册绑定、匹配输出、executor 参数传递和 template 的 channel 申请是否一致；区分算法层、物理层索引与实际 netLayer 编号，不能假定三者相等。修改公共匹配逻辑后，覆盖目标匹配、拒绝路径与受影响既有算法的匹配回归，并按[验证范围](build-verification.md#5-hccl-vm-双轨功能验收契约)做全集合通信算子默认路径冒烟。
+- 只有已有匹配器及公共逻辑无法合理表达所需拓扑语义，或扩展会破坏现有契约时，才考虑新增 TopoMatch 文件。设计与检视中记录已核对的复用对象、不能复用的具体原因、新增职责及兼容性验证范围。
+
+### 3.2 MeshConcur 适配参考
+
+以下基于 HCCL `9c52633ece7035ead796f62541844f852bcf0e6d` 的 AICPU 实现；路径相对 HCCL 仓根。使用时先核对目标版本，不把类名或双物理层需求套用到所有算法。
+
+- AllReduce 的 `AicpuAllReduceSoleMeshConcur`、`AicpuAllReduceSequenceMeshConcurNHR`、`AicpuAllReduceSequenceMeshConcurNHRNHR` 分别绑定已有 `TopoMatchOneLevel`、`TopoMatchTwoLevel`、`TopoMatchThreeLevel`，注册位于 `src/ops/all_reduce/algorithm/executor/` 对应的 two-shot sole、sequence AICPU 和 sequence AICPU 3level executor 文件。
+- 公共适配位于 `src/ops/op_common/algorithm/topo_match/topo_match_base_v2.cc`：`AnchorMeshLevels` 校验 MeshConcur 的 1DMESH 锚点，`FillPhysicalIdxForAlgoLevels` 为该算法层填充 `{Mesh物理层, 上层rank超集物理层}`；普通算法层仍填充单个物理层。OneLevel 表示一个算法层，MeshConcur 在该层仍可使用两个物理来源。
+- executor 将物理层拓扑和端口信息传给模板；还须独立核对模板建链。该版本 `ins_temp_reduce_scatter_mesh_1D_Z_axis_detour.cc` 的 `CalcRes` 调用 `CalcChannelRequestMesh1DLevel0/Level1`，而 `src/ops/op_common/algorithm/executor/channel/channel.cc` 中这两个入口固定查询 netLayer 0/1；不能仅凭 TopoMatch 成功就宣称任意物理层布局均可运行。
+
 ## 4. 架构红线（硬性，不可违反）
 
 来源：hccl 仓 `AGENTS.md` 第 3 节，改动 `src/`、`include/` 前必须对照：

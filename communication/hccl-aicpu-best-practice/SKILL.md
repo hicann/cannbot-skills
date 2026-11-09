@@ -20,6 +20,8 @@ hccl.h API → <op>.cc → Selector(算法名) → ExecutorRegistry → Executor
 
 本 Skill 只覆盖 **AICPU 引擎**。下文详细规则针对 `ins_temp_*`（基类 `InsAlgTemplateBase`）；executor、selector 和 TopoMatch 按上方跨层契约及目标源码核对，不把 template 规则外推到其他层。CCU（`ccu_temp_*`）/ AIV（`aiv_temp_*`）不在范围内。
 
+涉及拓扑匹配时，优先复用并适配已有 TopoMatch，尽量不新增 TopoMatch 文件；编码与检视按[复用与适配约束](references/architecture.md#31-复用与适配约束)核对，可参考其中 MeshConcur 的跨层适配方式。
+
 ## 0.4 能力调用模式
 
 根据技术语义分为三种模式；**只有模式 C 把 spec 作为实现前置条件**：
