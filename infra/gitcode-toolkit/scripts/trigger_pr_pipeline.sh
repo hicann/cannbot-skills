@@ -50,11 +50,17 @@ API_URL="https://api.gitcode.com/api/v5/repos/${OWNER}/${REPO_NAME}/pulls/${PR_N
 # Escape comment for JSON
 COMMENT_ESCAPED=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$COMMENT")
 
-RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL" \
+if RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "$API_URL" \
     -H 'Content-Type: application/json' \
     -H 'Accept: application/json' \
     -d "{\"body\": ${COMMENT_ESCAPED}}" \
-    --connect-timeout 30 --max-time 60 2>&1)
+    --connect-timeout 30 --max-time 60 2>&1); then
+    :
+else
+    CURL_EXIT=$?
+    printf '{"status":"fail","http_code":0,"curl_exit":%d,"detail":"curl transport failed"}\n' "$CURL_EXIT"
+    exit 1
+fi
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
