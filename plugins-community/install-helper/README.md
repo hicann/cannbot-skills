@@ -18,7 +18,9 @@ curl -fsSL https://raw.gitcode.com/cann/cannbot-skills/raw/master/install.sh | b
 iwr -useb https://raw.gitcode.com/cann/cannbot-skills/raw/master/install.ps1 | iex
 ```
 
-### npm（全平台，需要 [Node.js 18+](https://nodejs.org/zh-cn/download)）
+### npm（全平台，需要 [Node.js 20+](https://nodejs.org/zh-cn/download)）
+
+先运行 `node --version` 确认版本；使用 Node.js 18 等旧版本时，请通过上述官方下载页升级到 Node.js 20 或更高版本，再执行安装命令。
 
 ```bash
 npm install -g @cannbot-ai/install-helper
