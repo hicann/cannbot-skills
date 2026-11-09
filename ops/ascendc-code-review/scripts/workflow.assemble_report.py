@@ -23,6 +23,10 @@
               代码位置/修改建议 字段要点）；组内按文件路径 → 行号排序；SUSPICIOUS
               在问题描述尾部标注「疑似」，out_of_range 项在代码位置尾部标注
               「PR检视场景，非PR提交的相关代码」
+  - 附录（可选，传入 --references 时渲染）: 「附录：本次检视任务加载规则集」——按规则
+              文件分组罗列本次派发的全部条款（含 PASS），条款取自 yaml 的 clause_id/
+              clause_title，归属文件由 references 目录扫描（快速索引行 + 条款标题行）定位，
+              无法归属的条款列入「未定位来源文件」
   - 计入问题数: FAIL + SUSPICIOUS + style/sunset 违规 + 范围外；PASS 不渲染不计数
   - 严重级别取 yaml 的 severity 字段（条款声明的 高/中/低）；缺失时按置信度兜底
     （HIGH→高 / MED→中 / LOW→低），仍缺失按「中」
@@ -40,6 +44,7 @@ design 类 yaml 不再支持（设计一致性检查已停用）；目录中若�
 import argparse
 import logging
 import os
+import re
 import sys
 from typing import Dict, List, Tuple
 
@@ -409,7 +414,78 @@ def _render_header(lines: List[str], findings: List[dict], unreadable=None):
         lines.append("")
 
 
-def assemble_report(clause_list: List[dict], unreadable=None) -> str:
+# ─── 附录：本次检视任务加载规则集 ─────────────────────────────────
+
+def _clause_match_pos(text: str, clause_id: str):
+    """定位条款 ID 在规则文件中的首个出现位置（快速索引行或条款标题行）。
+
+    双模式匹配：① 快速索引表行 `^| {id} |`（覆盖表格式索引，如 cpp-style/simt）；
+    ② 条款标题行 `^#+ .*{id}([ :.]|$)`（quick-review 同款边界，覆盖标题式索引，
+    如 topk 的 `### TOPK-1. ...`）。无命中返回 None。
+    """
+    escaped = re.escape(clause_id)
+    row = re.search(r'^\|\s*' + escaped + r'\s*\|', text, re.M)
+    head = re.search(r'^#+ .*' + escaped + r'([ :.]|$)', text, re.M)
+    positions = [m.start() for m in (row, head) if m]
+    return min(positions) if positions else None
+
+
+def render_rules_appendix(lines: List[str], clause_list: List[dict], references_dir: str):
+    """渲染「附录：本次检视任务加载规则集」——按规则文件分组罗列本次派发的全部条款。
+
+    加载条款集 = yaml 目录中全部 clause（clause_id + clause_title 取自 yaml，即实际
+    派发名，含 PASS）；归属文件由 references 目录逐文件扫描定位（前缀全池唯一，首个
+    命中文件即归属）；无法归属的条款显式列入「未定位来源文件」，不静默丢弃。
+    文件按文件名排序，文件内条款按其在规则文件中的出现顺序排列。
+    """
+    loaded: Dict[str, str] = {}
+    for d in clause_list:
+        cid = str(d.get("clause_id", "") or "").strip()
+        if cid:
+            loaded[cid] = str(d.get("clause_title", "") or "")
+    if not loaded or not references_dir or not os.path.isdir(references_dir):
+        return
+
+    grouped: List[Tuple[str, List[str]]] = []
+    unmatched: Dict[str, str] = dict(loaded)
+    for fname in sorted(os.listdir(references_dir)):
+        if not fname.endswith(".md"):
+            continue
+        fpath = os.path.join(references_dir, fname)
+        if not os.path.isfile(fpath):
+            continue
+        try:
+            with open(fpath, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except OSError:
+            continue
+        hits = []
+        for cid in loaded:
+            pos = _clause_match_pos(text, cid)
+            if pos is not None:
+                hits.append((pos, cid))
+        if not hits:
+            continue
+        hits.sort()
+        grouped.append((fname, [cid for _, cid in hits]))
+        for _, cid in hits:
+            unmatched.pop(cid, None)
+
+    lines.append("## 附录：本次检视任务加载规则集")
+    lines.append("")
+    for fname, cids in grouped:
+        lines.append(f"- **{fname}**（{len(cids)} 条）")
+        for cid in cids:
+            lines.append(f"  - {cid} {loaded[cid]}".rstrip())
+        lines.append("")
+    if unmatched:
+        lines.append(f"- **未定位来源文件**（{len(unmatched)} 条）")
+        for cid in sorted(unmatched):
+            lines.append(f"  - {cid} {unmatched[cid]}".rstrip())
+        lines.append("")
+
+
+def assemble_report(clause_list: List[dict], unreadable=None, references_dir=None) -> str:
     """组装完整报告 md：检视概览 + 检视意见（按严重级别分节的段落形式）"""
     lines: List[str] = []
 
@@ -437,6 +513,10 @@ def assemble_report(clause_list: List[dict], unreadable=None) -> str:
                     continue
                 lines.extend(render_finding_block(d))
 
+    # 附录：本次检视任务加载规则集（可选，传入 references_dir 时渲染）
+    if references_dir:
+        render_rules_appendix(lines, clause_list, references_dir)
+
     return "\n".join(lines)
 
 
@@ -450,6 +530,8 @@ def _parse_args():
     )
     parser.add_argument("--dir", required=True, help="yaml 输出目录路径")
     parser.add_argument("--output", required=True, help="报告 md 输出路径")
+    parser.add_argument("--references", default=None,
+                        help="references 目录路径（提供时在报告末尾追加「附录：本次检视任务加载规则集」）")
     return parser.parse_args()
 
 
@@ -466,7 +548,7 @@ def main() -> int:
     except ValueError:
         return 1
 
-    report_md = assemble_report(clause_list, unreadable=unreadable)
+    report_md = assemble_report(clause_list, unreadable=unreadable, references_dir=args.references)
 
     # 确保输出目录存在
     out_dir = os.path.dirname(args.output)

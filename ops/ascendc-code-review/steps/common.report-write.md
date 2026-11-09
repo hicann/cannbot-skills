@@ -7,10 +7,11 @@
 ```bash
 python3 {skill_base}/scripts/workflow.assemble_report.py \
     --dir {yaml_output_dir} \
+    --references {skill_base}/references \
     --output {报告输出路径}
 ```
 
-脚本读取 `{yaml_output_dir}` 下所有 clause 类 yaml（含 category: clause / style / sunset），组装「检视概览 + 检视意见（按严重级别分节）」两章节报告正文，写入 `{报告输出路径}`。
+脚本读取 `{yaml_output_dir}` 下所有 clause 类 yaml（含 category: clause / style / sunset），组装「检视概览 + 检视意见（按严重级别分节）+ 附录（本次检视任务加载规则集）」报告正文，写入 `{报告输出路径}`。
 
 **统计口径**：问题数 = FAIL + SUSPICIOUS + style/sunset 违规 + 范围外（`out_of_range`）；PASS 不渲染、不计数。严重级别取 yaml 的 `severity` 字段（条款声明的高/中/低），脚本据此分档计数与排序；yaml 缺 severity 时按置信度兜底（HIGH→高 / MED→中 / LOW→低）。
 
@@ -45,6 +46,7 @@ wc -l {报告输出路径}
 
 1. `# 代码检视报告` + `## 检视概览`：检视文件数（`{{FILE_COUNT}}`）/ 代码行数（`{{TOTAL_LINES}}`）2 个占位符由主 Agent 替换；发现问题总数与高/中/低计数由脚本统计
 2. `## 检视意见`：按严重级别分节的段落形式——`### {高/中/低}（N 个）` 小节（空级别小节省略），每条发现一个自包含段落块（`#### {条例ID} {条款名称}` 标题 + 严重级别/问题描述/代码位置/修改建议 四个字段要点）；组内按文件路径 → 行号排序，同文件意见连续；SUSPICIOUS 在问题描述尾部标「（疑似，建议人工确认）」、范围外（out_of_range，仅 PR 检视）在代码位置尾部标「（PR检视场景，非PR提交的相关代码）」、行号未校对确认标「（行号待确认）」；无问题时显示「本次检视未发现问题」
+3. `## 附录：本次检视任务加载规则集`：按规则文件分组罗列本次派发的全部条款（含 PASS）——文件按名排序，每文件列 `{条款ID} {条款名称}`；条款取自 yaml 的 `clause_id`/`clause_title`（实际派发名），归属文件由 `--references` 扫描规则文件的快速索引行与条款标题行定位，无法归属的条款列入「未定位来源文件」
 
 ## 约束
 
