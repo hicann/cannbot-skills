@@ -78,7 +78,7 @@ describe("update", () => {
 
   it("update.ts calls ensureRepoAndScan before scanInstalled (H1 dynamic plugin discovery)", async () => {
     const src = readFileSync(join(__dirname, "..", "src", "commands", "update.ts"), "utf-8");
-    const ensureCallPos = src.indexOf("repoManager.ensureRepoAndScan()");
+    const ensureCallPos = src.indexOf("repoManager.ensureRepoAndScan({ updateCwd: true })");
     const scanCallPos = src.indexOf("const installed = scanInstalled()");
     expect(ensureCallPos).toBeGreaterThan(-1);
     expect(scanCallPos).toBeGreaterThan(-1);

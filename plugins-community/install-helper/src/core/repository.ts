@@ -46,11 +46,11 @@ const REPO_URL = loadRepoUrl();
 
 export class RepositoryManager {
   private repoPath: string | undefined;
-  private customPath?: string;
+  private managedCache = false;
+  private cwdCheckout = false;
 
   constructor(customPath?: string) {
     this.repoPath = customPath;
-    this.customPath = customPath;
   }
 
   async ensureRepo(): Promise<string> {
@@ -61,30 +61,34 @@ export class RepositoryManager {
     const cwd = process.cwd();
     if (this.isValidRepo(cwd)) {
       this.repoPath = cwd;
+      this.managedCache = false;
+      this.cwdCheckout = true;
       return cwd;
     }
 
     const envPath = process.env.CANNBOT_REPO_PATH;
     if (envPath && this.isValidRepo(envPath)) {
       this.repoPath = envPath;
+      this.managedCache = false;
       return envPath;
     }
 
     const cachedPath = getCannbotRepoPath();
     if (this.isValidRepo(cachedPath)) {
       this.repoPath = cachedPath;
+      this.managedCache = true;
       return cachedPath;
     }
 
     const clonedPath = await this.cloneRepo();
+    this.managedCache = true;
     return clonedPath;
   }
 
-  async ensureRepoAndScan(): Promise<string> {
+  async ensureRepoAndScan(options: { updateCwd?: boolean } = {}): Promise<string> {
     const repoPath = await this.ensureRepo();
 
-    const isUserProvided = !!this.customPath || !!process.env.CANNBOT_REPO_PATH;
-    if (!isUserProvided) {
+    if (this.managedCache || (options.updateCwd && this.cwdCheckout)) {
       await this.updateRepo();
     }
     mergeDynamicPlugins(repoPath);

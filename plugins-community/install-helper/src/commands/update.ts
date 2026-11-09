@@ -52,7 +52,7 @@ export async function updateCommand(
 
   let repoPath: string;
   try {
-    repoPath = await repoManager.ensureRepoAndScan();
+    repoPath = await repoManager.ensureRepoAndScan({ updateCwd: true });
     updateSpinner.succeed(t("install_repo_ready"));
   } catch (error) {
     updateSpinner.fail(t("repo_clone_failed")
