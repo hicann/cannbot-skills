@@ -122,12 +122,11 @@ run_check "SEC-11: http:// registry 覆盖时两脚本给出明文链路告警" 
 run_check "SEC-12: mock 就绪探测使用 --noproxy（企业代理环境不误判）" \
     grep -q -- '--noproxy' "${BASH_SOURCE[0]}"
 
-# SEC-05 / SEC-06: 四份文档
+# SEC-05 / SEC-06: 三份文档（triton-optimizer 已迁移至 cannbot 仓，其 quickstart 随插件移除）
 DOCS=(
     "README.md"
     "docs/installation-guide.md"
     "plugins-community/install-helper/README.md"
-    "plugins-community/triton-optimizer/quickstart.md"
 )
 
 print_section "Static: docs keep one-liner + security note"

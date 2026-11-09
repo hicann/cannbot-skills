@@ -202,4 +202,3 @@
 | [ops-perf-optimize（2026-10-29 已迁出）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-perf-optimize) | 0 |   |   |   |   |   |
 | [shmem-ops-generator（2026-11-04 已迁出）](https://gitcode.com/cann/cannbot/tree/master/plugins-community/shmem-ops-generator) | 0 |   |   |   |   |   |
 | tilelang2ascendc-ops-generator | 0 |   |   |   |   |   |
-| triton-optimizer | 0 |   |   |   |   |   |

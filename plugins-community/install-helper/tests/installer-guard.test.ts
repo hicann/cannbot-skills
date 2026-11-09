@@ -89,15 +89,6 @@ describe("installer tool guard", () => {
       expect(src).toContain("error_tool_not_supported");
     });
 
-    it("real community plugin init.sh without codex fails the guard", async () => {
-      const { scriptSupportsTool } = await import("../src/core/installer.js");
-      const repoRoot = join(__dirname, "..", "..", "..");
-      const tritonInit = join(repoRoot, "plugins-community", "triton-optimizer", "init.sh");
-      if (!existsSync(tritonInit)) return; // plugin layout changed — nothing to assert
-      expect(scriptSupportsTool(tritonInit, "codex")).toBe(false);
-      expect(scriptSupportsTool(tritonInit, "opencode")).toBe(true);
-    });
-
   });
 });
 
