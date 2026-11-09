@@ -163,6 +163,10 @@ passed, ratio, max_abs = check_precision(output, ref_output, dtype)
 
 ### 5.1 NaN/Inf 位置敏感输入与比较
 
+> **门禁定位**：**混合有限值 + 稀疏特殊值**的位置敏感比较是特殊值的**唯一门禁**；
+> 全 NaN / 全 Inf 用例只能作为**补充**语义用例，不能作为唯一门禁，也不能替代
+> 显式 mask 比较（`torch.allclose(equal_nan=True)` 同样不能替代）。
+
 对支持 NaN/Inf 的浮点算子，特殊值用例必须能发现数据重排、索引和尾块覆盖错误。
 全 NaN 输入在元素被搬到错误位置后仍然处处为 NaN，因此不能作为唯一门禁。
 

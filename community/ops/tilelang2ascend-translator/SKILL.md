@@ -103,7 +103,7 @@ argument-hint: >
 - `.claude/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md` — 重排/搬运类算子实现指南（固定开销约束、硬件 pattern 指令、广播消费结构、核数分档、已知低效结构）
 - `.claude/skills/tilelang2ascend-translator/references/ascendc_sort_topk_patterns.md` — 排序/TopK/采样类算子实现指南（值域二分 vs 分段 sort 双路径、GatherMask 对齐铁律、tie 语义对齐、p/k 评测约束）
 - `.claude/skills/tilelang2ascend-translator/references/ascendc_norm_fusion_patterns.md` — Norm 族+激活融合算子实现指南（双缓冲软流水、affine 融合预重排、两遍中心化 + mean 修正 + Kahan 补偿、swish 简洁形式、S_CHUNK 大空间维分片）
-- `.claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md` — Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention）
+- `.claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md` — Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention、FA 反向/FAG）
 - `.claude/skills/tilelang2ascend-translator/references/pooling-patterns/PoolingPatternIndex.md` — Pooling 类算子（AvgPool/MaxPool/AdaptivePool 及反向 Grad）的转译/实现模式路由索引（tilelang-translation 映射、UB 管理、对齐守卫、精度模式、反向实现、grad-v2 落地踩坑、反模式）
 - `.claude/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh` — AscendC 评测脚本
 - `workflows/templates/archive_tasks/` — 历史成功任务，host/kernel 完整参考实现（**编译/运行时错误时优先查阅**）
@@ -150,7 +150,7 @@ argument-hint: >
 0-A.1 🛑 读取 AttentionPatternIndex.md（必须，不可跳过）:
     Read .claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md
 
-0-A.2 🛑 逐条回答"生成前问题"中的 7 个诊断问题，记录命中的模式:
+0-A.2 🛑 逐条回答"生成前问题"中的 8 个诊断问题，记录命中的模式:
     1. 输入是标准 [B,H,S,D] 还是 (T,H,D) 拼接布局？
     2. K/V 是连续 tensor 还是 paged cache？
     3. Hq 和 Hkv 是否相等？
@@ -158,8 +158,10 @@ argument-hint: >
     5. 是否有 sink_k/sink_v？
     6. 是否有 indices/topk？
     7. 是否有 causal、padding、显式 mask？
+    8. 是前向还是反向（是否有 dy/softmax_max/softmax_sum/attention_in 输入、dq/dk/dv 输出）？
     
-    如果 7 项全否定 → 命中"标准 Attention" → 下一步 0-A.3 读 archive 模板
+    如果前 7 项全否定且为前向 → 命中"标准 Attention" → 下一步 0-A.3 读 archive 模板
+    如果第 8 项命中反向 → 下一步 0-A.3 读 fa_backward_pattern.md（可与其余模式组合）
     如果任一命中 → 下一步 0-A.3 读对应的 pattern 文档（可组合）
 
 0-A.3 🛑 只读取命中的文档（渐进式披露，只读需要的）:
@@ -167,7 +169,7 @@ argument-hint: >
 
 0-A.4 🛑 在思考中确认:
     - 已读的 pattern 文档列表及其关键语义边界
-    - 组合顺序（多模式命中时按 TND → Head Sharing → MLA → Sink → Sparse → Paged → Mask 顺序理解）
+    - 组合顺序（多模式命中时按 TND → Head Sharing → MLA → Sink → Sparse → Paged → Mask 顺序理解；反向则按 fa_backward_pattern 的三段式组织计算图）
     - 本算子的 AscendC 转译策略应与命中的 pattern 对齐
 ```
 

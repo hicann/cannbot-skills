@@ -27,10 +27,10 @@
 | 输入张量规格 | shape、dtype |
 | 输出张量规格 | shape、dtype |
 | 编程模式偏好 | Developer / Expert / 混合 |
-| **迁移算子路径** ⭐ | 原算子文件路径（迁移时必需），用于获取 golden 实现 |
-| **输出形状** ⭐ | 原算子输出 shape（迁移时必需），如 `(N, M)` 或 `(M, N)` |
+| **迁移算子路径** ⭐ | 原算子文件路径（迁移时必需），用于获取**与原实现一致的 golden 实现**——迁移正确性的判定基准 |
+| **输出形状** ⭐ | 原算子输出 shape（迁移时必需），用于**输出形状匹配与输出契约证明**，如 `(N, M)` 或 `(M, N)` |
 
-**迁移算子时必须提供原算子路径和输出形状**，否则无法证明迁移正确性。Golden 实现一致性要求详见 [tilelang-op-develop checklist.md #9 Golden 实现一致 / #10 输出形状匹配](../../tilelang-op-develop/Ascend910/references/checklist.md)。
+**迁移算子时必须提供原算子路径和输出形状**，否则无法证明迁移正确性：前者是 golden 实现一致性的来源（checklist #9），后者是输出形状匹配与输出契约证明的依据（checklist #10）。**缺失任一必需字段时禁止自行推断**——包括按公式推导输出形状、以公式自造的参考实现替代原算子或其 golden（布局/归约轴/转置语义可能不同，公式推导不能替代原算子的输出契约）；一律按下方提问规则补齐。详见 [tilelang-op-develop checklist.md #9 Golden 实现一致 / #10 输出形状匹配](../../tilelang-op-develop/Ascend910/references/checklist.md)。
 
 **提问规则（必须严格遵守）**：
 1. **优先使用调用方传入的字段**：若调用方（如 `tilelang-op-orchestrator` 通过 analyst 传入 `op_requirements` 结构）已经提供了字段值，**全部跳过提问**，直接进入技术约束检测和 design 生成
@@ -229,7 +229,7 @@ API 映射设计（§3）、数据规格与内存规划（§4）、Tiling 策略
 - [references/quality-checklist.md](references/quality-checklist.md) — 质量自检清单
 - [references/info-sources.md](references/info-sources.md) — 信息收集步骤、信息源优先级、冲突处理原则
 - [references/BlockLevelDesign.md](references/BlockLevelDesign.md) — Block 级任务划分、流水骨架、workspace 与同步关系设计
-- [references/attention-patterns/AttentionPatternIndex.md](references/attention-patterns/AttentionPatternIndex.md) — Attention / FlashAttention 模式路由索引（TND、paged KV、mask/causal、GQA/MQA、MLA、topk sparse、sink attention）
+- [references/attention-patterns/AttentionPatternIndex.md](references/attention-patterns/AttentionPatternIndex.md) — Attention / FlashAttention 模式路由索引（TND、paged KV、mask/causal、GQA/MQA、MLA、topk sparse、sink attention、FA 反向/FAG）
 - [references/pooling/](references/pooling) — Pooling 类算子（AvgPool/MaxPool/AdaptivePool 及反向 Grad）**设计模式**：布局策略、行粒度 tile、reduce_d 快路径、adaptive 窗口、反向梯度语义（5 篇，命中路由见 §6 决策树 Pooling 分支；转译/实现篇在 tilelang2ascend-translator Pooling 类别 `references/pooling-patterns/`，含 tilelang-translation/ub-management/alignment-guards/precision-patterns/backward-implementation/grad-v2-lessons/pooling-anti-patterns）
 - [examples/design-template.md](examples/design-template.md) — design.md 完整模板
 - [examples/completion-report-template.md](examples/completion-report-template.md) — 完成报告输出模板

@@ -91,7 +91,7 @@ argument-hint: >
 | 文档 | 用途 | 使用阶段 |
 |------|------|----------|
 | `ops/tilelang-op-design/references/BlockLevelDesign.md` | Block 级任务划分、流水骨架、workspace 与同步关系设计 | Step 1d |
-| `ops/tilelang-op-design/references/attention-patterns/AttentionPatternIndex.md` | Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention） | Step 0 |
+| `ops/tilelang-op-design/references/attention-patterns/AttentionPatternIndex.md` | Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention、FA 反向/FAG） | Step 0 |
 | `ops/tilelang-op-design/references/ascend-constraints.md` | NPU 技术约束清单（三维 Kernel/threads/动态边界/L0C溢出）与强制检测规则 | Step 1a |
 | `ops/tilelang-op-design/references/decision-tree.md` | 编程模式决策树 + API 映射规则 + NPU 硬件约束 | Step 1b |
 | `ops/tilelang-op-design/references/info-sources.md` | 信息收集步骤与优先级（搜索 examples/、确认 API 可用性） | Step 1c |
@@ -148,7 +148,7 @@ argument-hint: >
 0.1 🛑 读取 AttentionPatternIndex.md（必须，不可跳过）:
     Read ops/tilelang-op-design/references/attention-patterns/AttentionPatternIndex.md
     
-0.2 🛑 逐条回答"生成前问题"中的 7 个诊断问题，记录命中的模式:
+0.2 🛑 逐条回答"生成前问题"中的 8 个诊断问题，记录命中的模式:
     1. 输入是标准 [B,H,S,D] 还是 (T,H,D) 拼接布局？
     2. K/V 是连续 tensor 还是 paged cache？
     3. Hq 和 Hkv 是否相等？
@@ -156,8 +156,10 @@ argument-hint: >
     5. 是否有 sink_k/sink_v？
     6. 是否有 indices/topk？
     7. 是否有 causal、padding、显式 mask？
+    8. 是前向还是反向（是否有 dy/softmax_max/softmax_sum/attention_in 输入、dq/dk/dv 输出）？
     
-    如果 7 个问题全部否定 → 命中"标准 Attention" → 下一步 0.3 读 archive 模板
+    如果前 7 个问题全部否定且为前向 → 命中"标准 Attention" → 下一步 0.3 读 archive 模板
+    如果第 8 问命中反向 → 下一步 0.3 读 fa_backward_pattern.md（可与其余模式组合）
     如果任一命中 → 下一步 0.3 读对应的 pattern 文档（可组合）
 
 0.3 🛑 只读取命中的文档（渐进式披露，只读需要的）:
@@ -168,7 +170,7 @@ argument-hint: >
 
 0.4 🛑 在思考中确认:
     - 已读的 pattern 文档列表及其关键规则
-    - 组合顺序（多模式命中时按 TND → Head Sharing → MLA → Sink → Sparse → Paged → Mask 顺序理解）
+    - 组合顺序（多模式命中时按 TND → Head Sharing → MLA → Sink → Sparse → Paged → Mask 顺序理解；反向则按 fa_backward_pattern 的三段式组织计算图）
     - 本算子的 block-level 流水骨架应与命中的 pattern 对齐
 ```
 

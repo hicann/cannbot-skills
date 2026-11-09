@@ -97,8 +97,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "特殊值测试只用全 NaN 输入，并用 torch.allclose(equal_nan=True)。这能发现重排错位吗？",
-      "expected_output": "1. 回复应说明不能：全 NaN 输入在 equal_nan=True 下任何错位排列都能通过校验，无法发现重排错位。\n2. 回复应说明需混合有限值与稀疏特殊值输入，先比对特殊值位置 mask，再只对有限位置算容差。\n3. 回复应说明全特殊值用例只能作为补充，不能作为唯一门禁。",
+      "prompt": "请先加载 tilelang-op-develop 技能（可 Read references/coding-conventions.md §5.1 与 Ascend910/instructions.md 位置敏感验证段）。特殊值测试只用全 NaN 输入，并用 torch.allclose(equal_nan=True)。这能发现重排错位吗？",
+      "expected_output": "1. 回复应说明不能：全 NaN 输入在 equal_nan=True 下任何错位排列都能通过校验，无法发现重排错位。\n2. 回复应说明需混合有限值与稀疏特殊值输入（如 make_mixed_nan_input），先比对 NaN/正 Inf/负 Inf 特殊值位置 mask，再只对有限位置算容差。\n3. 回复应说明全特殊值用例只能作为补充，不能作为唯一门禁。",
       "expectations": [],
       "files": []
     }

@@ -16,6 +16,7 @@
 | `indices` / `topk` / selected token / sparse gather | `@references/attention-patterns/references/topk_kv_sparse_pattern.md` |
 | `sink_k` / `sink_v` / sink token / fixed prefix KV source | `@references/attention-patterns/references/sink_pattern.md` |
 | `cmp_kv` / `cmp_sparse_indices` / `SparseFlashMla`（双段 KV：KV 窗口 + 压缩前缀，softmax 分母计入 sinks；`sinks`/`metadata` 为辅助信号，arch22=A2/A3） | `@references/attention-patterns/references/sparse_flash_mla_package_op.md` |
+| `dy` / `softmax_max` / `softmax_sum` / `attention_in`（或 `softmax_in` 统计量变体）输入、`dq/dk/dv` 输出 → **FA 反向（FAG）** | `@references/attention-patterns/references/fa_backward_pattern.md` |
 | **以上全部不命中** → 标准 Attention `[B, H, S, D]` | `workflows/templates/archive_tasks/flash_attention/` — block/tile 设计模板 |
 
 ## 组合顺序
@@ -32,6 +33,7 @@
 7. Mask/Causal：在 softmax 前处理可见性、padding、causal。
 8. SparseFlashMla：若是双段 KV（ori 窗口段 + cmp 压缩前缀 + sinks），
    在标准 mask 之上套用双段可见性与 sinks 分母规则。
+9. Backward：若为反向（dy/softmax 统计量输入），上述模式只决定数据路径，计算图按 fa_backward_pattern 的三段式（Pre/Main/Post）组织。
 ```
 
 组合命中时仍然按需阅读：
@@ -54,5 +56,6 @@
 6. 是否有 `indices/topk`？
 7. 是否有 causal、padding、显式 mask？
 8. 输入是否含 `cmp_kv` / `cmp_sparse_indices`（SparseFlashMla 双段 KV；`sinks`/`metadata` 仅作辅助信号）？
+9. 是前向还是反向（是否有 dy/softmax_max/softmax_sum/attention_in 输入）？
 
-根据答案选择上面的文档。若 8 个问题全部否定 → 标准 Attention，读最后一行指向的 `workflows/templates/archive_tasks/flash_attention/` 中的 block/tile 设计实现，作为标准 MHA 的 block 级 Q 分块循环、O 分块循环、softmax rescale、C/V split 流水线设计参考。
+根据答案选择上面的文档。若前 8 个问题全部否定且第 9 问为前向 → 标准 Attention，读最后一行指向的 `workflows/templates/archive_tasks/flash_attention/` 中的 block/tile 设计实现，作为标准 MHA 的 block 级 Q 分块循环、O 分块循环、softmax rescale、C/V split 流水线设计参考。
