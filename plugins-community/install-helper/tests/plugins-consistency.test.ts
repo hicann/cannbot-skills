@@ -83,26 +83,6 @@ describe("plugins consistency — single source of truth", () => {
     }
   });
 
-  it("pypto-op-orchestrator installAgents == 8 plugin.json agents (bug regression)", () => {
-    const pluginDir = join(REPO_ROOT, "plugins-official", "pypto-op-orchestrator");
-    const agents = pluginJsonAgents(pluginDir);
-    const expected = [
-      "pypto-op-planner",
-      "pypto-op-mathematician",
-      "pypto-op-architect",
-      "pypto-op-coder",
-      "pypto-op-verifier",
-      "pypto-op-debugger",
-      "pypto-op-optimizer",
-      "pypto-op-auto-tuner-panko",
-    ];
-    expect(agents).toEqual(expected);
-    // the stale names from the bug report must NOT appear
-    expect(agents).not.toContain("pypto-op-analyst");
-    expect(agents).not.toContain("pypto-op-developer");
-    expect(agents).not.toContain("pypto-op-perf-tuner");
-  });
-
   it("ops-registry-invoke installAgents == 7 plugin.json agents (stale-subset regression)", () => {
     const pluginDir = join(REPO_ROOT, "plugins-official", "ops-registry-invoke");
     const agents = pluginJsonAgents(pluginDir);

@@ -14,6 +14,8 @@
 
 > **2026-11-06 aiss-tiling-solver 归位增量**：该 Skill（含 5 个用例）由 `ops/` 迁至 `community/ops/`，用例随技能整体迁移、总数不变；下表保留历史条目并标注新位置，未重新生成全量报告。
 
+> **2026-11-07 PyPTO 迁出增量**：删除 `pypto-op-orchestrator` 旧插件副本（含 3 个启用用例），Team 减少 1；本仓统计不再包含该 3 个用例。下表保留历史条目并标注迁出，未重新生成全量报告。
+
 > **统计口径**：统计代码仓内所有符合结构要求的 Skill（`skill_dirs` 下含 `SKILL.md`）与 Team（`team_dirs` 下含 `AGENTS.md` + `.claude-plugin/plugin.json`），与是否携带 `evals/evals.json` 无关——无 evals 的实体用例数计 0。
 
 ## 1. 五维看护说明
@@ -177,7 +179,7 @@
 
 ## 3. Team 覆盖率
 
-### plugins-official/（9 Teams，共 36 个用例）
+### plugins-official/（8 Teams，共 33 个用例）
 
 | 名称 | 用例数 | 正向看护 | 负向看护 | 正确性看护 | 调用流程看护 | 资源消耗看护 |
 | --- | :--: | :--: | :--: | :--: | :--: | :--: |
@@ -185,8 +187,8 @@
 | [model-infer-optimize（已迁出）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize) | 7 | √ |   | √ |   | √ |
 | [ops-direct-invoke（2026-10-23 已迁出）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke) | 0 |   |   |   |   |   |
 | [ops-direct-invoke-flash（2026-10-29 已迁出）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke-flash) | 9 | √ |   | √ |   | √ |
+| [pypto-op-orchestrator（2026-11-07 已迁出）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/pypto-op-orchestrator) | 3 | √ |   | √ |   | √ |
 | ops-registry-invoke | 13 | √ |   | √ | √ | √ |
-| pypto-op-orchestrator | 3 | √ |   | √ |   | √ |
 | tilelang-op-orchestrator | 3 | √ |   | √ |   | √ |
 | torch-compile（已迁至 cannbot，见应用仓安装测试） | 1 |   |   | √ |   | √ |
 | triton-op-generator | 0 |   |   |   |   |   |

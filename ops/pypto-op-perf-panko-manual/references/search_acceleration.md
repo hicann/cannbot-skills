@@ -20,7 +20,8 @@ From the repository root, in the operator's existing Ascend Python environment:
 
 ```sh
 SKILL_ROOT=cannbot-skills/ops/pypto-op-perf-panko-manual
-LINT_ROOT=cannbot-skills/plugins-official/pypto-op-orchestrator/hooks/pypto-op-lint
+WORKSPACE=/absolute/path/to/workspace
+LINT_ROOT="$WORKSPACE/.cannbot/plugins/pypto-op-orchestrator/hooks/pypto-op-lint"
 OP_DIR=/absolute/path/to/GELU
 MODE=cached
 python "$SKILL_ROOT/scripts/evaluation_session.py" \

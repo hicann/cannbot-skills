@@ -1,8 +1,0 @@
-{
-  "plugin": "pypto-op-orchestrator",
-  "skills": {
-    "dir": "ops",
-    "names": ["pypto-api-explore", "pypto-docs-search", "pypto-general-debug", "pypto-golden-generate", "pypto-intent-understand", "pypto-memory-template", "pypto-op-design", "pypto-op-develop", "pypto-op-knowledge", "pypto-op-perf-tune", "pypto-op-plan", "pypto-op-review", "pypto-op-verify", "pypto-orchestration-manual", "pypto-op-perf-panko-manual", "pypto-precision-compare", "pypto-precision-debug"]
-  },
-  "hooks": {"dir": "plugins-official/pypto-op-orchestrator/hooks"}
-}

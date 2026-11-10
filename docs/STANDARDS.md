@@ -216,7 +216,7 @@ skills:
 
 参考以下插件的 Agent 实现（已迁出插件见应用仓）：
 - [ops-direct-invoke（cannbot）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke) - 已迁出的直调开发插件，当前 Agent 定义在应用仓维护
-- `pypto-op-orchestrator/agents/` - PyPTO 开发子 Agent（planner / mathematician / architect / coder / verifier / debugger / optimizer / auto-tuner-panko；编排者以 AGENTS.md 注入）
+- [pypto-op-orchestrator（cannbot）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/pypto-op-orchestrator) - 已迁出的 PyPTO 算子开发插件
 
 ---
 

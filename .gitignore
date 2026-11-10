@@ -58,7 +58,6 @@ plugins-official/ops-registry-invoke/asc-devkit/
 plugins-official/ops-registry-invoke/ops-tensor/
 plugins-official/ops-registry-invoke/reference/
 plugins-official/tilelang-op-orchestrator/tilelang-ascend/
-plugins-official/pypto-op-orchestrator/pypto/
 plugins-official/model-infer-optimize/cann-recipes-infer/
 
 

@@ -19,5 +19,3 @@ Every `custom/<operator_name>/` directory must satisfy the requirements below: M
 | `pypto.view` rank consistency (not a reshape) | OL52 |
 | `set_cube_tile_shapes` m/k/n = `[L0, L1]`, 0<L0<=L1, L1%L0==0; tile args are literals | OL48 |
 | `pypto.loop` present for dynamic-axis iteration | OL23 / OL43 |
-
-See `../../../hooks/pypto-op-lint/rules.json` for the full rule registry.

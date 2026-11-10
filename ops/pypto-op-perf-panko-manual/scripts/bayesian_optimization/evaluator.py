@@ -329,8 +329,8 @@ class RealEvaluator:
         evaluation_mode="subprocess",
     ):
         """test_command : shell string that exits 0 iff golden+layout pass (from the dispatch prompt).
-        lint_root      : path to the pypto-op-lint hook directory under
-                         cannbot-skills/plugins-official/pypto-op-orchestrator/hooks
+        lint_root      : path to the installed pypto-op-lint hook directory under
+                         <workspace>/.cannbot/plugins/pypto-op-orchestrator/hooks
                          (enables the Stage-7 lint gate). None skips it.
         warmup/runs/agg: frozen measure_latency params (o4 defaults 1/3/min).
         fault_backoff_s: waits before re-running the command after a DEVICE fault.

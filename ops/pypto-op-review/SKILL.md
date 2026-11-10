@@ -11,7 +11,20 @@ Layout and structure rules for `custom/<operator>/` are enforced **automatically
 
 | File | Purpose |
 |------|---------|
-| **`scripts/extract_pypto_calls.py`** | List every `pypto.*` call site by line number — used for op-by-op debugging |
+| **`scripts/extract_pypto_calls.py`** | Produce an ordered, line-numbered `pypto.*` call-site fact list for op-by-op debugging |
+
+The extractor output is a fact list, not a compliance verdict: text output lists each
+call shape in source order (`line + call form`), while `--json` only changes the
+serialization to machine-readable JSON Lines for memory or downstream tooling. It does
+not prove dtype, shape, tile, layout, or write-back correctness. Reviewers must still
+check each call against the PyPTO API documentation and the layout/structure rules;
+write-back correctness in particular requires inspecting the implementation and test.
+
+When asked whether extractor output means that API review has passed, answer directly:
+**不等于**。The script only lists `pypto.*` call forms by source line as an op-by-op
+fact list; `--json` only changes serialization to JSON Lines. Reviewers must still
+check each call against the PyPTO API and layout/structure rules, and the script does
+not prove dtype, shape, tile, layout, or write-back compliance.
 
 ---
 
@@ -32,6 +45,22 @@ The checks formerly performed by a standalone layout script are covered by pypto
 | `pypto.loop` present when a kernel iterates a dynamic axis | OL23 / OL43 |
 
 A lint **FAIL** blocks the write (S0/S1) and the gate; fix it before re-writing the file.
+
+## Review order and dynamic-axis conclusion
+
+Start with directory-level cross-file checks: confirm the three-piece test set and any
+staged module trio are present and named consistently. Then inspect each source file and
+its PyPTO calls. Check test assertions (`assert_allclose` or
+`detailed_tensor_compare`) last. For dynamic-axis iteration, a Python-level loop driving
+the kernel is not compliant; inside the JIT graph use `pypto.loop`,
+`pypto.loop_unroll`, or an allowed `range(...)` form and state the overall conclusion.
+
+When a review prompt says that a loop uses a dynamic axis without identifying an
+allowed `pypto.loop`, give the overall conclusion **FAIL / 不合规** first. Do not
+answer conditionally or defer the conclusion until source files are provided:
+dynamic-axis iteration must be driven by `pypto.loop`; a host-side Python loop,
+JIT `while`, or non-`range` `for` is noncompliant. Explain the permitted forms
+only as the repair rule after stating the failure.
 
 ---
 

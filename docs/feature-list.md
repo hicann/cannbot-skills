@@ -106,7 +106,7 @@
 
 ## PyPTO 算子开发
 
-### Skills（17 个）
+### Skills
 
 | Skill | 功能 |
 |-------|------|
@@ -128,20 +128,7 @@
 | **pypto-op-knowledge** | 算子开发经验表 / 问题查找表 |
 | **pypto-memory-template** | 算子级 `MEMORY.md` 模板 |
 
-### Agents（8 个 + 编排者）
-
-编排者 `pypto-op-orchestrator`（AGENTS.md 注入，全流程唯一 owner）按 7 阶段调度 8 个子代理：
-
-| Agent | 功能 |
-|-------|------|
-| **pypto-op-planner** | 需求规划：SPEC.md / API_REPORT.md |
-| **pypto-op-mathematician** | Golden 参考实现 |
-| **pypto-op-architect** | 架构设计：拆解决策、Tile、Loop 结构、模块契约 |
-| **pypto-op-coder** | 单文件 kernel 编码 |
-| **pypto-op-verifier** | 裁判：对抗测试 + 精度/layout 校验 |
-| **pypto-op-debugger** | 失败定位与补丁方案 |
-| **pypto-op-optimizer** | 性能分析与自动调优（分步骤） |
-| **pypto-op-auto-tuner-panko** | PANKO 搜索式自动调优（world model + evaluator，用户要求 PANKO 时启用） |
+编排入口与 Agent 由 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/pypto-op-orchestrator) 维护。
 
 ## PyPTO-Pro 算子开发
 

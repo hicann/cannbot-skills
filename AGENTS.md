@@ -115,6 +115,8 @@ cannbot-skills/
 
 > 算子 QA 检测套装插件 `ops-qa-suite` 已从本仓迁出，入口与安装说明见 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-community/ops-qa-suite)；11 个内置 Skill 随 `.opencode` 覆盖层整体迁入 cannbot 维护，`cann-error-code-standard`、`ops-error-code-remediation`、`gitcode-toolkit` 三个共享 Skill 继续在本仓 `ops/`、`infra/` 维护。
 
+> PyPTO 算子开发插件 `pypto-op-orchestrator` 已从本仓迁出，入口与安装说明见 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/pypto-op-orchestrator)。
+
 ## Skills 分类
 
 项目 skills 目录按功能分类，包括：

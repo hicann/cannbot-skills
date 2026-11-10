@@ -73,7 +73,7 @@ describe("display — install summary docs line", () => {
     expect(docsLine).not.toMatch(/:\s*\/quickstart\.md/);
   });
 
-  it("keeps the repo-relative docs path for local-source plugins", async () => {
+  it("uses the plugin-id docs path when the local source is removed", async () => {
     const { printEnhancedSummary } = await import("../src/ui/display.js");
 
     const lines: string[] = [];
@@ -101,6 +101,6 @@ describe("display — install summary docs line", () => {
 
     const docsLine = lines.find((l) => l.includes("quickstart.md"));
     expect(docsLine).toBeDefined();
-    expect(docsLine).toContain("plugins-official/torch-compile/quickstart.md");
+    expect(docsLine).toContain("torch-compile/quickstart.md");
   });
 });

@@ -430,25 +430,6 @@
       ]
     },
     {
-      "name": "pypto-op-orchestrator",
-      "source": "./plugins-official/pypto-op-orchestrator",
-      "description": "PyPTO 算子端到端开发 Team。9 智能体状态机（planner/mathematician/architect/coder/verifier/debugger/optimizer/auto-tuner-panko + orchestrator），7 阶段驱动，阶段门禁与 state_transition 状态机，支持断点续跑和失败恢复。",
-      "version": "1.2.0",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "pypto",
-        "operator",
-        "orchestrator",
-        "state-machine"
-      ],
-      "category": "development",
-      "dependencies": [
-        "pypto-op-orchestrator-skills"
-      ]
-    },
-    {
       "name": "ops-code-reviewer",
       "source": "./ops",
       "strict": false,

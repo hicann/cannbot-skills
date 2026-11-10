@@ -216,12 +216,14 @@ install-helper lang set en_US      # 切换为英文
 | 3 | AscendC 算子注册调用 | ops-registry-invoke | ops-registry, ascendc-registry, registry |
 | 4 | Catlass 算子直调 | catlass-op-generator | catlass |
 | 5 | NPU 推理优化（已迁移至 cannbot） | model-infer-optimize | model-infer, infer, inference, sota, sota-approach, model-infer-sota |
-| 6 | PyPTO 算子开发 | pypto-op-orchestrator | pypto, pytorch |
+| 6 | PyPTO 算子开发（已迁移至 cannbot） | pypto-op-orchestrator | — |
 | 7 | TileLang 算子开发 | tilelang-op-orchestrator | tilelang |
 | 8 | 算子性能调优（已迁移至 cannbot） | ops-perf-optimize | perf-optimize, perf-optimization, performance |
 | 9 | torch.compile 图模式 | torch-compile | torch, compile, graph |
 
 `ops-direct-invoke` 的本地副本已移除，由 [cannbot 仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke) 的已发布安装包维护；`ops-direct`、`ascendc-direct`、`direct`、`kernel` 别名继续有效，`--source skills` 不再提供此插件。通过本 helper 安装仅支持 opencode / claude / trae / codex 的 project 级别。新仓也仅支持 project；旧版 global 安装及超出委托范围的客户端不再有本地副本回退，不承诺沿用旧版兼容性，请按新仓安装文档使用受支持的配置。
+
+`pypto-op-orchestrator` 已迁至 [cannbot 仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/pypto-op-orchestrator)，安装请使用 cannbot。
 
 `ops-perf-optimize` 的本地副本已移除，由 [cannbot 仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-perf-optimize) 维护；插件名及 `perf-optimize`、`perf-optimization`、`performance` 别名继续有效，安装由 cannbot 托管安装器提供，`--source skills` 不再提供此插件。通过本 helper 安装仅支持 opencode / claude / trae / codex 的 project 级别，已删除的本地副本不再提供回退。
 

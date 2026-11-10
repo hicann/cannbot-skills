@@ -160,53 +160,6 @@ describe("install summary source scoping (display layer)", () => {
   beforeEach(setup);
   afterEach(teardown);
 
-  it("printEnhancedSummary points --source skills docs at the legacy entry", async () => {
-    const { setCannbotPlugins } = await import("../src/core/registry.js");
-    const cannbotPkgDir = join(testDir, "cannbot-pkg", "dist", "plugins", "pypto-op-orchestrator");
-    mkdirSync(cannbotPkgDir, { recursive: true });
-    setCannbotPlugins([
-      {
-        id: "pypto-op-orchestrator",
-        dir: cannbotPkgDir,
-        displayName: "pypto-op-orchestrator",
-        script: "cannbot",
-        aliases: [],
-        skills: 0,
-        agents: 0,
-        description: "",
-        source: "cannbot",
-      },
-    ]);
-
-    const { printEnhancedSummary } = await import("../src/ui/display.js");
-    const logs: string[] = [];
-    const spy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
-      logs.push(args.map(String).join(" "));
-    });
-    try {
-      printEnhancedSummary(
-        [
-          {
-            pluginId: "pypto-op-orchestrator",
-            displayName: "PyPTO 算子开发",
-            success: true,
-            skillsCount: 45,
-            agentsCount: 6,
-            source: "skills",
-          },
-        ],
-        "opencode",
-        join(testDir, "target", ".opencode")
-      );
-    } finally {
-      spy.mockRestore();
-    }
-
-    const output = logs.join("\n");
-    expect(output).toContain("plugins-official/pypto-op-orchestrator/quickstart.md");
-    expect(output).not.toContain(cannbotPkgDir);
-  });
-
   it("printEnhancedSummary keeps cannbot-sourced docs pointing at the cannbot package", async () => {
     const { setCannbotPlugins } = await import("../src/core/registry.js");
     const cannbotPkgDir = join(testDir, "cannbot-pkg", "dist", "plugins", "torch-compile");

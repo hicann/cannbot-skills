@@ -2086,8 +2086,8 @@ def _check_lint_root(lint_root):
     that from a device that has gone away, and the block aborts on consecutive
     environment faults having measured nothing. A run can lose its first block
     exactly this way -- a few faults with `fault_kind: invocation`, the repo
-    root passed where `cannbot-skills/plugins-official/
-    pypto-op-orchestrator/hooks/pypto-op-lint` was wanted -- and an
+    root passed where the installed
+    `.cannbot/plugins/pypto-op-orchestrator/hooks/pypto-op-lint` was wanted -- and an
     `os.path.isdir` at init catches it before the device is touched.
 
     Returns "" when there is nothing to say. This WARNS rather than refuses:
@@ -2108,8 +2108,8 @@ def _check_lint_root(lint_root):
             f"`python -m pypto_op_lint` will fail on every trial and the "
             f"block will abort on invocation faults. Point --lint-root at "
             f"the directory CONTAINING the package "
-            f"(usually <repo>/cannbot-skills/plugins-official/"
-            f"pypto-op-orchestrator/hooks/pypto-op-lint), not at the repo root"
+            f"(usually <workspace>/.cannbot/plugins/pypto-op-orchestrator/"
+            f"hooks/pypto-op-lint), not at the repo root"
         )
     return ""
 

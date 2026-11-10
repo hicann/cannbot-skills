@@ -75,30 +75,6 @@ function cannbotPluginEntry(id: string): PluginEntry {
   };
 }
 
-/** Creates a minimal skills-repo checkout holding a local copy of
- *  pypto-op-orchestrator: one reusable skill, the agent and the AGENTS.md referenced by
- *  the embedded registry entry (the other ops/ installSkills sources are
- *  intentionally absent — a frozen snapshot may lag behind the cannbot
- *  release). */
-function makeLocalSkillsRepo(): string {
-  const repo = join(testDir, "skills-repo");
-  mkdirSync(join(repo, "ops", "pypto-op-knowledge"), { recursive: true });
-  writeFileSync(
-    join(repo, "ops", "pypto-op-knowledge", "SKILL.md"),
-    "---\nname: pypto-op-knowledge\ndescription: frozen local copy\n---\n# frozen local copy\n"
-  );
-  const pluginDir = join(repo, "plugins-official", "pypto-op-orchestrator");
-  mkdirSync(join(pluginDir, "agents"), { recursive: true });
-  // An existing offline dependency directory prevents a network clone.
-  mkdirSync(join(pluginDir, "pypto"), { recursive: true });
-  writeFileSync(
-    join(pluginDir, "agents", "pypto-op-planner.md"),
-    "---\nname: pypto-op-planner\ndescription: agent\n---\nbody\n"
-  );
-  writeFileSync(join(pluginDir, "AGENTS.md"), "# pypto-op-orchestrator local instructions\n");
-  return repo;
-}
-
 describe("cannbot-delegate", () => {
   beforeEach(setup);
   afterEach(teardown);
@@ -476,93 +452,6 @@ process.exit(0);
     });
     expect(result.success).toBe(true);
     expect(existsSync(join(target, ".agents/skills/fake-skill-a/SKILL.md"))).toBe(true);
-  });
-
-  it("installPluginRouted falls back to the local legacy entry when the tool is outside the delegation matrix", async () => {
-    // qoder is not declared by the installed (fake) installer: an implicit cannbot-first resolution
-    // must fall back to the local copy and produce the legacy layout
-    useFakeInstaller("pypto-op-orchestrator");
-    const repo = makeLocalSkillsRepo();
-    const target = join(testDir, "fallback-qoder-project");
-    mkdirSync(target, { recursive: true });
-    process.env.CANNBOT_QODER_LAYOUT = "cli";
-
-    const { installPluginRouted } = await import("../src/core/cannbot-delegate.js");
-    const result = await installPluginRouted({
-      pluginId: "pypto-op-orchestrator",
-      tool: "qoder",
-      level: "project",
-      repoPath: repo,
-      installPath: target,
-      yes: true,
-      plugin: cannbotPluginEntry("pypto-op-orchestrator"),
-    });
-
-    expect(result.errors).toEqual([]);
-    expect(result.success).toBe(true);
-    expect(result.skillsCount).toBe(1);
-    expect(result.agentsCount).toBe(1);
-    // legacy qoder layout: skills under .qoder/skills, agents as real copies
-    expect(existsSync(join(target, ".qoder", "skills", "pypto-op-knowledge", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(target, ".qoder", "agents", "pypto-op-planner.md"))).toBe(true);
-    // legacy project-root instructions file, no cannbot registry artifacts
-    expect(existsSync(join(target, "AGENTS.md"))).toBe(true);
-    expect(existsSync(join(target, ".qoder", "cannbot-plugin.json"))).toBe(false);
-    // the fallback warning carries the boundary reason and the local-copy note
-    expect(result.warnings.join(" ")).toContain("暂不支持工具 qoder");
-    expect(result.warnings.join(" ")).toContain("已自动回退本仓 skills 副本安装");
-  });
-
-  it("installPluginRouted falls back to local for global-level installs of cannbot-resolved plugins", async () => {
-    // upstream delegation is project-only: a global-level request for a
-    // cannbot-resolved plugin falls back to the local copy and installs into
-    // the legacy global skills root (~/.config/opencode/skills)
-    useFakeInstaller("pypto-op-orchestrator");
-    const repo = makeLocalSkillsRepo();
-
-    const { installPluginRouted } = await import("../src/core/cannbot-delegate.js");
-    const result = await installPluginRouted({
-      pluginId: "pypto-op-orchestrator",
-      tool: "opencode",
-      level: "global",
-      repoPath: repo,
-      yes: true,
-      plugin: cannbotPluginEntry("pypto-op-orchestrator"),
-    });
-
-    expect(result.errors).toEqual([]);
-    expect(result.success).toBe(true);
-    expect(existsSync(join(sandboxHome, ".config", "opencode", "skills", "pypto-op-knowledge", "SKILL.md"))).toBe(true);
-    expect(existsSync(join(sandboxHome, ".config", "opencode", "AGENTS.md"))).toBe(true);
-    // the fallback warning carries the level-boundary reason
-    expect(result.warnings.join(" ")).toContain("仅支持 project 级安装");
-    expect(result.warnings.join(" ")).toContain("已自动回退本仓 skills 副本安装");
-  });
-
-  it("explicit --source cannbot keeps the hard error for unsupported tools", async () => {
-    // even with a local copy available, an explicit --source cannbot must
-    // not silently downgrade to it — the boundary error stays final
-    useFakeInstaller("pypto-op-orchestrator");
-    makeLocalSkillsRepo();
-    const target = join(testDir, "explicit-cannbot-qoder");
-    mkdirSync(target, { recursive: true });
-
-    const { installPluginRouted } = await import("../src/core/cannbot-delegate.js");
-    const result = await installPluginRouted({
-      pluginId: "pypto-op-orchestrator",
-      tool: "qoder",
-      level: "project",
-      repoPath: join(testDir, "skills-repo"),
-      installPath: target,
-      source: "cannbot",
-      plugin: cannbotPluginEntry("pypto-op-orchestrator"),
-    });
-
-    expect(result.success).toBe(false);
-    expect(result.errors.join(" ")).toContain("暂不支持工具 qoder");
-    expect(result.warnings).toEqual([]);
-    // nothing was installed — no fallback, no delegation, no artifacts
-    expect(readdirSync(target)).toEqual([]);
   });
 
   it("no local copy: structured error for cannbot-only plugins on unsupported tools", async () => {

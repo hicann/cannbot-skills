@@ -61,22 +61,6 @@ describe("wizard selection dedupe", () => {
     expect(result[0].displayName).toBe("PyPTO-Pro 算子开发");
   });
 
-  it("follows the cannbot declaration for name and description (repo content wins)", () => {
-    // dual-source rows show the repository name and the manifest
-    // description — not the stale frozen snapshot
-    const frozen = "PyPTO Python API 算子全流程开发，覆盖需求理解、API 探索、实现与调优";
-    const manifest = "PyPTO 算子开发编排工作流：7 阶段状态机（需求规划→Golden→设计→验证准备→按模块编码→E2E 验证→性能调优）";
-    const result = dedupeForWizardSelection([
-      entry("pypto-op-orchestrator", "skills", "PyPTO 算子开发", frozen),
-      entry("pypto-op-orchestrator", "cannbot", "pypto-op-orchestrator", manifest),
-    ]);
-    expect(result).toHaveLength(1);
-    // repo identity: the sibling pypto-op / pypto-pro-op pair reads
-    // side-by-side in the wizard exactly as in the repository
-    expect(result[0].displayName).toBe("pypto-op-orchestrator");
-    expect(result[0].description).toBe(manifest);
-  });
-
   it("leaves single-source plugins untouched", () => {
     const single = [entry("torch-compile", "skills", "torch.compile 图模式")];
     expect(dedupeForWizardSelection(single)).toEqual(single);
