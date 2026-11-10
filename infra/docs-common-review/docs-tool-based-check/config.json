@@ -1,0 +1,19 @@
+{
+  "name": "基础检查配置",
+  "config": {
+    "base": {
+      "ci": [
+        "markdownlint",
+        "tag-closed-check",
+        "link-validity-check",
+        "resource-existence-check",
+        "codespell-check"
+      ]
+    }
+  },
+  "repo": {
+    "all": {
+      "extendConfig": "base"
+    }
+  }
+}

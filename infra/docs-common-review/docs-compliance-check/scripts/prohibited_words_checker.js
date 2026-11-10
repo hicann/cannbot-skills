@@ -214,7 +214,7 @@ class ProhibitedWordsChecker {
       const location = `vscode://file/${absolutePath}:${error.line}`;
       return {
         rule_group: '通用规则',
-        rule_item: 'StaticCheck_compliance',
+        rule_item: 'compliance-check',
         rule_type: '规范性',
         rule_name: '敏感词检查',
         snippet: error.snippet,

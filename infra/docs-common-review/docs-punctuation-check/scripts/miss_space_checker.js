@@ -374,7 +374,7 @@ class MissSpaceChecker {
 
       return {
         rule_group: '通用规则',
-        rule_item: 'StaticCheck_punctuation',
+        rule_item: 'punctuation-check',
         rule_type: '规范性',
         rule_name: '缺少空格',
         snippet: error.snippet || '',

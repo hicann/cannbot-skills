@@ -103,30 +103,31 @@ class TagChecker {
     });
 
     const results = this.formatResults();
-    if (results.length > 0) {
-      // 确保总JSON文件的父目录存在
-      const parentDir = path.dirname(this.totalJsonPath);
-      if (!fs.existsSync(parentDir)) {
-        fs.mkdirSync(parentDir, { recursive: true });
-      }
 
-      // 读取总JSON文件：文件存在且非空 → 解析为数组；否则从空数组开始
-      let existingResults = [];
-      if (fs.existsSync(this.totalJsonPath)) {
-        const fileContent = fs.readFileSync(this.totalJsonPath, 'utf8').trim();
-        if (fileContent) {
-          try {
-            existingResults = JSON.parse(fileContent);
-          } catch (e) {
-            existingResults = [];
-          }
+    // 无论是否有问题都落盘：零问题时写入 []（或保持既有内容），
+    // 保证"检查成功"与"结果文件存在"一致，聚合方不至将清洁文档误判为 skipped
+    // 确保总JSON文件的父目录存在
+    const parentDir = path.dirname(this.totalJsonPath);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+
+    // 读取总JSON文件：文件存在且非空 → 解析为数组；否则从空数组开始
+    let existingResults = [];
+    if (fs.existsSync(this.totalJsonPath)) {
+      const fileContent = fs.readFileSync(this.totalJsonPath, 'utf8').trim();
+      if (fileContent) {
+        try {
+          existingResults = JSON.parse(fileContent);
+        } catch (e) {
+          existingResults = [];
         }
       }
-
-      // 合并：追加本次检查结果
-      const merged = [...existingResults, ...results];
-      fs.writeFileSync(this.totalJsonPath, JSON.stringify(merged, null, 2), 'utf8');
     }
+
+    // 合并：追加本次检查结果
+    const merged = [...existingResults, ...results];
+    fs.writeFileSync(this.totalJsonPath, JSON.stringify(merged, null, 2), 'utf8');
 
     return results;
   }
@@ -466,7 +467,7 @@ class TagChecker {
 
       return {
         rule_group: '通用规则',
-        rule_item: 'StaticCheck_compliance',
+        rule_item: 'compliance-check',
         rule_type: '规范性',
         rule_name: error.ruleName || '芯片标签的合法性检查',
         snippet: lineContent.trim(),

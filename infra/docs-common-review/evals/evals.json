@@ -1,0 +1,84 @@
+{
+  "skill_name": "docs-common-review",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "门禁模式端到端：纯脚本管线与聚合报告（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "用门禁模式检查 infra/docs-common-review/evals/dataset/data_test.md。",
+      "expected_output": "1. 读取 workflows/ci-gated-review.md 并按其执行：工具 5 项每项一条 Bash（--checks=<单项>、--output 逐项 tool-based-<检查项>-result.json、计时写 timing/<检查项>.txt；markdownlint 先行预热脚本缓存，其余 4 项与合规脚本块在同一条消息中并发发出，禁止串行排队）→ tag_checker.js 与 encoding_format_checker.js 逐文件直调（传仓名，合并写入 compliance-gate-result.json）→ aggregate.js --mode=ci-gated --timing=<timing目录>。全程零模型逐行检查、零 subagent、零范围询问。\n2. 最终产物落在待检文档同级 output/：evals/dataset/output/docs-common-review-result.json，结构 {summary, issues}：summary.mode=ci-gated 且含 by_level/by_check/check_timing_ms（≥7 个条目，来自 timing 目录各文件）/gate（passed/blocking_issues/warning_issues）；issues 每条为 11 字段，rule_group 全部为\"通用规则\"，location 为 绝对路径:行号 且不带 vscode:// 等协议前缀、反斜杠统一为 /；排序为 文件名→行号→检查项→描述。\n3. 汇报门禁判定（拦截项问题逐条 + markdownlint/codespell 告警计数）与各检查项耗时，及 .doctools 白名单误报引导；随后询问是否导出 csv/md（用户未选择则仅保留 JSON），导出后清理 <项目根>/output/ 中间产物。外链检查结果受网络影响，结构断言不依赖具体链接结论。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "未指定模式时必须先弹选择框",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "帮我质检一下 infra/docs-common-review/evals/dataset/data_test.md。",
+      "expected_output": "用户未指定模式：必须先以可勾选（单选）选项形式询问用户（全量 / 门禁 / 自定义，各附一句话特点说明），禁止默认选某个模式直接执行检查；用户选择后读取对应 workflows/*.md 再执行。仅当用户明确跳过选择时才按门禁模式执行并告知。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 3,
+      "title": "自定义模式：别名映射生效与非法检查项拦截",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "自定义模式检查 infra/docs-common-review/evals/dataset/data_test.md，检查项用 tag_closed 和 toc_check。",
+      "expected_output": "tag_closed 命中 SKILL.md 别名映射表 → canonical 名 tag-closed-check；toc_check 是 run_check.js 底层支持但 SKILL.md 明确声明本家族不暴露的检查项（toc-check、file-naming-check 等），视为非法输入 → 停止执行，向用户说明非法并列出全部 9 项合法检查项名，待修正后重试；禁止模糊猜测执行、禁止静默忽略非法项、禁止对非法项编造结果。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "自定义模式：未给清单时先弹多选框",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "自定义模式检查 infra/docs-common-review/evals/dataset/data_test.md。",
+      "expected_output": "用户未给出检查项清单：必须先以可勾选（多选）选项形式询问，勾选项为 9 项 canonical 检查项（各附一句话功能说明）；仅当用户明确跳过选择时才全选执行。按勾选结果确定性执行：脚本组逐项独立调用 run_check.js --checks=<单项>（每项独立结果文件与耗时记录）；勾选 filename-check 时逐目标运行并合并为单一 filename-check-result.json；模型项派 subagent 并记录耗时。聚合 --inputs 只传本次实际执行项的结果文件（不得混入历史遗留文件），--mode=custom --timing，产物落待检文档同级 output/；汇报后询问 csv/md 导出并清理中间产物。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 5,
+      "title": "全量模式：全并发编排、计时与完整性校验（关键能力）",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "全量模式检查 infra/docs-common-review/evals/dataset/data_test.md。",
+      "expected_output": "1. 按 workflows/full-review.md 执行：第 1 步预清理历史中间产物后，单条消息并发启动 markdownlint 工具项（预热缓存）+ filename 各目标 Bash + punctuation / compliance / aicheck 三个 subagent（提示词预指定检查对象/项目根/全量范围、免交互；Agent 与 Bash 混合同发，aicheck 不等待任何其他检查项、禁止出现\"等待 compliance 后再派\"的排队步骤）→ markdownlint 返回后其余 4 个工具项同消息并发 → 各检查项计时写 output/timing/ 独立文件（filename 为 filename-check-<n> 每目标一条，模型项在完成通知后补写）→ filename merge_json 合并为单一 filename-check-result.json 并删 filename-<n>/ → 完整性校验（9 项期望结果文件，缺失重派一次，仍缺失在汇报中标注）→ aggregate.js --mode=full --timing=<timing目录> → 汇总输出。\n2. 各检查项耗时嵌入 summary.check_timing_ms（覆盖全部实际执行项）；产物落待检文档同级 output/（evals/dataset/output/docs-common-review-result.json），结构 {summary, issues}（summary 无 gate 属正常——仅 ci-gated 计算门禁判定；issues 11 字段、rule_group=通用规则、location 无协议前缀且正斜杠、排序 文件名→行号→检查项→描述）；汇报后询问 csv/md 导出，随后清理中间产物。\n3. 各模型项结果由对应原子 skill 真实产出（读其 SKILL.md 全流程执行），主 Agent 不得代跑或改写其检出内容。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 6,
+      "title": "门禁模式清洁文档回归：零问题文档门禁判定必须为通过（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": ["A2"],
+        "eval_mode": "text"
+      },
+      "prompt": "用门禁模式检查 infra/docs-common-review/evals/dataset/clean_doc.md。",
+      "expected_output": "1. 按 workflows/ci-gated-review.md 正常执行（含 codespell 词典前置与脚本缓存预热），本数据集不埋任何问题，全部检查项应零检出。\n2. 零问题也必须落盘：5 个工具项结果文件均为 []；合规脚本 tag_checker.js 与 encoding_format_checker.js 在零问题时同样写入 []（compliance-gate-result.json 必须存在，脚本保证），不得出现任何检查项结果文件缺失。\n3. 聚合报告 summary.gate.passed=true、blocking_issues=0、warning_issues=0、inputs.skipped=0，issues 为空数组；汇报\"门禁判定：通过、0 问题\"。若因结果文件缺失导致 skipped 非空、passed=false（清洁文档误红），即为回归失败。\n4. 其余流程（计时、产物落待检文档同级 output/、csv/md 询问、中间产物清理）与常规门禁模式一致。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}

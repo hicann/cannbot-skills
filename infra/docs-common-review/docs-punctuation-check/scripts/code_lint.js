@@ -1296,7 +1296,7 @@ function main() {
             for (const issue of block.issues) {
                 allResults.push({
                     rule_group: '通用规则',
-                    rule_item: 'StaticCheck_punctuation',
+                    rule_item: 'punctuation-check',
                     rule_type: '规范性',
                     rule_name: '代码块格式检查',
                     snippet: issue.source,

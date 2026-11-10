@@ -7,7 +7,8 @@ description: |
   - Markdown 中英文混排空格检查
   - Markdown 标点符号混用、缺失、配对检查
   - Markdown 路径格式规范性检查
-  触发词：Markdown内容、质量检查、质检、标点检查、空格检查
+  触发词：标点检查、空格检查、中英文混排、标点符号检查
+  仅承接用户点名的标点/空格类专项检查；通用质检（多检查项组合、全量模式、门禁模式）请使用统一入口 docs-common-review。
 version: 1.0.0
 metadata:
   author: Huawei Technologies Co., Ltd.
@@ -292,7 +293,7 @@ metadata:
 | 遗漏其他位置的错误 | 只报告第一处错误，忽略同一规则的后续错误 | 全面检查文档，同一规则的所有问题都要独立报告 |
 | 输出多余内容 | 输出总结、表格、解释 | TL;DR, 仅输出 JSON |
 | 心算行号 | 凭记忆或计数推算问题行号 | 从带行号的文档内容中直接获取行号 |
-| 忽略白名单例外 | 对产品名称白名单中的名称也报空格违规 | 规则3明确说明白名单例外，需读取白名单后判断 |
+| 忽略白名单例外 | 对产品名称白名单中的名称也报空格违规 | 先读取步骤1.4的产品名称白名单（references/product_names_whitelist.json），白名单内名称不判定为空格违规 |
 | 凭记忆扫描 | 读一遍文档后凭印象跳跃式扫描，不逐行对照原文 | 必须对照带行号的原文逐行逐字扫描，每条结论必须在原文中精确定位字符后再判定 |
 | 跳跃式检查 | 看到哪算哪，跳过行或跳过规则维度 | 按行号从小到大、每行从左到右逐字符扫描，每条规则的每个维度都必须逐一执行 |
 | 未验证结论 | 发现问题后不回原文确认空格数量、行号等细节就写入结果 | 每个问题必须回到原文逐字符确认（如确认是1个还是2个空格），行号从带行号文档内容中直接获取 |
@@ -311,8 +312,8 @@ docs-punctuation-check/
 │   ├── mixed_language_checker.js (中英文混用检查)
 │   ├── excess_punctuation_checker.js (多余标点符号检查)
 │   ├── pair_punctuation_checker.js (成对标点符号检查)
-│   ├── path_checker.js (检查规则定义)
-│   └── miss_punctuation_checker.js (产品名称白名单)
+│   ├── path_checker.js (路径符号检查)
+│   └── code_lint.js (代码块格式检查)
 └── assets/
     └── exclude-files.json (Markdown文件白名单)
 ```

@@ -1,0 +1,32 @@
+{
+  "markdownlint": {
+    "rule_name": "Markdown 语法检查",
+    "rule_type": "规范性",
+    "rule_level": null,
+    "suggestion": "修复对应 MD 规则问题：{message}"
+  },
+  "tag-closed-check": {
+    "rule_name": "HTML 标签闭合检查",
+    "rule_type": "正确性",
+    "rule_level": "严重",
+    "suggestion": "请补全或修正未闭合/未配对的 HTML 标签「{content}」"
+  },
+  "link-validity-check": {
+    "rule_name": "链接有效性检查",
+    "rule_type": "正确性",
+    "rule_level": "严重",
+    "suggestion": "请修正链接「{content}」或确认目标可访问；确认为预期保留的链接时，可将其加入项目 .doctools/url.whitelist.txt 白名单"
+  },
+  "resource-existence-check": {
+    "rule_name": "资源存在性检查",
+    "rule_type": "正确性",
+    "rule_level": "严重",
+    "suggestion": "请确认资源路径「{content}」正确或补齐资源文件；确认为预期保留的引用时，可将其加入项目 .doctools/url.whitelist.txt 白名单"
+  },
+  "codespell-check": {
+    "rule_name": "单词拼写检查",
+    "rule_type": "正确性",
+    "rule_level": "提示",
+    "suggestion": "请修正单词拼写「{content}」；如为专有名词、术语或常用英文单词，请将其加入项目 .doctools/codespell.whitelist.txt 白名单"
+  }
+}

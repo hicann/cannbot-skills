@@ -28,7 +28,7 @@ class MarkdownFilenameChecker:
         self.result: List[Dict[str, Any]] = []
         self.rule_info = {
             "rule_no": "1",
-            "rule_item_name": "StaticCheck_filename_check",
+            "rule_item_name": "filename-check",
             "rule_name": "Filename Check",
             "rule_type": "规范性",
             "rule_level": "提示"

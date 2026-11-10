@@ -5,15 +5,15 @@
 - 仅使用本文件中明确定义的规则进行检查
 - 规则名称、规则级别必须与本文件完全一致
 
-## 1. 规范性
+## 1. LLM 规则检查（SKILL.md 步骤 2.1.3.1 二次校验执行）
 
 检查 Markdown 文档中标点符号和空格使用是否符合统一规范。此类检查仅基于文档内容，不需要读取代码。
 
 | 规则项名称 | 规则名称 | 规则类型 | 描述 | 级别 |
 | --- | --- | --- | --- | --- |
-| StaticCheck_punctuation | 英文内容中文符号检查 | 规范性 | 检查英文内容中是否使用了中文符号（下划线、短横线、标点符号） | 一般 |
-| StaticCheck_punctuation | 中英文标点混用检查 | 规范性 | 检查段落里中英文标点符号是否混用 | 一般 |
-| StaticCheck_punctuation | 代码块检查 | 规范性 | 检查代码块里的代码坏味道 | 一般 |
+| punctuation-check | 英文内容中文符号检查 | 规范性 | 检查英文内容中是否使用了中文符号（下划线、短横线、标点符号） | 一般 |
+| punctuation-check | 中英文标点混用检查 | 规范性 | 检查段落里中英文标点符号是否混用 | 一般 |
+| punctuation-check | 代码块检查 | 规范性 | 检查代码块里的代码坏味道 | 一般 |
 
 ### 英文内容中文符号检查
 
@@ -31,5 +31,21 @@
 - 正例2：please submit them via Issues.
 - 【反例1：中文语境中使用英文冒号:输出（中文段落用英文标点）】
 - 【反例2：please submit them via Issues。（英文段落用中文标点）】
+
+## 2. 工具检查规则（SKILL.md 步骤 2.1.1 ~ 2.1.7 由脚本执行）
+
+以下规则由 scripts/ 目录下对应脚本执行，脚本输出的 rule_name、rule_type、rule_level 必须与本节定义完全一致，脚本检出的问题直接追加写入最终结果文件：
+
+| 规则项名称 | 规则名称 | 规则类型 | 描述 | 级别 |
+| --- | --- | --- | --- | --- |
+| punctuation-check | 多余空格 | 规范性 | 检查文档中的多余空格（scripts/excess_space_checker.js；产品名称白名单内的名称例外） | 提示 |
+| punctuation-check | 缺少空格 | 规范性 | 检查中英文之间等缺失的空格（scripts/miss_space_checker.js） | 提示 |
+| punctuation-check | 中英文符号混用 | 规范性 | 检查段落里中英文标点符号混用（scripts/mixed_language_checker.js；其结果须按第 1 节"中英文标点混用检查"二次校验后取舍） | 一般 |
+| punctuation-check | 多余标点符号 | 规范性 | 检查连续重复或多余的标点符号（scripts/excess_punctuation_checker.js） | 严重 |
+| punctuation-check | 成对标点符号不完整 | 规范性 | 检查成对标点（引号、括号等）缺失另一半（scripts/pair_punctuation_checker.js） | 一般 |
+| punctuation-check | 路径符号使用错误 | 规范性 | 检查文件路径中的符号使用错误（scripts/path_checker.js） | 提示 |
+| punctuation-check | 代码块格式检查 | 规范性 | 检查代码块内的格式问题（scripts/code_lint.js） | 提示 |
+
+> 第 2 节"中英文符号混用"是第 1 节"中英文标点混用检查"的机器检出部分、"代码块格式检查"是"代码块检查"的机器检出部分：脚本先检出，再按第 1 节对应规则二次校验真伪；两节规则名各自独立使用，禁止互相替换。
 
 ---

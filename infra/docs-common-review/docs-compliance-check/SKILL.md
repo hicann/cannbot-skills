@@ -2,12 +2,12 @@
 name: docs-compliance-check
 description: |
   对Ascend生态开发文档、API文档等Markdown（MD）文档进行合规性质检，基于预设规则检测文档中的规范性问题。适用于对"一段Markdown内容、一个Markdown文档、多个Markdown文档（包输入一个文档目录）"三种场景下Markdown内容的语法规范性检查和内容正确性检查，并输出结构化问题列表及修改建议。当用户提到以下场景时触发：
-  - 检查/质检/审核/验证 Markdown 文档质量
   - 检查/质检/审核 Markdown 文档是否符合合规性规范
   - Markdown 内容规范性检查
   - Markdown 文档术语、表格、隐私合规性检查
   - 审查/检查 Markdown 文档合规性
-  触发词：Markdown内容、质量检查、质检
+  触发词：合规检查、术语检查、敏感词检查、标签检查、编码格式检查、table规范、目录层级检查
+  仅承接用户点名的合规类专项检查；通用质检（多检查项组合、全量模式、门禁模式）请使用统一入口 docs-common-review。
 version: 1.0.0
 metadata:
   author: Huawei Technologies Co., Ltd.
@@ -44,6 +44,13 @@ metadata:
 - **禁止**将同一规则的多个问题合并为一个问题项
 - 每个问题位置需要独立的 line_number 和 snippet
 - 示例：如果"术语检查"在文档中有3处术语错误，应报告独立的问题项，每个指向不同的 line_number
+
+### 5. 双源互补、禁止删除已检出的真实问题
+
+- LLM 规则检查（步骤 2.2，依据 `references/rules.md` 第 1 节及其引用的参考资料）与脚本检查（步骤 2.3 ~ 2.7，依据 `references/rules.md` 第 2 节）相互独立、互为补充
+- "敏感词检查"存在两个数据源：LLM 依据 sensitive-words-internal.md（全部章节），脚本 prohibited_words_checker.js 依据 references/prohibited-words.json 机器词库；两个词库内容不完全相同，**任一来源检出的真实问题都必须写入最终结果**
+- **已写入结果文件的真实问题禁止删除**；仅当确认误报（如命中参考资料中的例外说明、词在代码块内等）才可剔除，且必须在上下文中保留剔除依据
+- **严禁**以"脚本未检出"为由删除 LLM 依据规则文件检出的真实问题，**严禁**以"LLM 未检出"为由删除脚本写出的结果，反之亦然
 
 ## 输入
 
@@ -152,6 +159,8 @@ metadata:
 
 - **此时读取**规则文件 `references/rules.md`，以及规则中引用的参考文件（如 `terms-and-abbreviations.md`、`sensitive-words-internal.md` 等，**仅在规则需要时读取**）
     - `terms-and-abbreviations.md`术语表需要从文档内容中获取**昇腾术语表**、**产品名术语**、**其它中文术语**三个章节的内容，并从内容中读取三个官方页面或者文件的内容。
+    - **术语数据源有效性验证（强制）**：逐一核验三个术语数据源的实际返回内容，必须确认取到的是术语表格/词条数据本体；若返回内容是 JS 提示页（如"Please Enable JavaScript and Cookie"）、错误页、登录页或空内容，判定该数据源**获取失败**。
+    - **数据源获取失败时的处理**：(1) 记录获取失败的数据源名称；(2) 仅基于成功获取的数据源执行术语检查（全部失败则术语检查无法执行）；(3) 在第 3 步汇总输出时向用户如实说明数据源缺失情况与影响范围。**严禁**在数据源获取失败、术语检查未实际执行或未完整执行时，输出"术语检查：未发现问题"或其他无问题的结论。
 - 将读取到的规则保留在上下文中直接传递给后续步骤
 
 #### 1.3 生成文档列表
@@ -177,17 +186,35 @@ metadata:
 
 ### 第 2 步：执行分析
 
+**脚本执行顺序（强制，禁止调整）**：步骤 2.3 ~ 2.7 的检查脚本必须严格按下表顺序**依次**执行，禁止调整顺序、禁止并行执行、禁止因用户强调"重点检查某项"而改变顺序；某步骤被用户参数跳过（`--skip-tag`/`--skip-encoding`）时，按编号顺序继续执行下一个未跳过的步骤。每个脚本执行完毕必须先输出对应 CHECKPOINT，再执行下一个脚本。脚本检出的结果（`rule_name`/`rule_type`/`rule_level`）以 `references/rules.md` 第 2 节定义为准。
+
+| 执行顺序 | 步骤 | 脚本 | 对应规则（rules.md 第 2 节） |
+| --- | --- | --- | --- |
+| 1 | 2.3 | scripts/tag_checker.js | 芯片标签的合法性检查、位置标签的合法性检查 |
+| 2 | 2.4 | scripts/encoding_format_checker.js | MD编码格式检查 |
+| 3 | 2.5 | scripts/prohibited_words_checker.js | 敏感词检查（机器词库部分） |
+| 4 | 2.6 | scripts/null_cell_checker.js | table规范 |
+| 5 | 2.7 | scripts/catalog_num_checker.js | 单md层级合法 |
+
 #### 2.1 基础准备
 
 - 确保 `output` 目录存在
 
 完成后必须在对话中输出 [CHECKPOINT: 基础准备完成]
 
-#### 2.2 批量检查文档
+#### 2.2 批量检查文档（LLM 规则检查）
+
+本步骤由 LLM 逐条执行 `references/rules.md` 第 1 节定义的**全部 3 条规则**，缺一不可：
+
+| 规则名称 | 数据来源 | 强制要求 |
+| --- | --- | --- |
+| 术语检查 | terms-and-abbreviations.md 引用的三个官方术语源 | 数据源获取失败时按步骤 1.2 的失败处理执行，禁止假报"未发现问题" |
+| 隐私检查 | rules.md 隐私检查定义（工号/IP/姓名/邮箱/手机号 + 错别字映射） | **无对应脚本，只能由 LLM 在本步骤逐行执行**，漏检即为执行不完整 |
+| 敏感词检查 | sensitive-words-internal.md 全部章节 | 与步骤 2.5 脚本（prohibited-words.json）双源互补，本步骤不得因脚本存在而跳过或缩小范围 |
 
 对于每个待检查文档：先用带行号方式读取本文件内容，逐条应用规则；行号须从本次读取的带行号内容中获取。
 
-1. 获取当前规则分组下的所有规则文件列表
+1. LLM 规则集合固定为上表 3 条规则，**严禁跳过其中任何一条**（仅当用户明确要求跳过某条规则时才可跳过该条）
 2. 对于每个规则：
     - **读取规则描述**：直接从上下文中的规则数据获取
     - **读取参考资料**：直接从上下文中的参考资料获取（如果该规则引用了参考文件）
@@ -197,6 +224,7 @@ metadata:
         - 如果不匹配，则剔除该问题结果
     - **保留结果**：将检查结果保存到 `output/compliance-markdown-check-result.json` 文件中
         - 如果是非问题或者未发现问题，禁止将结果保存到 `output/compliance-markdown-check-result.json` 文件中
+3. 每处理完一个文件的一条规则，必须按"逐行扫描执行规范"第 4 节追加 `[COVERED] <file_name> | <rule_name>` 记录；**全部 [COVERED] 记录齐全（文档列表 × 3 条 LLM 规则）后才允许进入步骤 2.3**
 
 完成后必须在对话中输出 [CHECKPOINT: 批量检查文档完成]
 
@@ -240,6 +268,9 @@ metadata:
 完成后必须在对话中输出 [CHECKPOINT: Markdown目录层级检查完成]
 
 ### 第 3 步：汇总输出
+
+- 汇总 `output/compliance-markdown-check-result.json`：LLM 规则检查（2.2）与脚本检查（2.3 ~ 2.7）的结果均须完整保留，禁止互相删除（见重要原则第 5 条）
+- 若步骤 1.2 存在获取失败的术语数据源，必须在本步如实向用户说明失败的数据源名称与影响范围（如"昇腾术语表获取失败，本次术语检查仅基于其余数据源执行"），禁止隐瞒
 
 完成后必须在对话中输出 [CHECKPOINT: 汇总输出完成]
 
@@ -303,9 +334,9 @@ metadata:
 docs-compliance-check/
 ├── SKILL.md (本文件)
 ├── references/
-│   ├── rules.md (检查规则定义)
-│   ├── sensitive-words-internal.md (敏感词和不规范用语（对内）)
-│   ├── sensitive-words-external.md (敏感词和不规范用语（对外）)
+│   ├── rules.md (检查规则定义：第1节 LLM 规则、第2节工具检查规则)
+│   ├── prohibited-words.json (机器敏感词词库，prohibited_words_checker.js 使用)
+│   ├── sensitive-words-internal.md (敏感词和不规范用语（对内），LLM 敏感词检查依据)
 │   └── terms-and-abbreviations.md (术语和缩略语)
 ├── scripts/
 │   ├── tag_checker.js (标签检查脚本)

@@ -1,0 +1,66 @@
+{
+  "skill_name": "docs-tool-based-check",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "五项静态检查全量执行与结果汇报（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "用工具链静态检查 infra/docs-common-review/docs-tool-based-check/evals/dataset/static_check_sample.md，五项全查。",
+      "expected_output": "1. 按 SKILL.md 执行流程：用户已指定范围（全部 5 项，无需勾选询问）→ 调用 helper：node <技能目录>/scripts/run_check.js --targets=<该文件绝对路径>（--checks 显式传全部 5 项，或不传而使用 config.json 默认，两者均可）→ 读取结果文件汇报。\n2. 最终结果仅写入 output/tool-based-check-result.json，为 12 字段统一 JSON（rule_group 固定\"工具检查\"，rule_item 为 checkType 原值，line_number 从脚本 position 提取，location 为 绝对路径:行号，不带 vscode:// 等协议前缀）。\n3. golden（对 pin 版脚本 c5ccfec7 + 内置社区白名单实测采集；数据集为离线确定性样例，共 11 项：严重 6、提示 3、一般 2）：\n   - markdownlint 4 项（规范性/Markdown 语法检查，级别按 references/markdownlint-severity.json 由规则号查出）：MD001（严重）第 7 行，snippet 为\"### 跳级标题\"；MD012（提示）第 11 行，snippet 为空字符串（问题行为空行）；MD040（一般）第 14 行，snippet 为\"```\"；MD041（一般）第 1 行，snippet 为文档首行文本。\n   - tag-closed-check 2 项（正确性/HTML 标签闭合检查/严重）：均为第 23 行，同一行两个未闭合的 <th> 各报一条，snippet 为\"\\<th>\"，description 为\"Html 标签匹配失败：\\<th>\"。\n   - link-validity-check 2 项（正确性/链接有效性检查/严重）：第 30 行锚点\"#不存在的锚点\"无法访问；第 32 行本地路径链接\"queshi.md\"无法访问；第 28 行指向本节的有效锚点链接不得报问题。\n   - resource-existence-check 1 项（正确性/资源存在性检查/严重）：第 38 行图片资源\"tupian/jiagou.png\"无法访问。\n   - codespell-check 2 项（正确性/单词拼写检查/提示）：第 42 行\"Krnel\"与\"tesst\"，各独立一条。\n4. 每条独立报告（suggestion 按检查项模板生成，如 markdownlint 为\"修复对应 MD 规则问题：<message 原文>\"），0 增删改写；执行期间保持静默，完成后汇报统计与逐条问题。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "检查范围未指定时先勾选询问",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "帮我检查一下 infra/docs-common-review/docs-tool-based-check/evals/dataset/static_check_sample.md 的文档质量。",
+      "expected_output": "用户未指定检查项范围：必须先以可勾选（多选）的选项形式询问用户，勾选项共 6 个（5 个检查项 markdownlint、tag-closed-check、link-validity-check、resource-existence-check、codespell-check 逐项勾选，外加\"全部 5 项（默认）\"勾选项）；禁止不询问直接使用 config.json 默认范围运行检查脚本；仅当用户明确跳过选择时才回退 config.json 默认。按用户勾选结果确定本次范围，仅本次生效，并可提示如需持久化可写入 config.json。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 3,
+      "title": "非法检查项校验",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我想在 config.json 的 ci 里加上 toc-check，帮我检查一下文档的 toc 有没有问题。",
+      "expected_output": "toc-check 不在本技能允许的检查项范围内（合法值仅 markdownlint、tag-closed-check、link-validity-check、resource-existence-check、codespell-check 共 5 项；脚本虽支持 toc-check/file-naming-check/file-naming-consistency-check 但本技能不暴露），视为非法输入：拒绝将该值写入 config.json，停止执行，向用户说明非法值并列出全部合法值，待用户修正后重试；不得带非法项运行 helper（helper 也会以\"非法检查项\"报错退出），也不得编造 toc 检查结果。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 4,
+      "title": "环境缺失提示",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我本地没装 node，先帮我跑一下 infra/docs-common-review/docs-tool-based-check/evals/dataset/static_check_sample.md 的工具链静态检查吧，结果随便给我就行。",
+      "expected_output": "node 为 helper 脚本（scripts/run_check.js）与检查脚本的必需运行环境，运行环境以用户声明的本地环境为准：用户明确声明本地未安装 node 时，必须立即停止执行检查（不运行 helper、不产出任何检查结果、不进入检查项范围询问），无论当前执行环境（agent 沙箱/CI）中 node 是否可用，均禁止以执行环境的 node 替代用户本地环境继续执行（不得出现\"本执行环境可用，你本机不用装\"一类回复），并向用户提供配套安装命令（Windows: winget install OpenJS.NodeJS.LTS 或 nodejs.org 下载；Ubuntu/Debian: sudo apt-get install -y nodejs npm；EulerOS/openEuler: sudo yum install -y nodejs npm），仅在用户确认其本地 node 可用后才继续执行。不得在环境缺失时编造或虚构任何检查结果。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}

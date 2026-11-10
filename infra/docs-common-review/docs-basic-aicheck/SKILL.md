@@ -2,13 +2,13 @@
 name: docs-basic-aicheck
 description: |
   对Ascend生态开发文档、API文档等Markdown（MD）文档进行质量检查，确保其质量、结构完整性、语言通顺性、规范性与正确性。适用于对"一段Markdown内容、一个Markdown文档、多个Markdown文档（包输入一个文档目录）"三种场景下Markdown内容的语法规范性检查和内容正确性检查，并输出结构化问题列表及修改建议。当用户提到以下场景时触发：
-  - 检查/质检/审核/验证 Markdown 文档质量
   - 检查/质检/审核 Markdown 文档写作风格一致性检查 
   - Markdown 内容一致性检查
   - Markdown 内容冗余性检查
   - Markdown 内容可读性检查
   - Markdown 代码段可读性检查
-  触发词：Markdown内容、质量检查、质检、一致性检查、冗余性检查、可读性检查
+  触发词：一致性检查、冗余性检查、可读性检查、写作风格检查、语义质检
+  仅承接用户点名的一致性/冗余/可读性等语义类专项检查；通用质检（多检查项组合、全量模式、门禁模式）请使用统一入口 docs-common-review。
 version: 1.0.0
 metadata:
   author: Huawei Technologies Co., Ltd.
@@ -167,9 +167,6 @@ metadata:
 - 检查 `output/general-markdown-check-result.json` 文件是否存在
     - 如果存在，删除该文件，避免历史检查结果影响本次检查
     - 如果不存在，跳过此步骤
-- 检查 `output/tag_check_result.json` 文件是否存在
-    - 如果存在，删除该文件，避免历史标签检查结果影响本次检查
-    - 如果不存在，跳过此步骤
 
 #### 1.6 批量读取待检查文档
 
@@ -208,7 +205,7 @@ metadata:
 - 调用当前技能目录下 `scripts/repeate_char_checker.js` 脚本
 - 命令格式：`node <技能目录绝对路径>/scripts/repeate_char_checker.js <md文件绝对路径> <项目根目录绝对路径>/output/general-markdown-check-result.json`
 
-完成后必须在对话中输出 [CHECKPOINT: 标签检查完成]
+完成后必须在对话中输出 [CHECKPOINT: 重复字/单词检查完成]
 
 ### 第 3 步：汇总输出
 
