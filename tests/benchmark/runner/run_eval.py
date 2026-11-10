@@ -328,8 +328,7 @@ class ServeManager:
                 )
                 return True
         print(f"  [SERVE] 启动失败, 日志: {self._log_path}")
-        self._proc = None
-        self._cwd = None
+        self._terminate_proc()
         self._close_log_fh()
         return False
 

@@ -204,6 +204,48 @@ class TestServeManagerModelFlag:
         return captured["cmd"], workdir
 
 
+class TestServeManagerStartupFailureCleanup:
+    @staticmethod
+    def _launch_with_failed_health_check(monkeypatch, tmp_path, proc):
+        monkeypatch.setattr(run_eval, "RESULTS_DIR", str(tmp_path / "results"))
+        monkeypatch.setattr(run_eval.time, "sleep", lambda *a, **k: None)
+        monkeypatch.setattr(run_eval.subprocess, "Popen", lambda *a, **k: proc)
+        monkeypatch.setattr(ServeManager, "_health_check", lambda self: False)
+        return ServeManager(port=59998, url="http://127.0.0.1:59998")
+
+    @pytest.mark.parametrize(
+        ("wait_times_out", "expected_events"),
+        [(False, ["terminate", ("wait", 5)]),
+         (True, ["terminate", ("wait", 5), "kill", ("wait", None)])],
+    )
+    def test_failed_health_check_reaps_child(
+            self, monkeypatch, tmp_path, wait_times_out, expected_events):
+        class FakeProc:
+            def __init__(self):
+                self.events = []
+
+            def terminate(self):
+                self.events.append("terminate")
+
+            def wait(self, timeout=None):
+                self.events.append(("wait", timeout))
+                if wait_times_out and timeout == 5:
+                    raise run_eval.subprocess.TimeoutExpired("opencode serve", timeout)
+                return 0
+
+            def kill(self):
+                self.events.append("kill")
+
+        proc = FakeProc()
+        mgr = TestServeManagerStartupFailureCleanup._launch_with_failed_health_check(
+            monkeypatch, tmp_path, proc)
+
+        assert mgr._launch(str(tmp_path)) is False
+        assert proc.events == expected_events
+        assert mgr._proc is None
+        assert mgr.cwd is None
+
+
 class _FakeResp:
     def __init__(self, data):
         self._data = data
