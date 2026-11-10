@@ -68,7 +68,7 @@ RPT  本次调用内的逻辑组数            IRS / ORS  相邻 repeat 起点�
 
 后五个由 executor 填写，template 只读；取值由实际布局决定，单层没有固定组合。
 四个 stride 是字节步长，不是空隙或本轮切片长度；repeat 不是 Ring step 数。
-填写前必读 `references/09-template-data-params.md`，分别推导输入、输出和 scratch。
+填写前加载 `hccl-aicpu-best-practice` Skill，阅读其 `09-template-data-params.md`，分别推导输入、输出和 scratch。
 
 自定义符号在第 5 章「切片」里先定义，之后直接引用，例如：
 
@@ -195,11 +195,11 @@ inFromScratch     输入已经在 CCL buffer 里（仍须核对生产者布局�
 
 ## 1. 元信息
 
-> 判定值写在本行第一个反引号中，补充说明放在外面。架构决策规则见 `references/07-rules.md` §11。
+> 判定值写在本行第一个反引号中，补充说明放在外面。架构决策规则见 `hccl-aicpu-best-practice` Skill 的 `07-rules.md` §11。
 
 > 填写提示：类名 = `InsTemp` + 算子 + 拓扑 + 变体。文件名是类名的 snake_case，
 > 但仓内习惯保留 `1D` 的大写 D（`ins_temp_all_reduce_mesh_1D_one_shot`），跟同目录邻居保持一致。
-> 不知道该叫什么就先 `TBD`，`scripts/list_templates.py --op <算子>` 可以看现有命名。
+> 不知道该叫什么就先 `TBD`；如需核对现有命名，加载 `hccl-aicpu-best-practice` Skill 后运行其 `list_templates.py --op <算子>`。
 
 | 字段 | 值 | 说明 |
 |---|---|---|
@@ -329,9 +329,9 @@ OUT ： <本 rank 输出的形态与大小>
 > `RPT=1, IRS=ORS=0` 时循环自动退化，零代价；漏写的话，这个 template 一旦被分层 executor
 > 当 intra/inter 构件复用，就只会处理第 0 块数据。
 > 确定只用于单层、也不打算被复用的可以省，在本章写明理由（`check_spec.py` 会给一条 WARN 提醒）。
-> 取值与特殊消费方式见 `references/09-template-data-params.md`。输入和输出分别核对 rank 项与 repeat 项。
+> 取值与特殊消费方式见 `hccl-aicpu-best-practice` Skill 的 `09-template-data-params.md`。输入和输出分别核对 rank 项与 repeat 项。
 
-**量化样例（必填）**：按 `references/09-template-data-params.md` §9 的格式添加一个或多个
+**量化样例（必填）**：按 `hccl-aicpu-best-practice` Skill 的 `09-template-data-params.md` §9 的格式添加一个或多个
 `layout-check` JSON 代码块。每条 case 的 expected 从布局独立推导，formula 对应拟实现/实际 C++ 地址表达式。
 覆盖 `L<D`、非零 base、非零算法 rank、非零 stride 与多 repeat 的适用组合；Ring 至少有 `ISS>0 && i>0`。
 不支持的组合写明依据。运行 `python3 "$SKILL_DIR/scripts/check_layout.py" <spec.md>`。

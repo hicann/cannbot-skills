@@ -64,7 +64,7 @@ ALL_PRIMS = WRITE_PRIMS + READ_PRIMS + LOCAL_PRIMS
 
 # ---------------------------------------------------------------------------
 # 规则登记表：ID -> (等级, 适用范围, 一句话规则)
-# 跨能力维护登记见 ../hccl-aicpu-best-practice/references/07-rules.md；
+# 跨能力维护登记见 hccl-aicpu-best-practice Skill 的 07-rules.md；
 # 本脚本可独立检查设计规格，不在运行时加载实现 Skill。
 #
 # 与 check_template.py 的差别：spec 是**新写**的文档，不存在存量欠债，
@@ -155,9 +155,7 @@ def print_rules(rid=None):
         if key not in RULES:
             print("check_spec.py 不检查这条规则：%s" % rid)
             print("本脚本涵盖：%s" % "、".join(sorted(RULES)))
-            print(
-                "跨能力维护登记见 ../hccl-aicpu-best-practice/references/07-rules.md。"
-            )
+            print("跨能力维护登记见 hccl-aicpu-best-practice Skill 的 07-rules.md。")
             return 1
         level, scope, text = RULES[key]
         print("%s  [%s]  适用: %s" % (key, level, scope))
@@ -165,7 +163,7 @@ def print_rules(rid=None):
         print(
             "  设计说明: references/07-dataflow-spec.md、references/08-algorithm-design.md"
         )
-        print("  跨能力维护登记: ../hccl-aicpu-best-practice/references/07-rules.md")
+        print("  跨能力维护登记: hccl-aicpu-best-practice Skill 的 07-rules.md")
         return 0
     print(
         "check_spec.py 能自动检查的规则（按稳定 ID 查询；跨能力规则登记由仓库维护）："
@@ -537,7 +535,7 @@ def check(path):
         rep.add(
             WARN,
             "第 5 章「切片」没有声明 `RPT`（repeat 次数）",
-            "按 executor 实际赋值填写，单层没有固定组合；定义见 references/09-template-data-params.md。",
+            "按 executor 实际赋值填写，单层没有固定组合；定义见 hccl-aicpu-best-practice Skill 的 09-template-data-params.md。",
             rid="R-FLOW-011",
         )
     else:
@@ -608,7 +606,7 @@ def check(path):
             ERROR,
             "scratch 倍数表达式里出现了 `RPT`：%s" % mult_for_rpt.strip("*` "),
             "倍数按单次 repeat 报，executor 会自己算 max(另一层, 本层 * RPT)。\n"
-            "自己先乘一遍 = 双重放大，loop 次数翻倍且编译/ST 都不报错。见 references/03 §2.1。",
+            "自己先乘一遍 = 双重放大，loop 次数翻倍且编译/ST 都不报错。见 hccl-aicpu-best-practice Skill 的 03-resource-model.md §2.1。",
             rid="R-FLOW-008",
         )
 
