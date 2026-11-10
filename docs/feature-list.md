@@ -319,6 +319,7 @@
 | **tool-npu-compute** | 使用 npu-compute 选择和采集 NPU 性能指标、确认采集结果、解包 `.npu-rep`，并分析带宽、流水线、存储访问、缓存和资源冲突等数据；支持由多个采集项组成的指标集合（Set）和可单独选择的采集项（Section） | [查看](skills-usage.md#tool-npu-compute) |
 | **tool-npu-check** | `memcheck` 设备全局内存（GM）访问检查、`synccheck` 同步操作配对检查、命令执行及检查报告解读 | — |
 | **npu-objdump-toolkit** | npu-objdump/msobjdump 算子编译产物分析：查看元数据与 ELF、提取 device ELF、反汇编 Ascend AICore 指令，并将异常 PC 定位到 OPP 对象、MIX AIC/AIV 物理符号和窄指令窗口 | — |
+| **tool-aml** | 为 oam-tools-diag 的 AICore STL 诊断模块（aicore_stl_detect）新增算子：自动生成 .cpp（host 规格+下发+注册）、.asc（kernel 下发包装）与 aic/aiv .cce 文件，并完成 host so 编译与注册校验 | — |
 
 ## 领域目录入口（自 README 索引表移入）
 
