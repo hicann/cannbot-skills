@@ -1,0 +1,78 @@
+{
+  "skill_name": "ops-repo-migration",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "显式选仓与未知算子接口保留",
+      "config": {"max_tokens": 12000, "eval_mode": "text"},
+      "prompt": "使用 ops-repo-migration 分析一个已有自定义算子包。用户给定信息：spec 名为 prefix_scan_v2，category=Recurrence，功能为数值前缀扫描，注册类型为 PrefixSCANV2，导出 aclnnPrefixScan 和 aclnnPrefixScanV2 两套手写接口，源包只支持 ascend910b，vendor 是 team_scan。用户明确要求迁入 ops-math。本题没有提供真实源代码、安装记录或冻结套件。请说明目标分类、应保留的源契约、哪些信息尚待源材料核验，以及能否直接套用 AddCustom、双输入单输出、ascend950 或 PascalCase 推导接口的模板。仅阅读技能与参考资料并给出分析，不执行命令、不修改文件、不运行编译或硬件测试，不声称已完成源契约核验或迁移。",
+      "expected_output": "依据用户给定信息，目标为 ops-math/math；应保留 PrefixSCANV2、aclnnPrefixScan/aclnnPrefixScanV2 两套手写接口和 ascend910b 支持集，不套 AddCustom、双输入单输出、ascend950，不用 PascalCase 猜注册/API。明确这些是题设信息，未读取真实源包，尚未核验源契约。列出后续需从 OpDef/注册、公共 API 头与导出符号、构建/tiling 产物、安装记录/实际 vendor 路径、golden/冻结套件核验的参数；不得编造缺失的签名、输入输出、dtype/format、tilingKey 或用例数，不把 team_scan 当作已经核验的安装路径。仅提出分析结论与待核验项，不宣称迁移通过；本题只验证分析结论和证据边界，源材料缺失时须报告未核验；实际迁移前仍必须完成源工程取证，不能虚构核验结果。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "ops-math"},
+        {"type": "contains", "pattern": "PrefixSCANV2"},
+        {"type": "contains", "pattern": "aclnnPrefixScanV2"},
+        {"type": "contains", "pattern": "ascend910b"}
+      ]
+    },
+    {
+      "id": 2,
+      "title": "功能域优先的自动选仓",
+      "config": {"max_tokens": 12000, "eval_mode": "text"},
+      "prompt": "用户没有指定目标仓库。使用 ops-repo-migration 分别判断以下三个已有算子包的目标仓与分类：A，category=ScatterUpdate，按给定索引更新普通张量；B，同样标为 ScatterUpdate，但功能是更新注意力的 KV-cache；C，category=Interpolation，依据二维采样网格对图像进行插值。请解释为什么相同 category 未必进入同一仓，并列出需要在选仓记录中留下的证据。仅阅读技能与参考资料并回答，不执行命令、不修改文件、不编译或调用硬件。",
+      "expected_output": "A 属于 ops-nn/index；B 的 KV-cache 注意力语义优先于泛 Scatter 分类，属于 ops-transformer/attention；C 的图像采样语义对应 ops-cv/image。选择结合原始需求、spec category、功能描述和公式，记录 routing_rule、spec_evidence、代表路径与理由，不只按一个类别机械映射。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "ops-nn"},
+        {"type": "contains", "pattern": "ops-transformer"},
+        {"type": "contains", "pattern": "ops-cv"},
+        {"type": "contains", "pattern": "attention"}
+      ]
+    },
+    {
+      "id": 3,
+      "title": "歧义目标和不支持目标的停止条件",
+      "config": {"max_tokens": 12000, "eval_mode": "text"},
+      "prompt": "按 ops-repo-migration 分别处理三个独立请求：A，只有 category=Sparse，功能描述和公式缺失，也没指定仓；B，明确指定迁入 ops-rand；C，用户明确说只交付源包，不要迁移。给出各自 RUN/SKIP、reason_code、target_repo/op_class 的处理，并说明是否允许为了继续任务改成 ops-math 或 ops-nn、开始克隆目标仓。仅做文字分析，不执行命令、不修改文件、不运行构建或硬件测试。",
+      "expected_output": "A 应 SKIP/ambiguous_target，不能凭 Sparse 猜仓；B 应 SKIP/unsupported_target 并保留显式 target_repo=ops-rand，不静默改成 ops-math；C 应 SKIP/user_opt_out。SKIP 的 op_class 为 null，记录原因和证据，不克隆、不修改目标仓。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "ambiguous_target"},
+        {"type": "contains", "pattern": "unsupported_target"},
+        {"type": "contains", "pattern": "user_opt_out"},
+        {"type": "contains", "pattern": "ops-rand"}
+      ]
+    },
+    {
+      "id": 4,
+      "title": "出包不能替代产物与运行验收",
+      "config": {"max_tokens": 12000, "eval_mode": "text"},
+      "prompt": "某次 ops-repo-migration 已编译得到 .run 包，但只检查了文件存在：手写 ACLNN V2 的头文件缺失，一个源 tilingKey 未进入包，仓内 UT 运行 0 条；TTK 仍使用旧 vendor 路径，数值显示 PASS，而原生调用程序清理资源时崩溃。源交付件还包含 GEIR 套件和 torch smoke。能否宣布迁移完成？请按技能给出产物 1/2/3 核验及必须补齐的验证证据。仅阅读并分析，不执行命令、不改文件或测试结果，不访问硬件。",
+      "expected_output": "不能完成。产物检查覆盖完整 op_api 库及全部头文件/符号、当前算子所有支持 soc/tilingKey 的 kernel/配置、op_proto/op_tiling 注册产物。需修复缺失覆盖、执行预期非零 UT，保留并重跑源 kernel/ACLNN/GEIR 冻结套件和适用 torch smoke，通过 check_op_binpath.py --require 证明命中新 vendor。原生进程须完成资源清理并正常退出，数值 PASS 不能覆盖崩溃；缺少运行条件记为未验证。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "op_api"},
+        {"type": "contains", "pattern": "op_proto"},
+        {"type": "contains", "pattern": "op_tiling"},
+        {"type": "contains", "pattern": "check_op_binpath"},
+        {"type": "contains", "pattern": "GEIR"},
+        {"type": "contains", "pattern": "torch"}
+      ]
+    },
+    {
+      "id": 5,
+      "title": "源码差异与迁移修改边界",
+      "config": {"max_tokens": 12000, "eval_mode": "text"},
+      "prompt": "使用 ops-repo-migration 检查以下迁移报告：verify_logic_unchanged.sh 返回 0，但显示 DIFFERS=2、ONLY-IN-SRC=1、ONLY-IN-DST=1；工程师建议修改 kernel 计算公式并放宽 golden 容差解决出包后的精度失败，再改仓级 CMake 接入依赖，最后直接 push 并开 PR。请逐项判断这些提议是否满足本技能的完成条件，说明移动文件和必要注册胶水应如何核验。只做文字审阅，不执行命令、不修改文件或远端状态。",
+      "expected_output": "脚本返回 0 只表示差异清单生成成功，不证明逻辑不变；逐项审查 DIFFERS 和新旧独有文件，提供移动映射、保留实现与 golden 的证据。仅允许目标算子目录内的结构、构建、必要注册胶水、注释与测试驱动适配，不得改 kernel 计算、tiling/推导/ACLNN 语义、golden 容差或仓级代码来通过。超出范围说明阻碍；通过验证后只创建一个目标算子迁移 commit，技能本身不自动 push 或创建 PR。",
+      "files": [],
+      "expectations": [
+        {"type": "contains", "pattern": "DIFFERS"},
+        {"type": "contains", "pattern": "ONLY-IN-SRC"},
+        {"type": "contains", "pattern": "ONLY-IN-DST"},
+        {"type": "contains", "pattern": "golden"}
+      ]
+    }
+  ]
+}
