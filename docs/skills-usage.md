@@ -198,6 +198,39 @@ A/B 运行证据：<两次运行的日志或 dump 绝对路径>
 
 ---
 
+## NPU 模型推理优化
+
+### model-infer-harmony
+
+Kirin9030 / HarmonyOS 端侧 ASR 模型 4bit W4A16 量化、`omg` 转 `omc` 与 CANNPAK 打包。
+
+```
+请使用 model-infer-harmony 技能，帮我把 ASR 模型转换为 Kirin9030 端侧可加载的 CANNPAK 单 bin。
+
+【目标】
+- 平台：Kirin9030 / HarmonyOS
+- 模型：encoder / decoder / punc（按实际保留）
+- 产物：量化后的 omc 文件 + CANNPAK 单 bin
+
+【输入路径】
+- 浮点 PyTorch 模型与 checkpoint：<绝对路径>
+- 校准数据：<绝对路径，建议使用真实口语或业务数据>
+- 已有 ONNX / quant_param_file（如有）：<绝对路径或无>
+- 容器内 DDK / AscendC 工具链路径：<绝对路径>
+
+【已知问题】（可选）
+- 例如：CompressInt4ToInt8 Value -1 out of range [0,15] / type MatMul don't support / GatherV2D Input[1] INT64 is wrong
+```
+
+**使用建议：**
+
+- 只把该技能用于 Kirin9030 链路；Kirin9020 的 INT4 约束与 9030 的 UINT4 约束不同，不要混用。
+- 提前准备真实校准数据、浮点模型权重和容器内 AscendC 工具链路径，便于 skill 按五阶段流程定位问题。
+- `omg` 转换需在满足 glibc 要求的容器内执行，并确认 `which ccec` 非空。
+- 该技能不负责端侧 C++ / ArkTS 推理代码实现，也不覆盖上游浮点模型训练。
+
+---
+
 ## Skill 治理工具
 
 ### cannbot-skill-reviewer
