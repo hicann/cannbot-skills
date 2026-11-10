@@ -26,7 +26,7 @@ CANNBot 是 [CANN](https://hiascend.com/software/cann) 社区的 Infra 智能体
 
 ### 前置条件
 
-- 任选一种 AI 编程工具：[OpenCode](https://opencode.ai/docs) / [Claude Code](https://code.claude.com/docs/en/setup) / [Trae](https://www.trae.ai) / [Cursor](https://www.cursor.com) / [Codex](https://openai.com/codex) / [GitHub Copilot](https://docs.github.com/en/copilot) / [CodeArts](https://codearts.huaweicloud.com/) / [Qoder](https://qoder.cn)
+- 任选一种 AI 编程工具：[OpenCode](https://opencode.ai/docs) / [Claude Code](https://code.claude.com/docs/en/setup) / [Trae](https://www.trae.ai) / [Cursor](https://www.cursor.com) / [Codex](https://openai.com/codex) / [GitHub Copilot](https://docs.github.com/en/copilot) / [CodeArts](https://codearts.huaweicloud.com/) / [Qoder](https://qoder.cn) / [DSH](https://github.com/deepseek-ai/deepseek-harness)
 
 ### 安装
 

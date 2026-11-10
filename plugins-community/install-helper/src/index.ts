@@ -40,6 +40,9 @@ process.on("uncaughtException", (error: any) => {
 
 process.on("unhandledRejection", (error: any) => {
   handleExit(error);
+  // Surface the failure instead of exiting silently — thrown validation
+  // errors (e.g. an unsupported -t value) must be visible to the user.
+  console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
 

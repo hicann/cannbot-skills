@@ -15,7 +15,7 @@
 | **包含内容** | Skills + Agents + Workflows + 外部依赖 | 仅 Skills |
 | **安装工具** | install-helper / init.sh | install-helper / npx skills |
 | **适用场景** | 需要完整开发流程编排 | 只需单个能力 |
-| **支持工具** | OpenCode/Claude/Trae/Cursor/Copilot/CodeArts | 70+ 种 AI 编程工具 |
+| **支持工具** | OpenCode/Claude/Trae/Cursor/Copilot/CodeArts/Qoder/DSH | 70+ 种 AI 编程工具 |
 
 > [!NOTE]
 > **外部依赖**指安装时由安装脚本动态克隆的外部仓库（如 `asc-devkit`、`pypto`、`tilelang-ascend`、`cann-samples` 等）。
@@ -154,6 +154,26 @@ npx skills list
 npx skills remove ascendc-tiling-design
 ```
 
+### DSH（DeepSeek Harness）
+
+install-helper 原生支持 DSH 目标：项目级安装落到 `<项目根>/.dsh/skills/`，全局安装落到 `$DSH_HOME/skills/`（`DSH_HOME` 未设置时默认 `~/.dsh`）。DSH 会原生发现 `<项目根>/.dsh/skills` 下的 `SKILL.md`（frontmatter 解析、按名触发均正常）。
+
+```bash
+# 通过 install-helper 安装（以 ascendc-env-check 为例）
+install-helper install ascendc-env-check -t dsh -l project
+install-helper install ascendc-env-check -t dsh -l global
+```
+
+也可以手动复制 skill 目录到技能根（无 bash 环境的 Windows 用户可用资源管理器直接复制，效果等价于 `npx skills add`）：
+
+```bash
+# 项目级手动安装
+mkdir -p .dsh/skills && cp -r ops/ascendc-env-check .dsh/skills/ascendc-env-check
+
+# 全局手动安装
+mkdir -p ~/.dsh/skills && cp -r ops/ascendc-env-check ~/.dsh/skills/ascendc-env-check
+```
+
 ---
 
 ## 安装后使用
@@ -184,7 +204,26 @@ npx skills remove ascendc-tiling-design
 | `install-helper` 报错 | npm/npx 方式请确认 Node.js >= 20：`node --version` |
 | AI 工具无法识别 Skills | 重启工具或新开会话 |
 | 软链接失效 | `install-helper doctor --fix` |
-| 网络问题 | 配置 GitCode SSH Key 或设置代理 |
+| 网络问题 | 配置 GitCode SSH Key 或设置代理；HTTPS git 被防火墙拦截时改走 SSH，见下方[防火墙拦截 HTTPS git](#防火墙拦截-https-git) |
 | CANN 环境未配置 | 仅影响代码编译/运行类 Skills，知识检索类不受影响 |
+
+#### 防火墙拦截 HTTPS git
+
+HTTPS git 被拦截但 SSH 可用时，任选一种处理（首次克隆与缓存刷新均生效）：
+
+**方式一：一条命令全局改写（推荐）**
+
+```bash
+git config --global url."git@gitcode.com:".insteadOf "https://gitcode.com/"
+```
+
+**方式二：只为 install-helper 设置环境变量**
+
+```bash
+export CANNBOT_REPO_URL=git@gitcode.com:cann/cannbot-skills.git      # skills 仓
+export CANNBOT_MAINLINE_URL=git@gitcode.com:cann/cannbot.git         # cannbot 主线仓
+```
+
+方式二只影响 install-helper 托管的缓存（`~/.cannbot/`）；方式一改写本机所有 gitcode.com 的 HTTPS 拉取（含 cannbot 安装器内部 clone），已检出仓库的配置不受影响。
 
 更多故障排查详见对应插件文档；已迁移的直调插件见 [cannbot 中的 ops-direct-invoke](https://gitcode.com/cann/cannbot/tree/master/plugins-official/ops-direct-invoke)。

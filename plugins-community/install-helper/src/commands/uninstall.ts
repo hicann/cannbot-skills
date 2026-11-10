@@ -26,6 +26,7 @@ import { findBackups, restoreBackup, deleteBackup } from "../core/backup.js";
 import { showRestorePrompt } from "../ui/backup-prompts.js";
 import { getConfigRoot, getSkillsRoot, validateTool, validateLevel, VALID_TOOLS } from "../utils/paths.js";
 import { scanInstalled } from "../core/manifest.js";
+import { ensureCannbotDiscovery, isCannbotInstallerReady } from "../core/cannbot-installer.js";
 import { selectTheme, checkboxTheme } from "../ui/theme.js";
 import { selectToolWithDetection } from "../ui/wizard.js";
 
@@ -35,6 +36,17 @@ export async function uninstallCommand(
 ): Promise<void> {
   const userSpecifiedTool = !!options.tool;
   const userSpecifiedLevel = !!options.level;
+  // Same precondition as install/list/info: discovery merges the installed
+  // installer's plugins (and tombstone aliases) into the registry so a
+  // renamed plugin's OLD id routes to its install record here too — the
+  // cake case showed uninstall-by-alias dead-ending without it. Unlike the
+  // install path, discovery is a name-resolution aid here, not a
+  // precondition: uninstall's source of truth is the local records, so
+  // when no installer is present we skip discovery rather than
+  // bootstrap-install one.
+  if (isCannbotInstallerReady()) {
+    await ensureCannbotDiscovery();
+  }
   const tool: AITool = options.tool ? validateTool(options.tool) : "opencode";
   const level: InstallLevel = options.level ? validateLevel(options.level) : "project";
 

@@ -15,7 +15,7 @@ import { spawnSync } from "child_process";
 import type { AITool, InstallLevel, TraeVariant } from "../types/index.js";
 import { t } from "./i18n.js";
 
-export const VALID_TOOLS: AITool[] = ["opencode", "claude", "trae", "cursor", "codex", "copilot", "codearts", "qoder"];
+export const VALID_TOOLS: AITool[] = ["opencode", "claude", "trae", "cursor", "codex", "copilot", "codearts", "qoder", "dsh"];
 const VALID_LEVELS: InstallLevel[] = ["project", "global"];
 
 // Qoder has two client layouts with separate directories (verified against
@@ -122,6 +122,10 @@ export function getConfigRoot(
         return isQoderCliLayout()
           ? (process.env.QODERCN_CONFIG_DIR || join(home, ".qoder-cn"))
           : join(home, ".lingma");
+      case "dsh":
+        // DSH_HOME is the official DeepSeek Harness home (defaults to
+        // ~/.dsh); project installs land in the project-dsh root .dsh/.
+        return process.env.DSH_HOME || join(home, ".dsh");
       default:
         throw new Error(
           t("error_invalid_tool")
@@ -158,6 +162,8 @@ export function getConfigRoot(
       return join(baseDir, ".codeartsdoer");
     case "qoder":
       return isQoderCliLayout() ? join(baseDir, ".qoder") : join(baseDir, ".lingma");
+    case "dsh":
+      return join(baseDir, ".dsh");
     default:
       throw new Error(
         t("error_invalid_tool")

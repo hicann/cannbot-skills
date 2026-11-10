@@ -38,6 +38,7 @@ export const CANNBOT_TOOL_LAYOUTS: Record<string, { configDirs: string[]; defaul
   codex: { configDirs: [".codex"], defaultConfigDir: ".codex" },
   claude: { configDirs: [".claude"], defaultConfigDir: ".claude" },
   trae: { configDirs: [".traecli", ".marscode", ".trae", ".trae-cn"], defaultConfigDir: ".trae" },
+  dsh: { configDirs: [".dsh"], defaultConfigDir: ".dsh" },
 };
 
 /** Registry layouts of the tools the installed cannbot installer declares;

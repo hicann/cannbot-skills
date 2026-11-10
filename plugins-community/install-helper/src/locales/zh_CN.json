@@ -238,6 +238,7 @@
   "cannbot_registry_missing": "安装后未在 cannbot-plugin.json 中找到注册记录",
   "cannbot_delegate_failed": "cannbot 安装器执行失败（退出码 {code}），输出见上方日志",
   "cannbot_bundled_fallback": "上游安装器暂不识别新版 plugins-official 目录（等待其发版修复），已自动回退为安装器包内置快照（--bundled）完成安装",
+  "cannbot_plugin_not_bundled": "cannbot 安装器 v{version} 的发布集未收录插件 {plugin}（上游主线已有，安装器版本滞后）——请升级 cannbot 安装器后重试（如设 CANNBOT_INSTALLER_CHANNEL=latest 或指定更高版本号）",
   "cannbot_delegate_fallback_local": "{reason}，已自动回退本仓 skills 副本安装（副本冻结于迁移前版本，后续由 cannbot 仓统一支持）",
   "cannbot_plugin_no_local_copy": "插件 {plugin} 已迁移至 cannbot 仓且本仓无本地副本可回退，请等待 cannbot 安装器扩充工具/级别支持",
   "cannbot_migrated_symlink": "检测到 {file} 为旧版插件软链，已转为真实文件（内容保留并已备份）",

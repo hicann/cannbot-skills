@@ -89,7 +89,7 @@ const STATIC_SKILL_CATEGORIES: SkillCategory[] = [
       { id: "ops-profiling", description: "NPU 性能采集与分析", source: "ops" },
       { id: "ops-simulator", description: "CANN Simulator 精度/性能仿真", source: "ops" },
       { id: "torch-ops-profiler", description: "torch_npu.profiler 性能报告", source: "ops" },
-      { id: "aiss-tiling-solver", description: "AISS-TilingSolver 自动求解 Tiling 参数", source: "ops" },
+      { id: "aiss-tiling-solver", description: "AISS-TilingSolver 自动求解 Tiling 参数", source: "community/ops" },
     ],
   },
   {

@@ -86,7 +86,13 @@ describe("repository auto-update source", () => {
 
   it("does not pull twice when an update command selects the managed cache", async () => {
     await new RepositoryManager().ensureRepoAndScan({ updateCwd: true });
-    expect(mocks.pull).toHaveBeenCalledTimes(1);
+    // the managed-cache refresh re-points origin first (CANNBOT_REPO_URL must
+    // govern refreshes, not only the first clone) — that set-url is a
+    // distinct command; exactly one pull must still happen
+    const pullCalls = mocks.pull.mock.calls.filter(
+      (args: unknown[]) => (args[1] as string[])?.[0] === "pull"
+    );
+    expect(pullCalls).toHaveLength(1);
   });
 
   it("does not auto-pull a valid environment-specified checkout", async () => {

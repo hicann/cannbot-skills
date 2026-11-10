@@ -9,7 +9,7 @@
 // ----------------------------------------------------------------------------------------------------------
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, symlinkSync, readdirSync, lstatSync } from "fs";
+import { mkdirSync, writeFileSync, existsSync, rmSync, readFileSync, symlinkSync, readdirSync, lstatSync, renameSync } from "fs";
 import { join, dirname } from "path";
 import { tmpdir } from "os";
 import { fileURLToPath } from "url";
@@ -634,5 +634,159 @@ process.exit(0);
     expect(existsSync(join(target, ".opencode"))).toBe(false);
     expect(existsSync(join(target, "AGENTS.md"))).toBe(false);
     expect(existsSync(join(sandboxHome, ".cannbot/installs/fake-cb-plugin.json"))).toBe(false);
+  });
+
+  it("pre-flights release-set-enforcing installers with an actionable error", async () => {
+    // Mirrors @cannbot-plugin/cannbot 1.10.0's resolveBundle gate: the bin
+    // hard-fails with "plugin not included in this CANNBot release" for
+    // plugins absent from the installer package — previously the spawn only
+    // failed late with that cryptic message; now the eligibility check
+    // rejects up front with the version and an upgrade hint, before any
+    // side effects in the target.
+    const installerRoot = join(testDir, "enforcing-installer");
+    mkdirSync(join(installerRoot, "bin"), { recursive: true });
+    writeFileSync(
+      join(installerRoot, "package.json"),
+      JSON.stringify({ name: "@cannbot-plugin/cannbot", version: "1.10.0", type: "module" }, null, 2)
+    );
+    writeFileSync(
+      join(installerRoot, "bin", "cannbot.js"),
+      `#!/usr/bin/env node
+// bundle resolution with the release-set hard fail (real 1.10.0 marker)
+console.error("plugin not included in this CANNBot release: " + process.argv[3]);
+process.exit(1);
+`
+    );
+    // the package resolves some OTHER plugin, but never ghost-plugin
+    mkdirSync(join(installerRoot, "dist", "plugins", "other-plugin", ".claude-plugin"), { recursive: true });
+    writeFileSync(
+      join(installerRoot, "dist", "plugins", "other-plugin", ".claude-plugin", "plugin.json"),
+      JSON.stringify({ name: "other-plugin", version: "1.0.0", skills: [], agents: [] })
+    );
+    process.env.CANNBOT_INSTALLER_PATH = installerRoot;
+
+    const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
+    const result = await delegateInstall({
+      pluginId: "ghost-plugin",
+      tool: "opencode",
+      level: "project",
+      target: testDir,
+    });
+    expect(result.success).toBe(false);
+    const msg = result.errors.join("\n");
+    expect(msg).toContain("ghost-plugin");
+    expect(msg).toContain("1.10.0");
+    expect(msg).toContain("未收录");
+    // the delegate spawn never ran — no debris in the target
+    expect(existsSync(join(testDir, "AGENTS.md"))).toBe(false);
+  });
+
+  it("legacy bundled-flag installers are exempt from the not-bundled pre-flight", async () => {
+    // pre-1.8.0 installers fetch the mainline when the bundled snapshot
+    // misses a plugin — the pre-flight must not block them
+    const installerRoot = join(testDir, "legacy-mainline-fetch");
+    createFakeInstaller(installerRoot, "fake-cb-plugin");
+    mkdirSync(join(installerRoot, "plugins-official"), { recursive: true });
+    renameSync(
+      join(installerRoot, "dist", "plugins", "fake-cb-plugin"),
+      join(installerRoot, "plugins-official", "fake-cb-plugin")
+    );
+    process.env.CANNBOT_INSTALLER_PATH = installerRoot;
+
+    const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
+    const result = await delegateInstall({
+      pluginId: "fake-cb-plugin",
+      tool: "opencode",
+      level: "project",
+      target: testDir,
+    });
+    // legacy fake falls through to the spawn, which fails on the manifest
+    // miss — but never with the not-bundled pre-flight message
+    expect(result.success).toBe(false);
+    expect(result.errors.join("\n")).not.toContain("未收录");
+  });
+
+  it("cleans the orphaned marker block after a failed delegated install", async () => {
+    useFakeInstaller("fake-cb-plugin");
+    const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
+
+    const agentsMd = join(testDir, "AGENTS.md");
+    writeFileSync(agentsMd, "user intro\n");
+
+    // upstream no-rollback failure AFTER the instructions block was written
+    process.env.FAKE_CANNBOT_FAIL_AFTER_INSTRUCTIONS = "1";
+    try {
+      const result = await delegateInstall({
+        pluginId: "fake-cb-plugin",
+        tool: "opencode",
+        level: "project",
+        target: testDir,
+      });
+      expect(result.success).toBe(false);
+
+      const content = existsSync(agentsMd) ? readFileSync(agentsMd, "utf-8") : "";
+      expect(content).not.toContain("cannbot:fake-cb-plugin");
+      expect(content).toContain("user intro");
+    } finally {
+      delete process.env.FAKE_CANNBOT_FAIL_AFTER_INSTRUCTIONS;
+    }
+  });
+
+  it("cleans the orphaned marker block when the failed run itself wrote a registry record (1.10.1 order)", async () => {
+    useFakeInstaller("fake-cb-plugin");
+    const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
+
+    // @cannbot-plugin/cannbot >= 1.10.1 writes the cannbot-plugin.json
+    // registry record BEFORE the plugin's late prechecks fail — the failed
+    // run itself leaves a record. The guard must compare against the
+    // pre-run snapshot, not the post-failure state, or it mistakes the
+    // fresh debris for a prior successful install and keeps the block.
+    process.env.FAKE_CANNBOT_FAIL_AFTER_INSTRUCTIONS = "1";
+    process.env.FAKE_CANNBOT_REGISTRY_BEFORE_FAILURE = "1";
+    try {
+      const result = await delegateInstall({
+        pluginId: "fake-cb-plugin",
+        tool: "opencode",
+        level: "project",
+        target: testDir,
+      });
+      expect(result.success).toBe(false);
+      const content = existsSync(join(testDir, "AGENTS.md"))
+        ? readFileSync(join(testDir, "AGENTS.md"), "utf-8")
+        : "";
+      expect(content).not.toContain("cannbot:fake-cb-plugin");
+    } finally {
+      delete process.env.FAKE_CANNBOT_FAIL_AFTER_INSTRUCTIONS;
+      delete process.env.FAKE_CANNBOT_REGISTRY_BEFORE_FAILURE;
+    }
+  });
+
+  it("preserves the marker block on a failed upgrade when a registry record exists", async () => {
+    useFakeInstaller("fake-cb-plugin");
+    const { delegateInstall } = await import("../src/core/cannbot-delegate.js");
+
+    // a successful install first — its registry record must protect the
+    // block from a later failed upgrade's cleanup
+    const ok = await delegateInstall({
+      pluginId: "fake-cb-plugin",
+      tool: "opencode",
+      level: "project",
+      target: testDir,
+    });
+    expect(ok.success).toBe(true);
+
+    process.env.FAKE_CANNBOT_FAIL_AFTER_INSTRUCTIONS = "1";
+    try {
+      const result = await delegateInstall({
+        pluginId: "fake-cb-plugin",
+        tool: "opencode",
+        level: "project",
+        target: testDir,
+      });
+      expect(result.success).toBe(false);
+      expect(readFileSync(join(testDir, "AGENTS.md"), "utf-8")).toContain("cannbot:fake-cb-plugin");
+    } finally {
+      delete process.env.FAKE_CANNBOT_FAIL_AFTER_INSTRUCTIONS;
+    }
   });
 });

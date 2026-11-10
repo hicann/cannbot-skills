@@ -147,6 +147,22 @@ if (existsSync(agentsMd)) {
   instructions = destination;
 }
 
+// Simulates the upstream no-rollback failure mode (e.g. tilelang-op-
+// orchestrator's late platform precheck): the instructions block is already
+// written when the install aborts, leaving an orphaned marker block.
+// FAKE_CANNBOT_REGISTRY_BEFORE_FAILURE mirrors @cannbot-plugin/cannbot
+// >= 1.10.1: the registry record is written BEFORE the plugin's own late
+// prechecks fail — the failed run itself leaves a record behind.
+if (process.env.FAKE_CANNBOT_FAIL_AFTER_INSTRUCTIONS === "1") {
+  if (process.env.FAKE_CANNBOT_REGISTRY_BEFORE_FAILURE === "1") {
+    const registryPath = join(configDir, "cannbot-plugin.json");
+    const record = { schemaVersion: 2, plugins: [{ plugin: manifest.name, pluginVersion: manifest.version, tool: options.tool, skillInstallMode: "copy", skills: [], agents: [], instructions: null, assets: null, permissions: null, settings: null, hookSettings: null, dependencies: [], dependencyAssets: [], nativePlugin: null, unsupported: [] }] };
+    writeFileSync(registryPath, JSON.stringify(record, null, 2));
+  }
+  console.error("cannbot: simulated failure after the instructions write (no rollback)");
+  process.exit(1);
+}
+
 let assets = null;
 const workflowsSrc = join(pluginDir, "workflows");
 const assetsRoot = join(options.target, ".cannbot", "plugins", pluginId);

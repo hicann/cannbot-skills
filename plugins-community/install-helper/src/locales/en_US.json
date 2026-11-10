@@ -238,6 +238,7 @@
   "cannbot_registry_missing": "No cannbot-plugin.json record found after installation",
   "cannbot_delegate_failed": "The cannbot installer exited with code {code}; see the output above",
   "cannbot_bundled_fallback": "The upstream installer predates the plugins-official rename (pending its next release); automatically fell back to the installer package's bundled snapshot (--bundled)",
+  "cannbot_plugin_not_bundled": "Plugin {plugin} is not included in cannbot installer v{version}'s bundled release (it exists on the mainline; the installer lags) — upgrade the cannbot installer and retry (e.g. CANNBOT_INSTALLER_CHANNEL=latest or a newer pinned version)",
   "cannbot_delegate_fallback_local": "{reason}; automatically fell back to the local skills-repo copy (frozen at the pre-migration version until the cannbot repo takes over)",
   "cannbot_plugin_no_local_copy": "Plugin {plugin} has migrated to the cannbot repo with no local copy to fall back to; wait for the cannbot installer to gain tool/level support",
   "cannbot_migrated_symlink": "{file} was a legacy plugin symlink; converted to a real file (content kept, backup saved)",

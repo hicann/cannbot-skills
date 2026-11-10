@@ -144,6 +144,22 @@ async function detectQoder(): Promise<DetectedTool | undefined> {
   return undefined;
 }
 
+async function detectDsh(): Promise<DetectedTool | undefined> {
+  // Prefer the dsh CLI (npx @deepseek-ai/dsh); fall back to the DSH home
+  // directory ($DSH_HOME, default ~/.dsh) per the official layout.
+  const cmdPath = await getCommandPath("dsh");
+  if (cmdPath) {
+    const version = await getCommandVersion("dsh");
+    return { name: "dsh", version, path: cmdPath };
+  }
+
+  const dshHome = process.env.DSH_HOME || join(homedir(), ".dsh");
+  if (existsSync(dshHome)) {
+    return { name: "dsh", path: dshHome };
+  }
+  return undefined;
+}
+
 export async function detectTools(): Promise<DetectedTool[]> {
   const detectors = [
     detectOpenCode,
@@ -154,6 +170,7 @@ export async function detectTools(): Promise<DetectedTool[]> {
     detectCopilot,
     detectCodeArts,
     detectQoder,
+    detectDsh,
   ];
 
   const results = await Promise.allSettled(detectors.map((d) => d()));
@@ -178,6 +195,7 @@ export function getToolDisplayName(tool: AITool): string {
     copilot: "GitHub Copilot",
     codearts: "CodeArts",
     qoder: "Qoder",
+    dsh: "DSH",
   };
   return names[tool];
 }

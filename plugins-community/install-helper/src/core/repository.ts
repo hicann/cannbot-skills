@@ -116,7 +116,20 @@ export class RepositoryManager {
 
   async updateRepo(): Promise<void> {
     const repoPath = await this.ensureRepo();
+    // Re-point origin at the currently configured URL only for the managed
+    // cache — CANNBOT_REPO_URL must govern refreshes too, not only the
+    // first clone (firewall move scenario, mirrors the mainline cache fix
+    // in cannbot-installer.ts). A user's own checkout (cwd / custom path /
+    // CANNBOT_REPO_PATH) keeps its origin untouched.
+    const isManagedCache = resolve(repoPath) === resolve(getCannbotRepoPath());
     try {
+      if (isManagedCache) {
+        await execa(
+          "git",
+          ["remote", "set-url", "origin", "--", loadRepoUrl()],
+          { cwd: repoPath, timeout: 30000 }
+        );
+      }
       await execa("git", ["pull", "--quiet"], { cwd: repoPath, timeout: 30000 });
     } catch {
       logger.warn(t("repo_pull_failed"));

@@ -15,11 +15,11 @@
 // `npx @cannbot-plugin/cannbot install`. install-helper only wraps discovery,
 // boundaries, bookkeeping and (uninstall/list/status) around it.
 
-import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync, readdirSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, copyFileSync, unlinkSync, readdirSync, mkdirSync, rmSync } from "fs";
 import { join, resolve } from "path";
 import { execa } from "execa";
 import type { AITool, InstallLevel, InstallOptions, InstallResult, PluginEntry, PluginSource } from "../types/index.js";
-import { discoverCannbotPlugins, ensureCannbotInstaller, getCannbotBinPath, hasNodeRuntime } from "./cannbot-installer.js";
+import { discoverCannbotPlugins, ensureCannbotInstaller, getCannbotBinPath, getCannbotPackageRoot, getCannbotInstallerVersion, hasNodeRuntime } from "./cannbot-installer.js";
 import { delegateBoundaryTools } from "./cannbot-tools.js";
 import { findCannbotRegistryPath, readCannbotRegistry } from "./cannbot-registry.js";
 import { readRecords, writeRecord } from "./record.js";
@@ -173,6 +173,57 @@ function installerSupportsBundledFlag(): boolean {
   }
 }
 
+/** Capability probe: installers whose bundle resolution hard-fails with
+ *  "plugin not included in this CANNBot release" enforce their bundled
+ *  package set (the 1.10.0 resolveBundle gate). Mainline-following
+ *  installers (1.9.x installLatest) lack the marker and are unaffected.
+ *  Mirrors the --bundled probe's degradation: if upstream rewords the
+ *  message this returns false and the eligibility check no-ops. */
+function installerEnforcesReleaseSet(): boolean {
+  try {
+    return readFileSync(getCannbotBinPath(), "utf-8").includes("not included in this CANNBot release");
+  } catch {
+    return false;
+  }
+}
+
+function hasCannbotRegistryEntry(target: string, tool: AITool, pluginId: string): boolean {
+  try {
+    return (readCannbotRegistry(target, tool)?.registry.plugins ?? []).some(
+      (r) => r?.plugin === pluginId
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Removes the orphaned instructions marker block a failed delegated install
+ *  left behind. Upstream writes the `cannbot:<id>:start..end` block before
+ *  its own late prechecks and does not roll back on failure; the block is
+ *  only ours to remove when the cannbot registry holds no entry for the
+ *  plugin — a prior successful install's block must survive failed
+ *  upgrades. Best-effort: never masks the delegate failure itself. */
+function removeOrphanedInstructionsBlock(target: string, tool: AITool, pluginId: string): void {
+  const file = join(target, tool === "claude" ? "CLAUDE.md" : "AGENTS.md");
+  try {
+    if (!existsSync(file)) return;
+    const content = readFileSync(file, "utf-8");
+    const start = `<!-- cannbot:${pluginId}:start -->`;
+    const end = `<!-- cannbot:${pluginId}:end -->`;
+    const s = content.indexOf(start);
+    const e = content.indexOf(end);
+    if (s === -1 || e === -1 || e < s) return;
+    const cleaned = (content.slice(0, s) + content.slice(e + end.length)).replace(/\n{3,}/g, "\n\n");
+    if (cleaned.trim().length === 0) {
+      rmSync(file); // the failed install created the file for its block only
+    } else {
+      writeFileSync(file, cleaned.trimEnd() + "\n");
+    }
+  } catch {
+    // best-effort safety net
+  }
+}
+
 export async function delegateInstall(options: DelegateInstallOptions): Promise<InstallResult> {
   const { pluginId, tool, level } = options;
   const requestedTarget = resolve(options.target || process.cwd());
@@ -224,6 +275,8 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
     return result;
   }
 
+  // 3.5 (removed — superseded by the release-set eligibility check at 4.5)
+
   // 4. discovery precheck — bootstrap semantics (fail-open). The npm package
   //    is only a bootstrap: every delegated install follows the cannbot git
   //    mainline at install time, so the local discovery snapshot is a
@@ -240,6 +293,25 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
     }
   }
 
+  // 4.5 release-set eligibility — installers that enforce their bundled
+  //     release set (resolveBundle's hard fail) cannot install a plugin the
+  //     installer package does not resolve; after the opportunistic refresh
+  //     above, still-absent means the spawn would only fail late with a
+  //     cryptic "plugin not included". Reject with the version and an
+  //     upgrade hint. The check mirrors the installer's own resolution:
+  //     discoverCannbotPlugins scans the same package parent layouts
+  //     (dist/plugins, plugins-official, ...). Mainline-following
+  //     installers (1.9.x installLatest) lack the enforcement marker and
+  //     are unaffected; migrated plugins follow the mainline on those.
+  if (installerEnforcesReleaseSet() && !discoverCannbotPlugins().some((p) => p.id === pluginId)) {
+    result.errors.push(
+      t("cannbot_plugin_not_bundled")
+        .replace("{plugin}", pluginId)
+        .replace("{version}", getCannbotInstallerVersion() || "?")
+    );
+    return result;
+  }
+
   // 5. instructions-file precheck (legacy symlink -> real file)
   result.warnings.push(...migrateSymlinkedInstructions(target, tool));
 
@@ -253,6 +325,13 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
   //    users are not blocked on upstream's release cadence. Installers
   //    >= 1.8.0 install from the bundled snapshot by default and dropped the
   //    flag, so for them the first failure is final and passed through.
+  // Debris-guard snapshot BEFORE the spawn: installers >= 1.10.1 write the
+  // cannbot-plugin.json registry record before the plugin's own late
+  // prechecks fail — the failed run itself may leave a record behind, so
+  // the post-failure registry state cannot distinguish fresh debris from a
+  // prior successful install. Only a record that already existed pre-run
+  // protects the block (failed upgrades keep the working install's config).
+  const hadRegistryRecordBeforeRun = hasCannbotRegistryEntry(target, tool, pluginId);
   let run = await runDelegate(["install", pluginId, "--tool", tool, "--target", target], target);
 
   // installLatest reports the failure via console.error (stderr)
@@ -285,6 +364,15 @@ export async function delegateInstall(options: DelegateInstallOptions): Promise<
       .filter(Boolean)
       .pop();
     if (reason) result.errors.push(reason);
+    // Debris safety net: upstream writes the instructions block before its
+    // late prechecks and has no rollback — clean the orphaned marker block
+    // unless the registry ALREADY carried this plugin's record before the
+    // failed run (a prior successful install; failed upgrades keep the
+    // working install's config). A record written by the failed run itself
+    // (installer >= 1.10.1 order) is fresh debris, not protection.
+    if (!hadRegistryRecordBeforeRun) {
+      removeOrphanedInstructionsBlock(target, tool, pluginId);
+    }
     return result;
   }
 

@@ -618,4 +618,22 @@ describe("uninstall --tool isolation (#797)", () => {
     // no --tool: the latest matching record (opencode) is removed as before
     expect(existsSync(join(projectDir, ".opencode", "AGENTS.md"))).toBe(false);
   });
+
+  it("runs cannbot discovery before resolving names (source code verification)", async () => {
+    // Renamed cannbot plugins route by their old id through the tombstone
+    // alias, which only resolves after discovery merges the installed
+    // installer's entries (the cake case: uninstalling by either name
+    // failed while install/list/info all worked). uninstall must run the
+    // same ensureCannbotDiscovery() precondition as the other commands,
+    // BEFORE the name-classification loop.
+    const { readFileSync } = await import("fs");
+    const { join, dirname } = await import("path");
+    const { fileURLToPath } = await import("url");
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const src = readFileSync(join(__dirname, "..", "src", "commands", "uninstall.ts"), "utf-8");
+    const callIndex = src.indexOf("await ensureCannbotDiscovery()");
+    expect(callIndex).toBeGreaterThan(-1);
+    const classifyIndex = src.indexOf("for (const query of names)");
+    expect(classifyIndex).toBeGreaterThan(callIndex);
+  });
 });

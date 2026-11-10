@@ -79,13 +79,27 @@ install_binary() {
     local ACTUAL_B64
 
     ARCH=$(uname -m)
+    OS_DETECT=$(uname -s | tr '[:upper:]' '[:lower:]')
 
     PLATFORM="linux"
 
-    case "$ARCH" in
-        x86_64|amd64)  ARCHITECTURE="x64" ;;
-        arm64|aarch64) ARCHITECTURE="arm64" ;;
-        *)             ARCHITECTURE="x64" ;;
+    # 平台守卫：不支持的 OS/架构在查询 registry 前直接拒绝（零网络请求）。
+    # #737 重构 install_binary() 时丢失了原守卫，未知架构静默回退 x64——
+    # 不支持平台上会先查询 linux-x64 包再失败，真实机器甚至可能装上错误
+    # 架构的二进制（回归测试：rejects <os>/<arch> before querying）。
+    case "${OS_DETECT}-${ARCH}" in
+        linux-x86_64|linux-amd64)  ARCHITECTURE="x64" ;;
+        linux-arm64|linux-aarch64) ARCHITECTURE="arm64" ;;
+        *)
+            echo -e "${RED}❌ 暂未提供 ${OS_DETECT}-${ARCH} 的预编译安装包${NC}"
+            echo ""
+            echo "请参照官网安装 Node.js:"
+            echo "  https://nodejs.org/zh-cn/download"
+            echo ""
+            echo "安装完成后执行:"
+            echo "  npm install -g @cannbot-ai/install-helper@${CHANNEL}"
+            exit 1
+            ;;
     esac
 
     SUBPKG_NAME="@cannbot-ai/install-helper-${PLATFORM}-${ARCHITECTURE}"

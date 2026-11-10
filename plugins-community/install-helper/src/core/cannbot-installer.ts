@@ -19,7 +19,7 @@
 //   - TTL ok   -> reuse the cached copy (offline friendly)
 //   - TTL gone -> refresh via npm install (same channel)
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, statSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, statSync, rmSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execa, execaSync } from "execa";
@@ -175,6 +175,10 @@ async function npmInstallInstaller(config: CannbotInstallerConfig, force: boolea
     mkdirSync(prefix, { recursive: true });
   }
 
+  // A crashed refresh leaves npm's rename target behind and every later
+  // install dies with ENOTEMPTY — clean those leftovers up front.
+  cleanStaleInstallerTempDirs(config.package, prefix);
+
   const spec = `${config.package}@${config.channel}`;
   let lastError: unknown = null;
   for (const registry of NPM_MIRRORS) {
@@ -185,6 +189,18 @@ async function npmInstallInstaller(config: CannbotInstallerConfig, force: boolea
       return true;
     } catch (error) {
       lastError = error;
+      const output = `${(error as { stderr?: string })?.stderr ?? ""} ${(error as Error)?.message ?? ""}`;
+      if (output.includes("ENOTEMPTY")) {
+        // leftovers appeared mid-run (racing rename): clean once and retry
+        // the same registry before falling through to the mirror logic
+        cleanStaleInstallerTempDirs(config.package, prefix);
+        try {
+          await execa("npm", args, { timeout: 300000 });
+          return true;
+        } catch (retryError) {
+          lastError = retryError;
+        }
+      }
       if (force || !isCannbotInstallerReady()) {
         // keep trying mirrors only when we have nothing cached yet
         continue;
@@ -200,6 +216,29 @@ async function npmInstallInstaller(config: CannbotInstallerConfig, force: boolea
   throw lastError instanceof Error
     ? lastError
     : new Error(t("error_unknown"));
+}
+
+/** npm's package replacement renames the old directory to
+ *  ".<name>-r<random>" under the scoped parent before extracting the new
+ *  copy; a crashed refresh leaves that copy behind and every later refresh
+ *  dies with ENOTEMPTY (deterministic, not a network failure). Removes
+ *  exactly those leftovers — the real package and unrelated dot-entries
+ *  stay untouched. Best-effort: npm surfaces any real install failure. */
+export function cleanStaleInstallerTempDirs(packageName: string, prefix?: string): void {
+  try {
+    const parts = packageName.split("/");
+    if (parts.length < 2) return;
+    const scopedRoot = join(prefix ?? getCannbotInstallerPrefix(), "node_modules", parts[0]);
+    if (!existsSync(scopedRoot)) return;
+    const leaf = parts[parts.length - 1];
+    for (const entry of readdirSync(scopedRoot)) {
+      if (entry.startsWith(`.${leaf}-r`)) {
+        rmSync(join(scopedRoot, entry), { recursive: true, force: true });
+      }
+    }
+  } catch {
+    // best-effort cleanup
+  }
 }
 
 /**
@@ -390,7 +429,17 @@ export function discoverCannbotPlugins(): CannbotPluginEntry[] {  if (!isCannbot
 // plugin.json) becomes discoverable and routable to the delegated install.
 // ---------------------------------------------------------------------------
 
-const CANNBOT_REPO_URL = "https://gitcode.com/cann/cannbot.git";
+const DEFAULT_CANNBOT_REPO_URL = "https://gitcode.com/cann/cannbot.git";
+
+/** The cannbot mainline repo URL. Call-time env read (not captured at
+ *  module load) so per-test dynamic imports observe fresh overrides.
+ *  CANNBOT_MAINLINE_URL exists for environments where HTTPS git is
+ *  firewalled but SSH works — mirrors the CANNBOT_REPO_URL override
+ *  for the skills repo in repository.ts. */
+export function getCannbotRepoUrl(): string {
+  return process.env.CANNBOT_MAINLINE_URL || DEFAULT_CANNBOT_REPO_URL;
+}
+
 const CANNBOT_REPO_TTL_MS = 24 * 60 * 60 * 1000;
 
 export function getCannbotRepoCachePath(): string {
@@ -436,15 +485,25 @@ export async function ensureCannbotRepoCache(): Promise<string | null> {
       mkdirSync(dirname(cachePath), { recursive: true });
       await execa(
         "git",
-        ["clone", "--depth", "1", "--single-branch", CANNBOT_REPO_URL, cachePath],
+        ["clone", "--depth", "1", "--single-branch", "--", getCannbotRepoUrl(), cachePath],
         { timeout: 600000 }
       );
       writeCannbotRepoStamp();
       return cachePath;
     }
 
-    // stale but valid: try to refresh, keep serving the stale cache on failure
+    // stale but valid: try to refresh, keep serving the stale cache on failure.
+    // Re-point origin at the currently configured URL first — the override
+    // must govern refreshes too, not only the first clone (PR #1671 review:
+    // a firewalled user with an HTTPS-cloned cache would otherwise keep
+    // pulling the blocked origin forever). The `--` guards keep the
+    // env-provided URL out of git's option space.
     try {
+      await execa(
+        "git",
+        ["remote", "set-url", "origin", "--", getCannbotRepoUrl()],
+        { cwd: cachePath, timeout: 60000 }
+      );
       await execa("git", ["pull", "--quiet"], { cwd: cachePath, timeout: 300000 });
       writeCannbotRepoStamp();
     } catch {

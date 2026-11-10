@@ -116,19 +116,39 @@ export function getPluginDirs(): string[] {
  *  directory in the repository therefore shows up in the wizard without an
  *  install-helper release; the configured scanDirs remain as a fallback
  *  when discovery finds nothing (unusual layouts). */
+/** A directory is a skill domain when at least one direct child directory
+ *  carries a SKILL.md (e.g. ops/<skill>/SKILL.md). */
+function isSkillDomain(dirPath: string): boolean {
+  return safeReaddir(dirPath).some((child) => {
+    const childPath = join(dirPath, child);
+    return isDirectory(childPath) && existsSync(join(childPath, "SKILL.md"));
+  });
+}
+
 export function discoverSkillDomains(repoPath: string): string[] {
   const pluginDirs = new Set(PLUGIN_SCAN_DIRS);
   const domains: string[] = [];
   for (const entry of safeReaddir(repoPath)) {
     if (entry.startsWith(".")) continue;
     if (pluginDirs.has(entry)) continue; // plugin trees are never skill domains
+    if (EXCLUDE_DIRS.has(entry)) continue; // node_modules & friends stay outside discovery
     const domainPath = join(repoPath, entry);
     if (!isDirectory(domainPath)) continue;
-    const hasDirectSkill = safeReaddir(domainPath).some((child) => {
-      const childPath = join(domainPath, child);
-      return isDirectory(childPath) && existsSync(join(childPath, "SKILL.md"));
-    });
-    if (hasDirectSkill) domains.push(entry);
+    if (isSkillDomain(domainPath)) {
+      domains.push(entry);
+      continue;
+    }
+    // Container directory (e.g. community/): no direct skills, but its
+    // children may be nested domains (community/ops/<skill>/SKILL.md — the
+    // #1690/#1680 community relocations). Probe one level deep so a new
+    // community/<domain> tree appears in the wizard without an
+    // install-helper release, same as top-level domains.
+    for (const nested of safeReaddir(domainPath)) {
+      if (nested.startsWith(".")) continue;
+      const nestedPath = join(domainPath, nested);
+      if (!isDirectory(nestedPath)) continue;
+      if (isSkillDomain(nestedPath)) domains.push(`${entry}/${nested}`);
+    }
   }
   return domains;
 }
