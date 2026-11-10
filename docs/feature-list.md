@@ -266,19 +266,26 @@
 | **model-recommend-runtime-debug** | 运行时诊断（条目 13）：GE 初始化 / onnx 解析 / aicore timeout / OOM / 卡死 / 错误码与 plog 排查 |
 | **model-recommend-structure-analysis** | 模型结构与显存分析（条目 1）：onnx 结构档案、算子构成（AIC/AIV）、链路清单、显存估算与可执行判定 |
 
-## NPU 模型训练精度诊断
+## NPU 模型训练调测
+
+> 方法论适用于 torchtitan-npu 等 PyTorch on NPU 训练框架。精度诊断 Skill 通过 `model-train-skills` 技能包安装（`npx skills add https://gitcode.com/cann/cannbot-skills.git --skill <skill-name>`），端到端流程可使用 [`model-train-precision-diagnose`](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) Plugin。
 
 ### Skills
 
-| Skill | 功能 |
-|-------|------|
-| **model-train-precision-numerical-mismatch** | E01 正向、E02 反向有限值偏差的首差异定位与标杆对齐 |
-| **model-train-precision-nonfinite** | E04 前向、反向及 Optimizer/Scaler 边界的 NaN/Inf/Overflow 定位 |
-| **model-train-precision-determinism** | E08 固定输入、权重、Seed 和确定性配置后的重复运行不一致定位 |
+| Skill | 功能 | 使用样例 |
+|-------|------|---------|
+| **model-train-precision-numerical-mismatch** | E01 正向、E02 反向有限值偏差的首差异定位与标杆对齐 | [查看](skills-usage.md#model-train-precision-numerical-mismatch) |
+| **model-train-precision-nonfinite** | E04 前向、反向及 Optimizer/Scaler 边界的 NaN/Inf/Overflow 定位 | [查看](skills-usage.md#model-train-precision-nonfinite) |
+| **model-train-precision-determinism** | E08 固定输入、权重、Seed 和确定性配置后的重复运行不一致定位 | [查看](skills-usage.md#model-train-precision-determinism) |
+| **model-train-oom-analysis** | NPU 训练 OOM 内存诊断与优化。按「日志分类 → 静态估算 → snapshot 深度分析 → 优化建议」流程定位内存问题 | [查看](skills-usage.md#model-train-oom-analysis) |
+| **model-train-log-visualization** | 训练日志可视化，从 stdout 解析 loss/grad_norm/内存/吞吐等指标并绘图，支持两份日志对比 | [查看](skills-usage.md#model-train-log-visualization) |
 
-端到端诊断可使用
-[`model-train-precision-diagnose`](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) Plugin，
-通过 `plugin-sources.json` 组合上述 Skills。
+**边界说明**：
+
+- 有限值偏差诊断必须提供可比标杆（标杆环境或标杆数据）；无法判断症状类型时，先使用 `model-train-precision-diagnose` Plugin 路由。
+- 纯 OOM（无精度问题）→ 使用 `model-train-oom-analysis`。
+- 纯推理精度问题 → 使用 `model-infer-precision-debug`。
+- 纯算子精度问题 → 使用 `ascendc-precision-debug`。
 
 ## Skill 治理工具
 

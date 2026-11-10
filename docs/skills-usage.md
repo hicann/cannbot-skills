@@ -154,7 +154,7 @@ python3 ops/ascendc-sync-audit/scripts/sync_audit.py cube.cpp vec.cpp --check pa
 
 ---
 
-## NPU 模型训练精度诊断
+## NPU 模型训练调测
 
 ### model-train-precision-numerical-mismatch
 
@@ -195,6 +195,31 @@ A/B 运行证据：<两次运行的日志或 dump 绝对路径>
 
 有限值偏差诊断必须提供可比标杆；路径尽量使用绝对路径。若尚不能判断症状类型或需要完整诊断流程，可使用
 [`model-train-precision-diagnose`](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) Plugin。
+
+---
+
+### model-train-oom-analysis
+
+诊断 PyTorch on NPU 大模型训练中的 OOM 问题，区分配置不足、Workspace/HCCL 内存与疑似内存泄漏，并给出内存优化方向。
+
+```
+请使用 model-train-oom-analysis 诊断训练 OOM。
+训练日志：<OOM 完整日志绝对路径>
+训练配置：<config registry 注册名 / 配置文件绝对路径>
+NPU 设备显存：<如 Ascend 910B 64GB>
+```
+
+### model-train-log-visualization
+
+从训练 stdout 日志按 step 解析 loss、grad_norm、内存、吞吐等指标并绘图，支持正常/异常两份日志对比。
+
+```
+请使用 model-train-log-visualization 绘制训练曲线。
+主日志：<训练日志绝对路径>
+对比日志：<baseline 日志绝对路径，可选>
+可选指标：<memory,tps,tflops,mfu,indexer_loss，可空>
+输出路径：<图片绝对路径，可选>
+```
 
 ---
 

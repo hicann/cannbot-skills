@@ -83,7 +83,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 | **Triton** | `triton_ascend` DSL 生成并优化算子 | triton-op-generator（已迁移至 [cannbot](https://gitcode.com/cann/cannbot) 仓 `plugins-official/triton-op-generator`） |
 | **torch.compile 图模式** | npugraph_ex 图捕获与重放 | [torch-compile（cannbot）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/torch-compile) |
 | **模型推理优化** | 固定阶段优化与 baseline 之上的 SOTA 探索优化 | [model-infer-optimize（cannbot）](https://gitcode.com/cann/cannbot/tree/master/plugins-official/model-infer-optimize) |
-| **模型训练精度诊断** | PyTorch on Ascend NPU 的有限值偏差、非有限值和确定性异常诊断 | [cannbot 社区 Plugin](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) |
+| **模型训练调测** | 训练精度诊断（有限值偏差 / 非有限值 / 确定性）、OOM 内存诊断与训练日志可视化 | [model-train-precision-diagnose（cannbot）](https://gitcode.com/cann/cannbot/tree/master/plugins-community/model-train-precision-diagnose) / [model-train-skills](docs/feature-list.md#npu-模型训练调测) |
 
 ## 🔍 项目架构
 
