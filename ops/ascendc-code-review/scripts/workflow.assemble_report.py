@@ -421,7 +421,7 @@ def _clause_match_pos(text: str, clause_id: str):
 
     双模式匹配：① 快速索引表行 `^| {id} |`（覆盖表格式索引，如 cpp-style/simt）；
     ② 条款标题行 `^#+ .*{id}([ :.]|$)`（quick-review 同款边界，覆盖标题式索引，
-    如 topk 的 `### TOPK-1. ...`）。无命中返回 None。
+    如 topk 的 `## TOPK-1: ...`）。无命中返回 None。
     """
     escaped = re.escape(clause_id)
     row = re.search(r'^\|\s*' + escaped + r'\s*\|', text, re.M)

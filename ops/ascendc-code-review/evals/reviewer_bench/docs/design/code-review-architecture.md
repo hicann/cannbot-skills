@@ -104,7 +104,7 @@ ascendc-code-review/
 │   ├── ascendc-topk.md                   TOPK高频问题清单（13条）
 │   │    语言:C++ 侧别:All,Host,Kernel 领域:false
 │   │    条款级侧别标记：[适用:All] / [适用:Host] / [适用:Kernel]
-│   │    含交叉引用（如TOPK-1→SEC-3.5, TOPK-6→SEC-2.3）
+│   │    含交叉引用（如TOPK-1→SEC-3.5, TOPK-5→SEC-2.3）
 │   │
 │   ├── cpp-general.md                    C++通用编码规范（44条）
 │   │    语言:C++ 侧别:All,Tiling 领域:false

@@ -69,7 +69,7 @@ auto combineEp = combineAttrs->GetAttrPointer<int64_t>(COMBINE_EP_INDEX);
 以被检提交的算子原型和目标版本接口声明为准；已有 API 预研覆盖相同版本时可直接使用。
 
 - 从算子注册和 Python、C++、aclnn 的接口签名，追踪到实际使用参数的位置。检查参数是否漏传、交换位置、被常量覆盖，或只用于打印日志；同时核对列表长度、输出顺序，以及 workspace、stream、通信域和设备参数。
-- 用 EP≠TP、高位非零值和省略可选参数的输入检查上述问题。共享属性读取表或适配层重排参数时，按当前算子的原型确认对应关系。属性类型见 [TOPK 第 5 条](ascendc-topk.md)，Kernel 选择见 [MC2-2.1](#mc2-2-1)。
+- 用 EP≠TP、高位非零值和省略可选参数的输入检查上述问题。共享属性读取表或适配层重排参数时，按当前算子的原型确认对应关系。属性类型见 [TOPK 第 6 条](ascendc-topk.md)，Kernel 选择见 [MC2-2.1](#mc2-2-1)。
 
 #### 条例结束
 
@@ -113,7 +113,7 @@ auto dispatchEntry = &BuildDispatchV2;
 
 ### 检视方法
 
-- 从各个可独立调用的入口追踪到风险操作。按 [TOPK 第 7 条](ascendc-topk.md) 核对 shape、dtype 与模式的组合、专家数量的合法范围，以及零值的含义；用 epSize=0、越界索引和空指针检查是否及时返回错误。
+- 从各个可独立调用的入口追踪到风险操作。按 [TOPK 第 6 条](ascendc-topk.md) 核对 shape、dtype 与模式的组合、专家数量的合法范围，以及零值的含义；用 epSize=0、越界索引和空指针检查是否及时返回错误。
 - wrapper 或 InferShape 中的校验不能保护绕过它们的调用路径。更换注册入口或删除检查时，必须保留接口签名、合法默认值、失败码，以及公共 Tiling 对容量和拓扑的约束。
 
 #### 条例结束

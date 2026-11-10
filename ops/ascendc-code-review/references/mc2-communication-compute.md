@@ -82,7 +82,7 @@ for (int round = 0; round < roundNum; ++round) {
 
 - 展开实际执行路径中的 GM 访问和同步封装，核对 payload、ready 的地址、epoch、参与核，以及数据何时可见。用两轮不同的数据并延迟生产者，检查数据发布、读取和缓冲复用的顺序；同时检查空工作量、尾块和提前退出路径。发生失败时，按通信域的协议通知其他参与者。
 - 屏障总数相同不代表各核停在同一阶段。volatile、CPU acquire/release 或原子 flag 本身也不能保证设备上的 payload 可见。已有有效同步时无需重复添加；部分核参与的同步和阻塞语义都按实际 API 核实。
-- 调度要求见 [TOPK 第 10、13、14 条](ascendc-topk.md)。superKernel 的限制只适用于该模式。
+- 调度要求见 [TOPK 第 11、12 条](ascendc-topk.md)。superKernel 的限制只适用于该模式。
 
 #### 条例结束
 
@@ -578,6 +578,6 @@ int8_t q = static_cast<int8_t>(clipped);    // [-130,0,130]→[-128,0,127]
 ### 检视方法
 
 - 用正负极值、舍入和饱和转换的边界值，以及多个量化分组，对比参考结果和允许误差。检查是否过早窄化导致回绕，以及计算位置或常量是否被改错。区分 1/sqrt(headDim) 与 1/headDim 时，要使用 headDim 不等于 1 的输入。
-- 模型允许的其他转换语义可以保留。Cast 次数或全零输入不能证明精度正确；数学 API 和 Cast 的约束按目标版本文档核实；特殊值处理见 [TOPK-6](ascendc-topk.md)。不要求 Kernel 使用 std::sqrt。
+- 模型允许的其他转换语义可以保留。Cast 次数或全零输入不能证明精度正确；数学 API 和 Cast 的约束按目标版本文档核实；特殊值处理见 [TOPK-5](ascendc-topk.md)。不要求 Kernel 使用 std::sqrt。
 
 #### 条例结束
