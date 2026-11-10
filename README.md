@@ -65,7 +65,7 @@ npx skills add https://gitcode.com/cann/cannbot-skills.git --skill ascendc-env-c
 "开发一个 Abs 算子，输入 float16，输出 float16"
 ```
 
-> 📖 完整命令参考、手动脚本安装与故障排查详见 [安装指南](docs/installation-guide.md)。
+> 📖 安装验证、完整命令参考、手动脚本安装与故障排查详见 [安装指南](docs/installation-guide.md)。
 
 ## 📐 开发路径与核心能力
 

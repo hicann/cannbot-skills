@@ -91,17 +91,27 @@ bash plugins-official/ops-direct-invoke/init.sh project opencode /path/to/projec
 
 ## 验证安装
 
-安装完成后，运行以下命令确认安装成功：
-
 ```bash
-# 完整安装验证
-install-helper list          # 查看已安装插件，应显示已安装的 Plugin
-
-# 独立 Skill 安装验证
-npx skills list              # 查看已安装 Skills，应显示已安装的 Skill
+install-helper list     # 完整安装：应列出已安装的 Plugin
+npx skills list         # 独立 Skill 安装：应列出已安装的 Skill
 ```
 
-若命令未找到或列表为空，运行 `install-helper doctor --fix` 自动诊断修复。
+命令未找到或列表为空时，运行 `install-helper doctor --fix` 自动诊断修复。
+
+Skill 以软链接安装到各工具的标准目录（指向 `~/.cannbot/repo/` 缓存）。OpenCode 与 Claude Code 的发现路径：
+
+| 工具 | project 级（仅当前项目） | global 级（本机所有项目） |
+|------|------------------------|--------------------------|
+| OpenCode | `<项目根>/.opencode/skills/` | `~/.config/opencode/skills/` |
+| Claude Code | `<项目根>/.claude/skills/` | `~/.claude/skills/` |
+
+```bash
+ls -l .opencode/skills/   # 检查软链接是否存在（Claude Code 对应 .claude/skills/）
+```
+
+> OpenCode 还兼容 `.claude/skills/`、`.agents/skills/`；其他工具（Trae / Cursor / Codex / Copilot / CodeArts / Qoder / DSH）的路径运行 `install-helper doctor` 查看，DSH 详见 [DSH（DeepSeek Harness）](#dshdeepseek-harness) 一节。
+
+最后确认客户端已加载：**Claude Code** 输入 `/skills` 查看列表；**OpenCode** 直接询问"当前会话有哪些可用的 skills？"，或输入"检查环境"做触发词冒烟验证。
 
 ---
 
@@ -204,6 +214,9 @@ mkdir -p ~/.dsh/skills && cp -r ops/ascendc-env-check ~/.dsh/skills/ascendc-env-
 | `install-helper` 报错 | npm/npx 方式请确认 Node.js >= 20：`node --version` |
 | AI 工具无法识别 Skills | 重启工具或新开会话 |
 | 软链接失效 | `install-helper doctor --fix` |
+| project 级 Skill 在其他项目不可见 | project 级仅当前项目生效，跨项目请安装 global 级（`--level global`） |
+| 客户端看不到 project 级 Skill | OpenCode / Claude Code 从启动目录向上查找，请在项目根目录（或子目录）启动 |
+| Skill 在自定义目录 | Claude Code 用 `claude --add-dir <目录>` 加载；OpenCode 软链接到标准路径即可（install-helper 不支持自定义安装根路径） |
 | 网络问题 | 配置 GitCode SSH Key 或设置代理；HTTPS git 被防火墙拦截时改走 SSH，见下方[防火墙拦截 HTTPS git](#防火墙拦截-https-git) |
 | CANN 环境未配置 | 仅影响代码编译/运行类 Skills，知识检索类不受影响 |
 
