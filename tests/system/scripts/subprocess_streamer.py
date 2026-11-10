@@ -16,6 +16,8 @@
 会话因长时间无输出而中断。
 """
 
+import os
+import signal
 import subprocess
 import sys
 import threading
@@ -24,8 +26,13 @@ from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 
-def _reader_thread(stream, lines: List[str], done: threading.Event,
-                   last_output: List[float], prefix: str = ""):
+def _reader_thread(
+    stream,
+    lines: List[str],
+    done: threading.Event,
+    last_output: List[float],
+    prefix: str = "",
+):
     """从 stream 逐行读取，追加到 lines 列表并实时输出到 stdout。"""
     try:
         for line in iter(stream.readline, ""):
@@ -41,8 +48,9 @@ def _reader_thread(stream, lines: List[str], done: threading.Event,
         stream.close()
 
 
-def _heartbeat_thread(done: threading.Event, last_output: List[float],
-                      interval: int, label: str):
+def _heartbeat_thread(
+    done: threading.Event, last_output: List[float], interval: int, label: str
+):
     """每隔 interval 秒检查一次，若输出静默则打出一条心跳日志到 stdout。"""
     while not done.wait(5):
         # 在循环开始时检查一次 done，而不是依靠 wait 的返回值
@@ -57,12 +65,14 @@ def _heartbeat_thread(done: threading.Event, last_output: List[float],
             last_output[0] = now
 
 
-def _start_streaming_threads(process: subprocess.Popen,
-                              stdout_lines: List[str],
-                              stderr_lines: List[str],
-                              done: threading.Event,
-                              last_output: List[float],
-                              label: str) -> List[threading.Thread]:
+def _start_streaming_threads(
+    process: subprocess.Popen,
+    stdout_lines: List[str],
+    stderr_lines: List[str],
+    done: threading.Event,
+    last_output: List[float],
+    label: str,
+) -> List[threading.Thread]:
     """启动 stdout/stderr 读取线程和心跳守护线程。"""
     threads: List[threading.Thread] = []
 
@@ -114,9 +124,16 @@ def run_subprocess_streaming(
         (returncode, captured_stdout, captured_stderr, timed_out)
     """
     process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, encoding="utf-8", errors="replace",
-        bufsize=1, cwd=cwd, env=env,
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        cwd=cwd,
+        env=env,
+        start_new_session=(os.name == "posix"),
     )
 
     stdout_lines: List[str] = []
@@ -125,21 +142,37 @@ def run_subprocess_streaming(
     done = threading.Event()
 
     threads = _start_streaming_threads(
-        process, stdout_lines, stderr_lines, done, last_output,
+        process,
+        stdout_lines,
+        stderr_lines,
+        done,
+        last_output,
         label or " ".join(cmd[:3]),
     )
 
     timed_out = False
     try:
         process.wait(timeout=timeout)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        process.wait()
+    except (subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
+        try:
+            if os.name == "posix":
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except OSError:
+            # A missing or inaccessible group must not leave the direct child alive.
+            process.kill()
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=10)
+        if isinstance(exc, KeyboardInterrupt):
+            raise
         timed_out = True
+    finally:
+        done.set()
+        for t in threads:
+            t.join(timeout=5)
 
-    done.set()
-    for t in threads:
-        t.join(timeout=5)
-
-    return (process.returncode, "".join(stdout_lines),
-            "".join(stderr_lines), timed_out)
+    return (process.returncode, "".join(stdout_lines), "".join(stderr_lines), timed_out)
