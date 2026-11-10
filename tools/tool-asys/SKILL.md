@@ -1,5 +1,5 @@
 ---
-name: asys-toolkit
+name: tool-asys
 description: "CANN 一键式故障信息收集工具 asys 使用指导。覆盖故障信息收集（collect）、业务复跑收集（launch）、软硬件与 Device 状态查询（info）、健康检查（health）、综合检测与组件检测（diagnose）、trace/coredump/stackcore/coretrace/UB/AI Core Error 六类文件解析（analyze）、实时堆栈导出、环境配置（config）、性能数据采集（profiling）。触发场景：需要收集 NPU 故障维测信息、训练或推理进程卡死要导出堆栈、Segmentation fault 要解析 coredump、日志出现 aivec/aicore error exception、排查 Device 健康状态与故障码、做 HBM/CPU/AI Core 硬件检测、或用 asys 采集系统级性能数据时。"
 ---
 
@@ -151,7 +151,7 @@ asys analyze -r=aicore_error --path=${HOME}/aic_err_info_timestamp
 - `ascendc-env-check`:npu-smi 不可用时的设备查询回退，回退命令引用本 skill。
 - `ascendc-crash-debug`:卡死/崩溃调试流程，堆栈与 coredump 解析步骤引用本 skill。
 - `ops-profiling`:算子性能采集主路径是 msprof;`asys profiling` 是系统级周期采样，定位不同。
-- `msnpureport-toolkit`:Device 侧 stackcore、coretrace、UB 文件的导出工具，是本 skill 解析功能的上游。
+- `tool-msnpureport`: Device 侧 stackcore、coretrace、UB 文件的导出工具，是本 skill 解析功能的上游。
 
 ## 信息来源
 

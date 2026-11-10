@@ -78,14 +78,14 @@ python3 msaicerr.py -p <收集目录> -out <结果目录> -dev <Device ID>
 
 执行规范（技能动作）：
 
-1. 在msaicerr.py所在目录执行，先完成P0/P1的环境与输入检查（见 SKILL.md Phase 0/Phase 1，工具准备详见 msaicerr-toolkit 技能）。
+1. 在msaicerr.py所在目录执行，先完成P0/P1的环境与输入检查（见 SKILL.md Phase 0/Phase 1，工具准备详见 tool-msaicerr 技能）。
 2. 预检查三要素：`dfx/data-dump`下有dump文件、有算子编译产物（`.o`与`.json`）、`dfx/log/host/cann`下有日志；缺任一则工具无法提取AI Core Error信息（oam-tools/docs/zh/msaicerr/AI_Core_error_analysis.md:19）。
 3. 执行后跟随终端提示`Analysis info is saved in <info.txt路径>`定位结果文件（oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:1358）；工具执行日志在同级的`debug_info.txt`（oam-tools/docs/zh/msaicerr/AI_Core_error_analysis.md:41）。
 4. 结果目录形态：`<out>/info_{执行时间戳}/aicerror_0_{错误时间戳}/info.txt`（输出目录拼接oam-tools/src/msaicerr/msaicerr.py:127，错误子目录拼接oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:1829-1830）。
 
 **多错误只解析第一个**：若故障信息中存在多个AI Core Error问题，msaicerr按日志时间解析第一次出现的问题（oam-tools/docs/zh/msaicerr/AI_Core_error_analysis.md:39）。实现上，错误记录按`err_time`排序（oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:567-569），再与dump侧线程号匹配取对应记录；tid不一致时报`Dump data tid is not the same with rts tid`并终止解析（oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:575-597）。若plog中常规错误正则（`error info:`行加`AICORE_ERR_OCCUR`）无命中，工具改试outstanding双PC正则`AICORE_ERR_OCCUR_OST`，仍无命中则报`Aicore error exception does not match`终止（oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:554-565；正则定义oam-tools/src/msaicerr/ms_interface/constant.py:1195-1210）。
 
-**info提取失败分支**：Step 1拿不到算子信息（或采集上报失败）时，工具直接写一份空结论的`info.txt`到`aicerror/`目录并返回8（`MS_AICERR_INVALID_SLOG_DATA_ERROR`），不执行后续步骤（oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:1820-1824）。此时按P1的输入完整性检查回退（三要素排查详见 msaicerr-toolkit 技能），不要重复执行`-p`。
+**info提取失败分支**：Step 1拿不到算子信息（或采集上报失败）时，工具直接写一份空结论的`info.txt`到`aicerror/`目录并返回8（`MS_AICERR_INVALID_SLOG_DATA_ERROR`），不执行后续步骤（oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:1820-1824）。此时按P1的输入完整性检查回退（三要素排查详见 tool-msaicerr 技能），不要重复执行`-p`。
 
 ## 四、info.txt判读
 
@@ -320,4 +320,4 @@ For complete instructions, please view <kernel.o>.txt
 
 ---
 
-**相关文件**：场景与收集输入判定见 SKILL.md 参考文件路由表（工具用法详见 msaicerr-toolkit、asys-toolkit 技能）；错误码与寄存器解码见`error-type-decode.md`；单算子复现见`reproduction-guide.md`；结论汇聚与修复建议见`fix-suggestions.md`。
+**相关文件**：场景与收集输入判定见 SKILL.md 参考文件路由表（工具用法详见 tool-msaicerr、tool-asys 技能）；错误码与寄存器解码见`error-type-decode.md`；单算子复现见`reproduction-guide.md`；结论汇聚与修复建议见`fix-suggestions.md`。

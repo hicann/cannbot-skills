@@ -3,7 +3,7 @@ name: tool-exception-dump
 description: |
   昇腾 NPU AI Core Error 系统化诊断工作流：环境与输入检查、故障信息收集、场景判定与报错行定位、错误类型识别、单算子复现、证据链汇聚与修复建议，基于 msaicerr/asys 官方工具管线执行与判读，输出六段式证据链诊断报告。
   Use when（满足任一强信号即触发）：当用户提到 aicore error、aivec error、AI Core Error、AI Core 异常、核错误、算子报错；越界、野指针、内存踩踏、地址非法；exception dump 解析、plog、故障日志收集、asys collect、msaicerr -p/-d/-e；报错行定位、错误码定位、寄存器解码、结论码 101-107；单算子复现、最小复现、根因分析；Kernel 报错调试。即使只是询问某报错是否为 AI Core Error 也应使用本技能。
-  Do NOT use：仅询问 msaicerr/asys 工具用法与参数细节（转 msaicerr-toolkit、asys-toolkit 技能）；GE/图编译层问题（转 graph/ 域技能）；算子精度不达标（转 ascendc-precision-debug）；AI CPU Error、HCCL 等其他错误类型（不在覆盖范围，说明后指路）。
+  Do NOT use：仅询问 msaicerr/asys 工具用法与参数细节（转 tool-msaicerr、tool-asys 技能）；GE/图编译层问题（转 graph/ 域技能）；算子精度不达标（转 ascendc-precision-debug）；AI CPU Error、HCCL 等其他错误类型（不在覆盖范围，说明后指路）。
 ---
 
 # tool-exception-dump：AI Core Error 系统化诊断工作流
@@ -18,7 +18,7 @@ description: |
 - **工具底座**：msaicerr 与 asys（CANN 软件包内置）。msaicerr 承载三种运行模式：`-p` 完整分析、`-d` dump 解析、`-e` 环境自检；asys 是配套的故障信息收集工具。
 - **术语约定**：plog 指业务进程运行日志（位于收集目录 dfx/log/host/cann 内）；dump 指异常发生时的数据落盘文件；SK 指 SuperKernel（多算子融合编译形态）。
 - **覆盖范围**：仅 AI Core Error；AI CPU Error、HCCL 等其他错误类型不在本技能范围内。
-- **指路规则**：仅询问 msaicerr/asys 工具用法、CLI 参数、环境准备、三要素排查等纯工具细节时转 `msaicerr-toolkit`、`asys-toolkit` 技能（工具用法真源，本技能不复制工具手册）；GE/图编译层问题（图编译报错、GE 进程崩溃等）转 graph/ 域技能；算子精度问题（rtol/atol 不达标、数值偏差）转 `ascendc-precision-debug`；不确定时标注不确定、不得编造，查证不了的写"待确认（需查 <文件>）"。
+- **指路规则**：仅询问 msaicerr/asys 工具用法、CLI 参数、环境准备、三要素排查等纯工具细节时转 `tool-msaicerr`、`tool-asys` 技能（工具用法真源，本技能不复制工具手册）；GE/图编译层问题（图编译报错、GE 进程崩溃等）转 graph/ 域技能；算子精度问题（rtol/atol 不达标、数值偏差）转 `ascendc-precision-debug`；不确定时标注不确定、不得编造，查证不了的写"待确认（需查 <文件>）"。
 - **操作边界**：只读分析加新增结果目录；不做硬件维修判断，只给方向与升级路径；所有结论必须带证据链（见第五节 NEVER 清单）。
 
 ## 二、参考文件路由表
@@ -34,7 +34,7 @@ description: |
 | P5 证据链汇聚与修复建议 | [fix-suggestions.md](references/fix-suggestions.md) | 四证据链框架、优先级链逐级触发条件、修复建议映射表、升级路径、证据链格式报告模板 |
 | 评测自查 | [eval-cases.md](references/eval-cases.md) | 14 个 RED-GREEN 用例，GREEN 断言覆盖全部 34 步 |
 
-上游 toolkit 技能分工（知识依赖单向性，修改只在真源处更新）：msaicerr CLI 参数与命令速查、环境准备、`-e` 环境自检、收集目录三要素排查、8 个暂不支持算子清单、dump 解析与 `-dtype` 转换 → `msaicerr-toolkit`；asys collect/analyze 用法与参数、asys_output 目录树全景、自动收集的 6 个环境变量一致性清单 → `asys-toolkit`。
+上游 toolkit 技能分工（知识依赖单向性，修改只在真源处更新）：msaicerr CLI 参数与命令速查、环境准备、`-e` 环境自检、收集目录三要素排查、8 个暂不支持算子清单、dump 解析与 `-dtype` 转换 → `tool-msaicerr`；asys collect/analyze 用法与参数、asys_output 目录树全景、自动收集的 6 个环境变量一致性清单 → `tool-asys`。
 
 ## 三、诊断剧本（Phase 0-5，34 个编号步骤）
 
@@ -65,8 +65,8 @@ cd <CANN安装路径>/tools/msaicerr     # 必须在 msaicerr.py 所在目录执
 echo "$ASCEND_OPP_PATH"             # 必须输出非空
 ```
 
-**判读**：echo 输出非空路径即通过；ASCEND_OPP_PATH 缺失时工具在解析参数前即报 `Environment variable not set after the CANN software is installed.` 并返回退出码 2（oam-tools/src/msaicerr/msaicerr.py:290-293）。环境准备三步详见 msaicerr-toolkit 技能。
-**失败分支**：输出为空则重新 source 或核查 CANN 安装（环境准备详见 msaicerr-toolkit 技能）；仍为空则停止，不得继续 P0.3。
+**判读**：echo 输出非空路径即通过；ASCEND_OPP_PATH 缺失时工具在解析参数前即报 `Environment variable not set after the CANN software is installed.` 并返回退出码 2（oam-tools/src/msaicerr/msaicerr.py:290-293）。环境准备三步详见 tool-msaicerr 技能。
+**失败分支**：输出为空则重新 source 或核查 CANN 安装（环境准备详见 tool-msaicerr 技能）；仍为空则停止，不得继续 P0.3。
 
 #### P0.3 环境自检（golden op 标杆算子）
 
@@ -101,7 +101,7 @@ ls <用户提供的路径>    # 对用户给出的每个路径做存在性核验
 echo "<算子名>" | grep -iE "MatmulAllReduce|AllGatherMatmul|MatmulReduceScatter|GroupedMatmulAllReduce|^MemSet$|NonMaxSuppressionBucketize"
 ```
 
-**判读**：无输出即不命中，可继续；有输出即命中暂不支持算子。完整 8 项清单：MatmulAllReduce 类算子、MatmulAllReduceAddRmsNorm、MatmulAllReduceInplaceAddRmsNorm、AllGatherMatmul、MatmulReduceScatter、GroupedMatmulAllReduce、MemSet、NonMaxSuppressionBucketize（oam-tools/docs/zh/msaicerr/msaicerr_functions_and_restrictions.md:8-16，清单与约束详见 msaicerr-toolkit 技能）。
+**判读**：无输出即不命中，可继续；有输出即命中暂不支持算子。完整 8 项清单：MatmulAllReduce 类算子、MatmulAllReduceAddRmsNorm、MatmulAllReduceInplaceAddRmsNorm、AllGatherMatmul、MatmulReduceScatter、GroupedMatmulAllReduce、MemSet、NonMaxSuppressionBucketize（oam-tools/docs/zh/msaicerr/msaicerr_functions_and_restrictions.md:8-16，清单与约束详见 tool-msaicerr 技能）。
 **失败分支**：命中即停止分析并如实告知用户该算子暂不支持，不得强行继续；否则转 P0.6。
 
 #### P0.6 预检执行位置与可写性约束
@@ -116,7 +116,7 @@ mkdir -p <结果目录>                            # <结果目录> 不得为 <�
 ```
 
 **判读**：三条均成功即通过；工具侧对应禁令文案为 `Do not run msaicerr in the directory specified by -p or its subdirectory. Make sure -out specifies a different directory (including its subdirectory) from -p.`，违反时退出码 2（oam-tools/src/msaicerr/msaicerr.py:120-123）；当前目录或 debug_info.txt 不可写报 `The current directory or debug_info.txt is immutable, Please check.` 退出码 2（oam-tools/src/msaicerr/msaicerr.py:301-307）。
-**失败分支**：预检不过则更换执行目录或结果目录后重试；仍无法满足时停止（硬约束详见 msaicerr-toolkit 技能），不得带病进入 P1。
+**失败分支**：预检不过则更换执行目录或结果目录后重试；仍无法满足时停止（硬约束详见 tool-msaicerr 技能），不得带病进入 P1。
 
 #### P0.7 汇总 Phase 0 结论并决定入口
 
@@ -171,7 +171,7 @@ ls <收集目录>/dfx/ops/              # 算子编译信息（*.o 与 *.json）
 ls <收集目录>/dfx/log/host/cann/    # host 侧 cann 日志（含 plog）
 ```
 
-**判读**：三个目录均非空即三要素齐备（oam-tools/docs/zh/msaicerr/AI_Core_error_analysis.md:19）；任一为空转 P1.5 降级标记。三要素排查口径与 asys_output 目录树全景详见 msaicerr-toolkit 与 asys-toolkit 技能。
+**判读**：三个目录均非空即三要素齐备（oam-tools/docs/zh/msaicerr/AI_Core_error_analysis.md:19）；任一为空转 P1.5 降级标记。三要素排查口径与 asys_output 目录树全景详见 tool-msaicerr 与 tool-asys 技能。
 **失败分支**：缺 plog（dfx/log/host/cann 无日志）时停止分析、要求用户重新收集（转 P1.5 与停止条件）；缺 dump 或缺 .o/.json 带降级标记继续，转 P1.5。
 
 #### P1.4 执行故障信息收集（分支 C）
@@ -184,7 +184,7 @@ asys collect --task_dir=<编译缓存目录> --tar="True" --output=<输出前缀
 asys analyze -r=aicore_error    # 入口 2：不带 --path，自动收集后内部直接调 msaicerr -p
 ```
 
-**判读**：入口 1 产出 `{output}/asys_output_时间戳` 目录（不带 output 时存放在命令执行目录）；执行 asys 前必须核对 6 个环境变量（ASCEND_PROCESS_LOG_PATH、NPU_COLLECT_PATH、DUMP_GRAPH_PATH、ASCEND_WORK_PATH、ASCEND_CACHE_PATH、ASCEND_CUSTOM_OPP_PATH）与业务运行时一致（oam-tools/docs/zh/asys/fault_information_collection.md:17）；为保证解析数据准确性，复现前建议先清理日志（oam-tools/docs/zh/asys/AI_Core_error_analysis.md:9）。参数细节与目录树详见 asys-toolkit 技能。
+**判读**：入口 1 产出 `{output}/asys_output_时间戳` 目录（不带 output 时存放在命令执行目录）；执行 asys 前必须核对 6 个环境变量（ASCEND_PROCESS_LOG_PATH、NPU_COLLECT_PATH、DUMP_GRAPH_PATH、ASCEND_WORK_PATH、ASCEND_CACHE_PATH、ASCEND_CUSTOM_OPP_PATH）与业务运行时一致（oam-tools/docs/zh/asys/fault_information_collection.md:17）；为保证解析数据准确性，复现前建议先清理日志（oam-tools/docs/zh/asys/AI_Core_error_analysis.md:9）。参数细节与目录树详见 tool-asys 技能。
 **失败分支**：环境变量不一致时先警示用户并要求确认，不得静默继续；收集失败检查 task_dir 与 output 参数合法性、写权限，否则转 P1.5 记录降级。
 
 #### P1.5 降级标记
@@ -226,7 +226,7 @@ python3 msaicerr.py -p <收集目录> -out <结果目录> -dev <device_id>
 ```
 
 **判读**：成功时终端打印 `Analysis info is saved in <info.txt路径>`（oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:1354-1358），结果目录形态为 `<out>/info_{执行时间戳}/aicerror_0_{错误时间戳}/info.txt`；退出码 0 或 101-107 为正常完成（101-107 即分析结论码），1-11 为工具状态码（全表见 references/toolchain-orchestration.md）。本步执行时工具内部自动完成 6 步收集（oam-tools/src/msaicerr/ms_interface/collection.py:383-429）与 11 步解析（oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:1802-1960），解析产出对应后续各判读点：错误行提取与 PC 修正→P2、寄存器解码→P3、dump 解析与单算子复现→P4、结论与报告→P5。
-**失败分支**：退出码 8（空报告）表示收集失败或日志无法提取信息，回 P1.3 复核三要素与日志时间窗，不要盲目重复执行 -p；退出码 2 回 P0.6 检查路径约束；退出码 1 检查参数依赖规则（详见 msaicerr-toolkit 技能）；否则转 P2.3 判读 info.txt。
+**失败分支**：退出码 8（空报告）表示收集失败或日志无法提取信息，回 P1.3 复核三要素与日志时间窗，不要盲目重复执行 -p；退出码 2 回 P0.6 检查路径约束；退出码 1 检查参数依赖规则（详见 tool-msaicerr 技能）；否则转 P2.3 判读 info.txt。
 
 #### P2.3 判读 info.txt 第③段（报错行定位）
 
@@ -279,7 +279,7 @@ grep -rn "D2H failed" <收集目录>                  # device 到 host 拷贝�
 grep -rn "the address maybe invalid" <收集目录>    # 异常地址无效
 ```
 
-**判读**：第⑤段出现 `Failed to get dump data of error op!` 或任一特征命中即 dump 失败、结论码 102（内存分配错误方向，oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:1972-1973），P4 无 dump 输入可用；SK 场景（P2.1 判定）证据链退化，定位不清时向用户给出关闭算子融合后重跑的建议（四链即可全部生效）；故障信息含多个 AI Core Error 时工具按日志时间只解析第一个（多错误行为详见 msaicerr-toolkit 技能），修复首个错误后仍有报错则重新收集走一轮 P1-P5。三类特征与 102 判读见 references/error-line-location.md「十、多错误与 dump 失败分类」，SK 处置见「九、SK 场景处理与关融合重跑建议」。
+**判读**：第⑤段出现 `Failed to get dump data of error op!` 或任一特征命中即 dump 失败、结论码 102（内存分配错误方向，oam-tools/src/msaicerr/ms_interface/aicore_error_parser.py:1972-1973），P4 无 dump 输入可用；SK 场景（P2.1 判定）证据链退化，定位不清时向用户给出关闭算子融合后重跑的建议（四链即可全部生效）；故障信息含多个 AI Core Error 时工具按日志时间只解析第一个（多错误行为详见 tool-msaicerr 技能），修复首个错误后仍有报错则重新收集走一轮 P1-P5。三类特征与 102 判读见 references/error-line-location.md「十、多错误与 dump 失败分类」，SK 处置见「九、SK 场景处理与关融合重跑建议」。
 **失败分支**：dump 失败则结合 P3 寄存器解码判断是否越界、地址类错误位，P4 改走路径 B，转 P3.1；dump 有效则直接转 P3.1。
 
 ### Phase 3：错误类型识别（P3.1-P3.5）
@@ -354,7 +354,7 @@ ls <收集目录>/dfx/data-dump/<device_id>/    # 人工快速核对是否存在
 python3 msaicerr.py -d <dump文件或目录路径> -out <结果目录> -dtype <目标dtype>    # .bin 文件必须给 -dtype
 ```
 
-**判读**：产出 tensor 文件命名 `{kernel名}.{input|output|workspace}.{序号}[.{dtype}].{npy|bin}`；`.npy` 文件被拒绝（报 `The dump file cannot be an npy file.`）；-dtype 官方文档列举 13 种常用值，代码实际校验集 VALID_DTYPES 为 DATA_TYPE_TO_DTYPE_MAP 全部 43 个值，判读以代码校验集为准（依据：docs/zh/msaicerr/Dump_files_data_types_conversion.md:21；ms_interface/dump_data_parser.py:93、:496-497）；bfloat16 依赖第三方库 bfloat16ext；dump 文件头 input_type==7 的条目即 tiling 数据。输入形态三分支与命名规则见 references/reproduction-guide.md「3.1 dump 数据解析（msaicerr -d）」，-dtype 与 bfloat16ext 详见 msaicerr-toolkit 技能。
+**判读**：产出 tensor 文件命名 `{kernel名}.{input|output|workspace}.{序号}[.{dtype}].{npy|bin}`；`.npy` 文件被拒绝（报 `The dump file cannot be an npy file.`）；-dtype 官方文档列举 13 种常用值，代码实际校验集 VALID_DTYPES 为 DATA_TYPE_TO_DTYPE_MAP 全部 43 个值，判读以代码校验集为准（依据：docs/zh/msaicerr/Dump_files_data_types_conversion.md:21；ms_interface/dump_data_parser.py:93、:496-497）；bfloat16 依赖第三方库 bfloat16ext；dump 文件头 input_type==7 的条目即 tiling 数据。输入形态三分支与命名规则见 references/reproduction-guide.md「3.1 dump 数据解析（msaicerr -d）」，-dtype 与 bfloat16ext 详见 tool-msaicerr 技能。
 **失败分支**：报 `Can not read with dtype bfloat16` 时安装 bfloat16ext 后重试；退出码 4 为 -d 路径校验失败或解析异常，核查路径形态后重试；否则转 P4.3。
 
 #### P4.3 输入数据有效性判读（104 证据链）
@@ -477,4 +477,4 @@ grep -n "aicore error\|aivec error\|aicore exception" <单算子日志目录>/*.
 
 ## 六、信息来源
 
-本技能知识来自 CANN 社区仓 [cann/oam-tools](https://gitcode.com/cann/oam-tools) 源码与官方文档（docs/zh/msaicerr、docs/zh/asys）：工具用法层（CLI 参数、环境准备、三要素排查、asys collect 用法、多错误取第一）以 `msaicerr-toolkit` 与 `asys-toolkit` 技能为真源，本技能只引用不复制；退出码全表、结论码优先级链与收集降级规则等本技能独有知识见 references/toolchain-orchestration.md。本文所有 path:line 引用相对于 cann/oam-tools 仓根目录，行号为源文件真实行号，可疑时按行号回读源码核实；不确定的行为不推断，查证不了的写"待确认（需查 <文件>）"。部分架构设计细节引用内部架构文档（sd_doc 工作区路径，仅溯源标注）。
+本技能知识来自 CANN 社区仓 [cann/oam-tools](https://gitcode.com/cann/oam-tools) 源码与官方文档（docs/zh/msaicerr、docs/zh/asys）：工具用法层（CLI 参数、环境准备、三要素排查、asys collect 用法、多错误取第一）以 `tool-msaicerr` 与 `tool-asys` 技能为真源，本技能只引用不复制；退出码全表、结论码优先级链与收集降级规则等本技能独有知识见 references/toolchain-orchestration.md。本文所有 path:line 引用相对于 cann/oam-tools 仓根目录，行号为源文件真实行号，可疑时按行号回读源码核实；不确定的行为不推断，查证不了的写"待确认（需查 <文件>）"。部分架构设计细节引用内部架构文档（sd_doc 工作区路径，仅溯源标注）。

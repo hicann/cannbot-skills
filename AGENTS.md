@@ -79,9 +79,9 @@ cannbot-skills/
 │   ├── gitcode-toolkit/
 │   └── ...
 ├── tools/                    # CANN 工具链 Skills（工具使用指导）
-│   ├── asys-toolkit/
-│   ├── msaicerr-toolkit/
-│   ├── msnpureport-toolkit/
+│   ├── tool-asys/
+│   ├── tool-msaicerr/
+│   ├── tool-msnpureport/
 │   └── tool-npu-compute/
 ├── plugins-official/         # 官方 Plugin（Plugin 配置 + Agents + init.sh）
 │   ├── ops-registry-invoke/  # 算子开发 Plugin（示例）

@@ -12,16 +12,16 @@
 
 | 知识类别 | 真源技能 | 覆盖内容 |
 | --- | --- | --- |
-| msaicerr CLI 六参数总表、三种运行模式（-p/-d/-e）、参数依赖规则（-out 须配 -p/-d、-dev 须配 -p/-e、-dtype 须配 -d）、分派优先级 | msaicerr-toolkit | 命令速查、参数总览、约束 |
-| 环境准备三步（装 Toolkit、source set_env.sh、cd 工具目录）、ASCEND_OPP_PATH、python 版本、仅本地分析、RC 形态约束 | msaicerr-toolkit | 环境准备、硬约束 |
-| 环境自检（-e，golden op 标杆算子）命令与输出判读 | msaicerr-toolkit | environment-check |
-| 收集目录三要素排查（dfx/data-dump、dfx/ops、dfx/log/host/cann） | msaicerr-toolkit | 使用要点 |
-| 8 个暂不支持分析的算子清单（MatmulAllReduce 类、AllGatherMatmul、MemSet 等） | msaicerr-toolkit | functions-and-restrictions |
-| dump 文件解析（-d）、-dtype 数据类型转换、bfloat16ext 依赖 | msaicerr-toolkit | dump-parsing、dump-dtype-conversion |
-| 多个 AI Core Error 只解析第一个（按日志时间取首次出现） | msaicerr-toolkit | 使用要点 |
-| asys collect / asys analyze 用法与参数（task_dir、tar、output、-r、--path） | asys-toolkit | collect-and-launch、analyze-files |
-| asys 自动收集的 6 个环境变量一致性清单（ASCEND_PROCESS_LOG_PATH、NPU_COLLECT_PATH、DUMP_GRAPH_PATH、ASCEND_WORK_PATH、ASCEND_CACHE_PATH、ASCEND_CUSTOM_OPP_PATH） | asys-toolkit | constraints |
-| asys_output 收集目录树全景（software_info.txt、dfx 各子目录） | asys-toolkit | collect-and-launch 产物结构 |
+| msaicerr CLI 六参数总表、三种运行模式（-p/-d/-e）、参数依赖规则（-out 须配 -p/-d、-dev 须配 -p/-e、-dtype 须配 -d）、分派优先级 | tool-msaicerr | 命令速查、参数总览、约束 |
+| 环境准备三步（装 Toolkit、source set_env.sh、cd 工具目录）、ASCEND_OPP_PATH、python 版本、仅本地分析、RC 形态约束 | tool-msaicerr | 环境准备、硬约束 |
+| 环境自检（-e，golden op 标杆算子）命令与输出判读 | tool-msaicerr | environment-check |
+| 收集目录三要素排查（dfx/data-dump、dfx/ops、dfx/log/host/cann） | tool-msaicerr | 使用要点 |
+| 8 个暂不支持分析的算子清单（MatmulAllReduce 类、AllGatherMatmul、MemSet 等） | tool-msaicerr | functions-and-restrictions |
+| dump 文件解析（-d）、-dtype 数据类型转换、bfloat16ext 依赖 | tool-msaicerr | dump-parsing、dump-dtype-conversion |
+| 多个 AI Core Error 只解析第一个（按日志时间取首次出现） | tool-msaicerr | 使用要点 |
+| asys collect / asys analyze 用法与参数（task_dir、tar、output、-r、--path） | tool-asys | collect-and-launch、analyze-files |
+| asys 自动收集的 6 个环境变量一致性清单（ASCEND_PROCESS_LOG_PATH、NPU_COLLECT_PATH、DUMP_GRAPH_PATH、ASCEND_WORK_PATH、ASCEND_CACHE_PATH、ASCEND_CUSTOM_OPP_PATH） | tool-asys | constraints |
+| asys_output 收集目录树全景（software_info.txt、dfx 各子目录） | tool-asys | collect-and-launch 产物结构 |
 
 ## 二、msaicerr 退出码全表
 

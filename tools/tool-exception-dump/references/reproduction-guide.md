@@ -24,7 +24,7 @@
 
 1. **有效dump的判定**：自动流程Step 7解析收集目录`collection/dump`下的dump文件（aicore_error_parser.py:1884-1890）；info.data_dump_result为True时，解析产出的输入、输出、workspace文件列表填入info.input_list/output_list/workspace_list（:1897-1901），这些列表正是复现config中各文件列表键的来源。dump失败时info.dump_file记为`Failed to get dump data of error op!`（:1905-1906）。
 2. **L1场景**：L1日志不含device侧exception dump数据，自动复现拿不到真实输入。注意L1场景下info.data_dump_result按plog中是否出现dump失败关键字判定（:1891-1892，_get_data_dump_result实现在:1360-1398），即使为True，dump目录中无匹配文件时解析结果仍为空（oam-tools/src/msaicerr/ms_interface/dump_data_parser.py:645-648），复现依旧缺真实输入，走路径B。
-3. **人工快速核对**：拿不准时直接查看收集目录`dfx/data-dump/<device_id>/`下是否存在`exception_info.*`开头的文件（收集目录结构见 asys-toolkit 技能）。存在则优先路径A。
+3. **人工快速核对**：拿不准时直接查看收集目录`dfx/data-dump/<device_id>/`下是否存在`exception_info.*`开头的文件（收集目录结构见 tool-asys 技能）。存在则优先路径A。
 
 ## 三、路径A：基于有效dump的标准复现
 
@@ -229,5 +229,5 @@ malloc按页大小（PageMemorySize=0x200000，即2MB）向上对齐后，把张
 2. **kernel名共现防误判**：仅凭日志含aicore error关键字不能认定复现，必须同一日志文件内出现目标kernel名（:1532-1534），避免把其他算子的错误算到目标算子头上。
 3. **日志等待无超时上限**：_wait_for_log_stabilization以0.2秒间隔轮询文件大小直到两次相同（:1537-1545），plog异步落盘时属正常等待；若有其他进程持续写同一目录理论上会一直等。
 4. **路径B不做全量还原承诺**：构造数据复现成功可锁定算子自身问题；构造复现未复现不能反推业务场景无问题（数据分布、并发、时序差异都可能影响）。
-5. **环境依赖自查**：单算子复现依赖NPU设备与驱动、tbe/te（脏UB）、CANN toolkit、DSMI、numpy，各依赖缺失时的行为见环境依赖表（sd_doc/msaicerr-arch-doc/msaicerr-doc/modules/single_op/single_op.md:416-425）；复现前先确认`-e`环境自检通过（环境自检详见 msaicerr-toolkit 技能）。
+5. **环境依赖自查**：单算子复现依赖NPU设备与驱动、tbe/te（脏UB）、CANN toolkit、DSMI、numpy，各依赖缺失时的行为见环境依赖表（sd_doc/msaicerr-arch-doc/msaicerr-doc/modules/single_op/single_op.md:416-425）；复现前先确认`-e`环境自检通过（环境自检详见 tool-msaicerr 技能）。
 6. **复现成功≠根因确认**：复现只证明问题在算子自身可复现，根因方向仍需P2（报错行）、P3（错误位）、dump校验（104证据链）共同收敛，最终按P5四证据链框架出结论。

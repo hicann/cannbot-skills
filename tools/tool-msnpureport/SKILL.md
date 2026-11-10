@@ -1,5 +1,5 @@
 ---
-name: msnpureport-toolkit
+name: tool-msnpureport
 description: msnpureport 工具使用技能。用于：(1) 导出 Device 侧系统类日志和维测信息（单次导出、常驻进程连续导出），(2) 查询 Device 维测配置（日志级别、Coremask、加速器复位、singlecommit），(3) 设置 Device 维测配置（日志级别、TaskSchedule 自动复位、AI Core singlecommit、屏蔽 AI Core/Vector Core、icache bit 翻转校验范围），(4) 配置 msnpureport 自身维测日志级别与展示位置，(5) 解读导出目录结构并定位日志文件。触发关键词：msnpureport、Device侧日志、导出Device日志、黑匣子、bbox、hisi_logs、stackcore、slog、连续导出日志、Device日志级别、Coremask、屏蔽AI Core、屏蔽Vector Core、accelerator_recover、singlecommit、icachecheck、msnpureport_auto_export.sh、vmcore、fault_event。
 ---
 

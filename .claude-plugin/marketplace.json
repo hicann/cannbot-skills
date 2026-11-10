@@ -361,9 +361,9 @@
       ],
       "category": "skills",
       "skills": [
-        "./asys-toolkit",
-        "./msaicerr-toolkit",
-        "./msnpureport-toolkit",
+        "./tool-asys",
+        "./tool-msaicerr",
+        "./tool-msnpureport",
         "./tool-exception-dump",
         "./tool-npu-compute",
         "./tool-npu-check",

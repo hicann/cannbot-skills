@@ -236,7 +236,7 @@ describe("skill uninstall by name via install record", () => {
     }
   });
 
-  it("uninstallCommand removes tools-domain skills by name (original repro: asys-toolkit + codex)", async () => {
+  it("uninstallCommand removes tools-domain skills by name (original repro: tool-asys + codex)", async () => {
     const { uninstallCommand } = await import("../src/commands/uninstall.js");
     const { addSkillsToRecord, readSkillRecord, removeSkillsFromRecord } = await import("../src/core/record.js");
     const { mkdirSync, writeFileSync, existsSync, rmSync } = await import("fs");
@@ -244,22 +244,22 @@ describe("skill uninstall by name via install record", () => {
     const { tmpdir } = await import("os");
 
     const W = join(tmpdir(), `ih-untools-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    mkdirSync(join(W, ".agents", "skills", "asys-toolkit"), { recursive: true });
-    writeFileSync(join(W, ".agents", "skills", "asys-toolkit", "SKILL.md"), "---\nname: asys-toolkit\n---\n");
+    mkdirSync(join(W, ".agents", "skills", "tool-asys"), { recursive: true });
+    writeFileSync(join(W, ".agents", "skills", "tool-asys", "SKILL.md"), "---\nname: tool-asys\n---\n");
 
     const origCwd = process.cwd();
     process.chdir(W);
     try {
-      addSkillsToRecord(["asys-toolkit"], "codex", "project", W);
+      addSkillsToRecord(["tool-asys"], "codex", "project", W);
 
-      await uninstallCommand(["asys-toolkit"], { tool: "codex", level: "project", yes: true });
+      await uninstallCommand(["tool-asys"], { tool: "codex", level: "project", yes: true });
 
-      expect(existsSync(join(W, ".agents", "skills", "asys-toolkit"))).toBe(false);
+      expect(existsSync(join(W, ".agents", "skills", "tool-asys"))).toBe(false);
       expect(existsSync(join(W, ".agents"))).toBe(false);
-      expect(readSkillRecord().codex?.project?.[W]?.skills ?? []).not.toContain("asys-toolkit");
+      expect(readSkillRecord().codex?.project?.[W]?.skills ?? []).not.toContain("tool-asys");
     } finally {
       process.chdir(origCwd);
-      removeSkillsFromRecord(["asys-toolkit"], "codex", "project", W);
+      removeSkillsFromRecord(["tool-asys"], "codex", "project", W);
       rmSync(W, { recursive: true, force: true });
     }
   });
@@ -272,7 +272,7 @@ describe("skill uninstall by name via install record", () => {
     const { tmpdir } = await import("os");
 
     const W = join(tmpdir(), `ih-unmix-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    for (const s of ["npu-arch", "msnpureport-toolkit"]) {
+    for (const s of ["npu-arch", "tool-msnpureport"]) {
       mkdirSync(join(W, ".opencode", "skills", s), { recursive: true });
       writeFileSync(join(W, ".opencode", "skills", s, "SKILL.md"), `---\nname: ${s}\n---\n`);
     }
@@ -280,15 +280,15 @@ describe("skill uninstall by name via install record", () => {
     const origCwd = process.cwd();
     process.chdir(W);
     try {
-      addSkillsToRecord(["npu-arch", "msnpureport-toolkit"], "opencode", "project", W);
+      addSkillsToRecord(["npu-arch", "tool-msnpureport"], "opencode", "project", W);
 
-      await uninstallCommand(["npu-arch", "msnpureport-toolkit"], { tool: "opencode", level: "project", yes: true });
+      await uninstallCommand(["npu-arch", "tool-msnpureport"], { tool: "opencode", level: "project", yes: true });
 
       expect(existsSync(join(W, ".opencode", "skills", "npu-arch"))).toBe(false);
-      expect(existsSync(join(W, ".opencode", "skills", "msnpureport-toolkit"))).toBe(false);
+      expect(existsSync(join(W, ".opencode", "skills", "tool-msnpureport"))).toBe(false);
     } finally {
       process.chdir(origCwd);
-      removeSkillsFromRecord(["npu-arch", "msnpureport-toolkit"], "opencode", "project", W);
+      removeSkillsFromRecord(["npu-arch", "tool-msnpureport"], "opencode", "project", W);
       rmSync(W, { recursive: true, force: true });
     }
   });

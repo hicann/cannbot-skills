@@ -241,4 +241,4 @@ MTE是唯一按错误位动态选子字典的模块（`aic_error_info.py:562-573
 - 场景判定与报错行定位（PC修正、llvm-symbolizer、objdump回退）：`error-line-location.md`。
 - dump解析与单算子复现（104输入数据证据链、INF/NAN判读）：`reproduction-guide.md`。
 - 证据链汇聚、优先级链与修复建议映射：`fix-suggestions.md`。
-- 工具用法、环境约束与收集流程：msaicerr-toolkit 与 asys-toolkit 技能（分工见 SKILL.md 参考文件路由表）。
+- 工具用法、环境约束与收集流程：tool-msaicerr 与 tool-asys 技能（分工见 SKILL.md 参考文件路由表）。

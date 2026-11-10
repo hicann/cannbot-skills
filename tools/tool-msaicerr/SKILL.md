@@ -1,5 +1,5 @@
 ---
-name: msaicerr-toolkit
+name: tool-msaicerr
 description: msaicerr 工具使用技能。用于：(1) 分析 AI Core Error 问题的故障信息，输出 info.txt 辅助定位，(2) 将 Dump 文件解析为 .bin/.npy 文件（算子输入、输出、workspace），(3) 转换 *.bin 格式 Dump 文件的数据类型为 .npy，(4) 运行内置算子样例检查软硬件环境，(5) 排查工具本身的执行约束与不支持算子清单。触发关键词：msaicerr、msaicerr.py、aicore error、aivec error、there is an aicore error、AI Core Error 分析、解析Dump文件、Dump文件转换、bin转npy、dest_dtype、bfloat16ext、exception_info、data-dump、report_path、内置算子样例、检查昇腾环境、debug_info.txt、info.txt。
 ---
 
