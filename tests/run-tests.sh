@@ -641,6 +641,7 @@ get_tests_for_category() {
             echo "unit/install/test-init-tool.sh --tool codearts:fast"
             echo "unit/install/test-safe-install.sh:fast"
             echo "unit/install/test-install-integrity.sh:fast"
+            echo "unit/install/test-install-fallback.sh:fast"
             echo "unit/install/test-safe-install-resilience.sh:fast"
             ;;
         behavior)

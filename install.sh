@@ -51,6 +51,247 @@ if [ -n "${CANNBOT_REGISTRY:-}" ] && [[ "${CANNBOT_REGISTRY}" == http://* ]]; th
     echo ""
 fi
 
+# npm 镜像（路径 A 版本查询与 install_binary 共用同一数组）
+NPM_MIRRORS=(
+    "https://registry.npmjs.org"
+    "https://registry.npmmirror.com"
+)
+# 企业镜像/私有 registry 覆盖（优先于公共镜像）
+if [ -n "${CANNBOT_REGISTRY:-}" ]; then
+    NPM_MIRRORS=("${CANNBOT_REGISTRY}" "${NPM_MIRRORS[@]}")
+fi
+
+# ========================================
+# 预编译二进制安装（用户目录，全程无需 sudo）
+# 供两类入口共用：
+#   1. 未检测到 Node.js 18+ 的 Linux 环境
+#   2. npm 全局安装失败的回退（如全局目录不可写）
+# install-helper 为纯用户态工具（仅写 $HOME 与项目目录），
+# 不应引导用户使用 root 权限安装。
+# 依赖全局变量 CHANNEL / NPM_MIRRORS；含 #832 载荷完整性校验（fail-closed）。
+# ========================================
+install_binary() {
+    local ARCH PLATFORM ARCHITECTURE SUBPKG_NAME BINARY_NAME
+    local VERSION BEST_REGISTRY REGISTRY TAG_VERSION
+    local INTEGRITY PACKUMENT
+    local INSTALL_DIR SHELL_RC LOCAL_VERSION
+    local TARBALL_FILENAME TARBALL_URL DOWNLOAD_MIRRORS TEMP_EXTRACT
+    local ACTUAL_B64
+
+    ARCH=$(uname -m)
+
+    PLATFORM="linux"
+
+    case "$ARCH" in
+        x86_64|amd64)  ARCHITECTURE="x64" ;;
+        arm64|aarch64) ARCHITECTURE="arm64" ;;
+        *)             ARCHITECTURE="x64" ;;
+    esac
+
+    SUBPKG_NAME="@cannbot-ai/install-helper-${PLATFORM}-${ARCHITECTURE}"
+    BINARY_NAME="install-helper"
+
+    echo -e "${GREEN}✓${NC} 平台: ${PLATFORM}-${ARCHITECTURE}"
+    echo ""
+
+    # 从 npm registry 查指定通道版本与完整性元数据
+    # （latest 与显式版本通道均遍历镜像取 dist.integrity，命中时回传 BEST_REGISTRY）
+    echo -e "${CYAN}📦 正在查询版本 (${CHANNEL})...${NC}"
+
+    VERSION=""
+    BEST_REGISTRY=""
+    INTEGRITY=""
+    if [ "$CHANNEL" = "latest" ] || [ "$CHANNEL" = "beta" ]; then
+        for REGISTRY in "${NPM_MIRRORS[@]}"; do
+            PACKUMENT=$(curl -fsSL "${REGISTRY}/${SUBPKG_NAME}/${CHANNEL}" 2>/dev/null || true)
+            TAG_VERSION=$(printf '%s' "$PACKUMENT" | grep -o '"version":"[^"]*"' | sed 's/.*"version":"//;s/"//' | head -1)
+            if [ -n "$TAG_VERSION" ]; then
+                VERSION="$TAG_VERSION"
+                BEST_REGISTRY="$REGISTRY"
+                INTEGRITY=$(printf '%s' "$PACKUMENT" | grep -o '"integrity":"sha512-[^"]*"' | sed 's/.*"integrity":"//;s/"//' | head -1)
+                break
+            fi
+        done
+    else
+        VERSION="$CHANNEL"
+        BEST_REGISTRY="${NPM_MIRRORS[0]}"
+        # 显式版本：遍历镜像取该版本 packument 的完整性元数据（npmjs 不可达时仍可从镜像取到）
+        for REGISTRY in "${NPM_MIRRORS[@]}"; do
+            PACKUMENT=$(curl -fsSL "${REGISTRY}/${SUBPKG_NAME}/${VERSION}" 2>/dev/null || true)
+            INTEGRITY=$(printf '%s' "$PACKUMENT" | grep -o '"integrity":"sha512-[^"]*"' | sed 's/.*"integrity":"//;s/"//' | head -1)
+            if [ -n "$INTEGRITY" ]; then
+                BEST_REGISTRY="$REGISTRY"
+                break
+            fi
+        done
+    fi
+
+    if [ -n "$VERSION" ] && [ "$CHANNEL" != "latest" ]; then
+        echo -e "${GREEN}✓${NC} 版本: ${VERSION} (${CHANNEL})"
+    elif [ -n "$VERSION" ]; then
+        echo -e "${GREEN}✓${NC} 版本: ${VERSION} (源: ${BEST_REGISTRY})"
+    fi
+
+    if [ -z "$VERSION" ]; then
+        echo -e "${RED}❌ 无法查询版本信息${NC}"
+        echo ""
+        echo "请检查网络后重试，或安装 Node.js 18+ 后使用:"
+        echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+        echo "  nvm install 20"
+        echo "  npm install -g @cannbot-ai/install-helper"
+        return 1
+    fi
+
+    # 检查本地是否已安装最新版本
+    INSTALL_DIR="$HOME/.cannbot/bin"
+    if [ -x "${INSTALL_DIR}/install-helper" ]; then
+        LOCAL_VERSION=$("${INSTALL_DIR}/install-helper" --version 2>/dev/null | head -1 | tr -d '[:space:]')
+        if [ "$LOCAL_VERSION" = "$VERSION" ]; then
+            echo -e "${GREEN}✓${NC} 已安装最新版本 (v${VERSION})"
+            echo ""
+            # 确保 PATH 已设置
+            SHELL_RC="$HOME/.bashrc"
+            if [ -n "$ZSH_VERSION" ] || [ "${SHELL##*/}" = "zsh" ]; then
+                SHELL_RC="$HOME/.zshrc"
+            fi
+            if [ -f "$SHELL_RC" ]; then
+                if ! grep -q "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
+                    echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
+                fi
+            fi
+            # 启动向导
+            if "${INSTALL_DIR}/install-helper" --version >/dev/null 2>&1; then
+                if { true </dev/tty; } 2>/dev/null; then
+                    exec "${INSTALL_DIR}/install-helper" </dev/tty
+                else
+                    echo "请运行以下命令启动安装向导:"
+                    echo -e "  ${CYAN}${INSTALL_DIR}/install-helper${NC}"
+                fi
+            fi
+            return 0
+        fi
+        if [ -n "$LOCAL_VERSION" ]; then
+            echo -e "${YELLOW}ℹ${NC}  更新 v${LOCAL_VERSION} → v${VERSION}"
+        fi
+    fi
+
+    # 下载二进制
+    mkdir -p "$INSTALL_DIR"
+
+    TARBALL_FILENAME="${SUBPKG_NAME#*/}-${VERSION}.tgz"
+
+    # fail-closed：registry 元数据缺少完整性校验值时中止下载（#832）
+    if [ -z "$INTEGRITY" ]; then
+        echo -e "${RED}❌ 完整性校验失败: registry 元数据未提供 dist.integrity (sha512)，已中止${NC}"
+        echo ""
+        echo "可改用 npm 安装（npm 生态自带完整性校验）:"
+        echo "  npm install -g @cannbot-ai/install-helper"
+        return 1
+    fi
+
+    # 优先使用查询阶段确定的最优镜像；tarball 落地用 mktemp（避免固定路径被预置）
+    # （TARBALL_FILE 不加 local：EXIT trap 在函数返回后的顶层上下文展开，需保持全局可见）
+    TARBALL_FILE="$(mktemp /tmp/cannbot-install-tarball.XXXXXX)"
+    trap 'rm -f "$TARBALL_FILE"' EXIT
+    TARBALL_URL=""
+    DOWNLOAD_MIRRORS=("$BEST_REGISTRY")
+    for REGISTRY in "${NPM_MIRRORS[@]}"; do
+        if [ "$REGISTRY" != "$BEST_REGISTRY" ]; then
+            DOWNLOAD_MIRRORS+=("$REGISTRY")
+        fi
+    done
+    for REGISTRY in "${DOWNLOAD_MIRRORS[@]}"; do
+        TARBALL_URL="${REGISTRY}/${SUBPKG_NAME}/-/${TARBALL_FILENAME}"
+        echo ""
+        echo -e "${CYAN}📦 正在下载...${NC}"
+        if curl -fL "$TARBALL_URL" -o "$TARBALL_FILE" --progress-bar; then
+            echo -e "${GREEN}✓${NC} 下载完成"
+            break
+        fi
+        TARBALL_URL=""
+    done
+
+    if [ -z "$TARBALL_URL" ] || [ ! -s "$TARBALL_FILE" ]; then
+        echo -e "${RED}❌ 下载失败${NC}"
+        rm -f "$TARBALL_FILE"
+        echo ""
+        echo "请检查网络后重试，或安装 Node.js 18+ 后使用:"
+        echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+        echo "  nvm install 20"
+        echo "  npm install -g @cannbot-ai/install-helper"
+        return 1
+    fi
+
+    # 完整性校验：下载的 tarball 必须与 registry 元数据 (dist.integrity, sha512) 匹配（#832 fail-closed）
+    ACTUAL_B64="$(compute_sha512_b64 "$TARBALL_FILE")" || ACTUAL_B64=""
+    if [ -z "$ACTUAL_B64" ]; then
+        echo -e "${RED}❌ 完整性校验失败: 缺少 sha512 计算工具 (openssl / python3)，已中止${NC}"
+        echo ""
+        echo "可改用 npm 安装（npm 生态自带完整性校验）:"
+        echo "  npm install -g @cannbot-ai/install-helper"
+        rm -f "$TARBALL_FILE"
+        return 1
+    fi
+    if [ "sha512-${ACTUAL_B64}" != "$INTEGRITY" ]; then
+        echo -e "${RED}❌ 完整性校验失败: 下载的载荷与 registry 元数据 (dist.integrity) 不匹配，已中止${NC}"
+        echo ""
+        echo "下载内容可能被篡改或损坏，请重试；如持续失败请改用 npm 安装:"
+        echo "  npm install -g @cannbot-ai/install-helper"
+        rm -f "$TARBALL_FILE"
+        return 1
+    fi
+    echo -e "${GREEN}✓${NC} 完整性校验通过 (sha512)"
+
+    # 解压
+    echo -e "${CYAN}📦 正在安装...${NC}"
+    TEMP_EXTRACT=$(mktemp -d)
+    tar xzf "$TARBALL_FILE" -C "$TEMP_EXTRACT" || { rm -rf "$TEMP_EXTRACT" "$TARBALL_FILE"; return 1; }
+    cp -f "${TEMP_EXTRACT}/package/${BINARY_NAME}" "${INSTALL_DIR}/install-helper"
+    chmod +x "${INSTALL_DIR}/install-helper"
+    if [ ! -x "${INSTALL_DIR}/install-helper" ]; then
+        echo -e "${RED}❌ 原生二进制落盘失败${NC}"
+        rm -rf "$TEMP_EXTRACT" "$TARBALL_FILE"
+        return 1
+    fi
+    rm -rf "$TEMP_EXTRACT" "$TARBALL_FILE"
+
+    # 自动添加 PATH
+    SHELL_RC="$HOME/.bashrc"
+    if [ -n "$ZSH_VERSION" ] || [ "${SHELL##*/}" = "zsh" ]; then
+        SHELL_RC="$HOME/.zshrc"
+    fi
+    if [ -f "$SHELL_RC" ]; then
+        if ! grep -q "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
+            echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
+        fi
+    else
+        echo -e "${YELLOW}⚠${NC} $SHELL_RC 不存在，请手动添加:"
+        echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
+    fi
+
+    # 安装完成 + 自动启动向导
+    echo -e "${GREEN}✅ 安装完成！${NC}"
+    echo ""
+
+    # 检测二进制是否可运行
+    if "${INSTALL_DIR}/install-helper" --version >/dev/null 2>&1; then
+        if { true </dev/tty; } 2>/dev/null; then
+            exec "${INSTALL_DIR}/install-helper" </dev/tty
+        else
+            echo "请运行以下命令启动安装向导:"
+            echo -e "  ${CYAN}${INSTALL_DIR}/install-helper${NC}"
+        fi
+        return 0
+    fi
+    echo -e "${YELLOW}⚠${NC} 原生二进制无法运行"
+    echo ""
+    echo "请安装 Node.js 18+ 后使用:"
+    echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
+    echo "  nvm install 20"
+    echo "  npm install -g @cannbot-ai/install-helper"
+    return 1
+}
+
 # ========================================
 # 路径 A: 有 Node.js 18+ → npm install
 # ========================================
@@ -60,17 +301,9 @@ if command -v node >/dev/null 2>&1; then
         echo -e "${GREEN}✓${NC} Node.js $(node --version)"
 
         # 查询 npm registry 指定通道版本
-        NPM_MIRRORS_A=(
-            "https://registry.npmjs.org"
-            "https://registry.npmmirror.com"
-        )
-        # 企业镜像/私有 registry 覆盖（优先于公共镜像）
-        if [ -n "${CANNBOT_REGISTRY:-}" ]; then
-            NPM_MIRRORS_A=("${CANNBOT_REGISTRY}" "${NPM_MIRRORS_A[@]}")
-        fi
         REMOTE_VERSION=""
         if [ "$CHANNEL" = "latest" ] || [ "$CHANNEL" = "beta" ]; then
-            for REGISTRY in "${NPM_MIRRORS_A[@]}"; do
+            for REGISTRY in "${NPM_MIRRORS[@]}"; do
                 TAG_VERSION=$(curl -fsSL "${REGISTRY}/@cannbot-ai/install-helper/${CHANNEL}" 2>/dev/null | grep -o '"version":"[^"]*"' | sed 's/.*"version":"//;s/"//' | head -1)
                 if [ -n "$TAG_VERSION" ]; then
                     REMOTE_VERSION="$TAG_VERSION"
@@ -104,18 +337,45 @@ if command -v node >/dev/null 2>&1; then
         echo -e "${CYAN}📦 正在安装 @cannbot-ai/install-helper@${CHANNEL}...${NC}"
         echo ""
 
-        if npm install -g "@cannbot-ai/install-helper@${CHANNEL}" 2>&1; then
+        NPM_RC=0
+        NPM_OUTPUT=$(npm install -g "@cannbot-ai/install-helper@${CHANNEL}" 2>&1) || NPM_RC=$?
+        echo "$NPM_OUTPUT"
+
+        if [ "$NPM_RC" -eq 0 ]; then
             echo ""
             echo -e "${GREEN}✅ 安装成功！${NC}"
             echo ""
             echo -e "${CYAN}请运行: install-helper${NC}"
             exit 0
+        fi
+
+        echo ""
+        echo -e "${RED}❌ npm 全局安装失败${NC}"
+        echo ""
+
+        if echo "$NPM_OUTPUT" | grep -qiE "EACCES|permission denied"; then
+            NPM_FAIL_REASON="npm 全局目录不可写"
         else
+            NPM_FAIL_REASON="原因见上方日志"
+        fi
+
+        OS_FALLBACK=$(uname -s | tr '[:upper:]' '[:lower:]')
+        if [ "$OS_FALLBACK" = "linux" ]; then
+            # install-helper 为纯用户态工具，回退到用户目录预编译二进制
+            # 安装（$HOME/.cannbot/bin），全程无需 sudo
+            echo -e "${YELLOW}ℹ${NC}  ${NPM_FAIL_REASON}，回退到用户目录预编译二进制安装（无需 sudo）"
             echo ""
-            echo -e "${RED}❌ npm 安装失败${NC}"
+            install_binary || exit 1
+            exit 0
+        else
+            # macOS 预编译二进制会被 Gatekeeper 拦截：
+            # 给出 npm 官方用户级 prefix 指引（同样无需 sudo）
+            echo -e "${YELLOW}ℹ${NC}  ${NPM_FAIL_REASON}。可使用 npm 用户级 prefix 安装（无需 sudo）："
             echo ""
-            echo "尝试使用 sudo:"
-            echo "  sudo npm install -g @cannbot-ai/install-helper"
+            echo "  mkdir -p ~/.npm-global"
+            echo "  npm config set prefix ~/.npm-global"
+            echo "  export PATH=~/.npm-global/bin:\$PATH   # 建议同步写入 shell rc"
+            echo "  npm install -g @cannbot-ai/install-helper"
             exit 1
         fi
     fi
@@ -143,227 +403,5 @@ fi
 echo -e "${YELLOW}ℹ${NC}  未检测到 Node.js 18+，使用预编译二进制安装"
 echo ""
 
-ARCH=$(uname -m)
-
-PLATFORM="linux"
-
-case "${OS}-${ARCH}" in
-    linux-x86_64|linux-amd64)  ARCHITECTURE="x64" ;;
-    linux-arm64|linux-aarch64) ARCHITECTURE="arm64" ;;
-    *)
-        echo -e "${RED}❌ 暂未提供 ${OS}-${ARCH} 的预编译安装包${NC}"
-        echo ""
-        echo "请参照官网安装 Node.js:"
-        echo "  https://nodejs.org/zh-cn/download"
-        echo ""
-        echo "安装完成后执行:"
-        echo "  npm install -g @cannbot-ai/install-helper@${CHANNEL}"
-        exit 1
-        ;;
-esac
-
-SUBPKG_NAME="@cannbot-ai/install-helper-${PLATFORM}-${ARCHITECTURE}"
-BINARY_NAME="install-helper"
-
-echo -e "${GREEN}✓${NC} 平台: ${PLATFORM}-${ARCHITECTURE}"
-echo ""
-
-# 2. 从 npm registry 查指定通道版本
-echo -e "${CYAN}📦 正在查询版本 (${CHANNEL})...${NC}"
-
-NPM_MIRRORS=(
-    "https://registry.npmjs.org"
-    "https://registry.npmmirror.com"
-)
-# 企业镜像/私有 registry 覆盖（优先于公共镜像）
-if [ -n "${CANNBOT_REGISTRY:-}" ]; then
-    NPM_MIRRORS=("${CANNBOT_REGISTRY}" "${NPM_MIRRORS[@]}")
-fi
-
-VERSION=""
-BEST_REGISTRY=""
-INTEGRITY=""
-if [ "$CHANNEL" = "latest" ] || [ "$CHANNEL" = "beta" ]; then
-    for REGISTRY in "${NPM_MIRRORS[@]}"; do
-        PACKUMENT=$(curl -fsSL "${REGISTRY}/${SUBPKG_NAME}/${CHANNEL}" 2>/dev/null || true)
-        TAG_VERSION=$(printf '%s' "$PACKUMENT" | grep -o '"version":"[^"]*"' | sed 's/.*"version":"//;s/"//' | head -1)
-        if [ -n "$TAG_VERSION" ]; then
-            VERSION="$TAG_VERSION"
-            BEST_REGISTRY="$REGISTRY"
-            INTEGRITY=$(printf '%s' "$PACKUMENT" | grep -o '"integrity":"sha512-[^"]*"' | sed 's/.*"integrity":"//;s/"//' | head -1)
-            break
-        fi
-    done
-else
-    VERSION="$CHANNEL"
-    BEST_REGISTRY="${NPM_MIRRORS[0]}"
-    # 显式版本：遍历镜像取该版本 packument 的完整性元数据（#832 fail-closed；
-    # 与 latest 分支及 install.ps1 的镜像回退契约一致——npmjs 不可达时仍可
-    # 从 npmmirror 等镜像取到，修复机器人评审 P2-1 的单点依赖）
-    for REGISTRY in "${NPM_MIRRORS[@]}"; do
-        PACKUMENT=$(curl -fsSL "${REGISTRY}/${SUBPKG_NAME}/${VERSION}" 2>/dev/null || true)
-        INTEGRITY=$(printf '%s' "$PACKUMENT" | grep -o '"integrity":"sha512-[^"]*"' | sed 's/.*"integrity":"//;s/"//' | head -1)
-        if [ -n "$INTEGRITY" ]; then
-            BEST_REGISTRY="$REGISTRY"
-            break
-        fi
-    done
-fi
-
-if [ -n "$VERSION" ] && [ "$CHANNEL" != "latest" ]; then
-    echo -e "${GREEN}✓${NC} 版本: ${VERSION} (${CHANNEL})"
-elif [ -n "$VERSION" ]; then
-    echo -e "${GREEN}✓${NC} 版本: ${VERSION} (源: ${BEST_REGISTRY})"
-fi
-
-if [ -z "$VERSION" ]; then
-    echo -e "${RED}❌ 无法查询版本信息${NC}"
-    echo ""
-    echo "请安装 Node.js 18+ 后使用:"
-    echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
-    echo "  nvm install 20"
-    echo "  npm install -g @cannbot-ai/install-helper"
-    exit 1
-fi
-
-# 3. 检查本地是否已安装最新版本
-INSTALL_DIR="$HOME/.cannbot/bin"
-if [ -x "${INSTALL_DIR}/install-helper" ]; then
-    LOCAL_VERSION=$("${INSTALL_DIR}/install-helper" --version 2>/dev/null | head -1 | tr -d '[:space:]')
-    if [ "$LOCAL_VERSION" = "$VERSION" ]; then
-        echo -e "${GREEN}✓${NC} 已安装最新版本 (v${VERSION})"
-        echo ""
-        # 确保 PATH 已设置
-        SHELL_RC="$HOME/.bashrc"
-        if [ -n "$ZSH_VERSION" ] || [ "${SHELL##*/}" = "zsh" ]; then
-            SHELL_RC="$HOME/.zshrc"
-        fi
-        if [ -f "$SHELL_RC" ]; then
-            if ! grep -q "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
-                echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
-            fi
-        fi
-        # 启动向导
-        if "${INSTALL_DIR}/install-helper" --version >/dev/null 2>&1; then
-            if { true </dev/tty; } 2>/dev/null; then
-                exec "${INSTALL_DIR}/install-helper" </dev/tty
-            else
-                echo "请运行以下命令启动安装向导:"
-                echo -e "  ${CYAN}${INSTALL_DIR}/install-helper${NC}"
-            fi
-        fi
-        exit 0
-    fi
-    if [ -n "$LOCAL_VERSION" ]; then
-        echo -e "${YELLOW}ℹ${NC}  更新 v${LOCAL_VERSION} → v${VERSION}"
-    fi
-fi
-
-# 4. 下载二进制
-mkdir -p "$INSTALL_DIR"
-
-TARBALL_FILENAME="${SUBPKG_NAME#*/}-${VERSION}.tgz"
-
-# fail-closed：registry 元数据缺少完整性校验值时中止下载（#832）
-if [ -z "$INTEGRITY" ]; then
-    echo -e "${RED}❌ 完整性校验失败: registry 元数据未提供 dist.integrity (sha512)，已中止${NC}"
-    echo ""
-    echo "可改用 npm 安装（npm 生态自带完整性校验）:"
-    echo "  npm install -g @cannbot-ai/install-helper"
-    exit 1
-fi
-
-# 优先使用查询阶段确定的最优镜像；tarball 落地用 mktemp（避免固定路径被预置）
-TARBALL_FILE="$(mktemp /tmp/cannbot-install-tarball.XXXXXX)"
-trap 'rm -f "$TARBALL_FILE"' EXIT
-TARBALL_URL=""
-DOWNLOAD_MIRRORS=("$BEST_REGISTRY")
-for REGISTRY in "${NPM_MIRRORS[@]}"; do
-    if [ "$REGISTRY" != "$BEST_REGISTRY" ]; then
-        DOWNLOAD_MIRRORS+=("$REGISTRY")
-    fi
-done
-for REGISTRY in "${DOWNLOAD_MIRRORS[@]}"; do
-    TARBALL_URL="${REGISTRY}/${SUBPKG_NAME}/-/${TARBALL_FILENAME}"
-    echo ""
-    echo -e "${CYAN}📦 正在下载...${NC}"
-    if curl -fL "$TARBALL_URL" -o "$TARBALL_FILE" --progress-bar; then
-        echo -e "${GREEN}✓${NC} 下载完成"
-        break
-    fi
-    TARBALL_URL=""
-done
-
-if [ -z "$TARBALL_URL" ] || [ ! -s "$TARBALL_FILE" ]; then
-    echo -e "${RED}❌ 下载失败${NC}"
-    rm -f "$TARBALL_FILE"
-    echo ""
-    echo "请安装 Node.js 18+ 后使用:"
-    echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
-    echo "  nvm install 20"
-    echo "  npm install -g @cannbot-ai/install-helper"
-    exit 1
-fi
-
-# 4.5 完整性校验：下载的 tarball 必须与 registry 元数据 (dist.integrity, sha512) 匹配（#832 fail-closed）
-ACTUAL_B64="$(compute_sha512_b64 "$TARBALL_FILE")" || ACTUAL_B64=""
-if [ -z "$ACTUAL_B64" ]; then
-    echo -e "${RED}❌ 完整性校验失败: 缺少 sha512 计算工具 (openssl / python3)，已中止${NC}"
-    echo ""
-    echo "可改用 npm 安装（npm 生态自带完整性校验）:"
-    echo "  npm install -g @cannbot-ai/install-helper"
-    rm -f "$TARBALL_FILE"
-    exit 1
-fi
-if [ "sha512-${ACTUAL_B64}" != "$INTEGRITY" ]; then
-    echo -e "${RED}❌ 完整性校验失败: 下载的载荷与 registry 元数据 (dist.integrity) 不匹配，已中止${NC}"
-    echo ""
-    echo "下载内容可能被篡改或损坏，请重试；如持续失败请改用 npm 安装:"
-    echo "  npm install -g @cannbot-ai/install-helper"
-    rm -f "$TARBALL_FILE"
-    exit 1
-fi
-echo -e "${GREEN}✓${NC} 完整性校验通过 (sha512)"
-
-# 4. 解压
-echo -e "${CYAN}📦 正在安装...${NC}"
-TEMP_EXTRACT=$(mktemp -d)
-tar xzf "$TARBALL_FILE" -C "$TEMP_EXTRACT" || { rm -rf "$TEMP_EXTRACT" "$TARBALL_FILE"; exit 1; }
-cp -f "${TEMP_EXTRACT}/package/${BINARY_NAME}" "${INSTALL_DIR}/install-helper"
-chmod +x "${INSTALL_DIR}/install-helper"
-rm -rf "$TEMP_EXTRACT" "$TARBALL_FILE"
-
-# 5. 自动添加 PATH
-SHELL_RC="$HOME/.bashrc"
-if [ -n "$ZSH_VERSION" ] || [ "${SHELL##*/}" = "zsh" ]; then
-    SHELL_RC="$HOME/.zshrc"
-fi
-if [ -f "$SHELL_RC" ]; then
-    if ! grep -q "$INSTALL_DIR" "$SHELL_RC" 2>/dev/null; then
-        echo "export PATH=\"$INSTALL_DIR:\$PATH\"" >> "$SHELL_RC"
-    fi
-else
-    echo -e "${YELLOW}⚠${NC} $SHELL_RC 不存在，请手动添加:"
-    echo "  export PATH=\"$INSTALL_DIR:\$PATH\""
-fi
-
-# 6. 安装完成 + 自动启动向导
-echo -e "${GREEN}✅ 安装完成！${NC}"
-echo ""
-
-# 检测二进制是否可运行
-if "${INSTALL_DIR}/install-helper" --version >/dev/null 2>&1; then
-    if { true </dev/tty; } 2>/dev/null; then
-        exec "${INSTALL_DIR}/install-helper" </dev/tty
-    else
-        echo "请运行以下命令启动安装向导:"
-        echo -e "  ${CYAN}${INSTALL_DIR}/install-helper${NC}"
-    fi
-else
-    echo -e "${YELLOW}⚠${NC} 原生二进制无法运行"
-    echo ""
-    echo "请安装 Node.js 18+ 后使用:"
-    echo "  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash"
-    echo "  nvm install 20"
-    echo "  npm install -g @cannbot-ai/install-helper"
-fi
+install_binary || exit 1
+exit 0
