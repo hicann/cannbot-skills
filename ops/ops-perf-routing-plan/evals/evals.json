@@ -1,0 +1,116 @@
+{
+  "skill_name": "ops-perf-routing-plan",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "Skill 定位与 Step 1 边界",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "ops-perf-routing-plan 这个 skill 负责什么？它会不会直接修改 kernel、启动优化子 agent 或拼装 final code？不需要执行任何命令。",
+      "expected_output": "回复应说明该 skill 只完成 Shape 级 tiling 路由的 Step 1：理论下限分析、worst-first 排序与分组、tiling 可行性校验、冻结计划与路由表生成；不会修改 kernel、host tiling、构建文件，不启动优化子 agent，也不拼装 final code。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "Step 1",
+          "description": "回复明确该 skill 只做 Step 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "理论下限与 headroom 排序",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "ops-perf-routing-plan 如何根据 golden_flow.json 和 performance.json 计算每个 shape 的理论下限并排序？T_hw 和 headroom 分别表示什么？",
+      "expected_output": "回复应说明分别计算 T_vector、T_copy，可选 T_cube，并取 max 得到理论下限 T_hw；headroom = T_candidate / T_hw，按 headroom 降序排序，同分再按 T_candidate 和 case_id 确定顺序。headroom 仅用于排序，不代表最终加速比。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "headroom",
+          "description": "回复提到 headroom 排序指标"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "贪心归类与冻结计划",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "使用 ops-perf-routing-plan 做 shape 分组时，greedy_route.py 的 init/next/validate/commit/freeze 各自做什么？commit 前会校验什么？冻结后产出什么文件？",
+      "expected_output": "回复应说明 init 初始化归类状态，next 返回当前最差未覆盖 shape，validate 校验模板提案但不改状态，commit 前对模板覆盖的全部 shape 做核数、tile、UB、对齐和尾块校验，通过后写入模板；freeze 校验 100% 覆盖、不重叠、模板名/tiling_key/priority 唯一后生成 plan.json。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "plan.json",
+          "description": "回复提到冻结产物 plan.json"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "硬件档案向量参数一致性",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "ops-perf-routing-plan 的 ascend950pr.json 中 vector_width_bits 和 vector_elements_per_cycle 是什么关系？如果某个 dtype 没有显式表项，elements_per_cycle 如何兜底？int64 应得到多少？",
+      "expected_output": "回复应说明 vector_width_bits 表示每个 vector 周期有效的元素位宽，950PR 为 4096 bits（128 个 fp32 × 32 bits），与 float32=128、fp16=256、int8=512 的表一致；未显式列出的 dtype 使用 vector_width_bits / (8 * dtype_bytes) 兜底，int64 应为 4096 / (8 × 8) = 64 elements/cycle。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "4096",
+          "description": "回复给出 950PR 的有效向量位宽 4096"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "基线准备与环境污染防护",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2",
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "用 ops-perf-routing-plan 准备基线时，prepare.py 的 init/build/profile 分别负责什么？如何避免污染共享 CANN 或他人环境？",
+      "expected_output": "回复应说明 init 创建工作目录、归一化 cases、选择硬件档案并探测 golden，build 编译算子并把包安装到工作目录下的 cann_opp，profile 归档已有 performance.json 或用命令现场采集；通过独立 ASCEND_OPP_PATH、唯一 vendor 名、只 source 自己的 env、产物和缓存全部写在工作目录内来避免污染共享环境。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "performance.json",
+          "description": "回复提到 profile 产出或归档 performance.json"
+        }
+      ]
+    }
+  ]
+}

@@ -33,6 +33,7 @@
 | **ascendc-direct-invoke-template** | Kernel 直调工程模板，提供验证过的样例工程和修改指南 | — |
 | **ops-theoretical-performance-estimation** | 设计期性能建模与方案比较：Ascend950 RegBase 纯 Vector Roofline 估算，以及内置 OpModel 建模、DAG 寻优、空泡分析与设计文档工作流 | [入口](../ops/ops-theoretical-performance-estimation/SKILL.md) |
 | **ops-profiling** | NPU 性能采集与分析，CSV 指标解读、瓶颈定位、优化建议 | — |
+| **ops-perf-routing-plan** | Shape 级 tiling 路由规划：理论下限估算、worst-first 分组、tiling 可行性校验与冻结路由计划 | [入口](../ops/ops-perf-routing-plan/SKILL.md) |
 | **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 | — |
 | **ascendc-docs-gen** | 算子文档写作与 ACLNN API 完整生成，按需加载取证、审阅及交付流程 | [入口](../ops/ascendc-docs-gen/SKILL.md) |
 | **ascendc-api-docs-gen** | Ascend C API 文档写作参考，按需加载源码完整生成流程 | [入口](../ops/ascendc-api-docs-gen/SKILL.md) |
