@@ -26,6 +26,10 @@ GTEST_FILTER="UtestMemoryAssignerManualTest.memory_assign_with_dump_graph"
 if [ ! -f "${DUMP_FILE}" ]; then
   echo "错误: dump图不存在: ${DUMP_FILE}"; exit 1
 fi
+DUMP_FILE_ABS=$(realpath -- "${DUMP_FILE}") || {
+  echo "错误: 无法解析 dump 图路径: ${DUMP_FILE}"
+  exit 1
+}
 if [ ! -x "${UT_BIN}" ]; then
   echo "UT可执行文件不存在: ${UT_BIN}，自动编译中（已存在时会直接复用，不会走到这里）..."
   BUILD_METADEF=OFF BUILD_PARSER=OFF bash scripts/build_fwk.sh -d -j16 || { echo "错误: UT编译失败"; exit 1; }
@@ -87,17 +91,19 @@ best_offset=-1
 for mode in ${MODES}; do
   for mop in ${MOPS}; do
     log="${LOG_DIR}/topo${mode}_mop${mop}.log"
-    mop_env=""
     mop_disp="default"
+    run_env=(
+      ASCEND_GLOBAL_LOG_LEVEL=1
+      "GE_MT_DUMP_FILE=${DUMP_FILE_ABS}"
+      GE_MT_BUILD_FOR_EVALUATE=1
+      "GE_MT_TOPOSORTING_MODE=${mode}"
+    )
     if [ "${mop}" != "default" ]; then
-      mop_env="GE_MT_MEMORY_OPTIMIZATION_POLICY=${mop}"
+      run_env+=("GE_MT_MEMORY_OPTIMIZATION_POLICY=${mop}")
       mop_disp="${mop}"
     fi
     # 开启 info 日志，确保 [IMAS]AfterAssignMemory（GEEVENT 级）输出
-    eval "ASCEND_GLOBAL_LOG_LEVEL=1 \
-    GE_MT_DUMP_FILE='$(realpath ${DUMP_FILE})' \
-    GE_MT_BUILD_FOR_EVALUATE=1 GE_MT_TOPOSORTING_MODE=${mode} ${mop_env} \
-    '${UT_BIN}' --gtest_filter='${GTEST_FILTER}'" >"${log}" 2>&1
+    env "${run_env[@]}" "${UT_BIN}" --gtest_filter="${GTEST_FILTER}" >"${log}" 2>&1
 
     # 用 imas 解析日志取汇总行（与 imas report 同源），指标含流数/集中清零大小
     log_abs=$(realpath "${log}")
