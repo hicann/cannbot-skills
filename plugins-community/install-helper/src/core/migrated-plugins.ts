@@ -117,6 +117,18 @@ export const MIGRATED_PLUGINS: PluginEntry[] = [
     description: "CAKE2 - Collaborative Ascend Kernel Evolution，AI 驱动的 AscendC 算子协同进化；已迁移至 cannbot 仓，经托管安装器安装",
     source: "cannbot",
   },
+  {
+    id: "ascendc-ops-perf-evolution",
+    dir: "",
+    displayName: "AscendC 算子性能进化",
+    script: "cannbot",
+    aliases: ["ops-perf-evolution", "perf-evolution"],
+    skills: 8,
+    agents: 4,
+    version: "1.0.1",
+    description: "Ascend C 算子性能多轮并行进化优化 Agent Team（1 个 Orchestrator + 4 个路径专用 Subagent）；已迁移至 cannbot 仓，经托管安装器安装",
+    source: "cannbot",
+  },
 ];
 
 export function isMigratedPlugin(id: string): boolean {

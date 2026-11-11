@@ -175,18 +175,38 @@ describe("plugins consistency — single source of truth", () => {
   });
 
   it("./AGENTS.md in plugin.json agents[] is filtered out (not treated as agent)", () => {
-    // ascendc-ops-perf-evolution plugin.json agents[] includes "./AGENTS.md" (the PM entry).
+    // A plugin.json agents[] may include "./AGENTS.md" (the PM entry).
     // This must be filtered out — AGENTS.md is a configFile, not an installable agent.
-    const pluginDir = join(REPO_ROOT, "plugins-community", "ascendc-ops-perf-evolution");
-    expect(existsSync(pluginDir)).toBe(true);
-    const pj = readJson(join(pluginDir, ".claude-plugin", "plugin.json"));
-    const hasAgentsMd = (pj.agents || []).some((a: string) => a === "./AGENTS.md");
-    expect(hasAgentsMd).toBe(true);
-    const agents = pluginJsonAgents(pluginDir);
-    expect(agents).not.toContain("AGENTS");
-    expect(agents).not.toContain("AGENTS.md");
-    // the 4 real agents should remain
-    expect(agents.length).toBe(4);
+    // (Regression: the migrated ascendc-ops-perf-evolution plugin used to exercise this
+    //  path; now simulated with a throwaway fixture so the test does not depend on a
+    //  specific plugin staying in the repo.)
+    const os = require("os");
+    const fs = require("fs");
+    const tmp = os.tmpdir();
+    const pluginDir = join(tmp, `ih-agmd-${Date.now()}`);
+
+    fs.mkdirSync(join(pluginDir, ".claude-plugin"), { recursive: true });
+    fs.writeFileSync(
+      join(pluginDir, ".claude-plugin", "plugin.json"),
+      JSON.stringify({
+        name: "agents-md-plugin",
+        version: "1.0.0",
+        agents: ["./AGENTS.md", "./agents/alpha.md", "./agents/beta.md"]
+      })
+    );
+
+    try {
+      const pj = readJson(join(pluginDir, ".claude-plugin", "plugin.json"));
+      const hasAgentsMd = (pj.agents || []).some((a: string) => a === "./AGENTS.md");
+      expect(hasAgentsMd).toBe(true);
+      const agents = pluginJsonAgents(pluginDir);
+      expect(agents).not.toContain("AGENTS");
+      expect(agents).not.toContain("AGENTS.md");
+      // the real agents should remain
+      expect(agents).toEqual(["alpha", "beta"]);
+    } finally {
+      fs.rmSync(pluginDir, { recursive: true, force: true });
+    }
   });
 
   it("discoverAgents falls back to init.sh INCLUDED_AGENT_PATTERN when plugin.json has no agents", () => {
@@ -569,6 +589,13 @@ describe("plugins consistency — single source of truth", () => {
       for (const skill of pack.skills) {
         expect(existsSync(join(REPO_ROOT, "graph", skill, "SKILL.md"))).toBe(true);
       }
+    });
+
+    it("ascendc-ops-perf-evolution is fully removed (migrated to cann/cannbot)", () => {
+      expect(existsSync(join(INSTALL_HELPER_ROOT, "plugins.d", "ascendc-ops-perf-evolution.yml"))).toBe(false);
+      expect(existsSync(join(REPO_ROOT, "plugins-community", "ascendc-ops-perf-evolution"))).toBe(false);
+      const marketplace = readJson(join(REPO_ROOT, ".claude-plugin", "marketplace.json"));
+      expect(marketplace.plugins.find((plugin: any) => plugin.name === "ascendc-ops-perf-evolution")).toBeUndefined();
     });
   });
 

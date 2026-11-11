@@ -683,28 +683,6 @@
       "dependencies": []
     },
     {
-      "name": "ascendc-ops-perf-evolution",
-      "source": "./plugins-community/ascendc-ops-perf-evolution",
-      "description": "Ascend C 算子性能进化优化 Agent Team。对已有 AscendC 内核或 ops 仓库算子进行多轮并行进化优化，含 1 个 Orchestrator Agent 和 4 个路径专用 Subagent。",
-      "version": "1.0.1",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "ascendc",
-        "evolution",
-        "perf-optimize",
-        "kernel",
-        "operator"
-      ],
-      "category": "development",
-      "dependencies": [
-        "ops-perf-evolution-shared-skills",
-        "ops-perf-evolution-skills",
-        "cannbot-knowledge-consumer-skills"
-      ]
-    },
-    {
       "name": "shmem-ops-skills",
       "description": "SHMEM 自定义通信算子开发 Skills（10 个）。覆盖设计、代码生成、编译调试、正确性评估、HCCL 对比评测、性能优化、代码审查和 PyTorch 绑定。",
       "source": "./community/ops",
