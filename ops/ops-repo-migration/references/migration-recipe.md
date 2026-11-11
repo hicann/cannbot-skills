@@ -39,7 +39,7 @@
 移除目标副本的独立构建脚本和工作流测试驱动；源套件留在原位置做迁移后回归。
 `op_graph/*_proto.cc` 若确为模板空壳才删除；若含真实注册，先保持等价注册定义再移除，不能丢签名。
 
-允许的产品适配仅为目录、构建、注册胶水、许可证注释。以下实现必须保持：kernel 计算、tiling 公式、InferShape/InferDataType、L0/L2 ACLNN 语义。
+允许的产品适配为目录、构建、注册胶水、许可证注释及经核验的目标仓必需格式化。以下实现必须保持：kernel 计算、tiling 公式、InferShape/InferDataType、L0/L2 ACLNN 语义。格式化在构建前按 [格式化核验](formatting-validation.md) 收敛，不修改冻结源包。
 不改 dtype/format/属性默认值、soc 支持集或 `.AutoContiguous()`。
 `OP_ADD` 与 `REG_OP` 类型一致，每个受支持 soc 有显式 AddConfig。
 `opFile.value` 不仅要对应文件，还必须映射到仓库暂存的 `{OP}` 目录：math/nn/cv 支持 `{OP}`、`{OP}_apt`、`{OP}_910b`；transformer 支持 `{OP}`、`{OP}_apt`、`{OP}_a2`、`{OP}_a3`。入口 `.cpp` 放在 `op_kernel/` 根目录。
@@ -80,7 +80,7 @@ math/nn 用顶层聚合宏并自动收 UT；cv 用顶层聚合宏但显式接 te
 - 头文件 include 对照目标仓 example 的实际 include flags，不能假定所有仓都带同一前缀。
 - example 是否被收集按目标仓及当前 soc 的规则判断（profile 的 `example_dirs`），不能统一只查根目录和 arch35。文件后缀可以是实际接口名，不必等于算子目录名。
 - UT 按目标仓工具改写驱动，保留源包已验证的断言；不新增自带 main。math 与其他三仓的 tiling 文件名规则不同，nn 的 UT 选目录还取决于 soc 映射。
-- golden 整文件拷到 `tests/assets/golden.py`，只补注释许可证。ST 可随仓约定归档，但不能靠随机抽样取代冻结套件回归。
+- golden 整文件拷到 `tests/assets/golden.py`，只补注释许可证及经 AST 比较和差异审阅确认等价的必要格式化；源 golden 不变。ST 可随仓约定归档，但不能靠随机抽样取代冻结套件回归。
 
 ## 构建与安装
 
@@ -146,9 +146,9 @@ transformer 的 eager cust 会用 ASCEND_CUSTOM_OPP_PATH 首项的父目录重�
 ## 源码核验与提交
 
 `verify_logic_unchanged.sh <src> <dst>` 输出同路径 C/C++/Ascend 文件的去注释差异清单，覆盖 .c/.cc/.cpp/.cxx/.h/.hpp/.hxx/.asc。保留字符串及 token 间空白，格式变化可能保守报告为差异。正常清单返回 0（包含有差异），预处理或工具失败返回非零；仍必须审阅每个差异和新增/删除。
-构建/注册/example/UT 的必要改动列入报告；kernel、tiling、推导、ACLNN 实现和 golden 不能改变。
+构建/注册/example/UT 的必要改动列入报告；kernel、tiling、推导、ACLNN 实现和目标 golden 的注释及必要格式化单独核验，不能改变计算逻辑或行为。
 若移动了实现文件，按源/目标路径映射追加逐文件核验，不能让 ONLY-IN-SRC/ONLY-IN-DST 掩盖改写。
 
-所有门禁完成后，仅提交 `<op_class>/<OP>/`，形成一个 commit，不 push、不开 PR。
+所有门禁完成且最后一次 pre-commit 未改写受测文件后，仅提交 `<op_class>/<OP>/`，形成一个 commit，不 push、不开 PR。
 `MIGRATION-REPORT.md` 包含源契约与参数来源、决策及证据、目标基线/分支/commit、许可证与源码核验、三项产物清单、每套用例计数、命令退出码及日志路径。
 失败、N/A、未运行分别说明具体依据；完整迁移未验证时不得记录成功。

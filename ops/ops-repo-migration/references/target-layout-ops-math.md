@@ -46,7 +46,7 @@
 ├── tests/ut/op_host/test_{OP}_infershape.cpp   M
 ├── tests/ut/op_host/{TILING_DIR}/test_{OP}_tiling*.cpp  M
 ├── tests/ut/op_api/test_aclnn_{OP}*.cpp        O  有 op_api 时
-├── tests/assets/golden.py                      O  源工程 golden.py 原样拷贝，仅补注释形式许可证头
+├── tests/assets/golden.py                      O  源 golden 副本；许可证及必要格式化按共同配方核验
 └── tests/st/<source_arch>/ttk_kernel_{OP}_st.csv O  ST 用例（来自源工程 tests/blackbox/**）
 ```
 

@@ -65,13 +65,38 @@
       "title": "源码差异与迁移修改边界",
       "config": {"max_tokens": 12000, "eval_mode": "text"},
       "prompt": "使用 ops-repo-migration 检查以下迁移报告：verify_logic_unchanged.sh 返回 0，但显示 DIFFERS=2、ONLY-IN-SRC=1、ONLY-IN-DST=1；工程师建议修改 kernel 计算公式并放宽 golden 容差解决出包后的精度失败，再改仓级 CMake 接入依赖，最后直接 push 并开 PR。请逐项判断这些提议是否满足本技能的完成条件，说明移动文件和必要注册胶水应如何核验。只做文字审阅，不执行命令、不修改文件或远端状态。",
-      "expected_output": "脚本返回 0 只表示差异清单生成成功，不证明逻辑不变；逐项审查 DIFFERS 和新旧独有文件，提供移动映射、保留实现与 golden 的证据。仅允许目标算子目录内的结构、构建、必要注册胶水、注释与测试驱动适配，不得改 kernel 计算、tiling/推导/ACLNN 语义、golden 容差或仓级代码来通过。超出范围说明阻碍；通过验证后只创建一个目标算子迁移 commit，技能本身不自动 push 或创建 PR。",
+      "expected_output": "脚本返回 0 只表示差异清单生成成功，不证明逻辑不变；逐项审查 DIFFERS 和新旧独有文件，提供移动映射、保留实现与 golden 的证据。仅允许目标算子目录内的结构、构建、必要注册胶水、注释、测试驱动及经核验的必要格式化适配，不得改 kernel 计算、tiling/推导/ACLNN 语义、golden 容差或仓级代码来通过。超出范围说明阻碍；通过验证后只创建一个目标算子迁移 commit，技能本身不自动 push 或创建 PR。",
       "files": [],
       "expectations": [
         {"type": "contains", "pattern": "DIFFERS"},
         {"type": "contains", "pattern": "ONLY-IN-SRC"},
         {"type": "contains", "pattern": "ONLY-IN-DST"},
         {"type": "contains", "pattern": "golden"}
+      ]
+    },
+    {
+      "id": 6,
+      "title": "目标仓格式门禁与冻结源内容的兼容边界",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "使用 ops-repo-migration 审阅以下迁移情况，不执行命令、不修改文件、不访问硬件。源包与冻结测试已验证且必须只读。目标副本第一次 pre-commit 因 clang-format、ruff-format 自动修改返回 1；golden 的 x=self; axis=dim 被拆成两行，字符串引号风格变化，按 type_comments=True 解析后的完整 AST 相同。另一处候选修复把计算中的加号改成减号，AST 不同。C++ 还存在 include 顺序变化，工程师仅凭 git diff -w 和数值回归通过就认为等价。工程师提出三种方案：一律恢复所有格式化而反复提交；关闭 hook 后提交；接受全部自动修复沿用格式化前的出包与测试结果。请说明应如何处理这些变化，源 golden 与目标副本分别受什么约束，什么条件下可以提交，不能证明等价时怎么办。",
+      "expected_output": "源包、源 golden、冻结用例和证据只读。目标副本可以保留目标仓必需且经过核验的纯格式化，不能把仅格式变化一律当作不支持迁移，也不能绕过 hook。第一次返回 1 不算通过，保存自动修改 diff、检查工具版本并再次运行到退出 0 且文件不变。golden 完整 AST 相同是必要核验，还要审阅动态源码依赖等；加改减不等价，不能接受或改容差。C++ 必须核对词法 token、字符串、宏和预处理语义，include 顺序变化不能被忽略，不凭 diff -w、formatter 来源或数值通过放行；无法证明等价时报告失败。构建与完整原回归针对格式收敛后的目标，原回归仍使用冻结源 golden，另记录目标 golden 等价证据。最终 hook 不能改写受测输入，如再次改写须核验并重跑受影响的构建/安装/UT/example/回归，最终提交对应受测源码。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "AST"
+        },
+        {
+          "type": "contains",
+          "pattern": "pre-commit"
+        },
+        {
+          "type": "contains",
+          "pattern": "golden"
+        }
       ]
     }
   ]

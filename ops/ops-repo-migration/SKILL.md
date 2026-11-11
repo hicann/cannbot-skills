@@ -51,8 +51,8 @@ soc/tilingKey、安装 vendor 路径、golden 与套件数量；未读到的内�
 5. **注册适配**。保持类型、签名、dtype/format、属性、`.AutoContiguous()` 和源包支持的 soc 集。`opFile.value` 与根目录入口及仓库暂存路径匹配（见共同配方）；每个 soc 的注册与编译覆盖都要核对。允许必要的注册胶水适配，不改计算、tiling 或推导。
 6. **构建适配**。严格按该仓布局接入。math/nn 可用单个顶层 `add_all_modules_sources`；cv 还要显式接入 UT；transformer 使用 `op_host/CMakeLists.txt` 的 `add_modules_sources_with_soc`。不可把 math 模板套到全部仓。手写 ACLNN 的 `ACLNNTYPE` 用 `aclnn_exclude`。
 7. **最小 example**。按源包真实通路写 `examples/test_aclnn_{OP}.cpp`、`test_geir_{OP}.cpp`，只验证调用与输出可读；完整精度验证仍用冻结用例。不保留会被 example 扫描器误收的草稿。
-8. **接入测试**。按目标仓 UT glob 和接入链改写 harness；期望值仍来自已验证源包。golden 整文件拷到 `tests/assets/golden.py`，仅补许可证注释。用例完整保留；不得靠抽样替代工作流回归。
-9. **验证**。结构检查 → 出包 → 安装隔离目录 → 仓内 UT / example → 工作流冻结用例回归 → 源码差异核验。命令和产物对照见 [共同配方](references/migration-recipe.md)。对每个支持的 soc 检查产物；运行条件缺失要报告未验证，不能当通过。UT 必须执行到预期用例，零用例不算通过。
+8. **接入测试**。按目标仓 UT glob 和接入链改写 harness；期望值仍来自已验证源包。golden 整文件拷到 `tests/assets/golden.py`，保持计算逻辑不变；许可证注释及目标仓必需的格式化按 [格式化核验](references/formatting-validation.md) 处理。源 golden 和冻结用例保持只读；不得靠抽样替代工作流回归。
+9. **验证**。先运行目标文件的 pre-commit 并核验格式化差异，再做结构检查 → 出包 → 安装隔离目录 → 仓内 UT / example → 工作流冻结用例回归 → 源码差异核验。命令和产物对照见 [共同配方](references/migration-recipe.md)。对每个支持的 soc 检查产物；运行条件缺失要报告未验证，不能当通过。UT 必须执行到预期用例，零用例不算通过。
 10. **提交与报告**。目标算子树形成一个 commit，不 push、不开 PR；不捏造共同作者。报告记录目标/分类/基线/分支/commit、产物清单、用例数、命令退出码和日志。只提交目标树，构建和证据留在工作目录。
 
 ## 完成判据
@@ -66,7 +66,8 @@ soc/tilingKey、安装 vendor 路径、golden 与套件数量；未读到的内�
 - `-u --ophost --ops={OP}` 的预期 UT 实际执行；适用的 eager / graph example 都成功。没有通路时需用源包证据说明 N/A。
 - 工作流调用必须重跑原 kernel / ACLNN / GEIR 冻结套件与已有 torch 冒烟，并证明运行命中了新包；不得改用例、golden、容差或阈值。
 - 调用进程须完成资源清理并正常退出；数值 PASS、框架父进程退出 0 均不能掩盖 worker 或原生驱动的析构异常。自定义库的内部符号隔离与公共 ABI 核对见目标布局和共同配方。
-- `verify_logic_unchanged.sh` 是**差异清单工具**，工具/预处理失败必须解决；正常退出 0 本身不证明无改动。逐项解释 DIFFERS / ONLY-IN-SRC / ONLY-IN-DST；kernel、tiling、InferShape/InferDataType 和 ACLNN 实现除注释外必须相同。新增/删除不能绕过核验。
+- `verify_logic_unchanged.sh` 是**差异清单工具**，工具/预处理失败必须解决；正常退出 0 本身不证明无改动。逐项解释 DIFFERS / ONLY-IN-SRC / ONLY-IN-DST；kernel、tiling、InferShape/InferDataType、ACLNN 和目标 golden 只允许注释与经核验的必要格式化，计算逻辑和行为必须保持。新增/删除不能绕过核验。
+- 提交前 pre-commit 必须通过且不再改写受测文件；若门禁又改写文件，先核验差异并重跑受影响的构建与测试，不能提交未受测版本或跳过 hook。
 
 ## 工具与参考
 
@@ -77,4 +78,4 @@ soc/tilingKey、安装 vendor 路径、golden 与套件数量；未读到的内�
 - `scripts/audit_repo_layout.py ops-math=/path/to/math ops-nn=/path/to/nn ops-cv=/path/to/cv ops-transformer=/path/to/transformer`：只读结构对拍；在临时目录用真实仓库 UT 收集函数执行 CMake glob，不编译、不需 CANN/NPU，输出各仓 commit 和结果。
 - [共同迁移配方](references/migration-recipe.md)：环境、许可证、出包与验收；[ops-math 已验证问题](references/pitfalls-ops-math.md) 仅在 math 迁移或同类症状出现时读取，四仓复杂模拟交付件的覆盖范围与限制见 [验证矩阵](references/validation-matrix.md)。
 
-迁移只允许改目录、构建、注册胶水、注释和测试驱动。若必须改 kernel、tiling 公式、推导语义、ACLNN 行为或仓级代码才能构建，停止并说明具体阻碍，不把开发/调优混入迁移。
+迁移只允许改目录、构建、注册胶水、注释、测试驱动及经核验的目标仓必需格式化。若必须改 kernel 计算、tiling 公式、推导语义、ACLNN 行为或仓级代码才能构建，停止并说明具体阻碍，不把开发/调优混入迁移。

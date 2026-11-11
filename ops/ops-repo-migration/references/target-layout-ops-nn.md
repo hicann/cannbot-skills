@@ -52,7 +52,7 @@ ascend950 → arch35；ascend910b / ascend910_93 → arch22。其他 soc 查当�
 - example：`examples/test_aclnn_<OP>.cpp` / `test_geir_<OP>.cpp`；运行 `--run_example <OP> eager cust --vendor_name=<v> --soc=<soc>` / `graph --soc=<soc>`。
 - `build.sh` 的 example 收集还支持 ascend910b 的 `examples/arch22/`、ascend310p 的 `examples/arch20/` 及 ascend950/ascend350/ascend960dt/ascend960pr 的 `examples/arch35/`；其他 soc 不自动套用这些子目录。文件名匹配 `test_aclnn_*.cpp` / `test_geir_*.cpp`，可对应实际公开接口名。
 - eager cust 读取 `ASCEND_CUSTOM_OPP_PATH`；依赖 `opapi_math` 等内置库，保留同一 toolkit 的系统库路径。
-- `OAT.xml` / `.pre-commit-config.yaml` 为本仓门禁依据；算法实现仍原样迁移。
+- `OAT.xml` / `.pre-commit-config.yaml` 为本仓门禁依据；实现语义保持不变，必要格式化按共同配方核验。
 
 ## 共享库链接依赖
 
