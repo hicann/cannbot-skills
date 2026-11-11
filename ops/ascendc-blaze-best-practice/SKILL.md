@@ -53,7 +53,7 @@ Blaze skill 不读取或依赖 `environment.md`、外部 manifest 或其他工�
 
 ### Step 1: Project Setup
 
-创建 `operator_root`，在 `blaze_source_root` clone、从本地预置源（`<project-root>/.cannbot/ops-tensor` 或调用方传入的 `local_blaze_source`）复制或更新授权 ops-tensor，递归初始化 submodule，确认抽象版本一致性，并建立根源码、项目 Blaze 副本、项目 tensor_api 副本三个只读区。不要预先实现公式、Tiling、Golden、固定工程或场景 recipe。
+创建 `operator_root`，优先核对已有 `blaze_source_root`（含安装器创建的有效链接）；需要本地预置源时，依次检查调用方明确指定的 `local_blaze_source` 和兼容位置 `<project-root>/.cannbot/ops-tensor`，先只读校验再复制。两者均未提供来源时进入 Step 1 的 L3；已有目录或链接校验失败时停止，不换源。本地源不联网补齐；网络获取或更新仅按既有授权执行。确认抽象版本一致性，并建立根源码、项目 Blaze 副本、项目 tensor_api 副本三个只读区。不要预先实现公式、Tiling、Golden、固定工程或场景 recipe。
 
 → [Step 1: Project Setup](references/workflow/step1-project-setup.md)
 

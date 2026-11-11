@@ -1,6 +1,6 @@
 # Step 1: Project Setup
 
-> **定位**：建立当前算子工程、根级 Blaze 源码版本、只读源码区和版本一致性记录。Step 1 保留 clone 或本地预置源复制、递归 submodule 初始化和版本确认；不调查 Blaze 组装方案、不选择路线、不创建场景实现。
+> **定位**：建立当前算子工程、根级 Blaze 源码版本、只读源码区和版本一致性记录。Step 1 按授权执行网络获取或更新，或只读校验并复制完整本地预置源；不调查 Blaze 组装方案、不选择路线、不创建场景实现。
 
 ## 1. 路径合同和目录结构
 
@@ -65,22 +65,53 @@ mkdir -p <project-root>/operators/<operator_name>/op_tiling
 
 | 级别 | 条件 | 动作 |
 |---|---|---|
-| L1 | `<project-root>/ops-tensor/` 已存在 | 不重新获取，直接进入 2.2 |
-| L2 | `<project-root>/.cannbot/ops-tensor` 存在且完整，或调用方传入 `local_blaze_source` 指向完整 ops-tensor（绝对路径） | 解引用复制到 `<project-root>/ops-tensor/`，再核对 submodule；把来源路径和 HEAD 写入抽象版本记录 |
+| L1 | `<project-root>/ops-tensor` 目录项已存在（含符号链接） | 先只读校验真实路径、Git 根与来源，再进入 2.2；断链、不可读或校验失败时停止，不降级换源 |
+| L2 | 按下文顺序唯一选定完整本地源 | 先只读校验授权来源与完整性，再解引用复制到 `<project-root>/ops-tensor/` 并只读复核；将来源与一致性状态写入现有抽象版本记录 |
 | L3 | 网络可达 | 从授权仓库递归 clone |
 | L4 | 以上均不可用 | 记录 `source_unavailable`，停止 Step 1，不得进入 Blaze 能力判定 |
 
-L2 的本地来源：
+当前 install-helper 的 project 安装在 `<project-root>/ops-tensor` 建立项目链接，属于 L1。`<project-root>/.cannbot/ops-tensor` 仅兼容旧工作区布局，不作为当前安装器的输出约定。
+
+**L2 选源顺序**：
+
+1. 调用方明确指定的 `local_blaze_source`（绝对路径）。已指定但路径不存在、无法解析或校验不合格时停止，不静默换源。
+2. 未指定 `local_blaze_source` 时，检查 `<project-root>/.cannbot/ops-tensor`。该目录项不存在才进入 L3；存在但断链、不可读或校验不合格时停止。
+
+高优先级来源已选定时，不扫描低优先级目录来否定它。自动查找仅限当前项目内上述位置；显式 `local_blaze_source` 只访问调用方已授权的来源，不扩展为其它目录或全局搜索。复制目标仍只能是当前项目的 `blaze_source_root`。
+
+**选定后先只读校验**：
+
+- 确认来源是可读取的 Git 工作区；选定目录和 `git rev-parse --show-toplevel` 的输出都先解析为真实路径，再比较两者相等，不能直接比较符号链接路径与 Git 返回的路径字符串。L1 的项目链接同样适用；断链或任一解析失败时停止。按授权仓库身份核对 remote。相同仓库的 HTTPS、SSH 地址及末尾 `.git` 写法可以不同，例如 `https://gitcode.com/cann/ops-tensor.git` 与 `git@gitcode.com:cann/ops-tensor.git`。不能只比较原始 URL 字符串，也不任意折叠仓库路径大小写。
+- 明确授权的镜像或本地预置来源按已有授权记录核对；不自动信任任意 fork，也不把 remote 名为 `upstream` 当作授权证明。缺少 remote 或无法确认授权时，按现有合同停止，不联网补证据，不增加外部 manifest 依赖。
+- 核对当前布局中必要的 Blaze、tensor_api 源码目录非空；工作区、分支和版本状态满足 §2.2。所有递归 submodule 必须已初始化、与父仓 gitlink 一致且无冲突；不能用初始化、同步、更新或联网下载来补齐本地来源。
+
+以下为 Linux shell 的只读校验示例；实际源码目录按 §3 检查，不能只凭目录名或一个命令退出成功就认定完整。其他平台采用等价的真实路径解析，不直接比较不同路径表示：
+
+```bash
+source_path='<selected-source>'  # L1 项目路径或 L2 选定来源
+source_real=$(realpath -e -- "$source_path") || exit 1
+test -d "$source_real" && test -r "$source_real" && test -x "$source_real" || exit 1
+git_root=$(git -C "$source_real" rev-parse --show-toplevel) || exit 1
+git_root_real=$(realpath -e -- "$git_root") || exit 1
+test "$source_real" = "$git_root_real" || exit 1
+
+git -C "$source_real" remote -v
+git --no-optional-locks -C "$source_real" status --short --ignore-submodules=none
+git -C "$source_real" submodule status --recursive
+git -C "$source_real" ls-tree HEAD include/tensor_api
+```
+
+任一选源歧义或校验失败都是 Step 1 setup 阻塞，不得写成 Blaze 不支持该需求。全部通过后才复制：
 
 ```bash
 mkdir -p <project-root>/ops-tensor
 cp -aL <local-source>/. <project-root>/ops-tensor/
 test ! -L <project-root>/ops-tensor
-git -C <project-root>/ops-tensor submodule sync --recursive
-git -C <project-root>/ops-tensor submodule update --init --recursive
+git --no-optional-locks -C <project-root>/ops-tensor status --short --ignore-submodules=none
+git -C <project-root>/ops-tensor submodule status --recursive
 ```
 
-`cp -aL` 必须解引用软链：`<local-source>` 可能是安装期建出的符号链接，`cp -a` 只复制链接本身，会让事实根仍指向安装目录并随其更新静默漂移；复制后必须确认目标是实体目录。
+`cp -aL` 必须解引用软链：`<local-source>` 可能是安装期建出的符号链接，`cp -a` 只复制链接本身，会让事实根仍指向安装目录并随其更新静默漂移；复制后必须确认目标是实体目录，并按相同只读检查复核 Git 工作区、源码目录与 submodule。缺失或不一致时停止，不修改来源或联网补齐。
 
 L3 的授权仓库来源：
 
@@ -96,11 +127,11 @@ git -C <project-root>/ops-tensor submodule update --init --recursive
 
 ### 2.2 已存在源码
 
-已有 `<project-root>/ops-tensor/` 时不重复 clone。只在当前版本合同授权下更新，并检查 remote、branch、worktree、父仓 gitlink 和递归 submodule：
+已有 `<project-root>/ops-tensor` 时先执行 §2.1 的只读路径与来源校验，不重复 clone。符号链接存在但目标缺失也属于已有目录项，必须阻塞，不能当作路径不存在。安装器链接指向的来源默认只读；更新授权必须覆盖该真实来源，不能因项目路径可写就更新共享 checkout。只在当前版本合同授权下更新，并检查 remote、branch、worktree、父仓 gitlink 和递归 submodule：
 
 ```bash
 git -C <project-root>/ops-tensor remote -v
-git -C <project-root>/ops-tensor status --short --ignore-submodules=none
+git --no-optional-locks -C <project-root>/ops-tensor status --short --ignore-submodules=none
 git -C <project-root>/ops-tensor fetch origin master
 git -C <project-root>/ops-tensor checkout master
 git -C <project-root>/ops-tensor pull --ff-only origin master
@@ -113,7 +144,7 @@ git -C <project-root>/ops-tensor ls-tree HEAD include/tensor_api
 
 命令输出仅用于建立抽象一致性状态。不要把提交 ID、manifest/hash、文件哈希或时间戳写入 Blaze Skill 合同。dirty、detached、ahead/diverged、remote 不匹配、父仓 gitlink 不一致、未初始化或不匹配的递归 submodule 都必须停止。
 
-本节 `fetch`、`checkout` 和 `pull --ff-only` 只适用于来源是授权网络仓的 checkout（L1 的原始 clone 或 L3）。经 §2.1 L2 从本地预置源复制来的 checkout 不执行任何联网步骤：只做 `submodule`、父仓 gitlink 和 worktree 一致性核对，并沿用来源 checkout 记录的 remote 与 HEAD；本地存在未提交修改时仍按 dirty 停止。
+本节 `fetch`、`checkout`、`pull --ff-only`、`submodule sync` 和 `submodule update` 只适用于版本合同已授权的网络仓更新（L1 的原始 clone 或 L3）。经 §2.1 L2 从本地预置源复制来的 checkout 只做只读的 submodule、父仓 gitlink 和 worktree 一致性核对，不执行同步、初始化、更新或任何联网步骤，并沿用来源 checkout 的已核实授权身份与版本。remote 身份按 §2.1 核对；本地存在未提交修改时仍按 dirty 停止。
 
 ## 3. 同源只读区
 
