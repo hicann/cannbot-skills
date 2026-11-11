@@ -6,6 +6,8 @@
 > - **L3 设计流** — `design/`:节点化设计流程(_governance / shape / resources / execution),节点 G→N12
 > - **L4 变体** — `subfamilies/` + `specialization/`:变体特定设计(base / quantization;稀疏 / feature flags);`implementation_ref.md` 为实现叶子
 >
+> **A2/A3(`arch22`)实现手册**(上述四层按 A5 口径写,本目录是 A2/A3 口径,按需加载):`impl_arch22_a2a3/` — 单实现实证,只描述一个具体实现的做法、判据与已知失效,不替代 L1–L4
+>
 > **使用方式**:先读本文确定场景 → 加载 `foundation/` 地基 → 沿 `design/` 节点 G→N12 推进 → 按需加载 `subfamilies/` / `specialization/` 变体文件。设计节点名→文件位置由 §C 注册表唯一翻译。
 
 ---
@@ -45,6 +47,23 @@
 | [`specialization/sparse_design.md`](./specialization/sparse_design.md)| BlockSparse / SlidingWindow(📋 占位)| 稀疏 pattern 描述、KV chunk 跳过、索引预计算 —— 当前为占位骨架,落地首个稀疏 FA 算子时细化 |
 | [`specialization/feature_flags.md`](./specialization/feature_flags.md)| PSE / RoPE / Sink / PostQuant / Prefix / ChunkedPrefill | 正交特性 flag 契约(可叠加在任意变体之上)|
 | [`implementation_ref.md`](./implementation_ref.md)| 实现叶子(全变体)| 跨核同步代码骨架、PIPE 映射、平台 mode/offset、Fixpipe 参数 |
+
+### A2/A3(`arch22`)实现手册(与四层的 A5 口径分开,按需加载): 单实现实证 — `impl_arch22_a2a3/`
+
+> A2/A3(`arch22`)单实现实证手册,与上述四层的 A5 口径分开:只描述**一个**具体实现的做法、判据与已知失效,**不替代 L2/L3、不承担精度/性能验收口径**。跨代际(950 / `arch35`)、跨变体(GQA / MLA / 量化 / 稀疏)不继承其中任何取值。
+
+| 文件 | 内容 |
+|------|------|
+| [`scope.md`](./impl_arch22_a2a3/scope.md)| 适用范围、与 N7/N9/N10/N11/N12 的关系、术语、与基线默认口径不同的三处 |
+| [`principles.md`](./impl_arch22_a2a3/principles.md)| 成本模型(固定项 / 面积项)与 12 条设计原理(定性)、每条失效条件 |
+| [`architecture.md`](./impl_arch22_a2a3/architecture.md)| 核间分工、workspace 布局、4 类槽语义、执行路径枚举与产物分离 |
+| [`tiling_budget.md`](./impl_arch22_a2a3/tiling_budget.md)| UB/L1/L0/workspace 预算、host 决策流水线、判据形式与回退 |
+| [`numerics.md`](./impl_arch22_a2a3/numerics.md)| 数值链路、S/PV 半精度写回、固定参考最大值、mask/尾块、确定性坑 |
+| [`sync_pipeline.md`](./impl_arch22_a2a3/sync_pipeline.md)| 三种同步原语、拆与留的判决、4 类槽语义、节拍体、竞态清单 |
+| [`perf_levers.md`](./impl_arch22_a2a3/perf_levers.md)| 缺口定位、主杠杆依赖顺序、接手起点诊断、阈值标定、收益转化率 |
+| [`dead_ends.md`](./impl_arch22_a2a3/dead_ends.md)| 六条收敛律、已关闭方向与翻案条件、反模式、故障图谱 |
+| [`bringup_cube.md`](./impl_arch22_a2a3/bringup_cube.md)| 最小 Q·Kᵀ 验证、数据通路字段、编译链接、静默排查 |
+| [`bringup_crosscore.md`](./impl_arch22_a2a3/bringup_crosscore.md)| AIC↔AIV 最小握手、flag 语义、子核信用、超时与挂死排查 |
 
 ---
 

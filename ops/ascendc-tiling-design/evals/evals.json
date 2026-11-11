@@ -34,7 +34,7 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "所有算子类型的 Tiling 设计中必须考虑的通用要素有哪些？请分别说明每个要素的核心问题。不需要执行任何工具调用。",
+      "prompt": "所有算子类型的 Tiling 设计中必须考虑的通用要素有哪些？请分别说明每个要素的核心问题。可以读取本技能目录下的 `SKILL.md` 核对内容；除此之外不要执行任何其他工具调用，不要执行命令，不要写入或修改任何文件。",
       "expected_output": "回复应说明 Tiling 设计的四个通用核心要素：\n- 多核切分策略：任务如何分配给多个 AI Core，关注负载均衡、数据局部性、粒度适中\n- UB 切分策略：单次能处理多少数据，受 UB 容量限制（DAV_2201: 192KB, DAV_3510: 248KB），决定是否需要分 chunk\n- Buffer 规划：需要哪些 buffer（inQueue/outQueue/tmpBuf/workBuf）及各多大，支持 Double Buffer 优化\n- 分支场景覆盖：需处理不同数据类型（FP32/FP16/BF16/INT8）、Shape 大小、数据对齐、边界情况等分支",
       "files": [],
       "expectations": []
