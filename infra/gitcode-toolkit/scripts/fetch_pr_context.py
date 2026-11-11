@@ -199,10 +199,16 @@ def main(argv: list[str] | None = None) -> int:
     owner, repo = args.repo.split("/", 1)
     ts = int(time.time())
     work_dir = args.work_dir or os.path.join("/tmp", f"{TMP_PREFIX}{owner}_{repo}_{ts}")
+    if os.path.lexists(work_dir):
+        ERROR_LOGGER.error("ERROR: working directory already exists; choose a new path")
+        return 1
+    work_dir_created = False
 
     ctx = PRContext(work_dir=work_dir)
 
     try:
+        os.makedirs(work_dir)
+        work_dir_created = True
         clone_repo(owner, repo, work_dir)
         pr_branch = fetch_pr_branch(args.pr, work_dir)
         ctx.base_branch = get_base_branch(work_dir)
@@ -216,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
         ERROR_LOGGER.error("ERROR: %s", e)
         return 1
     finally:
-        if not args.keep and os.path.isdir(work_dir):
+        if not args.keep and work_dir_created and os.path.isdir(work_dir):
             shutil.rmtree(work_dir, ignore_errors=True)
             ERROR_LOGGER.info("Cleaned up: %s", work_dir)
 
