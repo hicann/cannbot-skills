@@ -147,7 +147,7 @@ argument-hint: >
 ```
 0.1 🛑 读取 AttentionPatternIndex.md（必须，不可跳过）:
     Read ops/tilelang-op-design/references/attention-patterns/AttentionPatternIndex.md
-    
+
 0.2 🛑 逐条回答"生成前问题"中的 8 个诊断问题，记录命中的模式:
     1. 输入是标准 [B,H,S,D] 还是 (T,H,D) 拼接布局？
     2. K/V 是连续 tensor 还是 paged cache？
@@ -157,7 +157,7 @@ argument-hint: >
     6. 是否有 indices/topk？
     7. 是否有 causal、padding、显式 mask？
     8. 是前向还是反向（是否有 dy/softmax_max/softmax_sum/attention_in 输入、dq/dk/dv 输出）？
-    
+
     如果前 7 个问题全部否定且为前向 → 命中"标准 Attention" → 下一步 0.3 读 archive 模板
     如果第 8 问命中反向 → 下一步 0.3 读 fa_backward_pattern.md（可与其余模式组合）
     如果任一命中 → 下一步 0.3 读对应的 pattern 文档（可组合）
@@ -182,21 +182,21 @@ argument-hint: >
 ---
 
 ### 🛑 步骤 0.5: Conv 算子结构选型路由（Conv 类强制执行）
- 
+
 ```
 ⚠️ 本步骤是硬性门禁。如果 model.py 是 Conv 类算子，
    必须逐个完成以下 checklist 后才能进入步骤 1。禁止跳过。
 ```
- 
+
 **触发条件**：`{output_dir}/model.py` 的 forward() 为卷积计算（`nn.Conv1d/2d/3d`、`F.conv1d/2d/3d`，或类名含 `Conv`）。
- 
+
 **强制执行清单**：
- 
+
 ```
-0.5.1 🛑 Read .claude/skills/tilelang2ascend-translator/references/dsl2Ascendc_compute_conv.md（全文）:
+0.5.1 🛑 Read .cannbot/skills/tilelang2ascend-translator/references/dsl2Ascendc_compute_conv.md（全文）:
     conv 结构与优化知识的权威来源。本阶段只取结构选型与设计约束；
     LoadData3D 等 AscendC API 细节供 Phase 4 转译参考。
- 
+
 0.5.2 🛑 GEMM 结构三模式显式选型（结论写入 PERF_DESIGN.md）:
     | 模式 | 适用 | 省去 |
     | normal（im2col 物化） | 通用回退 | — |
@@ -212,24 +212,24 @@ argument-hint: >
     方案正确但实测 net negative，见 conv2d_base.cpp P0-b）。
     注：`T.tile.im2col` 当前未注册不可执行；fused 模式作为结构意图记录，
     由 Phase 4 AscendC 转译落实（compute_conv.md 第四章）。
- 
+
 0.5.3 🛑 标量约束:
     禁止默认标量逐元素 gather 的 im2col 设计；k'=(ci,kh,kw) 解码必须按段
     连续块/向量化表达。标量豁免仅限占比 <5% 的偶发小尾块（如 <32B k' 尾块），
     主数据路径（im2col gather 主体、epilogue 主写出、wrepack 主存储）不属于豁免范围。
- 
+
 0.5.4 🛑 dtype 适配声明:
     fp32 走原生 fp32 cube / bf16 拆分替代等适配时，PERF_DESIGN.md 必须含
     「保留的优化结构清单」——fused/normal 模式、零标量、批量转置、
     epilogue 跨行块处理逐项标注 保留/丢弃+理由。该清单是 Phase 4 转译的强制输入。
     （fp32 精度适配路线演进定稿见 compute_conv.md 第八章：3-chain 已退役，
     原生 fp32 cube 为默认。）
- 
+
 0.5.5 🛑 权重 repack 可缓存:
     repack 结果是（weight 内容, shape, dtype）的确定函数，设计中标注
     由 host 侧 LRU 缓存（key = data_ptr + sizes + dtype + version）。
 ```
- 
+
 **门禁规则**：
 - 触发条件满足但 0.5.1-0.5.5 未完成 → **禁止**进入步骤 1，**禁止**生成任何 design/ 下的代码
 - "archive 先例 / 与 archive conv2d_base 同结构"论断必须附 grep 证据
@@ -237,7 +237,7 @@ argument-hint: >
   epilogue 主写出——零标量逐元素访问；行内标量 bias Adds 与调试标志属
   豁免形态；含 xtrans/fused 结构），无证据视为未验证
 - 禁止凭记忆或经验跳过本步骤直接设计
- 
+
 ### 🛑 步骤 0-A: 归约 / 重排类设计模式路由（命中特征时强制执行）
 
 ```

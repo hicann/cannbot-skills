@@ -53,7 +53,9 @@ from verification_ascendc import (
 )
 
 
-def _tensor_diff_summary(lhs: torch.Tensor, rhs: torch.Tensor, atol: float = 0.0, rtol: float = 0.0):
+def _tensor_diff_summary(
+    lhs: torch.Tensor, rhs: torch.Tensor, atol: float = 0.0, rtol: float = 0.0
+):
     if lhs.shape != rhs.shape:
         return f"shape mismatch: ref={tuple(lhs.shape)}, cand={tuple(rhs.shape)}"
 
@@ -82,7 +84,10 @@ def _compare_values(lhs, rhs, atol: float, rtol: float, path: str = "output"):
     def _compare_leaf(a, b, p):
         if isinstance(a, torch.Tensor):
             if a.shape != b.shape:
-                return False, f"{p}: shape mismatch: ref={tuple(a.shape)}, cand={tuple(b.shape)}"
+                return (
+                    False,
+                    f"{p}: shape mismatch: ref={tuple(a.shape)}, cand={tuple(b.shape)}",
+                )
             a_fp = torch.nan_to_num(a.to(torch.float32))
             b_fp = torch.nan_to_num(b.to(torch.float32))
             if torch.allclose(a_fp, b_fp, atol=atol, rtol=rtol):
@@ -129,7 +134,8 @@ def _run_comparisons(ref_model, cand_model, input_groups, device, report):
     all_ok = True
     comparisons = []
     ref_outputs, cand_outputs, input_summaries = _execute_models(
-        ref_model, cand_model, input_groups, device)
+        ref_model, cand_model, input_groups, device
+    )
     for index, (ref_out, cand_out) in enumerate(zip(ref_outputs, cand_outputs)):
         atol = report["atol"]
         rtol = report["rtol"]
@@ -137,12 +143,15 @@ def _run_comparisons(ref_model, cand_model, input_groups, device, report):
             atol = 1.5
             rtol = 0.0
 
-        ok, comparison = _compare_values(ref_out, cand_out, atol=atol, rtol=rtol,
-                                         path=f"output[{index}]")
+        ok, comparison = _compare_values(
+            ref_out, cand_out, atol=atol, rtol=rtol, path=f"output[{index}]"
+        )
         comparisons.append(f"case[{index}]: {comparison}")
         all_ok = all_ok and ok
         report["atol"] = max(report["atol"], atol)
-        report["rtol"] = min(report["rtol"], rtol) if math.isclose(rtol, 0.0) else report["rtol"]
+        report["rtol"] = (
+            min(report["rtol"], rtol) if math.isclose(rtol, 0.0) else report["rtol"]
+        )
 
     return all_ok, comparisons, input_summaries
 
@@ -181,7 +190,8 @@ def _run_verification(op: str):
         cand_model = cand_cls(*_clone_value(init_inputs)).to(device).eval()
 
         all_ok, comparisons, input_summaries = _run_comparisons(
-            ref_model, cand_model, input_groups, device, report)
+            ref_model, cand_model, input_groups, device, report
+        )
 
         report["inputs"] = input_summaries
         report["comparisons"] = comparisons
@@ -209,15 +219,18 @@ def _print_report(report):
         extra.append(f"Tolerance : atol={report['atol']}")
     else:
         extra.append(f"Tolerance : atol={report['atol']}, rtol={report['rtol']}")
-    _ascendc_print_report(report, title="TileLang Verification Report",
-                          extra_header_lines=extra,
-                          debug_env_var="VERIFICATION_TILELANG_DEBUG")
+    _ascendc_print_report(
+        report,
+        title="TileLang Verification Report",
+        extra_header_lines=extra,
+        debug_env_var="VERIFICATION_TILELANG_DEBUG",
+    )
 
 
 def main():
     if len(sys.argv) != 2:
         logger.error(
-            "Usage: python .claude/skills/tilelang2ascend-tilelang-designer/"
+            "Usage: python .cannbot/skills/tilelang2ascend-tilelang-designer/"
             "scripts/verification_tilelang.py <op>"
         )
         logger.error("Result: fail")

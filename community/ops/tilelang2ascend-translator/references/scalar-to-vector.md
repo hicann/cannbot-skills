@@ -234,7 +234,7 @@ AscendC::PipeBarrier<PIPE_V>();
 在实际安装的 skill 目录下运行（扫描目录递归包含 C++ 源文件和头文件）：
 
 ```bash
-python3 .claude/skills/tilelang2ascend-translator/scripts/check_scalar_residuals.py \
+python3 .cannbot/skills/tilelang2ascend-translator/scripts/check_scalar_residuals.py \
   "${output_dir}/kernel/op_kernel"
 ```
 

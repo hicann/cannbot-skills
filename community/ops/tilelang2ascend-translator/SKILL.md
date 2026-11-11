@@ -24,7 +24,7 @@ argument-hint: >
 - 在 AscendC 实现中应尽可能避免标量逐元素写法，优先使用块级或向量化操作；编写 Compute 前阅读 `references/scalar-to-vector.md`，修改后执行步骤 1.5。必要的控制循环和小 tile 回退应说明理由。
 - 只允许修改或新增 `{output_dir}/` 目录中的文件，不要改动其他目录中的文件。
 - 只允许读取当前工作区目录结构内的文件与子目录；禁止读取当前工作区之外的任何路径，包括父目录、兄弟目录、用户目录、绝对路径以及系统其他目录。
-- 禁止读取 `.claude/skills/tilelang2ascend-translator/references/TileLangAscendProgrammingGuide.md`；该文档是 TileLang 编程指南，仅供 TileLang 阶段使用，与本阶段无关。
+- 禁止读取 `.cannbot/skills/tilelang2ascend-translator/references/TileLangAscendProgrammingGuide.md`；该文档是 TileLang 编程指南，仅供 TileLang 阶段使用，与本阶段无关。
 - 严格按照算子描述生成kernel，ascend c kernel的功能应该和标杆完全一致，不能出现部分功能使用ascend c，部分使用torch算子的情况
 - 即使测试用例中不包含某个功能或者分支对应的case，也要生成对应的ascend c kernel代码
 - **🛑 参考实现 ≠ 可复制代码**：`workflows/templates/archive_tasks/` 用于理解结构范式（目录组织、API 用法、EXEC_KERNEL_CMD 传参模式、缓冲规划），**禁止整体照抄其代码**。复用任何参考代码必须：① 按当前算子的 shape/dtype/归约路径/广播形态**逐行适配**；② 重新推导 tiling 与 UB 预算（不沿用 archive 的硬编码参数）；③ 全量验证通过。archive 中存在的缺陷不得被复制进新算子。
@@ -95,19 +95,19 @@ argument-hint: >
 
 ## Skill 参考资料
 本 skill 提供以下参考资料：
-- `.claude/skills/tilelang2ascend-translator/references/scalar-to-vector.md` — 标量反模式、A2 Sort/GatherMask 的布局与同步、跨行循环审查及最小示例
-- `.claude/skills/tilelang2ascend-translator/references/dsl2Ascendc.md` — TileLang 转 AscendC 指南
-- `.claude/skills/tilelang2ascend-translator/references/TileLang-AscendC-API-Mapping.md` — TileLang 与 AscendC API 映射表
-- `.claude/skills/tilelang2ascend-translator/references/AscendCVerification.md` — AscendC 验证指南
-- `.claude/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md` — 归约族算子实现指南（(O,R,I) 路由、补零/行距铁律、应避免的结构、精度与验证约定）
-- `.claude/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md` — 重排/搬运类算子实现指南（固定开销约束、硬件 pattern 指令、广播消费结构、核数分档、已知低效结构）
-- `.claude/skills/tilelang2ascend-translator/references/ascendc_sort_topk_patterns.md` — 排序/TopK/采样类算子实现指南（值域二分 vs 分段 sort 双路径、GatherMask 对齐铁律、tie 语义对齐、p/k 评测约束）
-- `.claude/skills/tilelang2ascend-translator/references/ascendc_norm_fusion_patterns.md` — Norm 族+激活融合算子实现指南（双缓冲软流水、affine 融合预重排、两遍中心化 + mean 修正 + Kahan 补偿、swish 简洁形式、S_CHUNK 大空间维分片）
-- `.claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md` — Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention、FA 反向/FAG）
-- `.claude/skills/tilelang2ascend-translator/references/pooling-patterns/PoolingPatternIndex.md` — Pooling 类算子（AvgPool/MaxPool/AdaptivePool 及反向 Grad）的转译/实现模式路由索引（tilelang-translation 映射、UB 管理、对齐守卫、精度模式、反向实现、grad-v2 落地踩坑、反模式）
-- `.claude/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh` — AscendC 评测脚本
+- `.cannbot/skills/tilelang2ascend-translator/references/scalar-to-vector.md` — 标量反模式、A2 Sort/GatherMask 的布局与同步、跨行循环审查及最小示例
+- `.cannbot/skills/tilelang2ascend-translator/references/dsl2Ascendc.md` — TileLang 转 AscendC 指南
+- `.cannbot/skills/tilelang2ascend-translator/references/TileLang-AscendC-API-Mapping.md` — TileLang 与 AscendC API 映射表
+- `.cannbot/skills/tilelang2ascend-translator/references/AscendCVerification.md` — AscendC 验证指南
+- `.cannbot/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md` — 归约族算子实现指南（(O,R,I) 路由、补零/行距铁律、应避免的结构、精度与验证约定）
+- `.cannbot/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md` — 重排/搬运类算子实现指南（固定开销约束、硬件 pattern 指令、广播消费结构、核数分档、已知低效结构）
+- `.cannbot/skills/tilelang2ascend-translator/references/ascendc_sort_topk_patterns.md` — 排序/TopK/采样类算子实现指南（值域二分 vs 分段 sort 双路径、GatherMask 对齐铁律、tie 语义对齐、p/k 评测约束）
+- `.cannbot/skills/tilelang2ascend-translator/references/ascendc_norm_fusion_patterns.md` — Norm 族+激活融合算子实现指南（双缓冲软流水、affine 融合预重排、两遍中心化 + mean 修正 + Kahan 补偿、swish 简洁形式、S_CHUNK 大空间维分片）
+- `.cannbot/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md` — Attention / FlashAttention 类算子的模式路由索引（TND、paged KV cache、mask/causal、GQA/MQA、MLA、topk sparse KV、sink attention、FA 反向/FAG）
+- `.cannbot/skills/tilelang2ascend-translator/references/pooling-patterns/PoolingPatternIndex.md` — Pooling 类算子（AvgPool/MaxPool/AdaptivePool 及反向 Grad）的转译/实现模式路由索引（tilelang-translation 映射、UB 管理、对齐守卫、精度模式、反向实现、grad-v2 落地踩坑、反模式）
+- `.cannbot/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh` — AscendC 评测脚本
 - `workflows/templates/archive_tasks/` — 历史成功任务，host/kernel 完整参考实现（**编译/运行时错误时优先查阅**）
-- `.claude/skills/tilelang2ascend-translator/references/ascendc_quantization_patterns.md` — 量化类算子实现指南（量化契约、scale/zero-point 广播、舍入/饱和/类型转换、量化数据流、索引写回融合、克隆+量化+scatter 结构范式和验证易错点）
+- `.cannbot/skills/tilelang2ascend-translator/references/ascendc_quantization_patterns.md` — 量化类算子实现指南（量化契约、scale/zero-point 广播、舍入/饱和/类型转换、量化数据流、索引写回融合、克隆+量化+scatter 结构范式和验证易错点）
 - 共享演进知识库（`$CANNBOT_KNOWLEDGE_ROOT` 的 `runbooks/`）— 历史走偏点与成功模式，**经 knowledge-query skill 检索（步骤 0-K 必读，命中即规避）**
 
 ### 🛑 官方文档目录（asc-devkit，强制查阅）
@@ -148,7 +148,7 @@ argument-hint: >
 
 ```
 0-A.1 🛑 读取 AttentionPatternIndex.md（必须，不可跳过）:
-    Read .claude/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md
+    Read .cannbot/skills/tilelang2ascend-translator/references/attention-patterns/AttentionPatternIndex.md
 
 0-A.2 🛑 逐条回答"生成前问题"中的 8 个诊断问题，记录命中的模式:
     1. 输入是标准 [B,H,S,D] 还是 (T,H,D) 拼接布局？
@@ -159,7 +159,7 @@ argument-hint: >
     6. 是否有 indices/topk？
     7. 是否有 causal、padding、显式 mask？
     8. 是前向还是反向（是否有 dy/softmax_max/softmax_sum/attention_in 输入、dq/dk/dv 输出）？
-    
+
     如果前 7 项全否定且为前向 → 命中"标准 Attention" → 下一步 0-A.3 读 archive 模板
     如果第 8 项命中反向 → 下一步 0-A.3 读 fa_backward_pattern.md（可与其余模式组合）
     如果任一命中 → 下一步 0-A.3 读对应的 pattern 文档（可组合）
@@ -192,9 +192,9 @@ argument-hint: >
 
 ```
 0-A2.1 🛑 只读取命中族的实现指南（渐进式披露，只读需要的）:
-    - 归约族 → Read .claude/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md
-    - 重排/搬运类 → Read .claude/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md
-    - Norm 族（含激活融合） → Read .claude/skills/tilelang2ascend-translator/references/ascendc_norm_fusion_patterns.md
+    - 归约族 → Read .cannbot/skills/tilelang2ascend-translator/references/ascendc_reduce_patterns.md
+    - 重排/搬运类 → Read .cannbot/skills/tilelang2ascend-translator/references/ascendc_shuffle_patterns.md
+    - Norm 族（含激活融合） → Read .cannbot/skills/tilelang2ascend-translator/references/ascendc_norm_fusion_patterns.md
     （多族同命中 → 都读）
 
 0-A2.2 🛑 在思考中确认:
@@ -223,7 +223,7 @@ argument-hint: >
 
 ```
 0-A3.1 🛑 读取实现指南（必须，不可跳过）:
-    Read .claude/skills/tilelang2ascend-translator/references/ascendc_sort_topk_patterns.md
+    Read .cannbot/skills/tilelang2ascend-translator/references/ascendc_sort_topk_patterns.md
 
 0-A3.2 🛑 在思考中确认:
     - 输出形态（一票否决）：输出为有序值/有序索引（argsort 下标、gather 按序消费）时
@@ -252,7 +252,7 @@ argument-hint: >
 如果命中，必须完成以下 checklist：
 
 ```
-0-A4.1 🛑 Read .claude/skills/tilelang2ascend-translator/references/ascendc_quantization_patterns.md
+0-A4.1 🛑 Read .cannbot/skills/tilelang2ascend-translator/references/ascendc_quantization_patterns.md
 
 0-A4.2 🛑 在思考中确认:
     - 量化顺序、dtype 组合、广播轴、rounding、clamp、特殊值和 optional 参数语义
@@ -279,7 +279,7 @@ argument-hint: >
 如果命中，必须完成以下 checklist：
 
 ```
-0-A3.1 🛑 Read .claude/skills/tilelang2ascend-translator/references/pooling-patterns/PoolingPatternIndex.md
+0-A3.1 🛑 Read .cannbot/skills/tilelang2ascend-translator/references/pooling-patterns/PoolingPatternIndex.md
     按「生成前问题」确定前向/反向、布局、实现策略，再只读命中的模式文档
     （渐进式披露，只读需要的）:
     - 转译映射 → references/pooling-patterns/references/tilelang-translation.md
@@ -361,7 +361,7 @@ argument-hint: >
     ── 同步控制 ──
     - PipeBarrier → asc-devkit/docs/zh/api/SIMD-API/basic_api/sync_control/intra_core_sync/PipeBarrier_ISASI.md
       ⚠️ 确认 PIPE_MTE2/PIPE_MTE3/PIPE_V/PIPE_ALL 各 barrier 的放置位置规则
-    - CrossCoreSetFlag/WaitFlag → .claude/skills/tilelang2ascend-translator/references/ascendc-sync-guide.md
+    - CrossCoreSetFlag/WaitFlag → .cannbot/skills/tilelang2ascend-translator/references/ascendc-sync-guide.md
       ⚠️ 确认 mode2 下 Set/Wait 两侧 PIPE 参数完整且配对
       ⚠️ AIC 侧: Set<0x2, PIPE_FIX> + Wait<0x2, PIPE_FIX>
       ⚠️ AIV 侧: Set<0x2, PIPE_MTE2> + Wait<0x2, PIPE_MTE2>（MTE3 写用 PIPE_MTE3）
@@ -421,7 +421,7 @@ argument-hint: >
 
 ```
 0-C.1 🛑 读取 ascendc-sync-guide.md（必须，不可跳过）:
-    Read .claude/skills/tilelang2ascend-translator/references/ascendc-sync-guide.md 全文
+    Read .cannbot/skills/tilelang2ascend-translator/references/ascendc-sync-guide.md 全文
 
 0-C.2 🛑 逐条在思考中确认以下 checkpoint:
     ① PIPE 配对:
@@ -780,8 +780,8 @@ RoPE / rotary / rope / 位置编码融合类，包括：
 - `{output_dir}/kernel/setup.py` — whl 打包配置
 - `{output_dir}/kernel/CMakeLists.txt` — CMake 编译配置
 - `{output_dir}/kernel/utils/kernel_common.h` — CopyTiling 等公共工具
-参考文档：`.claude/skills/tilelang2ascend-translator/references/dsl2Ascendc.md`
-**🛑 实施转译前必须先完成步骤 0-A（如触发）、步骤 0-B 和步骤 0-C（如触发）的全部查阅，然后阅读 `.claude/skills/tilelang2ascend-translator/references/TileLang-AscendC-API-Mapping.md` 逐一确认 API 映射。禁止跳过 Mapping 直接编写 AscendC 代码。**
+参考文档：`.cannbot/skills/tilelang2ascend-translator/references/dsl2Ascendc.md`
+**🛑 实施转译前必须先完成步骤 0-A（如触发）、步骤 0-B 和步骤 0-C（如触发）的全部查阅，然后阅读 `.cannbot/skills/tilelang2ascend-translator/references/TileLang-AscendC-API-Mapping.md` 逐一确认 API 映射。禁止跳过 Mapping 直接编写 AscendC 代码。**
 
 **op_host/<op_name>.cpp** 模式：
 - include `torch_kernel_helper.h` + `tiling/platform/platform_ascendc.h`
@@ -904,7 +904,7 @@ DataCopyPad(bLocal, xGm[bBaseOffset], copyParams, padParams);  // bBaseOffset = 
 
 ### 🛑 步骤 1.5: 标量残留审查（修改 kernel 后、编译前）
 
-1. 运行 `.claude/skills/tilelang2ascend-translator/scripts/check_scalar_residuals.py`，
+1. 运行 `.cannbot/skills/tilelang2ascend-translator/scripts/check_scalar_residuals.py`，
    参数为 `{output_dir}/kernel/op_kernel` 及包含 Compute/辅助实现的其他 C++ 文件或目录。
    脚本跨行扫描循环和 raw-address 使用，输出 JSON；退出码 1 表示待审查，2 表示扫描失败。
 2. 对照 `references/scalar-to-vector.md` 七类检查项逐项审查。可向量化计算按对应模式修复；
@@ -971,7 +971,7 @@ def run(x, dim=-1):
 - entry_point 应为模块级函数 `run()`，不是 class 方法
 - runner 会自动加载编译产物 `.so`，wrapper 无需自行加载
 
-然后调用 `.claude/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh {output_dir}` 编译并验证（内部 cmake + make + whl 安装）。
+然后调用 `.cannbot/skills/tilelang2ascend-translator/scripts/evaluate_ascendc.sh {output_dir}` 编译并验证（内部 cmake + make + whl 安装）。
 
 ---
 
@@ -1024,7 +1024,7 @@ def run(x, dim=-1):
 
 4.3 如果仍 FAIL 且连续失败 < 7 次 → 回到 4.1
 
-4.4 如果 7 次后仍 FAIL → 
+4.4 如果 7 次后仍 FAIL →
     🛑 调用 Skill "ascendc-precision-tuning"，传入 output_dir + 错误输出
     等待返回取证→审计→修复分析。此步骤不可跳过。
 

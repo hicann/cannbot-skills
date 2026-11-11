@@ -17,7 +17,7 @@ polynomial 近似，~fp16 mantissa 精度**；而 PyTorch CPU 用 libm `expf` �
 - **dtype 描述存储格式，不描述计算精度**：fp32 tensor 占 32 bit，但里面
   数值的 *信息内容* 取决于产生它的整条计算链。如果链上某一步只输出
   ~10 bit mantissa 的结果，下游 fp32 存储里 11–23 位就是物理噪声。
-- **`.claude/skills/tilelang2ascend-translator/scripts/verification_ascendc.py` 当前的阈值表是按"输出 dtype"取的**，
+- **`.cannbot/skills/tilelang2ascend-translator/scripts/verification_ascendc.py` 当前的阈值表是按"输出 dtype"取的**，
   fp32 用 MERE = 2⁻¹³ / MARE = 2⁻¹²；fp16 用 2⁻¹⁰ / 2⁻⁹。这套阈值是按
   "reference 和 candidate 在同一精度档" 校准的。
 - **PR #139 把 `11_DequantSwigluQuant` 的 reference 从 NPU vendor kernel
@@ -229,7 +229,7 @@ input 里 `quant_scale` 可能是 fp16 / bf16 / fp32（取决于 case）。kerne
 下面这些是 **不能进 PR 的妥协路径**，因为它们破坏了"算子按硬件事实正确
 实现 / 验证按硬件事实合理判定"的双向契约：
 
-- ❌ 改 `.claude/skills/tilelang2ascend-translator/scripts/verification_ascendc.py` 让 fp32 阈值放宽 / 加 op 白名单
+- ❌ 改 `.cannbot/skills/tilelang2ascend-translator/scripts/verification_ascendc.py` 让 fp32 阈值放宽 / 加 op 白名单
 - ❌ 改 `model.py`（reference 实现）让它适应 NPU 精度
 - ❌ 用形状特化、magic constant、benchmark-aware 输入路径让 50 个 case 过
 - ❌ 用 `torch_npu.npu_*` vendor kernel 当 oracle 让两端互相 cancel——
