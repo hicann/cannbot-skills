@@ -126,7 +126,8 @@
                   "Ascend310", "Ascend310P", "Ascend910",
                   "Ascend310B",
                   "Ascend910B",
-                  "Ascend950PR", "Ascend950DT"
+                  "Ascend950PR", "Ascend950DT",
+                  "KirinX90"
                 ]
               },
               "description": "本算子适用的 Atlas 芯片型号白名单（与 registries/chip_registry.yaml 对齐）"

@@ -96,7 +96,7 @@ cannbot-skills/
 ├── graph/                # 图模式 Skills
 ├── runtime/              # Runtime Skills
 ├── infra/                # 基础设施 Skills（治理 / GitCode 协作）
-├── tools/                # CANN 工具链 Skills（asys / msaicerr / msnpureport / npu-compute / npu-check / npu-objdump）
+├── tools/                # CANN / 端侧工具链 Skills
 ├── plugins-official/     # 官方 Plugins（开发路径入口，含 Agents/Workflows）
 ├── plugins-community/    # 社区 Plugins
 ├── docs/                 # 项目文档
@@ -160,6 +160,7 @@ cannbot-skills/
 ║  │  ascendc-crash-debug     卡死/崩溃调试、Coredump 分析                    │  ║
 ║  │  ascendc-sync-audit    信号同步检验与修正（SetFlag/WaitFlag/CrossCore） │  ║
 ║  │  ascendc-env-check       NPU 设备查询与环境验证                          │  ║
+║  │  ops-kirin-device-verify  麒麟设备端侧验证                               │  ║
 ║  └─────────────────────────────────────────────────────────────────────────┘ ║
 ║                                                                              ║
 ║  ┌─ 测试开发类 ────────────────────────────────────────────────────────────┐  ║

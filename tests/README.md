@@ -130,7 +130,7 @@ ST（System Test）是基于 Python/pytest 的 **AI 语义评测**系统。`test
 | ----------------------- | ------------------------------------------------------------------ |
 | `max_tokens`          | Token 硬上限                                                       |
 | `max_tokens_by_model` | 按模型 Token 上限，如`{"deepseek-v4-flash": 140000}`             |
-| `ascend_platforms`    | 适用平台（A2/A3/A5）                                               |
+| `ascend_platforms`    | 适用平台（A2/A3/A5/Kirin；Kirin 为端侧平台）                       |
 | `distractor_skills`   | 正向看护：干扰 skill 列表                                          |
 | `disabled`            | 跳过该用例                                                         |
 | `timeout`             | 执行超时（秒，默认 600）                                           |

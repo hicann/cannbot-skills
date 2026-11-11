@@ -248,7 +248,7 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 |-----|------|------|--------|
 | `max_tokens` | int | Token 消耗硬上限，超过则测试失败 | 无限制 |
 | `max_tokens_by_model` | object | 按模型的 Token 上限，如 `{"deepseek-v4-flash": 140000}` | `{}` |
-| `ascend_platforms` | string[] | 适用平台，如 `["A2"]`。配合 `--ascend-platform` 参数按平台过滤 | `[]` |
+| `ascend_platforms` | string[] | 适用平台，如 `["A2"]`（端侧用例用 `["Kirin"]`）。配合 `--ascend-platform` 参数按平台过滤 | `[]` |
 | `disabled` | bool | `true` 跳过该用例 | `false` |
 | `distractor_skills` | string[] | 正向看护：干扰 skill 名称列表 | `[]` |
 | `timeout` | int | 执行超时秒数 | `600` |

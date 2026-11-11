@@ -82,7 +82,7 @@ flowchart TD
 
 ### 4.1 定位与全流程
 
-基于 Python/pytest 的 **AI 语义评测系统**：验证 Skill/Team 在真实对话中的回复质量与正确性，CI 流水线自动触发、变更驱动精准评测，支持多平台（A2/A3/A5）与多轮重复求稳定通过率。
+基于 Python/pytest 的 **AI 语义评测系统**：验证 Skill/Team 在真实对话中的回复质量与正确性，CI 流水线自动触发、变更驱动精准评测，支持多平台（A2/A3/A5/Kirin）与多轮重复求稳定通过率。
 
 ```mermaid
 flowchart TD

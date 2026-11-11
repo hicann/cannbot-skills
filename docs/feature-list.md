@@ -17,6 +17,8 @@
 | **npu-arch** | NPU 架构知识、芯片型号映射 | — |
 | **ascendc-docs-search** | API 文档索引 + 在线搜索 | — |
 | **ascendc-env-check** | NPU 设备查询、CANN 环境验证 | — |
+| **ascendc-kirin-env-check** | 麒麟平台（Kirin NPU）端侧开发环境检查：开发依赖、CANN 双能力线（atc→omc / camodel sim 直调）、hdc 设备识别 | — |
+| **ops-kirin-device-verify** | 麒麟设备端到端验证：编译安装 vendor 包、生成 ONNX/裸 bin 与 golden、atc 转 OMC、HAP 安装与 hdc 推送、推理启动、输出回传与精度比对 | — |
 | **ascendc-cross-gen-migration** | 已有 A2/A3 AscendC 算子按 Stage 0–5 迁移到 A5；从源码自合成标杆并完成精度和性能验证 | — |
 | **ascendc-tiling-design** | Tiling 和 Kernel 设计方法论，按算子类别分类 | — |
 | **ascendc-precision-debug** | 精度调试，症状-原因速查、常见陷阱 | — |
@@ -306,15 +308,17 @@
 | **gitcode-issue-handler** | GitCode 单 Issue/批量 Issue 状态机：分诊、可配置自动首响与负责人转交、稳定复现、最小修复、测试、经确认的代码交付与报告 | [查看](skills-usage.md#gitcode-issue-handler) |
 | **gitcode-toolkit** | GitCode API/Token/URL/日志/变更展示 + Git 克隆/diff/log/remote + PR 创建工作流共享参考（内部参考，不直接触发） | [查看](skills-usage.md#gitcode-toolkit) |
 
-## CANN 工具链
+## CANN / 端侧工具链
 
-> 以下 Skill 位于 `tools/` 目录，提供 CANN 维测工具使用指导（仅 Ascend EP 形态，RC 形态不支持）。
+> 以下 Skill 位于 `tools/` 目录，提供 CANN / 端侧工具链使用指导（维测类仅 Ascend EP 形态，RC 形态不支持；hdc 属 HarmonyOS SDK）。
 
 | Skill | 功能 | 使用样例 |
 |-------|------|---------|
 | **tool-asys** | asys 一键式故障信息收集：collect/launch/info/health/diagnose/analyze（trace/coredump/stackcore/coretrace/UB/AI Core Error 六类文件解析）/config/profiling | — |
 | **tool-msaicerr** | msaicerr 故障分析：AI Core Error 问题定位（info.txt）、Dump 文件解析为 .bin/.npy、bin 转 npy 类型转换、内置算子样例环境检查 | — |
 | **tool-msnpureport** | msnpureport Device 侧日志导出（单次/常驻连续）、维测配置查询与设置（日志级别/Coremask/加速器复位/singlecommit）、导出目录结构解读 | — |
+| **tool-atc** | ATC 模型转换：框架网络模型/单算子描述文件转 om 离线模型、高频参数选型、转换报错排查（EZ3003/E19999/E20002/E90003 等），支撑算子开发「离线模型 → 设备验证」环节 | — |
+| **tool-hdc** | HarmonyOS Device Connector（hdc）命令行：设备连接管理、HAP 安装/卸载、文件传输、设备端 shell 与日志抓取、错误码速查，支撑端侧验证的设备侧操作 | — |
 | **tool-exception-dump** | AI Core Error 系统化诊断工作流（34 步）：环境与输入检查、场景判定与报错行定位、错误类型解码、单算子复现、证据链汇聚与修复建议，输出六段式证据链诊断报告，与 tool-msaicerr/tool-asys 分工协作 | — |
 | **tool-npu-compute** | 使用 npu-compute 选择和采集 NPU 性能指标、确认采集结果、解包 `.npu-rep`，并分析带宽、流水线、存储访问、缓存和资源冲突等数据；支持由多个采集项组成的指标集合（Set）和可单独选择的采集项（Section） | [查看](skills-usage.md#tool-npu-compute) |
 | **tool-npu-check** | `memcheck` 设备全局内存（GM）访问检查、`synccheck` 同步操作配对检查、命令执行及检查报告解读 | — |

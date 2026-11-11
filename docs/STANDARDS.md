@@ -120,6 +120,7 @@ Skills 按功能定位分为五大类，每类技能有明确的职责边界和�
 | 技能名称 | 用途 |
 |---------|------|
 | ascendc-env-check | 环境检查（NPU 设备、CANN 配置） |
+| ascendc-kirin-env-check | 麒麟平台（Kirin NPU）环境检查（端侧依赖、CANN 能力、hdc 设备） |
 
 > 查看完整技能列表: `ls ops/`
 
@@ -248,7 +249,7 @@ skills:
 |------|------|------|---------|
 | 领域根目录 | `ops/` | 算子 Skills（正式版：Ascend C + PyPTO） | Ascend C / PyPTO 算子开发相关 |
 | 领域根目录 | `model/` | 模型优化 | 模型优化相关技能 |
-| 领域根目录 | `tools/` | CANN 工具链使用指导 | asys / msaicerr / msnpureport / npu-compute 等维测与性能工具 |
+| 领域根目录 | `tools/` | CANN / 端侧工具链使用指导 | asys / msaicerr / msnpureport / npu-compute 等维测与性能工具 |
 | Skill 内 | `references/` | 按需加载的知识文档 | API 指南、最佳实践、约束说明 |
 | Skill 内 | `assets/` | 输出时使用的静态资源 | 模板文件、图标 |
 | Skill 内 | `scripts/` | 可执行脚本 | 数据生成、验证脚本 |

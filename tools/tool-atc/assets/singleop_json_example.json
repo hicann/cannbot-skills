@@ -1,0 +1,13 @@
+[
+  {
+    "op": "Less",
+    "input_desc": [
+      {"format": "ND", "type": "float16", "name": "x1", "shape": [256, 1024]},
+      {"format": "ND", "type": "float16", "name": "x2", "shape": [256, 1024]}
+    ],
+    "output_desc": [
+      {"format": "ND", "type": "bool", "name": "y", "shape": [256, 1024]}
+    ],
+    "attr": []
+  }
+]

@@ -1,0 +1,136 @@
+{
+  "eval_mode": "text",
+  "skill_name": "tool-hdc",
+  "evals": [
+    {
+      "id": 1,
+      "title": "设备查询与多设备指定",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "我用 hdc 连了一台麒麟设备，怎么确认设备连上了？如果同时接了两台设备，执行命令要注意什么？",
+      "expected_output": "回复应说明用 hdc list targets（或 -v）查询已连接设备及状态，connect-key 在 USB 场景下即设备 SN；多台设备时必须在命令中用 hdc -t <connect-key> <command> 指定目标，否则报错。还应提示状态 Unauthorized 表示设备未授权需在设备上确认弹窗、[Empty] 表示没有设备需排查 USB 调试开关/数据线/驱动。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "把设备上的 hilog 拉到本地",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "帮我把设备上的 hilog 拉到本地排查问题。",
+      "expected_output": "回复应给出 hdc shell hilog > local.log 重定向保存方式，或先在设备端落盘（如 hdc shell \"hilog -x > /data/local/tmp/hilog.txt\"，参数以 hdc shell hilog -h 为准）再用 hdc file recv /data/local/tmp/hilog.txt ./local.log 拉回（强调 recv 是远端在前、本地在后）；提示执行前先 hdc list targets 确认设备，多设备加 -t。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "HAP 安装与 bundle 名确认",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "我要把一个 HAP 装到设备上，hdc 命令怎么写？装完后怎么确认应用的 bundle 名？",
+      "expected_output": "回复应给出 hdc install <hap>（多设备加 -t，覆盖安装加 -r），成功返回 install bundle successfully / AppMod finish；确认 bundle 名用 hdc shell bm dump -a 列出全部 bundle（或 bm dump -n <bundle> 查详情），强调 bundle 名以 bm dump 输出为准不要靠猜。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "推拉文件与目录不存在报错",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "怎么用 hdc 把本地文件推到设备、把设备上的结果文件拉回本地？报 E005005 Error create directory 怎么回事？",
+      "expected_output": "回复应给出 hdc file send <local> <remote_dir>/ 与 hdc file recv <remote> <local>（强调 recv 远端在前、本地在后，与 send 相反）；E005005 说明目录无写权限或不存在，可先 hdc shell mkdir -p 预建；如需直传可调试应用沙箱，hdc 3.1.0e+ 用 -b <bundle>（前置条件：应用调试证书签名且已启动）；成功返回 FileTransfer finish。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "卸载与强停等破坏性操作",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "hdc 卸载应用、强停应用、重启设备的命令是什么？执行前要注意什么？",
+      "expected_output": "回复应给出 hdc uninstall <bundle>（-k 保留数据）、hdc shell aa force-stop <bundle>、hdc target boot，并明确这些都是破坏性操作：执行前应向用户确认（卸载会清应用数据、target boot 会重启设备）；自动化场景只生成命令不擅自执行。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "aa start 传参与不重跑现象",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "我用 hdc shell aa start 启动应用传了参数，第一次有效果，第二次换参数跑完结果没变，是什么原因？",
+      "expected_output": "回复应指出根因：应用未退出时再次 aa start 会复用已启动的 ability，新参数被忽略、结果不更新；解决方法是两次启动之间先 hdc shell aa force-stop <bundle> 再 aa start。给出 aa start -a <ability> -b <bundle> --ps <key> <value> 传参形式，说明 --ps 的 key 名由宿主应用定义。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "设备接在另一台电脑上的远程调试",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "设备的 USB 线插在另一台电脑上，我在自己的开发机上想用 hdc 操作这台设备，有什么办法？",
+      "expected_output": "回复应说明官方远程连接场景：设备所在机器 hdc kill 后 hdc -s <本地IP>:8710 -m 启动网络转发服务，客户端 hdc -s <服务器IP>:8710 <command> 执行；说明 -s 只对当次命令有效、显式 -s 时忽略 OHOS_HDC_SERVER_PORT、监听非回环地址注意安全；也提及 TCP 无线直连（tconn）作为设备与开发机同网时的替代。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "hdc 异常恢复与脚本判断依据",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "hdc 命令经常卡住或者报错，重启后恢复正常，有什么标准的恢复手段？另外我写自动化脚本，能用 hdc 返回的错误文本做判断吗？",
+      "expected_output": "回复应说明标准恢复手段是 hdc kill -r 终止并重启服务进程（必要时 hdc -l5 start 高日志等级收集 hdc.log 定位，日志在执行端 TEMP 目录）；自动化脚本不应依赖返回的错误文本做逻辑判断（文本可能随版本调整），应使用标准错误码（如 E005xxx 文件传输、E006xxx 安装）判断。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "hdc 工具来源与独立运行",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "hdc 工具从哪里获取？Linux 下怎么把它加到环境变量？hdc 的 client/server/daemon 架构是怎么回事？",
+      "expected_output": "回复应说明 hdc 从 HarmonyOS SDK 获取（DevEco Studio 内嵌或 Command Line Tools），路径为 sdk/default/openharmony/toolchains，独立运行需 hdc + libusb_shared 同目录；Linux/MacOS 将 toolchains 目录加入 PATH 后 source 配置重启终端。架构上 client 执行命令即启退、server 后台常驻默认监听 8710（OHOS_HDC_SERVER_PORT 可改）、daemon（hdcd）运行在设备端响应请求。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "版本特性与低版本报错",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "我 hdc file send 带 -b 参数报 Unknown file option: -b，是什么原因？哪些 hdc 版本支持哪些特性？",
+      "expected_output": "回复应说明 -b（沙箱直传）需 hdc 3.1.0e / API 15+（E005004 同因）；版本配套表：3.1.0a(API12) wait -t 与中文文件名、3.1.0e(API15) file send/recv -b 与 shell -b、3.2.0b(API20) 端口转发监听远端 IP、3.2.0e(API26) shell -b 交互式等；用 hdc version 与 hdc shell hdcd -v 查两端版本，低版本需升级 SDK。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

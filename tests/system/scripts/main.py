@@ -591,7 +591,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ascend-platform", action="append",
         default=None,
-        help="Filter eval cases by Ascend platform (A2/A3/A5). Repeatable."
+        help="Filter eval cases by Ascend platform (A2/A3/A5/Kirin). Repeatable."
     )
     return parser
 

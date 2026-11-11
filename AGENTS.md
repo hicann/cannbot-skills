@@ -82,6 +82,8 @@ cannbot-skills/
 │   ├── tool-asys/
 │   ├── tool-msaicerr/
 │   ├── tool-msnpureport/
+│   ├── tool-atc/
+│   ├── tool-hdc/
 │   └── tool-npu-compute/
 ├── plugins-official/         # 官方 Plugin（Plugin 配置 + Agents + init.sh）
 │   ├── ops-registry-invoke/  # 算子开发 Plugin（示例）

@@ -80,6 +80,8 @@ cannbot-skills/
 ║  │  ascendc-crash-debug     卡死/崩溃调试、Coredump 分析                    │  ║
 ║  │  ascendc-sync-audit    信号同步检验与修正                                │  ║
 ║  │  ascendc-env-check       NPU 设备查询与环境验证                          │  ║
+║  │  ascendc-kirin-env-check 麒麟平台环境检查                                │  ║
+║  │  ops-kirin-device-verify  麒麟设备端侧验证                               │  ║
 ║  └─────────────────────────────────────────────────────────────────────────┘ ║
 ║                                                                              ║
 ║  ┌─ 测试开发类 ────────────────────────────────────────────────────────────┐  ║

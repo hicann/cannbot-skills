@@ -1,0 +1,137 @@
+{
+  "eval_mode": "text",
+  "skill_name": "tool-atc",
+  "evals": [
+    {
+      "id": 1,
+      "title": "ONNX 模型转 om 基础命令",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "把 resnet50.onnx 转成 om 模型并指定 soc_version，atc 命令怎么写？framework 参数怎么取？",
+      "expected_output": "回复应给出 atc --model=resnet50.onnx --framework=5 --soc_version=<soc_version> --input_shape=\"<输入名>:1,3,224,224\" --output=./out/resnet50 形式的命令，说明 framework 取值 0 Caffe / 1 MindSpore / 3 TensorFlow / 5 ONNX，Caffe 还需 --weight；--soc_version 必须与运行环境芯片型号一致；提示先 source set_env.sh，转换后可用 atc --mode=6 --om=xxx.om 验证模型信息。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "环境准备与验证要求",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "执行 atc 之前环境要怎么准备？能不能只 export ASCEND_OPP_PATH 不 source set_env.sh？",
+      "expected_output": "回复应说明必须先 source CANN 安装目录下的 set_env.sh（给出示例命令），转换不依赖 NPU 设备但依赖完整环境变量；手动 export 单个变量（如 ASCEND_OPP_PATH）替代 source 是错误做法，会遗漏必要变量导致报错；验证环境可用 which atc、atc --help。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "单算子描述文件转单算子 om",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "我开发了一个自定义算子，想用 atc 做单算子功能验证，描述文件和转换命令怎么写？产物在哪里？",
+      "expected_output": "回复应说明单算子描述文件为 JSON 数组（op/input_desc/output_desc/attr，输入输出含 format/type/shape），给出 atc --singleop=op_list.json --soc_version=<soc> --output=<目录> 命令，说明 --singleop 场景 --output 为目录且只能配合官方文档列出的有限参数集合；产物在输出目录下（文件名含 shape/dtype 枚举，修改描述文件后产物名会变化）；可推荐 scripts/gen_singleop_json.py 生成。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "EZ3003 算子内核缺失排查",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "atc 转换报 EZ3003: No supported Ops kernel and engine are found for [Add], optype [Add]，是什么原因？怎么一步步排查？",
+      "expected_output": "回复应给出排查顺序：① OPP 组件是否安装完整（opp/built-in）② 目标 soc_version 的算子信息库是否覆盖该算子 ③ 自定义算子的 vendor 包是否安装（改码后需卸载重装）；fp32 输入被默认 force_fp16 降精度插 trans_Cast 的场景加 --precision_mode=must_keep_origin_dtype。提示该报错的可能原因与官方 Solution 一致（检查 OPP 组件）。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "版本配套关系",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "转换环境的 CANN 版本和部署运行环境的 CANN 版本有什么配套要求？哪些场景要求完全一致？",
+      "expected_output": "回复应说明：运行环境 CANN 版本必须不低于转换环境版本，低版本转换的 om 可在高版本环境运行（兼容 4 个版本周期）；8.5.0 及之后版本转换必须安装与目标芯片匹配的 ops 算子包否则编译失败；动态 shape 算子与昇腾虚拟化实例场景要求转换与运行环境版本完全一致，否则加载报 E19999（opp 版本不匹配）。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "soc_version 查询与取值",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "atc 的 --soc_version 参数怎么取值？怎么在我这台服务器上查到该填什么？",
+      "expected_output": "回复应说明 --soc_version 必须为模型运行阶段所用 AI 处理器型号，转换阶段不依赖 NPU 但取值必须正确；查询方法：Atlas A2/A3、Ascend 950 用 npu-smi info -t board -i <id>（A3 加 -c <chip_id>）取 Chip Name_NPU Name；其他产品用 npu-smi info 的 Name 前加 Ascend；麒麟平台型号以设备实际型号为准（映射见 npu-arch）；同一 soc_version 的产品可一次转换多处部署。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "precision_mode 选型",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "atc 的 --precision_mode 有哪些取值？默认行为是什么？我想让模型完全保持原始精度转换，该选哪个？",
+      "expected_output": "回复应列出主要取值：force_fp16（默认，fp32/fp16/bf16 强制选 fp16）、force_fp32、cube_fp16in_fp32out、allow_fp32_to_fp16、must_keep_origin_dtype（保持原图精度）、allow_mix_precision 系列等；保持原始精度用 must_keep_origin_dtype；提示与 --precision_mode_v2（fp16/origin 等）互斥、官方推荐优先 v2；fp32 输入在无对应内核的平台上默认模式可能插 Cast 报 EZ3003。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "E19999 单算子加载失败",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "单算子 om 在设备上加载报 E19999: The opp version of the model does not match the current opp run package，怎么处理？",
+      "expected_output": "回复应说明根因：动态 shape 算子或虚拟化实例场景下，加载环境的算子库包版本与 om 编译环境不一致；处理：让两端 opp/算子库包版本保持一致（更换加载环境包版本或更换编译环境版本），选择后者时需重新转换模型。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "模型量化与算子融合异常入口",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "eval_mode": "text"
+      },
+      "prompt": "我做模型量化转换失败了，还有想临时关掉某个算子融合规则验证问题，atc 有什么参数？去哪查详细说明？",
+      "expected_output": "回复应指出量化相关参数（如 --compression_optimize_conf）与融合开关参数 --fusion_switch_file（图融合/UB 融合规则开关配置文件）；量化类报错（校准集不匹配、不支持量化的层、build graph failed 等）应查官方文档提炼（references/atc_official_digest.md），算子融合异常也可结合 --log=debug 与 pre-check（--mode=3）定位，不应凭猜测改参数。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "正向看护-多skill环境下正确触发目标skill",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": ["A2", "Kirin"],
+        "distractor_skills": ["tool-hdc", "cann-error-code-standard", "ascendc-env-check", "ascendc-precision-debug"],
+        "eval_mode": "text"
+      },
+      "prompt": "我有一个自定义算子的 JSON 描述文件和一个 ONNX 模型，想把它们变成能在设备上跑的离线模型，第一步怎么做？",
+      "expected_output": "回复应使用 tool-atc：先 source set_env.sh 确认环境，然后 atc --singleop=xxx.json --soc_version=<目标芯片> --output=<目录>、onnx 走 --model --framework=5；说明 --soc_version 关键性；转换出 om 后的设备侧部署应引导至 tool-hdc 流程而非展开 hdc 命令细节。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

@@ -210,7 +210,7 @@ def probe_full_soc_via_asys():
     if not chip_info:
         return None
     full_soc = _parse_full_soc_from_chip_info(chip_info)
-    if not full_soc or not full_soc.startswith(("Ascend", "Kirin")):
+    if not full_soc or not full_soc.startswith("Ascend"):
         return None
     return full_soc
 
@@ -240,7 +240,7 @@ def probe_full_soc_via_dsmi():
     chip_type = info.type.decode().strip()
     chip_name = info.name.decode().strip()
     full_soc = chip_type + chip_name
-    if not full_soc.startswith(("Ascend", "Kirin")):
+    if not full_soc.startswith("Ascend"):
         return None
     return full_soc
 

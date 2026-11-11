@@ -1,3 +1,4 @@
+#!/bin/bash
 # ----------------------------------------------------------------------------------------------------------
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
@@ -7,9 +8,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
-
-
-#!/bin/bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,7 +28,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --ascend-platform)
             if [[ -z "$2" || "$2" == --* ]]; then
-                echo "ERROR: --ascend-platform requires a value (A2/A3/A5)"
+                echo "ERROR: --ascend-platform requires a value (A2/A3/A5/Kirin)"
                 exit 1
             fi
             ASCEND_PLATFORMS+=("$2")
@@ -66,12 +64,12 @@ if [ ${#ASCEND_PLATFORMS[@]} -eq 0 ]; then
     ASCEND_PLATFORMS=("A2")
 fi
 
-# 校验每个平台值为 A2/A3/A5
+# 校验每个平台值为 A2/A3/A5/Kirin
 for p in "${ASCEND_PLATFORMS[@]}"; do
     case "$p" in
-        A2|A3|A5) ;;
+        A2|A3|A5|Kirin) ;;
         *)
-            echo "ERROR: 无效的平台值 '$p'，请使用 A2/A3/A5"
+            echo "ERROR: 无效的平台值 '$p'，请使用 A2/A3/A5/Kirin"
             exit 1
             ;;
     esac
@@ -103,10 +101,10 @@ for env_script in \
     "/home/developer/Ascend/ascend-toolkit/set_env.sh"; do
     if [ -f "$env_script" ]; then
         echo "  Sourcing ASCEND env: $env_script"
-        # shellcheck disable=SC1090
         # set_env.sh 内部引用 LD_LIBRARY_PATH 等可能未定义的变量，
         # 临时关闭 nounset 避免 -u 模式下报 unbound variable 错误。
         set +u
+        # shellcheck source=/dev/null
         source "$env_script"
         set -u
         ASCEND_ENV_LOADED=1
@@ -250,7 +248,7 @@ else
         [ -n "$entity" ] && ENTITIES+=("$entity")
     done
     if [ ${#ENTITIES[@]} -gt 0 ]; then
-        ENTITIES=($(printf '%s\n' "${ENTITIES[@]}" | sort -u))
+        mapfile -t ENTITIES < <(printf '%s\n' "${ENTITIES[@]}" | sort -u)
         for entity in "${ENTITIES[@]}"; do
             # 在 scan dirs 中查找对应实体的 evals.json
             for base_dir in "$REPO_ROOT"/ops/*/ \

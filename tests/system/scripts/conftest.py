@@ -411,10 +411,10 @@ def pytest_configure(config):
 def pytest_addoption(parser):
     parser.addoption("--skill", action="append", default=None, help="Run evals for specific skill(s)")
     parser.addoption("--team", action="append", default=None, help="Run evals for specific team(s)")
-    parser.addoption("--eval-id", action="append", default=None, 
+    parser.addoption("--eval-id", action="append", default=None,
                      help="Run specific eval IDs (repeatable, scoped to --skill/--team)")
     parser.addoption("--ascend-platform", action="append", default=None,
-                     help="Filter eval cases by Ascend platform (A2/A3/A5). Repeatable.")
+                     help="Filter eval cases by Ascend platform (A2/A3/A5/Kirin). Repeatable.")
 
 
 def get_all_skills() -> List[str]:
@@ -1818,7 +1818,7 @@ def pytest_runtest_logreport(report):
 # ═══════════════════════════════════════════════════════════════
 
 def _platform_matches(ascend_platforms, eval_item):
-    """检查 eval 用例是否匹配指定的 Ascend 平台。
+    """检查 eval 用例是否匹配指定的平台（A2/A3/A5/Kirin）。
 
     两端的 .upper() 大小写归一化保证一致。evals_json_parser 中 ascend_platforms
     已做 .upper() 处理，此处做二次保障。

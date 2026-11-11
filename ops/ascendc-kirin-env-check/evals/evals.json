@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "eval_mode": "text",
+  "skill_name": "ascendc-kirin-env-check",
+  "evals": [
+    {
+      "id": 1,
+      "title": "麒麟平台开发环境检查",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "Kirin"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我要在 KirinX90 设备上开发端侧算子，怎么判断当前环境能不能做麒麟开发？环境检查会给出哪些结论？",
+      "expected_output": "回复应按三段式给出环境检查结论：①开发环境是否满足官方前提；②CANN 包能力分 atc→omc 与 camodel sim 两条独立能力线分别判定、不以单包结论外推（如 atc 报 E20002、sim 报 aclInit 500000）；③hdc 设备连接与芯片型号确认。缺失项按「缺什么→哪个功能不可用→如何补齐」报告，只检查不安装。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "麒麟环境检查路由与能力线报告",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "Kirin"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我有一台鸿蒙设备通过 hdc 连接，想跑 atc 把 onnx 转成 omc，但报 E20002，另外跑 sim 直调也失败了（aclInit 500000）。帮我检查环境。",
+      "expected_output": "回复应进入麒麟平台环境检查，先确认 CANN 环境就绪，再分别处理两条独立能力线：E20002 先核对 atc 与 ASCEND_OPP_PATH 是否同版本；若版本一致，再检查 opp/built-in 是否缺 op_graph/op_impl/framework，只有 opp 子目录不全时才建议安装 opp 完整的 CANN 包。aclInit 500000 是 camodel sim 缺 libascendcl.so 壳，需确认 sim 目录存在 camodel 版壳，缺壳时补齐含 camodel 壳的 sim 包。atc→omc 与 camodel sim 两条能力线应分别报告、不以单包结论外推；不同形态的包可能只满足其中一条链路。应运行或建议运行 scripts/check_kirin_env.sh；对确认缺失的项给出补齐建议，只检查不安装。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 3,
+      "title": "麒麟与昇腾环境检查技能区分",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "Kirin"
+        ],
+        "eval_mode": "text",
+        "distractor_skills": [
+          "ascendc-env-check"
+        ]
+      },
+      "prompt": "我在麒麟端侧开发环境里执行 npu-smi 查不到设备，是环境坏了吗？应该用哪个环境检查技能？",
+      "expected_output": "回复应说明 npu-smi 属昇腾服务器侧工具、麒麟端侧不适用，并选择 ascendc-kirin-env-check（麒麟平台环境检查）；可建议用 scripts/check_kirin_env.sh 做麒麟环境检查。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}

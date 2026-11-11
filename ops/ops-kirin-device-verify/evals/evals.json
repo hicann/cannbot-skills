@@ -1,0 +1,81 @@
+{
+  "eval_mode": "text",
+  "skill_name": "ops-kirin-device-verify",
+  "evals": [
+    {
+      "id": 1,
+      "title": "fp32 转 omc 报 EZ3003 排查",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "Kirin"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我把 float32 输入的自定义算子 onnx 用 atc 转成 KirinX90 的 omc，报 EZ3003: No supported Ops kernel and engine are found for [trans_Cast_0], optype [Cast]，算子本身声明支持 fp32，怎么回事？",
+      "expected_output": "回复应指出根因：atc 默认 --precision_mode=force_fp16，会把 fp32 输入降精度并插入 trans_Cast，而 host 工具链对 KirinX90 无 Cast 内核，导致 EZ3003；这不是算子不支持 fp32。解决：转换时加 --precision_mode=must_keep_origin_dtype 保持原始 dtype。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "第二个用例推理后 output0.bin 未更新",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "Kirin"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "在麒麟设备上用 HAP 跑第二个测试用例，aa start 返回 start ability successfully，但拉回来的 output0.bin 时间戳没变还是上一个用例的结果，为什么？",
+      "expected_output": "回复应说明：应用进程存活时再次 aa start 会复用已启动 ability，新传入的 --ps 参数被忽略、不会重新执行推理，但仍返回 start ability successfully；解决：每次执行前先 hdc shell aa force-stop <bundle名> 再 aa start。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "设备验证用例数据与 onnx 生成约束",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "Kirin"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "准备把自定义算子放到 KirinX90 麒麟设备上验证，onnx 测试模型和输入数据怎么生成？有什么格式要求？",
+      "expected_output": "回复应说明：onnx 用单算子图构造，opset_import.version=11、ir_version=6，输入输出 value_info 的 dtype/shape 必须按算子规格（shape 不符会触发 E90003）；数据用固定 seed 的 numpy 生成，注入 NaN/±0/±Inf/等值对/单 ulp 等特殊值；golden 按算子语义计算，与设备输出 output0.bin 同构，bool 以 uint8(0/1) 存盘，其他 dtype 按实际 dtype 存盘；可指向 assets/create_onnx.py 与 scripts/gen_cases.py 模板。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "设备验证完整流程次序与关键坑",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "Kirin"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "算子已经在开发机上编译出 vendor 包了，接下来怎么在麒麟设备上完整验证一遍？流程是什么？",
+      "expected_output": "回复应从安装 vendor 包开始说明后续流程：①安装 vendor 包（改码后先卸载再重装）；②生成 onnx/输入数据/golden；③atc 转 omc（fp32/bf16 加 --precision_mode=must_keep_origin_dtype）；④下载并安装 HAP，用 hdc shell bm dump -a 核实 bundle 名；⑤hdc file send 推送输入 bin 到设备；⑥aa force-stop 后 aa start 推理；⑦file recv 回传 output0.bin 并与 golden 比对（bool 输出用 bitwise 模式）。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "hdc 设备连接问题应路由 tool-hdc（负向看护）",
+      "config": {
+        "max_tokens": 200000,
+        "ascend_platforms": [
+          "Kirin"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "hdc list targets 显示 [Empty]，设备连不上，怎么排查？",
+      "expected_output": "回复应基于 tool-hdc 的设备连接排查指导（USB 连接/授权、hdc kill 与 start 重启服务、tconn、驱动等），而不是展开算子设备验证全流程；可提及设备链路就绪后再走 ops-kirin-device-verify 的设备侧步骤 5~8，但不应把本 skill 的 8 步流程作为该问题的主回答。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}
