@@ -20,13 +20,13 @@
 |------|------|------|
 | 公开入口 | 检查公开 dtype / shape / layout / device 参数组合；准备输出并委托 Host/Kernel | 不把设备计算藏在入口或可达辅助函数 |
 | Host launcher | 静态配置、输出/workspace 分配、布局归一化、launch 分开组织 | 只做元数据 / 分配 / 零拷贝视图；torch 调用若触发设备算子或复制即越界（见 [capability-mapping.md](capability-mapping.md) §4 规则 1） |
-| Kernel | 按真实数据所有权拆阶段方法，避免单个巨型 `__call__` | Broadcast 纯 Vector 路径通常无 Cube/Vector 交接，不因样例结构给纯 Vector 算子加 CrossCore Channel |
+| Kernel | 按真实数据所有权拆阶段方法，避免单个巨型 `__call__` | Broadcast 纯 Vector 路径通常无 Cube/Vector 交接，不因样例结构给纯 Vector 算子加跨核 RingBuffer |
 
-## 3 Buffer/Channel 规划
+## 3 Buffer/RingBuffer 规划
 
 1. buffer 数量按通用层 [../../generic/liveness-fusion.md](../../generic/liveness-fusion.md) 的 P 值推导：Broadcast standard 路径 P = 输入数 + 输出数 + 融合压缩后的中间值数
-2. 阶段内中间量用 Buffer（无交接语义不建 Channel）；仅真实生产/消费交接处用 Channel，produce/consume 成对、不越生命周期
-3. Channel 深度按在飞任务数与资源预算核定（depth=1/2/3 均为合法样例选择，非规范）
+2. 阶段内中间量用 Buffer（无交接语义不建 RingBuffer）；仅真实生产/消费交接处用 RingBuffer，`next_write()/next_read()` 选槽位置成对、不越生命周期
+3. RingBuffer 深度按在飞任务数与资源预算核定（depth=1/2/3 均为合法样例选择，非规范）
 4. 单 buffer 容量按通用层 [../../generic/splitting.md](../../generic/splitting.md) 公式：`perBufBytes = floor(片上容量/P)`，对齐粒度以 [capability-mapping.md](capability-mapping.md) `ALIGN_GRANULARITY` 真值为准（待验证，代入时声明假设）
 
 ## 4 shape 归一化与切分的 DSL 落地
@@ -38,7 +38,7 @@
 ## 5 尾块与同步
 
 1. 尾块处理（掩码/有效行）在 kernel 内完成；不把无效尾行写入输出
-2. Buffer/Channel 交接遵守 acquire/commit/wait/release 成对语义；跨执行单元事件的配对规则依赖 `SYNC_PRIMITIVE` / `EXEC_UNITS` 真值（待验证），就位前同步设计按 Channel 自带交接语义保守设计并标注假设
+2. Buffer/RingBuffer 交接遵守 `next_write()/next_read()` 选槽与真实访问依赖：选槽本身不等待、不搬运，跨执行单元事件的配对规则依赖 `SYNC_PRIMITIVE` / `EXEC_UNITS` 真值（待验证），就位前同步设计按编译器由 Tensor 访问推导的依赖保守设计并标注假设
 
 ## 6 产出与验证义务
 
@@ -48,5 +48,5 @@
 适用前提 → 最小代码位置/伪代码 → 生命周期或同步不变量 → 对应 Unit 测试
 ```
 
-- 数学语义与形状以当前算子规格为准，Buffer 容量、Channel 深度和同步关系按实际数据流及资源预算推导。
+- 数学语义与形状以当前算子规格为准，Buffer 容量、RingBuffer 深度和同步关系按实际数据流及资源预算推导。
 - 引用待验证谓词的结论，按 [capability-mapping.md](capability-mapping.md) §3 声明假设并给出验证义务

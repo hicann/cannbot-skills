@@ -19,7 +19,7 @@
 | 任务阶段 | 入口 | 内容 |
 |------|------|------|
 | 方案设计 | [../../generic/index.md](../../generic/index.md)（通用层算法）→ [capability-mapping.md](capability-mapping.md)（谓词真值） | 场景模型 / shape 归一化 / 切分 / 存活节点等语言中立算法，叠加 DSL 能力真值与落地差异 |
-| DSL 代码组织与实现 | [implementation-guide.md](implementation-guide.md) | 通用层数据流骨架到 DSL 入口/Host/Kernel 三层的映射、Buffer/Channel 规划、尾块与同步 |
+| DSL 代码组织与实现 | [implementation-guide.md](implementation-guide.md) | 通用层数据流骨架到 DSL 入口/Host/Kernel 三层的映射、Buffer/RingBuffer 规划、尾块与同步 |
 
 ## 4 补充输入
 

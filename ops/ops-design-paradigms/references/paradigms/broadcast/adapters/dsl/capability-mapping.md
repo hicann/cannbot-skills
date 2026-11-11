@@ -11,22 +11,22 @@
 | `CAP_BROADCAST_IN_TRANSFER` | **待验证** | DSL 存在数据搬运类目（`ops.memcpy`：DMA、copy engine、分块搬运、padding、`mem_copy`），但搬运是否支持广播轴 stride=0 随路展开未证实。验证义务：查 CANNBotDSL 搬运 API 的 stride/广播参数。若为 false，通用层数据流退化为独立广播步骤（P 值 +1，见 [../../generic/liveness-fusion.md](../../generic/liveness-fusion.md) 冲突处理） |
 | `CAP_REG_CHAIN_FUSION` | **待验证** | DSL 存在寄存器算术类目（`ops.reg`：寄存器算术、比较、mask、load/store），链式中间值是否驻留寄存器不落片上 buffer 未证实。验证义务：查 `ops.reg` 运算的数据落点语义 |
 | `CAP_FUSED_ARITH` | **待验证** | 寄存器算术类目存在，但"一条接口完成两步运算"的融合指令集合未证实。验证义务：查 `ops.reg` 融合类接口清单 |
-| `ALIGN_GRANULARITY` | **待验证** | Buffer/Channel 构造的对齐粒度未证实。验证义务：查 Buffer/Channel 构造 API 的对齐约束。影响：通用层 `perBufBytes` 对齐公式（[../../generic/splitting.md](../../generic/splitting.md)）暂以假设值代入并声明 |
+| `ALIGN_GRANULARITY` | **待验证** | Buffer/RingBuffer 构造的对齐粒度未证实。验证义务：查 Buffer/RingBuffer 构造 API 的对齐约束。影响：通用层 `perBufBytes` 对齐公式（[../../generic/splitting.md](../../generic/splitting.md)）暂以假设值代入并声明 |
 | `TRANSFER_MAX_DIMS` | **待验证** | 分块搬运的维数上限未证实。影响：通用层搬运策略分叉（全维单次 vs 逐段）暂不定型 |
 | `FUSION_CHAIN_MAX_LEN` | **待验证** | 依赖 `CAP_REG_CHAIN_FUSION` 的验证结果 |
 | `CONVERT_BREAKS_CHAIN` | **待验证** | 类型转换与寄存器链的关系未证实（标量 cast 已有类目，张量级 cast 落点未证实） |
 | `CONVERT_INPLACE` | **待验证** | 精度转换可否原地完成未证实。影响：转换中转 buffer 是否需要（P 值推导） |
 | `COMPUTE_PRECISION` | **待验证** | DSL 范式统一计算精度策略未证实，不排除按 dtype 原位计算。影响：`perBufElems` 公式的字节宽度取值 |
-| `BUFFER_MODEL` | **Buffer / Channel 双原语**：阶段内临时量用 Buffer 显式管理；跨阶段/跨角色生产消费用 Channel（acquire/commit/wait/release 数据流接口） | 已有 DSL Buffer/Channel 用法资料与 API 数据流类目；具体行为仍需核对目标 DSL 能力 |
-| `SYNC_PRIMITIVE` | 类目存在：pipe、barrier、busy wait、事件、buffer 同步、跨核同步（`ops.sync`）；Channel 自带 acquire/commit/wait/release 交接语义。**具体调用规则待验证** | 调用方提供的 DSL 同步 API 资料 |
-| `EXEC_UNITS` | **待验证** | 架构/平台信息类目（`ops.arch` / `ops.info`：block/core/subblock 索引、内存容量）存在，但搬入/计算/搬出执行单元划分及事件配对规则未证实。影响：通用层 sync-model 的事件对推导暂以 Channel 交接语义保守替代 |
+| `BUFFER_MODEL` | **Buffer / RingBuffer 双原语**：阶段内临时量用 Buffer 显式管理；跨阶段/跨角色多槽位流水用 RingBuffer（`next_write()`/`next_read()` 独立推进读写游标） | 已有 DSL Buffer/RingBuffer 用法资料与 API 数据流类目；具体行为仍需核对目标 DSL 能力 |
+| `SYNC_PRIMITIVE` | 类目存在：pipe、barrier、busy wait、事件、buffer 同步、跨核同步（`ops.sync`）；RingBuffer 的 `next_write()/next_read()` 只选槽推进游标，不等待、不搬运，同步由 Tensor 数据访问推导。**具体调用规则待验证** | 调用方提供的 DSL 同步 API 资料 |
+| `EXEC_UNITS` | **待验证** | 架构/平台信息类目（`ops.arch` / `ops.info`：block/core/subblock 索引、内存容量）存在，但搬入/计算/搬出执行单元划分及事件配对规则未证实。影响：通用层 sync-model 的事件对推导暂以编译器从 Tensor 访问推导的同步语义保守替代 |
 
 ## 2 通用术语 → DSL 实体对照
 
 | 通用层术语 | DSL 实体 |
 |------|------|
-| 片上 buffer（阶段内临时量） | Buffer（指定 MemLoc / dtype / shape / 生命周期，当前阶段可反复读写） |
-| 片上 buffer（生产/消费交接） | Channel（produce/consume 成对，acquire/commit/wait/release） |
+| 片上 buffer（阶段内临时量） | Buffer（指定 MemLoc / dtype / layout / 生命周期，当前阶段可反复读写） |
+| 片上 buffer（生产/消费交接） | RingBuffer（`next_write()`/`next_read()` 独立推进读写游标，同步由数据访问推导） |
 | 设备侧计算 | `@kernel` / `@jit` 装饰的 DSL kernel 及其阶段方法 |
 | Host 侧调度 | 公开入口 + Host launcher（torch 张量作公开接口） |
 | 搬入 / 搬出 | 数据搬运类目（`ops.memcpy`：DMA、copy engine、layout/format transform、分块搬运、`mem_copy`） |
@@ -44,7 +44,7 @@
 ## 4 关键语言级附加约束
 
 1. **设备计算归属**：spec / DESIGN 规定在设备上完成的值计算、类型转换、布局搬运、掩码/尾块处理、最终输出合成，必须落在 CANNBotDSL kernel 内；禁止在公开入口、Host launcher 或其可达辅助函数中用 `torch` / `torch.nn.functional` 小算子（会触发设备算子或复制的操作，如 `torch.add`、`.to(dtype)`、`F.*`、隐式 copy 的视图变换）补全实现。Host 仅限：读取 shape/dtype/device 元数据、分配输出/workspace、建立零拷贝视图、发起 DSL kernel
-2. **Channel/Buffer 选择**：数据需要生产/消费同步才用 Channel；仅为当前阶段可反复读写的临时量用 Buffer；produce/consume 必须成对、不越生命周期，临时量没有交接语义时不硬建 Channel
-3. **Channel 深度非规范**：depth=1/2/3 是样例选择，按在飞任务数、资源预算与复用时序核定，不固定取值
-4. **尾块纪律**：不把无效尾行写入输出；布局表面相同不等于 Channel 兼容（NZ/ND 物理布局需逐项核对）
+2. **RingBuffer/Buffer 选择**：数据需要跨阶段多槽位流水交接才用 RingBuffer；仅为当前阶段可反复读写的临时量用 Buffer；`next_write()/next_read()` 的选槽位置须对应真实生产/消费事件、不越生命周期，临时量没有交接语义时不硬建 RingBuffer
+3. **RingBuffer 深度非规范**：depth=1/2/3 是样例选择，按在飞任务数、资源预算与复用时序核定，不固定取值
+4. **尾块纪律**：不把无效尾行写入输出；布局表面相同不等于 RingBuffer 兼容（NZ/ND 物理布局需逐项核对）
 5. **平台参数获取**：核数、内存容量等经架构/平台信息类目 API 获取，严禁写死
