@@ -60,3 +60,11 @@ Python 模型的 `partition/placement/accumulator_residency` 结构变换暂不�
 运行时数据决定的新分支、无界循环及 Python 操作运行时事件/资源不受支持。
 先验证固定 case，再覆盖尾块、多 task、多组及槽位回绕。后端一致性与
 [执行数值验收](../framework/numeric-execution-validation.md)分别记录。
+
+## 迁移有限任务与向量声明
+
+`Stage.build(context)` 生成与 YAML 相同的 DAG，不操作运行时 token 或资源。
+合法空 stage 不需要虚构占位 VEC；输出信号仍须对应实际产生的标签。
+`ProgramBuilder.move` 使用端点、size/dtype 与当前搬运声明，不能套用旧 Stage 的 `bytes=`。
+多 task、多 group、条件空输出和全部消费者按[并发指南](concurrency.md)核对。
+需要 VF 内部步骤时显式声明[程序与计划](../framework/vec-plans.md)，固定周期指令不会自动补齐。

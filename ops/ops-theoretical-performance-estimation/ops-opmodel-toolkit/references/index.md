@@ -23,10 +23,14 @@ OpModel 用模型描述算子的计算、搬运、任务分配和资源约束，
 | --- | --- |
 | 模型文件、存储/控制字段、搜索调用和验证范围 | [框架参考](framework/index.md) |
 | 模型每个文件负责什么、表达式怎么写 | [模型配置参考](model-reference.md) |
-| 如何更换硬件或修改带宽参数 | [硬件配置](hardware.md) |
+| 如何确认目标、来源和配置 | [硬件准备](hardware-preparation.md)、[硬件配置](hardware.md) |
+| 如何表达 Vec 计划、预测 VF 或搜索融合拆分 | [Vec 计划](framework/vec-plans.md) |
+| 如何核对变换搬运、实际读写和释放边界 | [搬运契约](framework/transfer-contracts.md) |
+| 如何交接编译结果和设备版本 | [编译反馈](framework/compile-feedback.md) |
 | Python 怎样运行自定义模型或内置模型 | [Python API](python-api.md) |
 | 命令参数和输出位置是什么 | [CLI 参考](cli.md) |
 | 如何让代理组织模型、实现与实测的联合寻优 | [七项工作流](workflows.md) |
+| 多 case、多实现模板怎样组织设计交接文档 | [设计文档生成](opmodel-design-gen.md) |
 | 导入、形状、容量或搜索报错怎么办 | [常见问题](troubleshooting.md) |
 | 哪些能力和环境受支持 | [能力矩阵](capabilities.md) |
 

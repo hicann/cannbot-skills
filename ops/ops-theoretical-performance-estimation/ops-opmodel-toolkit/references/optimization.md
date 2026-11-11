@@ -98,3 +98,11 @@ python "$OPMODEL_SKILL_DIR/scripts/run_case.py" work/my_matmul \
 
 实验输入、产物和使用限制见[图搜索接口](framework/graph-search.md)。
 保存命令返回的候选与检查点，不手工修改其内容来改变验证状态。
+
+## Vec 内部计划
+
+固定 DAG 参数搜索与显式 Vec 计划是不同入口。已声明程序、profile 和有限计划时，
+按[Vec 接口](framework/vec-plans.md)调用 `search_vec_plans`，记录实际候选、预算覆盖与图周期。
+超容或非法构造计入失败记录和预算，再继续后续计划；实际覆盖以 `ledger` 和 `complete` 为准。
+更多 slots 或 interleave 不保证更快，保持所有语义与容量约束。
+有真实实现的候选另外保存[编译反馈](framework/compile-feedback.md)。

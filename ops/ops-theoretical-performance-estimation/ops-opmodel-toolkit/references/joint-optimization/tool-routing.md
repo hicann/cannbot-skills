@@ -104,3 +104,10 @@ buffer 复用分析若出现 `tuple ... has no attribute 'name'` 错误，
 
 实现交接和测量反馈沿用[记录契约](workflow.md#记录与交付)。理论、校准、代表核、
 全核共享和设备实测分别呈现；没有适用峰值或硬件计数时不强行计算 MFU/MBU。
+
+## Vec 与构建结果
+
+显式程序的单次预测用 `estimate_vf`，有限计划比较用 `search_vec_plans`，
+字段、产物和当前限制见[Vec 接口](../framework/vec-plans.md)。这两个入口无需外部 VFModel。
+真实实现的编译仍由项目工具链完成，结果按[编译反馈](../framework/compile-feedback.md)接入；
+只请求方案时不因该接口存在而启动编译。

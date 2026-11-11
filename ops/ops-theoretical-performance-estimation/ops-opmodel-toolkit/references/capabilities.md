@@ -20,6 +20,9 @@
 | 外部目标与重评分 | `agent_search set-objective` / `rescore` | 用户目标、有效观察复用与资格边界，见[目标接口](framework/objectives.md) |
 | 多 case 统一规则 | `agent_search register-policy` / `search-policy` | 需要用户适配器、有限域及完整 case 评价，见[规则接口](framework/policies.md) |
 | 场景与有界控制 | `cases[].scenario`、`ControlFlow` | 适用图模型的输入与路径；不表示所有模型已接入，见[运行时控制](framework/runtime-control.md) |
+| 单 VF 预测／Vec 计划 | `estimate_vf`、`search_vec_plans` | 程序、参数与有限计划的条件预测；见[Vec 接口](framework/vec-plans.md) |
+| 有限变换搬运 | `move.transform/gm_strides` | ND/NZ、窗口、跨步及对应路径限制见[搬运契约](framework/transfer-contracts.md) |
+| 用户实现编译反馈 | `validate_compile_evidence`、会话反馈接口 | 工件与构建身份核对，独立于模型和设备资格，见[编译反馈](framework/compile-feedback.md) |
 | 数值校验 | `model.validation.score_case`、语义/执行声明 | 普通聚合或物理范围；需独立执行用例，量化/NZ 支持域见[数值接口](framework/numeric-execution-validation.md) |
 | 硬件 / 搬运分析 | 硬件 YAML、`gm_read` 等入口 | 资源导出、硬件 profile 与搬运参数分析 |
 

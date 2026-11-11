@@ -13,6 +13,9 @@
 | 编写逐核任务及 Python hooks | [分核接口](split-model.md)、[Python Stage](../new-operator/python-stages.md) |
 | 描述物理 AIC/AIV 上的模型 | [物理执行接口](physical-execution.md) |
 | 选择硬件及成本来源 | [硬件配置](hardware-binding.md)、[VF 成本](vf-costs.md) |
+| 描述 Vec 计划或独立预测 VF | [Vec 方案与预测](vec-plans.md) |
+| 声明变换搬运和解释读写量 | [搬运契约](transfer-contracts.md) |
+| 接入用户实现的编译结果 | [编译反馈](compile-feedback.md) |
 | 选择运行方式和理解时间线 | [运行与 trace](runtime-and-trace.md)、[支持范围](backend-capabilities.md) |
 | 声明参数搜索或候选比较 | [DAG 搜索接口](dag-search.md)、[图搜索与会话](graph-search.md) |
 | 定义任务目标、复用评价与多输入规则 | [外部目标](objectives.md)、[统一规则](policies.md) |

@@ -62,3 +62,10 @@ PY
 
 `performance_consistency_report.json` 等文件描述该次模型的额外检查状态。
 未提供独立性能预期时，`not_run` 表示未执行该项检查，不等同于仿真启动失败或通过。
+
+## 搬运与 Vec 诊断
+
+逻辑输入、实际源读取、目的输出与物理分配分别核对，含重读、padding 和布局跨度时
+不应相等。资源服务、延迟和等待可能重叠，见[搬运结果](framework/transfer-contracts.md)。
+[Vec 预测](framework/vec-plans.md)的内部时间线与外部调用 trace 不重复累计；
+单次周期、调用合计与包含搬运等待的图周期分别报告。模型成本不赋予编译或设备资格。

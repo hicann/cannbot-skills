@@ -12,7 +12,7 @@
 | `definition/split.yaml` | `kind: split_spec`、任务空间、任务字段、约束与工作量 |
 | `definition/operator.yaml` | `name/hardware/params/buffers/pipeline`、运行策略及可选物理执行声明 |
 | `definition/dag.yaml` | `task_graph` 和 `kernels`，具体语法见[DAG 接口](dag-reference.md) |
-| `definition/costs.yaml` | `source/coefficients/native/vf/sensitivity`，系数注明单位、来源、校准状态 |
+| `definition/costs.yaml` | `source/coefficients/native/vf/analytic_profiles/sensitivity`，系数注明单位、来源、校准状态 |
 | `optimize/search.yaml` | 参数空间及受支持的候选选项 |
 | `case.yaml` | 一次运行的完整输入形状，字段须在 workload 中声明 |
 
@@ -56,3 +56,14 @@ VF 成本的常量、公式和外部预测配置见[VF 接口](vf-costs.md)。
 
 Python 文件属于用户模型，需随模型一起交付；模型目录名应为合法 Python 包名。
 修改 hooks 后重新启动运行进程。纯 YAML 能表达的模型无需额外 Python 文件。
+
+## Vec 计划与变换搬运
+
+显式 Vec 的 `numeric_program/paradigms/plan` 放在 VF implementation block，
+`task_graph.vec_regions` 保存区域和有限计划。`costs.yaml:analytic_profiles`
+给出参数，`vf.<块>.<变体>` 选择 `model: analytic`，`search.yaml:vf_plans`
+列计划名称。完整字段与调用见[Vec 参考](vec-plans.md)。
+
+`move.transform`、`gm_strides` 与源／目的布局见[搬运契约](transfer-contracts.md)。
+显式变换不能同时使用覆盖字节量的 `transfer`，实际读取、逻辑输出和物理容量分开。
+用户声明的数量不能替代数值映射和生命周期验证。

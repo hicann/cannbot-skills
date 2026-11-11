@@ -67,3 +67,10 @@ python "$OPMODEL_SKILL_DIR/scripts/run_case.py" work/my_matmul \
 
 下一步按[参数寻优](optimization.md)搜索内层分块，再把选中的参数应用到完整 case。
 了解每个模型文件的职责，请阅读[编写自己的模型](modeling.md)。
+
+## 使用自己的目标硬件与程序
+
+教程 profile 是演示选择，不能推断为用户目标。创建实际模型时先按
+[硬件准备](hardware-preparation.md)保存匹配目标的配置；后续评估与搜索沿用该引用。
+下一步可按[建模工作流](new-operator.md)扩展完整语义、任务与验证；需要显式向量方案
+或单次 VF 预测时，使用[独立调用示例](framework/vec-plans.md#单次预测示例)。

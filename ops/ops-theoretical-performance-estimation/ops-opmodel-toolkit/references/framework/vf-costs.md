@@ -137,3 +137,13 @@ plugins:
 `prediction_rankable` 不表示已校准或可以直接推荐设备实现。
 切换版本、绑定、实现或成本来源后，重新运行基线与候选；不混用旧结果。
 关闭预测时先恢复合法 cycles/affine 声明，再移除配置。
+
+## 显式程序的独立预测
+
+有步骤、实际调用和执行计划时，可使用[Vec 计划与独立 VF 预测](vec-plans.md)。
+YAML 成本使用 `{model: analytic, profile: <名称>}` 并声明 `analytic_profiles`；
+Python 用 `estimate_vf`，多计划用 `search_vec_plans`。所有实际操作须有来源参数。
+它不需要编译产物或外部 VFModel，不自动替代原生 `vec.cycles` 或已有 affine。
+
+保留程序、调用、计划及 profile 身份和假设，区分 `analytic_ranking` 与外部预测资格。
+预测的资源服务量、活跃字节与内部时间线是诊断产物，不等于设备实测或编译资源报告。

@@ -59,3 +59,10 @@ python "$OPMODEL_SKILL_DIR/scripts/run_case.py" work/my_matmul \
 
 数值输入、报告状态与限制见[数值验收接口](framework/numeric-execution-validation.md)。
 使用自己的模型与独立参考验证，不用其他模型的通过记录替代本次验收。
+
+## 变换与显式计划的验证
+
+[变换搬运](framework/transfer-contracts.md)需要支持的路径、真实地址／布局绑定及适用
+numeric 声明；结构或周期检查通过不能代替数值回放。动态写入的 `needs_replay`
+状态需要实际输入复核。显式[Vec 计划](framework/vec-plans.md)另保留构造、容量、
+数值与假设状态，不能从一次 VF 预测推断完整算子验证通过。

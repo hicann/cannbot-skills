@@ -24,3 +24,16 @@
 模型运行、后端一致性、数值验收、成本校准和设备验证是不同结果。
 报告分别呈现 `passed/failed/not_run/unsupported` 等实际状态及缺口。
 当前已知命令限制见[能力矩阵](../capabilities.md)。
+
+## 新接口的范围
+
+| 入口 | 支持及限制 |
+| --- | --- |
+| `estimate_vf` | 显式有限程序的单 VF 分区预测，须有全部操作参数；不依赖编译产物 |
+| `search_vec_plans` | 一次一个 Vec 区域的有限计划，基线／轴／存储限制见[Vec 接口](vec-plans.md) |
+| 变换与跨步搬运 | 有限 ND/NZ、Load3D、显式动态 GM 读取；具体路径和数值限制见[搬运契约](transfer-contracts.md) |
+| 编译反馈 | 校验用户实现的构建证据与身份；不启动编译或授予设备资格，见[编译反馈](compile-feedback.md) |
+
+原生 DAG 和 Python Stage 是冻结输入下的有限构图；受限运行时分支／循环另见
+[控制接口](runtime-control.md)，Vec 计划不自动支持该组合。原生固定周期和冻结 VF
+的搜索路径也不会因为新增 Vec 接口而获得内部计划搜索能力。

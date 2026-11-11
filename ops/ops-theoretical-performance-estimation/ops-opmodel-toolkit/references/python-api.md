@@ -56,3 +56,19 @@ run_native_case(operator_dir, shape=None, *, output_dir=None,
 使用本页列出的 API，调用前核对包版本和接口签名。
 批量运行时为每个 case 分配独立输出目录；加载不同版本的 Python hooks 后重启进程，
 避免模块缓存导致编辑未生效。
+
+## Vec 与构建反馈
+
+- `accel_model.model.vf.estimate_vf(program, invocation, plan, hardware_cost)`：
+  单 VF 调用预测；完整合成示例及返回字段见[Vec 接口](framework/vec-plans.md)。
+- `accel_model.optimize.graph.global_search.search_runner.search_vec_plans(root, *,
+  mapped=None, address_keys=None, numeric_cases=(), vector_costs=(), workload_overrides=None,
+  max_evaluations=None, control=None)`：有限计划搜索，结果包含实际候选状态、评分及覆盖；
+  沿用模型硬件，基线要求见[Vec 接口](framework/vec-plans.md#搜索与结果)。
+- `accel_model.model.validation.compile_evidence`：校验／导出用户编译反馈，调用和状态见
+  [编译反馈](framework/compile-feedback.md)。
+- `accel_model.optimize.graph.global_search.device_evidence`：
+  `import_compile_feedback(session, candidate_id, bundle_path, identity=...)` 导入候选反馈；
+  `set_compile_target(session, candidate_id, identity)` 更新构建身份。输入规则见同一编译反馈说明。
+
+这些入口不自动编译或采集设备数据；单次预测、模型排序、编译及设备资格分别报告。

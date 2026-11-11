@@ -44,3 +44,10 @@ python -m accel_model.app.cli.agent_search --help
 使用 `accel_model.optimize.dag.reuse` 时，若出现
 `AttributeError: 'tuple' object has no attribute 'name'`，保留版本、输入和报错。
 分析本例请使用[周期统计和 trace](analysis.md)。
+
+## Python 专用入口
+
+显式 Vec 的单次预测与有限计划搜索使用[Python API](python-api.md)的
+`estimate_vf/search_vec_plans`，不要推测存在同名 CLI 或把 `vf_plans` 交给原生
+`search_bundle`。用户实现的编译反馈通过[反馈接口](framework/compile-feedback.md)接入，
+本工具集不提供通用编译命令。

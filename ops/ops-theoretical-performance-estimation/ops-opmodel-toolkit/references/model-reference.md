@@ -76,3 +76,11 @@ size: [{expr: 'min(M_L0, task_M - _m * M_L0)'}, {expr: Kb}]
 实验可以固定某些参数、只搜索其余参数，见[参数寻优](optimization.md)。
 `rewrite_grammar`、`mapping_choices`、`split_choices` 等面向图搜索的声明，
 不会自动变成 `dag_run` 或 `split_run` 的实验参数。
+
+## 扩展字段路由
+
+- Vec 程序、范式、VF 分区与计划、`analytic_profiles/vf_plans`：见[Vec 契约](framework/vec-plans.md)。
+- `move.transform/gm_strides`、逻辑量／读写量与物理容量：见[搬运契约](framework/transfer-contracts.md)。
+- `physical_bytes` 与循环写入、源读完与目的消费者：见[存储接口](framework/ub-storage.md)。
+
+这些字段各有入口及组合限制；能解析声明不代表任意模型都能搜索或数值回放。

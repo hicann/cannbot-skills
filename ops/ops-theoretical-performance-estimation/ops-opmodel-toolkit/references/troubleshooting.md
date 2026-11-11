@@ -41,9 +41,21 @@ DAG 的候选评分范围与完整 case 的分核、共享资源和总体评价�
 
 ## 升级后的硬件与成本检查
 
-`resolve_eval_hardware` 默认同芯片普通带宽，缺失时不自动改用细化配置；需要细化
-须显式指定。`compute.cube.overhead` 已退役，删除键而非设为零。
+`resolve_eval_hardware` 解析算子保存的硬件引用，显式覆盖优先。引用缺失或无法解析时，
+检查配置与来源，不按芯片前缀猜另一个 profile；已有模型不因本机不同而重新选型。
+新模型按[硬件准备](hardware-preparation.md)确认目标。
 
 实现成本报 hardware／dtype／workload mismatch 或来源变化时，检查最终参数、实际
 硬件内容及绑定文件。更新匹配实现的成本定义并重新评价，不能改签名、钳制输入或
 覆盖绑定成本绕过检查；字段与历史校准标记的含义见[VF 成本](framework/vf-costs.md)。
+
+## Vec、搬运和构建反馈
+
+| 问题 | 检查与处理 |
+| --- | --- |
+| `vf_plans` 被原生搜索拒绝 | 使用 [Vec 入口](framework/vec-plans.md)，核对单区域及基线限制 |
+| 首计划超容，后续没有结果 | 当前入口记录非法候选后继续后续计划；核对版本、异常、预算及实际 `ledger/complete`，修正真实配置后按需重跑，不从计划列表推断覆盖 |
+| 预测缺少操作参数／硬件不匹配 | 补有来源的全部操作及 dtype 参数，核对调用与 profile，不填零绕过 |
+| 变换写入超容 | 比较 NZ／stride 物理跨度与每实例容量，见[搬运契约](framework/transfer-contracts.md) |
+| 源读完后目的仍不能消费 | 源复用和目的就绪是不同边界，保留完整依赖及消费者保护 |
+| 编译状态失效或非法 | 重新绑定源码、构建、工件和候选，见[编译反馈](framework/compile-feedback.md) |

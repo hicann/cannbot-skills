@@ -8,6 +8,10 @@
 
 """Installed-wheel contract checks, called by smoke.py in its new user project."""
 
+from contextlib import redirect_stdout
+from copy import deepcopy
+import hashlib
+import io
 import json
 from pathlib import Path
 import re
@@ -16,6 +20,11 @@ import shutil
 from accel_model.app.case.native_case import run_native_case
 from accel_model.model.case import resolve_cli_hardware, resolve_eval_hardware
 from accel_model.model.validation import score_case
+from accel_model.model.validation.compile_evidence import (
+    compile_qualification,
+    export_compile_evidence,
+    validate_compile_evidence,
+)
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -209,7 +218,7 @@ def numeric_contract():
 def hardware_selection():
     model = "work/my_matmul"
     selected = Path(resolve_eval_hardware(model))
-    assert selected.name == "ascend_950DT.yaml" and selected.is_file()
+    assert selected.name == "ascend_950DT_streaming.yaml" and selected.is_file()
     explicit = Path(model, "hardware.yaml").resolve()
     assert Path(resolve_eval_hardware(model, str(explicit))) == explicit
     try:
@@ -221,6 +230,91 @@ def hardware_selection():
     return dict(selected=selected.name, explicit_preserved=True)
 
 
+def vf_prediction():
+    """Exercise the published example and reject unsupported invocation contracts."""
+    document = (ROOT / "references/framework/vec-plans.md").read_text()
+    example = re.findall(r"^```python\n(.*?)^```", document, re.M | re.S)[0]
+    namespace = {}
+    with redirect_stdout(io.StringIO()):
+        exec(compile(example, "vec-plans.md", "exec"), namespace)
+    estimate = namespace["estimate"]
+    assert estimate.cycles > 0 and estimate.identity
+    assert estimate.operation_counts and estimate.resource_service
+    assert estimate.peak_live_bytes > 0 and estimate.timeline
+    assert estimate.assumptions
+    predict = namespace["estimate_vf"]
+    argument_names = ("program", "invocation", "plan", "hardware_cost")
+    args = [namespace[name] for name in argument_names]
+    assert predict(*args).identity == estimate.identity
+    wrong_hardware = dict(args[1], hardware="different_chip")
+    split_plan = namespace["VFPlanSpec"]("split", (("u",), ("v",)))
+    for invocation, plan in ((wrong_hardware, args[2]), (args[1], split_plan)):
+        try:
+            predict(args[0], invocation, plan, args[3])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(
+                "Mismatched hardware or multiple VF partitions must fail"
+            )
+    return dict(
+        example="passed", hardware_mismatch_rejected=True, multi_vf_rejected=True
+    )
+
+
+def compile_feedback():
+    """Check evidence states with synthetic files; no compilation is performed."""
+    root = Path("work/compile_feedback")
+    root.mkdir(parents=True)
+
+    def artifact(name, content):
+        path = root / name
+        path.write_text(content)
+        return dict(path=name, sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+
+    artifacts = dict(
+        source=artifact("source.txt", "synthetic source fixture"),
+        log=artifact("build.log", "synthetic log fixture"),
+        binary=artifact("binary.txt", "synthetic binary fixture"),
+    )
+    identity = dict(
+        source_sha256=artifacts["source"]["sha256"],
+        compiler="synthetic-toolchain",
+        flags=["-O2"],
+        soc="synthetic-soc",
+    )
+    record = dict(identity=identity, exit_code=0, resources={}, artifacts=artifacts)
+
+    def expect(result, status):
+        assert result["status"] == status, result
+        assert result["verified"] == (status == "PASSED"), result
+
+    expect(compile_qualification(), "NOT_RUN")
+    expect(validate_compile_evidence(record, root, identity), "PASSED")
+    failed = deepcopy(record)
+    failed["exit_code"] = 1
+    failed["artifacts"].pop("binary")
+    expect(compile_qualification(failed, root=root, identity=identity), "FAILED")
+    changed = dict(identity, flags=["-O3"])
+    expect(compile_qualification(record, root=root, identity=changed), "STALE")
+    missing_binary = deepcopy(record)
+    missing_binary["artifacts"].pop("binary")
+    expect(
+        compile_qualification(missing_binary, root=root, identity=identity), "INVALID"
+    )
+    destination = Path("work/exported_compile_feedback")
+    exported = export_compile_evidence(record, root, destination, identity)
+    shutil.rmtree(root)
+    expect(validate_compile_evidence(exported, destination, identity), "PASSED")
+    (destination / exported["artifacts"]["log"]["path"]).write_text("changed log")
+    expect(
+        compile_qualification(exported, root=destination, identity=identity), "INVALID"
+    )
+    return dict(
+        states=["NOT_RUN", "PASSED", "FAILED", "STALE", "INVALID"], export="passed"
+    )
+
+
 if __name__ == "__main__":
     print(
         json.dumps(
@@ -229,6 +323,8 @@ if __name__ == "__main__":
                 physical_stage=physical_stage(),
                 numeric_contract=numeric_contract(),
                 hardware_selection=hardware_selection(),
+                vf_prediction=vf_prediction(),
+                compile_feedback=compile_feedback(),
             ),
             ensure_ascii=False,
         )

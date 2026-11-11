@@ -108,3 +108,13 @@ Python 派生函数和分核规格会承担原本由声明式配置完成的工�
 实现相关成本的 `implementation/scope` 和原生注入 `dtype_params` 见
 [VF 成本接口](framework/vf-costs.md)。这些约束用于检查来源与适用域，不把已声明
 `calibrated` 当作自动设备验收；成本更新只作用于匹配实现，不能用于修改硬件服务率。
+
+## 从固定模型扩展方案
+
+新建前按[硬件准备](hardware-preparation.md)确认目标并保存配置；已有模型继承该引用。
+涉及 Vec 内部步骤时先声明程序和成本，再按[Vec 计划](framework/vec-plans.md)比较分区、
+调用分块及缓冲安排。原有固定周期无需为了普通建模强行迁移。
+
+涉及布局／窗口变换时按[搬运契约](framework/transfer-contracts.md)分别核对逻辑元素、
+实际读写、物理跨度及生命周期。完成后按[模型验收](new-operator/validation.md)检查
+完整 case、任务投影及边界，再进入用户要求的搜索。
