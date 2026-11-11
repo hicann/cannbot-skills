@@ -328,6 +328,36 @@
       "expected_output": "1. 回复应指出存在多种满足约束的实现：DIST_BRC 广播（LoadAlign）、Brcb 批量广播后 stride-0 参与计算、或把系数作为 vector 操作数的一部分（如 Adds/Muls 的标量参数由寄存器广播提供）。\n2. 回复应说明选择依据：UB 预算、寄存器压力、通道切换频率，不限定必须叫某个 helper 名。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 21,
+      "title": "Fixpipe 写 GM / L1 / UB 三路怎么选（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "在 Ascend 950 上，同一个 Fixpipe，我有时要把 L0C 的结果写进 GM、有时写进 L1、有时写进某个 AIV 的 UB——这三种分别怎么写？如果我把这段代码写在 AIV 分支里会怎样？",
+      "expected_output": "1. 回复应说明三条通路怎么选只看两件事：目的是 GlobalTensor 时写 GM；目的是 LocalTensor 时再看 config.isToUB——true 写 UB、false 写 L1。对应地参数结构体要写 FixpipeParamsArch3510<config.format>，两套重载都能编过，类型写错不会报错、只会静默走到另一条实现。\n2. 回复应指出 Fixpipe 只能在 AIC 上发起：三路实现都包在 if ASCEND_IS_AIC 里，写在 AIV 分支会被编译期消除，不报错也不写数据，AIV 随后读到的是自己的旧数据。\n3. 回复应给出可跑通的写法要点：UB 的 LocalTensor 要配 {ROW_MAJOR, true}；srcStride 按完整 baseM 的 Align(baseM,16) 填；ROW_MAJOR 写非 GM 目的时 nSize*sizeof(DstT) 要满足 32B 对齐。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 22,
+      "title": "1 AIC 喂 2 AIV 的分发与同步（关键能力）",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A5"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "一个 AIC 算完 M×N 的结果，要同时给同组的 2 个 AIV 用。用一条 SplitM 的 Fixpipe 怎么分？目的地址要注意什么？写完之后两个 AIV 怎么知道数据到了？",
+      "expected_output": "1. 回复应说明 SplitM 只需一条指令：把 dualDstCtl 设成 1，两个 AIV 各拿一半行；前提是 M 为偶数、不带随路量化/relu、输出不是 COLUMN_MAJOR。\n2. 回复应提醒两块 tile 的目的地址要按一半折算（第二块偏移除以 2）——这是实测结论，不折半会写出半行空洞。\n3. 回复应说明这种模式下 subBlockId 不用管（硬件只看 dualDstCtl），只有单目标分发时才靠 subBlockId 选 AIV。\n4. 回复应给出同步做法：AIC 在 PIPE_FIX 上给两个 lane 各发一次（base 与 base+16），AIV 侧只用 base 等，并等在自己要用的 pipe 上（PIPE_V 或 PIPE_MTE2），否则会等错槽卡死。",
+      "expectations": [],
+      "files": []
     }
   ],
   "skill_name": "ascendc-api-best-practices"

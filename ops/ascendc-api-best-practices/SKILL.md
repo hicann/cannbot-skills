@@ -20,6 +20,7 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **标量访问 Get/SetValue** | GlobalTensor/LocalTensor GetValue, SetValue | [api-scalar-access-patterns.md](references/api-scalar-access-patterns.md) | 按访问用途、执行频率、目标架构判断是否替换及替换路径 |
 | **LoadData / Cube 加载** | LoadData2D, LoadData2DV2, LoadData2DMx, LoadData3D | [api-loaddata.md](references/api-loaddata.md) | L1 → L0 加载、Cube GEMM、MX 块量化格式、img2col |
 | **L0C 回写 / Fixpipe** | DataCopyCO12DstParams, FixpipeParamsV220 | [api-cross-gen-fixpipe.md](references/api-cross-gen-fixpipe.md) | L0C → GM/UB 回写、unitFlag、跨代参数差异 |
+| **1C:2V 双 AIV 分发（Fixpipe L0C→UB）** | FixpipeParamsArch3510, dualDstCtl, subBlockId, McgShfMode | [api-fixpipe-1c2v.md](references/api-fixpipe-1c2v.md) | 单 AIC 写两个 AIV 的 UB、SplitM/SplitN 选型、intra-block 握手 |
 | **Transpose / 重排** | TransDataTo5HD, Gather | [api-transpose.md](references/api-transpose.md) | 小通道 transpose、permute |
 | **数据过滤/解交织** | GatherMask | [api-gathermask.md](references/api-gathermask.md) | RoPE 奇偶拆分、列分量分离、非均匀间隔自定义 mask |
 | **Matmul 高阶 API（Cube）** | MatmulImpl, MatmulConfig, IterateAll | [api-matmul.md](references/api-matmul.md) | MatMul, BatchMatMul, MatMulBias；**限 Atlas A2/A3 系列（DAV_2201）平台** |
@@ -66,6 +67,8 @@ description: Ascend C API 使用最佳实践。提供算术、归约、数据搬
 | **RoPE 奇偶拆分** | [api-gathermask.md](references/api-gathermask.md) | pattern 1/2、Normal/Counter 均可、零拷贝偏移；**限 Atlas A2/A3 系列（DAV_2201）平台** |
 | **Interleaved 列分离** | [api-gathermask.md](references/api-gathermask.md) | 官方：Normal 模式、stride=8；实测：tile≥2048、外层循环；**限 Atlas A2/A3 系列（DAV_2201）平台** |
 | **非均匀间隔自定义 mask** | [api-gathermask.md](references/api-gathermask.md) | 用户自定义 LocalTensor mask、类型匹配 |
+| **1 AIC 喂 2 AIV（Cube:Vector=1:2）** | [api-fixpipe-1c2v.md](references/api-fixpipe-1c2v.md), [api-crosscore-sync.md](references/api-crosscore-sync.md) | 四种分发策略选型、每 lane 半 M、AIC 发两槽 / AIV 只等 base |
+| **Fixpipe 结果错位 / 参数填错** | [api-fixpipe-1c2v.md](references/api-fixpipe-1c2v.md) | §6.1 断言速查表、`srcStride = Align(baseM,16)`、真机无运行时校验 |
 ---
 
 ## 快速参考

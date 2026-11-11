@@ -3,6 +3,9 @@
 > **平台**：`FixpipeParamsV220` 用于 DAV_2201（A2/A3）；`FixpipeParamsArch3510` 用于 DAV_3510（950）。两套参数**同名不同义、单位不同**，照搬旧参数必错。
 >
 > **适用**：DAV_2201（A2/A3）→ DAV_3510（950）迁移时 L0C 回写参数体系的切换。
+>
+> **另见**：DAV_3510 的 1C:2V 双目标分发、L0C→UB / →L1 / →GM 三条通路的编译期分派、以及真机实测结论，见 [api-fixpipe-1c2v.md](./api-fixpipe-1c2v.md)。
+>
 > **参数真源**：官方文档 `$DEVKIT_PATH/docs/zh/api/SIMD-API/basic_api/cube_compute_ISASI/cube_compute_store/`（Fixpipe / FixpipeParamsArch3510 全字段）。
 > 迁移决策（何时弃高阶走低阶直跑、Fixpipe 与 Mmad 的 unitFlag 配合）见迁移技能 `ascendc-cross-gen-migration` 的 cube-migration-guide 改动 3。
 
@@ -70,16 +73,18 @@ struct FixpipeConfig {
 };
 ```
 
+`isToUB` 只在 `__NPU_ARCH__ == 3510 || 5102` 存在；它决定编译期走 L0C→UB 还是 L0C→L1（详见 [api-fixpipe-1c2v.md](./api-fixpipe-1c2v.md) §2.1）。
+
 ## FixpipeParamsArch3510 关键字段（与 V220 的差异点是易错区）
 
 | 字段 | 说明 |
 |---|---|
-| nSize | N 方向大小；不开启 channelSplit 时**必须为 16 的倍数**（channelSplit 时为 8 的倍数） |
+| nSize | N 方向大小；`NZ` 输出时**必须为 16 的倍数**，`isChannelSplit` 时为 8 的倍数；`NZ2ND`（ROW_MAJOR）时要求 `nSize * sizeof(DstT) % 32 == 0`。上限 4095 |
 | mSize | M 方向大小；mSize=0 表示 NOP |
-| srcStride | 相邻 Z 排布起始地址偏移，单位 **C0_SIZE**（16×sizeof(T)），填 mSize 对 16 向上取整 |
+| srcStride | 相邻 Z 排布起始地址偏移，单位 **C0_SIZE**（实现里固定乘 `BLOCK_CUBE=16` 元素）。取值为 **`Align(baseM, 16)`**——注意是「把 M 向上对齐到 16 的倍数」，**不是 `ceil(M/16)`**（M=64 → 填 64）。且要按 L0C 的物理 `baseM` 算，与本条指令实际拷出的 `mSize` 无关；推导与实测见 [api-fixpipe-1c2v.md](./api-fixpipe-1c2v.md) §3.1 |
 | dstStride | 开启 NZ2ND/NZ2DN 时 = 目的**每一行元素个数（单位 element）**；不开转换时 = 相邻 Z 排布偏移。**注意：`FixpipeParamsArch3510.dstStride` 单位是 element，而 `FixpipeParamsV220.dstStride` 是 datablock（32B）——两者单位不同！** |
 | params | 随路格式转换参数：NZ（普通搬运）→ `Nz2NdParams{ndNum, srcNdStride, dstNdStride}`（**此为 3510 的 3 字段形态**）/ 950 新增 `Nz2DnParams{dnNum, srcNzMatrixStride, dstDnMatrixStride, srcNzC0Stride}` |
-| dualDstCtrl / subBlockId | **仅 L0C→UB 通路有效**（双目标 / 子块模式） |
+| `dualDstCtl` / `subBlockId` | **仅 L0C→UB 通路有效**：`dualDstCtl` 选双目标模式（0/SPLIT_M/SPLIT_N），`subBlockId` 选目标 lane。**实测：`dualDstCtl != 0` 时 `subBlockId` 被硬件忽略**，目的端只由 `dualDstCtl` 决定。详见 [api-fixpipe-1c2v.md](./api-fixpipe-1c2v.md) §4 |
 | unitFlag | Mmad 与 Fixpipe 细粒度并行（每算完一个分形立即搬出）；开启时 Mmad 和 Fixpipe 的 unitFlag 须同为 2 或 3 |
 
-> **易错点速记**：本表 `FixpipeParamsArch3510.dstStride` 单位是 **element**，而 `FixpipeParamsV220.dstStride` 是 datablock/32B（**两个不同结构体，不是同代结论冲突**）；`nSize` 不开启 channelSplit 时须为 **16 的倍数**；`dualDstCtrl` / `subBlockId` **仅 L0C→UB 通路**有效。
+> **易错点速记**：本表 `FixpipeParamsArch3510.dstStride` 单位是 **element**，而 `FixpipeParamsV220.dstStride` 是 datablock/32B（**两个不同结构体，不是同代结论冲突**）；`nSize` 在 `NZ` 输出时须为 **16 的倍数**（`NZ2ND` 走 32 B 对齐规则）；`dualDstCtl` / `subBlockId` **仅 L0C→UB 通路**有效，且双目标模式下 `subBlockId` 会被忽略。

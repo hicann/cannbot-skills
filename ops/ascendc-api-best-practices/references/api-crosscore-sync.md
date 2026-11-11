@@ -107,7 +107,7 @@ __aicore__ inline void WaitFlag(int32_t eventID);
 | `0` | AI Core 核间同步（AIC 调用时同步所有 AIC；AIV 调用时同步所有 AIV） | 950/A3/910b |
 | `1` | AI Core 内部两个 AIV 之间的同步 | 950/A3/910b |
 | `2`（`0x2`） | 同核 AIC 与所有 AIV 之间的同步 | 950/A3/910b |
-| `4`（`INTRA_MODE`） | AscendC Matmul 高阶 API 内部使用 | 仅 950，且要求 `KERNEL_TYPE_MIX_AIC_1_2` |
+| `4`（`INTRA_MODE`） | 用户可用（`CrossCoreSetFlag<4,…>` / `CrossCoreWaitFlag<4,…>`）；`AscendC::Matmul` 内部也用它 | 仅 950，且要求 `KERNEL_TYPE_MIX_AIC_1_2`。1C:2V 场景下的收发规则（AIC 写两槽 `base`/`base+16`、AIV 只用 `base`）见 [api-fixpipe-1c2v.md](./api-fixpipe-1c2v.md) §5 |
 
 > 平台标签为官方文档口径：`950` = Ascend 950PR/950DT（DAV_3510）、`A3` = Atlas A3 训练/推理系列产品、`910b` = Atlas A2 训练/推理系列产品（A3 与 910b 同为 DAV_2201）。
 
@@ -126,7 +126,7 @@ __aicore__ inline void WaitFlag(int32_t eventID);
 | 混用风险 | 官方不建议同时使用 CrossCoreSetFlag 与 SyncAll 硬同步；组合使用时，自定义 flagId 落入 [11,14]（截断后）存在冲突风险 |
 | 发射顺序 | 同一核连续发出的 CrossCoreSetFlag，硬件**不保证执行顺序**——不要依赖 per-flag 的先后次序 |
 
-**flagId 分配策略（通道式流水场景）**：可用集合 = [0,15] − 实际存在的 mode 4 保留区 [0, 2N-1] − SyncAll 保留区 [11,14]；**保守集 [8, 9, 10, 15] 仅当 kernel 内确有 mode 4 使用方（`AscendC::Matmul` 高阶 API 或走 mode 4 的 Blaze 变体）时按此收缩**——Blaze qbmm_mx 系 kernel（无 mode 4）可直接用 [0,10]∪{15}（官方 MC2 算子即用 0/1）。设计原则：
+**flagId 分配策略（通道式流水场景）**：可用集合 = [0,15] − 实际存在的 mode 4 保留区 [0, 2N-1] − SyncAll 保留区 [11,14]；**保守集 [8, 9, 10, 15] 仅当 kernel 内确有 mode 4 使用方（`AscendC::Matmul` 高阶 API 或走 mode 4 的 Blaze 变体）时按此收缩**——其中 `15` 及其镜像 `31` 只在 Matmul/KFC 使用方存在时被占（`KFC_SYNC_ID=15`，见 [api-fixpipe-1c2v.md](./api-fixpipe-1c2v.md) §5.4），无 mode 4 使用方时 `15` 可用；Blaze qbmm_mx 系 kernel（无 mode 4）可直接用 [0,10]∪{15}（官方 MC2 算子即用 0/1）。设计原则：
 
 1. 从空闲区显式挑选固定 ID——**选值前必须确认同 kernel 内 matmul 实现的实际保留范围**：先查所用模板是否走 mode 4（grep `CrossCore` 零命中即不占），不能仅凭"最多 [0,7]"假设选值
 2. 一条生产者→消费者通道用一个固定 ID 做计数式配对（T 次 Set ⇔ T 次 Wait，紧邻配对下计数自然平衡）
