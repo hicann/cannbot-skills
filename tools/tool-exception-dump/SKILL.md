@@ -111,7 +111,12 @@ echo "<算子名>" | grep -iE "MatmulAllReduce|AllGatherMatmul|MatmulReduceScatt
 
 ```bash
 pwd                                            # 不得位于 <收集目录> 或其子目录内
-touch debug_info.txt && rm -f debug_info.txt  # 当前目录可写且已存在的 debug_info.txt 可写
+if [ -e debug_info.txt ]; then
+    test -w . && test -w debug_info.txt        # 已有日志只检查可写性，不删除
+else
+    probe=$(mktemp ./.debug_info.txt.preflight.XXXXXX) &&
+        unlink "$probe"                       # 只清理本次创建的探针
+fi
 mkdir -p <结果目录>                            # <结果目录> 不得为 <收集目录> 或其子目录
 ```
 
