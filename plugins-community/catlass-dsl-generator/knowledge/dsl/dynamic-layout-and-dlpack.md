@@ -16,7 +16,7 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/tests/test_dynamic_gm_launch_abi.py
     title: Dynamic GM launch ABI tests
   - id: batched
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/batched_matmul/batched_matmul.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/batched_matmul/batched_matmul.py
     title: Batched matmul dynamic-GM example
 operator_families: [elementwise, matmul, attention]
 arch: [c310]

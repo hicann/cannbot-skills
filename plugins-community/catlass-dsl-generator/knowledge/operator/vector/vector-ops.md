@@ -9,22 +9,22 @@ verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
 sources:
   - id: unary
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/vector_ops/unary_ops.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/unary_ops.py
     title: Unary vector examples
   - id: binary
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/vector_ops/binary_op.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/binary_op.py
     title: Binary vector examples
   - id: advanced
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/vector_ops/vector_op_harness.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/vector_op_harness.py
     title: Vector operation harness
   - id: gather
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/vector_ops/gather_op.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/gather_op.py
     title: Gather operation
   - id: reduction
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/vector_ops/reduction_ops.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/reduction_ops.py
     title: Reduction operations
   - id: cast
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/vector_ops/cast_multi.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/cast_multi.py
     title: Vector cast operations
 operator_families: [elementwise, reduction, gather]
 arch: [c310]

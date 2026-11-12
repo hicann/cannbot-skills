@@ -6,6 +6,9 @@ description: Use when specifying a new CATLASS Python DSL operator and producing
 # CATLASS DSL Design（门禁引导）
 
 > **入口**：本阶段开始前先加载 `catlass-dsl-workflow` 并输出阶段卡。
+> **硬前置**：`.catlass-dsl/references/catlass/examples/python/tla_dsl` 必须已成功下载且能
+> 列出 `.py` 样例；缺失时先按 workflow §6 下载，下载失败即停止，不得用知识库或已安装包
+> 源码替代。
 > 默认直通：产物齐备并自检通过后直接进入 develop，不等待用户批准；用户要求先评审时才暂停。
 
 > **自动执行**：遇到问题只要有可行方案就逐步尝试，一个方案失败就换下一个，不停下来找
@@ -182,7 +185,24 @@ case 规则：
 2. 明确算子名称、family、用途和可观察行为。按 `catlass-dsl-knowledge` 检索相关条目，
    把查询关键词、采用的条目路径与适用约束写入 `DESIGN.md`。
 3. 固定每个输入输出的 symbolic shape、dtype、layout 和语义。
-4. 写清数学计算、广播/尾块/空输入等边界行为，以及累加精度、舍入和 NaN/Inf 规则。
+4. 写清数学计算、广播/尾块/空输入等边界行为，并给出「数值契约」：每个阶段/中间量的
+   存储 dtype、累加 dtype、窄化或提升发生在哪一步、舍入/饱和/近似；reference 自己的
+   精度路径（f16/bf16 是否先 `.float()` 再算、结果按输出 dtype 还是 f32 转回）也要写明。
+   单 kernel 内部的 C→V→C、epilogue、fixpipe 窄化同样逐行列出，不只看跨 kernel 边。
+   契约必须由「标杆步骤映射」得来：逐行拆 `reference.py` 的每个计算步骤（含 cast、scale、
+   归约、scatter、广播），标出对应 kernel 阶段与对齐结论，不得跳步、合并或只列自己想到的
+   中间量；漏一步视为契约未完成。
+   累加与归约顺序（K 分块与 `BK` 循环、是否 splitK、atomic add、分段归约、online softmax）、
+   padding 与被 mask lane 的归约语义、NaN/Inf 传播一并写清。舍入模式的支持范围以目标
+   `ascend-catlass-dsl` 版本的包实际 API 能力为准，版本内不同子包也可能不一致，不支持时
+   写替代方案，不得按“应该支持”假设（例如 RINT 这类 round mode 在不同子包的支持情况
+   并不一致，2.2.0 仍在演进，必须按目标版本实测或查 API 确认）。容差按输出 dtype 写入
+   definition（atol/rtol/matched_ratio/max_error_cap），debug 期不得放宽。
+   **对齐优先于容差**：标杆已定义的数值语义（存储/累加 dtype、舍入位置与模式、归约与
+   累加顺序）必须在实现中复现，不复现按精度 bug 处理；容差只吸收“完全对齐后”仍然存在
+   的浮点尾差，不能当作不对齐的理由。确实无法复现时（DSL 无等价表达，或成本不可接受），
+   必须在 DESIGN 里单列 deviation：哪一项、不可复现的原因、量级估算或对照实验、影响的
+   用例范围、high risk 标记和补偿计划，不得只写“容差内”。
 5. 生成 `reference.py` 与 `definition.json`，把每个非 performance required case 写成
    `workload.jsonl` 一行，并按规则生成 `workload_dev.jsonl`。
 6. 按 L2 口径在真实环境运行 reference cases 并记录证据；全 shape 不可完成时先冒烟
@@ -190,6 +210,41 @@ case 规则：
 7. 使用 CATLASS Python DSL API 给出融合范围、各 kernel 职责与调用顺序、中间张量、
    tiling/layout、内存空间、pipeline 和同步方案，解释性能选择依据。tiling 块数按核数
    取整，行块对齐 cube fractal（16 行），依据见 `dsl/pattern-gemm-optimization-ladder`。
+   包含 MMAD 的算子（纯 matmul 与 CV 融合都算）必须完整读取该条目，并在 `DESIGN.md` 的
+   「GEMM 骨架与优化阶梯」一节声明目标级别（第 2/3 级）、主 matmul 的骨架验证 shape
+   （M/N/K/dtype/batch）与来源 dev 用例 uuid、全部 matmul 阶段清单（名称 / 所在 kernel /
+   预计占比 / 各自最大 dev shape）、首版骨架必须包含的双缓冲结构、明确排除的反模式，
+   以及 skeleton 验收判据（含豁免）；每个 matmul 阶段都要在 develop 各自跑一次骨架评测，
+   不得只测主 GEMM。只写条目名或“参考”不算完成。是否评测只看“算子是否包含 MMAD”，
+   不按整体时间占比判断：CV 融合算子即使 vector 段占比更高，也要逐个 matmul 声明 shape
+   并评测，因为瓶颈通常在 matmul 段；纯 vector 算子不适用。骨架是测量工件，不改变最终
+   kernel 划分与 `fusion.mode`；不得因为要做骨架评测就把 CV 融合算子拆成独立 Cube / Vector
+   kernel。默认目标为第 3 级，选第 2 级必须说明第 3 级为何不可行。skeleton 性能判据、
+   豁免与带宽受限规则以
+   `catlass-dsl-develop/SKILL.md` 的「skeleton 性能 DoD」为准。
+   先判定算子整体结构（阶段数、Cube/Vector 交替方式、数据流、任务映射、同步方式），
+   再按整体结构选一个**主参考样例**：Cube-only（纯 MMAD）参考
+   `tla/kernel/matmul/basic_mmad/basic_matmul.py`；Cube-Vector（MMAD 后接 vector 后处理）参考
+   `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+   Cube-Vector-Cube（两段 MMAD 中间夹 vector）参考
+   `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；纯 vector 参考
+   `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
+   `dsl_tutorials/vector_simt_ops/`。
+   **整体结构优先于分步参考**：主参考是 kernel 划分、缓冲层次和同步骨架的基线，不是
+   约束；算法或硬件要求不同时，可以在 DESIGN 里调整并写清偏离点与理由。主参考缺少某个
+   局部机制（如 gather SIMT、atomic add、特定 epilogue）时，用局部样例补齐。没有足够
+   契合的主参考时，允许组合多个分步样例，但必须在 DESIGN 里显式设计组合后的整体结构
+   （阶段顺序、接口、同步），并照常跑 skeleton DoD；不得无说明地把样例片段拼在一起。
+   参考样例必须在 `.catlass-dsl/references/catlass/examples/python/tla_dsl/` 下实际存在；
+   在 DESIGN 的「结构类型与参考样例」一节分别记录主参考（整体结构匹配点、偏离点）和
+   局部参考（补齐的机制或组合方案）。目标版本没有同名样例时，选最接近的整体结构样例
+   并记录差异与改造点，不得凭记忆引用。
+   设计期先完整读取 `knowledge/debug/multi-kernel-precision-localization.md` 的「通用规则」
+   （中间量 dtype、layout、舍入位置、归约顺序、独立 oracle），不要等到测试失败才看。
+   多 kernel 或跨 kernel 中间张量的算子，还必须为每条跨 kernel 边定义精度契约：数学语义、
+   shape/stride/有效区、输入输出与累加 dtype、舍入位置、重复 ID/归约/chunk 顺序、消费
+   分支和对应 oracle；并在 DESIGN 的「跨 kernel 阶段 oracle」一节给出阶段检查计划（局部
+   检查、真实链路、双向替换）。没有中间量 oracle 时，明确写出替代验证方式。
    同时给出搬运量核算（Σ 重读次数 × 体积）与对应的带宽下界，tiling 参数偏离参考样例时
    逐项说明差异及对搬运量的影响。
    写明 `fusion.mode` 及单融合是否由用户明确提出；没有实测支持的性能判断标记为待验证
@@ -217,9 +272,11 @@ case 规则：
 设计应当在“写→跑→看数”的循环中收敛，而不是在动笔前一次性消灭所有不确定性。
 
 冻结前再次检查：算子主体和 reference 都是 Python 文件；算法引用的 `tla.*` 接口可以从
-本地源码或知识条目定位；标准 definition/workload 覆盖全部非 performance required cases
-（`blocked` 项附原因与精确 argv）；正文包含三个文件的实际 SHA-256；没有把 C++ CATLASS
-API 当作 DSL API；每个 decorated kernel 自包含；融合边界有明确性能依据。
+本地源码或知识条目定位；「数值契约」表已覆盖每个阶段/中间量（存储 dtype、累加 dtype、
+窄化或舍入位置），没有留空或只写“同 torch”；标准 definition/workload 覆盖全部非
+performance required cases（`blocked` 项附原因与精确 argv）；正文包含三个文件的实际
+SHA-256；没有把 C++ CATLASS API 当作 DSL API；每个 decorated kernel 自包含；融合边界
+有明确性能依据。
 
 ## 输出
 

@@ -19,7 +19,7 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/tla/runtime.py
     title: DLPack bridge implementation
   - id: vadd
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/basic_vadd/basic_vadd.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/vec/basic_vadd/basic_vadd.py
     title: VADD runtime and correctness harness
 operator_families: [elementwise, matmul]
 arch: [c310]

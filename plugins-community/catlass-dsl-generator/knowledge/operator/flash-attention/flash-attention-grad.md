@@ -23,22 +23,22 @@ sources:
     resource: https://gitcode.com/cann/ops-transformer/blob/adc5fd30003da4c73bc478cf42c6f031b491b973/attention/flash_attention_score_grad/op_kernel/arch22/flash_attention_score_grad_s1s2_bn2.h
     title: BN2 模板实现（固定提交 adc5fd30）：workspace 清零 AtomicClean/EODClean、kvAtomic/qAtomic 首写不累加、CrossCore 同步 flag 编号、ping-pong 事件编号分配
   - id: fa-infer-kernel
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/flash_attention_infer/flash_attention_infer.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/flash_attention_infer.py
     title: catlass-dsl Ascend950 FlashAttention 推理 example 的 kernel：grid-stride 任务循环、L1/L0/L0C 缓冲、L0C2UBMode.SPLIT_M、zN 视图、cross flag 编号与 PRE_LAUNCH
   - id: fa-infer-tiling
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/flash_attention_infer/fa_tiling.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/fa_tiling.py
     title: 同 example 的 tiling：Q/KV 基块与 L1 tile 形状、各 buffer 份数、GQA 的 group_size
   - id: fa-infer-readme
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/flash_attention_infer/README.md
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/README.md
     title: 同 example 的文档：分块 + online softmax、中间计算恒 FP32 的 dtype 组合、编译期常量与 CLI 覆盖
   - id: dsl-core-api
     resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/core_api.py
     title: CATLASS DSL core API：l0c fixpipe 可窄化的目标 dtype，以及 atomic 的目标位置与累加 dtype 白名单
   - id: dsl-atomic-add
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul_atomic_add.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul_atomic_add.py
     title: CATLASS DSL atomic add 示例：MMAD 结果直接累加到 GM（GM C 必须为 f32）
   - id: dsl-cross-flag
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/cross_flag_two_way/cross_flag_two_way.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/cross_flag_two_way/cross_flag_two_way.py
     title: CATLASS DSL 跨核同步示例：mode=4 双向 cross flag 与同核 pipe-to-pipe flag
 operator_families: [flash-attention, attention]
 arch: [c310, ascend-950]
@@ -392,7 +392,7 @@ L1→L0 载入与 MMAD 不重叠；再往后发现 fixpipe 掉一大截而 Durat
    pipe 分解并与 vendor baseline 用同一采集口径对比（见 `profiler/metrics-and-bottlenecks.md` 与
    `profiler/collection-workflows.md`），必要时用 `Block Num`/`Mix Block Num` 确认 launch 覆盖。
 
-[^fa-infer-kernel]: catlass-dsl `python/tla_dsl/examples/end_to_end/flash_attention_infer/flash_attention_infer.py`：`tla.range(block_idx(), total_task_num, block_num())` 任务循环与 `q_block_idx`/`head_idx` 分解、`sub_block_idx()` 与 `Q_BLOCK_SUB`、`PRE_LAUNCH`/`MAX_CROSS_CORE_BUF_STAGES`、L0A/L0B/L0C ping-pong 缓冲、`tla.mmad(..., init_c=True)`、`CopyL0C2DstParams(l0c2ub_mode=L0C2UBMode.SPLIT_M)`、P 的 `zNUnAlign`/`zN` 视图、按方向编号的 cross flag（0/1、2/3/4、5/6）、`actual_q_seqlen`/`actual_kv_seqlen`。
+[^fa-infer-kernel]: catlass-dsl `examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/flash_attention_infer.py`：`tla.range(block_idx(), total_task_num, block_num())` 任务循环与 `q_block_idx`/`head_idx` 分解、`sub_block_idx()` 与 `Q_BLOCK_SUB`、`PRE_LAUNCH`/`MAX_CROSS_CORE_BUF_STAGES`、L0A/L0B/L0C ping-pong 缓冲、`tla.mmad(..., init_c=True)`、`CopyL0C2DstParams(l0c2ub_mode=L0C2UBMode.SPLIT_M)`、P 的 `zNUnAlign`/`zN` 视图、按方向编号的 cross flag（0/1、2/3/4、5/6）、`actual_q_seqlen`/`actual_kv_seqlen`。
     
 [^upstream-readme]: ops-transformer FlashAttentionScoreGrad 算子 README（固定提交 adc5fd30）：反向公式 `dV=P^T dY`/`dQ`/`dK`、输入输出表、layout 一致性与 B/N/S/D（950 上 D ≤ 768）取值范围、`keepProb ∈ (0,1]`。
     
@@ -402,12 +402,12 @@ L1→L0 载入与 MMAD 不重叠；再往后发现 fixpipe 掉一大截而 Durat
     
 [^upstream-bn2]: BN2 模板 `op_kernel/arch22/flash_attention_score_grad_s1s2_bn2.h`（固定提交 adc5fd30）：`LAYOUT == TND` 常量与 `tndSplitCoreParams` 分段、`AtomicClean`/`EODClean` 的 `B32_BLOCK_NUM` 向上取整清零、fp32 输入走 `dvGm` 而 fp16 走 `dvWorkspaceGm`、`kvAtomic`/`qAtomic` 首写不累加、`SYNC_*_FLAG` 5 个跨核 flag 编号、`AllocEventID/ReleaseEventID` ping-pong。
     
-[^fa-infer-tiling]: catlass-dsl `python/tla_dsl/examples/end_to_end/flash_attention_infer/fa_tiling.py`：`Q_BASE_TILE`/`KV_BASE_TILE = 128`、`QK_L1_TILE(M,N,K_LEFT,K_RIGHT) = (128,256,192,192)`、`PV_L1_TILE = (128,128,256,128)`、`Q/K/V/P_L1_BUF_NUM = 1/2/2/3`、`group_size = num_heads // kv_heads`。
+[^fa-infer-tiling]: catlass-dsl `examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/fa_tiling.py`：`Q_BASE_TILE`/`KV_BASE_TILE = 128`、`QK_L1_TILE(M,N,K_LEFT,K_RIGHT) = (128,256,192,192)`、`PV_L1_TILE = (128,128,256,128)`、`Q/K/V/P_L1_BUF_NUM = 1/2/2/3`、`group_size = num_heads // kv_heads`。
     
-[^fa-infer-readme]: catlass-dsl `python/tla_dsl/examples/end_to_end/flash_attention_infer/README.md`：分块 + online softmax 公式、输入 f16/bf16 时中间计算恒 FP32、编译期常量被 CLI 覆盖且改值触发重新编译、`HEAD_NUM` 必须被 `KV_HEAD_NUM` 整除、mask 仅占位。
+[^fa-infer-readme]: catlass-dsl `examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/README.md`：分块 + online softmax 公式、输入 f16/bf16 时中间计算恒 FP32、编译期常量被 CLI 覆盖且改值触发重新编译、`HEAD_NUM` 必须被 `KV_HEAD_NUM` 整除、mask 仅占位。
     
 [^dsl-core-api]: catlass-dsl `python/tla_dsl/catlass/core_api.py`：`l0c` fixpipe 的 `f32 → f32/f16/bf16` 窄化白名单；atomic 目标必须为 GM，累加 dtype 白名单 `f32/f16/i16/i32/i8/bf16`。
     
-[^dsl-atomic-add]: catlass-dsl `python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul_atomic_add.py`：MMAD 结果直接累加到 GM 的写法，GM 侧 C 必须为 f32。
+[^dsl-atomic-add]: catlass-dsl `examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul_atomic_add.py`：MMAD 结果直接累加到 GM 的写法，GM 侧 C 必须为 f32。
     
-[^dsl-cross-flag]: catlass-dsl `python/tla_dsl/examples/end_to_end/cross_flag_two_way/cross_flag_two_way.py`：`tla.cross_flag(name, mode=4)` 双向握手与 `tla.flag(name, src_pipe, dst_pipe)` 同核同步。
+[^dsl-cross-flag]: catlass-dsl `examples/python/tla_dsl/dsl_tutorials/cross_flag_two_way/cross_flag_two_way.py`：`tla.cross_flag(name, mode=4)` 双向握手与 `tla.flag(name, src_pipe, dst_pipe)` 同核同步。

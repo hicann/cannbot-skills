@@ -10,13 +10,13 @@ verified:
   - {by: process:fa-dsl-9-operator-delivery, at: '2026-09-11T00:00:00Z'}
 sources:
   - id: kernel
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/flash_attention_infer/flash_attention_infer.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/flash_attention_infer.py
     title: Flash Attention inference kernel and host validation
   - id: tiling
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/flash_attention_infer/fa_tiling.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/fa_tiling.py
     title: Flash Attention tiling data implementation
   - id: guide
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/flash_attention_infer/README.md
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/README.md
     title: Flash Attention inference guide
 operator_families: [flash-attention, attention]
 arch: [c310]

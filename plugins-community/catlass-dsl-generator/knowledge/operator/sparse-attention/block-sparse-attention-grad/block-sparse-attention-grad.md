@@ -74,19 +74,19 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/core_api.py
     title: CATLASS core API for mmad layout, cross_flag, L0C2UBMode and extern
   - id: tla-atomic
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul_atomic_add.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul_atomic_add.py
     title: CATLASS AtomicMode.ADD copy pattern
   - id: tla-mixed
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/basic_mixed/basic_mixed.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed.py
     title: CATLASS mixed Cube and Vector kernel pattern
   - id: tla-crossflag
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/cross_flag_two_way/cross_flag_two_way.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/cross_flag_two_way/cross_flag_two_way.py
     title: CATLASS two-way cross flag pairing
   - id: tla-cast
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/vector_ops/cast_multi.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simd_ops/cast_multi.py
     title: CATLASS vector cast and register slot usage
   - id: tla-fa
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/flash_attention_infer/flash_attention_infer.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/flash_attention_infer.py
     title: CATLASS attention tail view and DINTLV store patterns
 operator_families: [sparse-attention, block-sparse-attention, attention]
 arch: [c310, ascend-950]

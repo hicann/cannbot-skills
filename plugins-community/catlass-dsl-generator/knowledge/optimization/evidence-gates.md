@@ -12,7 +12,7 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/README.md
     title: CATLASS DSL validation layers
   - id: examples
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mmad/README.md
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/README.md
     title: MMAD build and run examples
 operator_families: [matmul, elementwise, mixed]
 arch: [c310]

@@ -9,13 +9,13 @@ verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
 sources:
   - id: mixed
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mixed/basic_mixed.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed.py
     title: Basic mixed Cube and Vector kernel
   - id: atomic
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul_atomic_add.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul_atomic_add.py
     title: MMAD atomic-add variant
   - id: mutex
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul_mutex.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul_mutex.py
     title: MMAD mutex variant
 operator_families: [matmul, mixed, elementwise]
 arch: [c310]

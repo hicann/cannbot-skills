@@ -19,7 +19,7 @@
 - [静态展开优先](pattern-static-unroll-first.md)
 - [广播加载与 SIMT 收尾](pattern-broadcast-and-simt-epilogue.md)
 - [显式声明支持域，禁止静默回退](pattern-declare-support-domain.md)
-- [预计算索引结构（bucket + 链表）替代 gather](pattern-precomputed-index-structure.md)
+- [预计算索引结构（bucket + 链表 / scatter run 表）](pattern-precomputed-index-structure.md)
 - [在 SIMD 中复现 bf16 的 ties-to-even 舍入](pattern-bf16-ties-to-even.md)
 - [单个 cross flag 的双向互斥用法](pattern-cross-flag-bidirectional.md)
 - [统计量打包在同一 UB 张量的列偏移里](pattern-ub-stats-packing.md)

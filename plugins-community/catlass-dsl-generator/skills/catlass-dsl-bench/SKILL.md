@@ -73,6 +73,8 @@ Python 代码，必须来自用户信任的来源；测量脚本不提供安全�
 - tolerance 逐 workload 生效：满足
   `abs(candidate-reference) <= max_atol + max_rtol * abs(reference)` 计为匹配；匹配比例
   不得低于 `required_matched_ratio`，`max_error_cap` 是额外硬上限。
+- 容差只用于吸收完全对齐标杆实现后的浮点尾差；实现与标杆在 dtype、舍入位置/模式、
+  累加 dtype 或归约顺序上不一致时先修实现，不得用容差通过。
 - 浮点输出默认 `required_matched_ratio: 0.999`；`1.0` 只用于位精确、整数结果或数值设计
   明确要求。NaN/Inf 默认失败；`allow_negative_inf` 只允许两侧同位置的 `-inf`。
 - 同一 suite 使用同一随机 seed，保证可复现。

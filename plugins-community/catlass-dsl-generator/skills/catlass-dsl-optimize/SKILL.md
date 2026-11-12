@@ -145,6 +145,13 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    `knowledge/dsl/pattern-gemm-optimization-ladder` 的阶梯顺序选取（波次量化 → L1 双缓冲
    → L0 双侧双缓冲），不要在同一阶段反复微调参数。
 
+   若同时满足 `mac < 0.5`、`mte2 > 0.8`、`mac + mte2 < 1.5`，先排除带宽受限：若
+   `mte2 ≥ 0.95` 且实测耗时已接近 DESIGN 的带宽下界（或不超过同 shape `torch.mm`），
+   说明该 shape 贴住带宽上限，本轮轴改为减流量、铺放或波次量化，不得按“缺流水”处理。
+   排除带宽受限后，唯一结论是**缺少流水、拷贝链与 MMAD 串行**；本轮轴只能是双缓冲、
+   `BK > SK` 或同步协议修复，禁止选铺放、减流量类改动。`cube_utilization` 接近 100%
+   不能推翻这个判断。
+
    若 `kernel_details.csv` 缺失、目标 kernel 行 task duration 为 0，或该时长与配对计时
    相差一个数量级，先按 `knowledge/profiler/torch-npu-profiler-dsl-kernels.md` 的
    Level1 + AiCMetrics 配置重采（上限 2 次）；仍不可用时，在账本写明「profiling 不可用」
@@ -157,7 +164,8 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    记录，并仅在 profile 证据足以支撑 hypothesis 时继续。
 
 3. **Pre-register.** 在 `## Performance Rounds` 增加一行草稿，填写 `Axis`、
-   `Bottleneck`、预期收益和判伪条件；Expected 必须在 benchmark 前写入。
+   `Bottleneck`、至少 2 个候选根因、能区分这些根因的判别性实验、预期收益和判伪条件；
+   Expected 必须在 benchmark 前写入。
 4. **Snapshot.** 修改前把当前 best kernel 复制到 `evidence/round-NNN/kernel-before.py`，
    便于 rejected 后恢复。
 5. **Modify.** 只修改主实现文件，修改后同步更新 `solution.json` 的源码包；不改变
@@ -173,6 +181,9 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    记录。
 9. **Decide.** 按下方噪声门禁判断 adopted / rejected。rejected 时从
    `evidence/round-NNN/kernel-before.py` 恢复 best；不要手工重建候选。
+   实测方向与预登记预期相反（例如预测 ≥1.3×、实得 <1.0×，或指标应升反降、应降反升）
+   时，不得直接 rejected 收工：必须写一条重新诊断记录（新的候选根因与判别实验），再用
+   不同的轴进入下一轮。幅度不足但方向一致时按普通 rejected 记录。
 10. **Continue.** 只有本轮已记录后才分析下一优化轴。不得复用上一轮检索结果跳过本轮核对，
     但可以复用仍适用的条目。
 
@@ -196,9 +207,18 @@ candidate 相对 best 的提升小于 `required_improvement` 时记 `rejected`�
 2. 采集一次 fresh profile，保存到对应轮的 `evidence/round-NNN/profile/`；
 3. 选择与上一轮不同的改动轴，写明新的机制与判伪条件后继续。
 
+即使已满足模式 A 的一轮下限，若 fresh profile 的归因第一名还没有作为任何一轮的 Axis，
+也不得停止；至少完成一轮针对该归因的候选改动。归因第一名指 `kernel_details.csv` 中
+task duration 占比最高的 pipe（mac / mte2 / mte1 / fix / vec）；`op_summary` 只有在该
+版本确实带 pipe 指标时才可作为替代。按阶梯映射到轴：MTE2 → 波次量化或 L1 双缓冲；
+MTE1 → L0 双侧双缓冲或 `BK > SK`；CUBE → 铺放或结构上限；FIX → epilogue 归并。若该
+映射轴已被 DESIGN 判定不可用，或已有 rejected 轮次的实测证据，可停止，并在 Final
+Verdict 写明依据。`性能要求：none` 且触发 MFU ≥ 90% 收口时，本要求不适用。
+
 仅在以下条件停止迭代并进入 Finalization：
 
-- 模式 A 达到 threshold 且至少完成 1 轮；
+- 模式 A 达到 threshold 且至少完成 1 轮，且满足上方“归因第一名已尝试”要求（MFU 收口
+  例外除外）；
 - 模式 B 至少完成 3 轮；
 - 达到 `max_iterations`（默认 30）；
 - 环境缺失导致无法继续，记录 `blocked` / `not_run` 与精确重跑命令。

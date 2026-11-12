@@ -12,10 +12,10 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/docs/en/api/kernel_api_reference.md
     title: CATLASS kernel synchronization API
   - id: mixed
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mixed/basic_mixed.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed.py
     title: CATLASS mixed Cube Vector example
   - id: sync
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/cross_flag_two_way/cross_flag_two_way.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/cross_flag_two_way/cross_flag_two_way.py
     title: CATLASS two-way cross flag example
 operator_families: [matmul, sparse-attention, elementwise]
 arch: [c310]

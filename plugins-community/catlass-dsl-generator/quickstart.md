@@ -4,7 +4,8 @@
 
 `catlass-dsl-generator` 为 Ascend NPU CATLASS DSL 算子开发提供完整流程指引，覆盖设计、
 编码、基准测试、性能优化与知识管理五个阶段。内置**离线 OKF 知识库**，支持 API 查询、
-样例检索、问题排查与性能调优，无需网络连接。
+问题排查与性能调优；知识库只描述样例，不替代源码。design / develop 前必须成功下载
+catlass master 归档到 `.catlass-dsl/references/catlass/`，下载失败即停止推进。
 
 **本版本是门禁引导工作流**：不包含 `develop_state.py`、`optimize_state.py`、`bench.py`、
 `verification.py`、`validate_reference.py`、`record_knowledge.py` 等状态机脚本；阶段推进
@@ -125,11 +126,23 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 
 `design` 会暂停并展示产物；回复“继续”即进入开发，不需要“批准”字样。
 
-`develop` 会按 `ITERATIONS.md` 逐个里程碑推进：先落一个可运行骨架，再按
-「正确性 → 边界 → 性能」扩展。阶段顺序固定为 focused test → **full test #1** →
-optimize（有目标走模式 A，无目标走模式 B 至少三轮）→ targeted/final review →
+`develop` 会按 `ITERATIONS.md` 逐个里程碑推进：含 MMAD 的算子（纯 matmul 与 CV 融合都算）
+先把每个 matmul 阶段剥成单 GEMM 骨架，**各自**按时间与流水判据判定（不达标可写豁免理由），
+再按「正确性 → 边界 → 性能细节」扩展。骨架只是测量工件，不改变最终 kernel 划分。阶段
+顺序固定为 focused test → **full test #1** → optimize（有目标走模式 A，无目标走模式 B
+至少三轮）→ targeted/final review →
 全量测试验收（kernel 变化时补跑 **full test #2**）→ [benchmark]。每次进入下一阶段前都要
 先跑门禁并通过：
+
+> 按结构找参考样例：Cube-only → `tla/kernel/matmul/basic_mmad/basic_matmul.py`；
+> Cube-Vector → `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+> Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
+> 纯 vector → `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
+> `dsl_tutorials/vector_simt_ops/`。路径以
+> 工作区 `.catlass-dsl/references/catlass/` 下 `find` 的结果为准。
+> 整体结构优先：先选阶段序列、数据流、任务映射、同步方式都接近的主参考；主参考是基线
+> 不是约束，偏离写清理由。没有足够契合的主参考时，可以组合多个分步样例，但要显式设计
+> 整体结构并照常跑 skeleton DoD。
 
 ```bash
 python3 <skills>/catlass-dsl-workflow/scripts/gate.py <阶段> --workspace <项目根>
@@ -211,7 +224,8 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <阶段> --workspace <项�
 [`catlass-dsl-knowledge/SKILL.md`](skills/catlass-dsl-knowledge/SKILL.md) 的入库标准手工
 创建文件。
 
-> 知识涵盖 DSL API、算子样例、调试方法、优化技巧及项目实测经验。查询仅读取本地文件。
+> 知识涵盖 DSL API、算子样例描述、调试方法、优化技巧及项目实测经验。查询仅读取本地
+> 文件；实际样例源码以工作区下载的 catlass 归档为准。
 
 ---
 
@@ -241,7 +255,7 @@ python3 -m pytest
 
 ## 完整生成与后续调试
 
-develop 先落可运行骨架，再一次生成主 Python 文件内的全部 kernel、host 编排及完整
+develop 先落性能骨架并达标，再扩展主 Python 文件内的全部 kernel、host 编排及完整
 `solution.json`。生成阶段只产出文件，不在本地做语法检查、模拟检查或标杆运行；不论
 一开始是否有服务器信息、或本来就在服务器上，都先生成再推进。生成完成不代表验证通过。
 

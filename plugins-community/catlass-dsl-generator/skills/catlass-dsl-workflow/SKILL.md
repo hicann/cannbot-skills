@@ -14,6 +14,10 @@ description: Use when the user asks for any CATLASS DSL operator task (design, i
 唯一不可放松的要求：**任何“通过”都必须对应真实执行记录**。没有命令、退出码和输出文件的
 结果一律视为未执行，写 `blocked` / `not_run`，不得写成通过。
 
+> **自动执行**：默认自主推进，不把阶段边界或阶段卡变成等待用户的理由。门禁通过并记录
+> 里程碑后，立即进入下一阶段；只有缺少只有用户能提供的信息、环境缺失或可行路径穷尽时
+> 才停下提问。
+
 ## 1. 启动检查（每个新任务的第一条回复前）
 
 依次完成：
@@ -27,16 +31,18 @@ description: Use when the user asks for any CATLASS DSL operator task (design, i
    以文件系统为准，不凭对话记忆续跑。
 5. **定 DSL 版本**：用户提示或任务文件已声明时直接采用；否则读取当前 Python 环境已安装
    版本（`importlib.metadata.version("ascend-catlass-dsl")`）。本地未安装时，可交互则先向
-   用户确认一次；无法交互时默认 `2.2.0`。目标版本写入阶段卡与 `DESIGN.md`；远端实际版本
-   不一致时先停下确认。
-6. **刷新参考源码**（涉及 design / develop 的任务才执行）：删除已存在的
-   `.catlass-dsl/references/catlass`，按 §6 重新下载并解压 master 归档包，确保本次任务
-   使用最新 catlass 样例。下载结果必须是 ZIP；若得到 HTML 页面或空文件，视为下载失败，
-   记录原因并用知识库兜底，不得把残留旧目录当作最新 master。
+   用户确认一次；无法交互时默认 `2.2.0`。这里只确定版本号，不得把 site-packages 里的
+   实现或源码当作 catlass 样例。目标版本写入阶段卡与 `DESIGN.md`；远端实际版本不一致时
+   先停下确认。
+6. **刷新参考源码（design / develop 的硬前置）**：删除已存在的
+   `.catlass-dsl/references/catlass`，按 §6 重新下载并解压 master 归档包。下载结果必须
+   是 ZIP；若得到 HTML 页面、空文件，或解压后没有 `examples/python/tla_dsl`，视为阻塞：
+   记录失败原因与重试命令，停止推进，不得进入 design / develop，也不得用知识库、已安装
+   Python 包源码或残留旧目录替代。只有确认样例树可 `find` 到 `.py` 后才继续。
 7. **跑门禁**：执行 `python3 <SKILL_DIR>/scripts/gate.py status --workspace <项目根>`，
    按输出定位最上游未通过项；该阶段就是当前阶段卡里的阶段。门禁失败原因必须原样带进
    阶段卡，不得省略。
-8. **输出阶段卡**，然后才允许执行动作：
+8. **输出阶段卡**，然后立即执行该阶段第一个动作，不等待用户确认：
 
    ```text
    📋 阶段卡
@@ -45,6 +51,7 @@ description: Use when the user asks for any CATLASS DSL operator task (design, i
    DSL 版本：<目标版本 + 来源：用户指定 / 本地已安装 / 默认>
    执行模式：<remote-detached | remote-connected | local>（来源：用户说明 / DESIGN.md）
    工作区：<项目根> ｜ 已有产物：<列出实际存在的关键文件>
+   参考源码：<已下载 / 缺失（阻塞）> ｜ 路径：`.catlass-dsl/references/catlass`
    门禁：<gate.py status 的输出摘要，或未通过项与原因>
    下一步：<该阶段第一个必做动作>
    ```
@@ -63,11 +70,16 @@ description: Use when the user asks for any CATLASS DSL operator task (design, i
 | 已通过算子的性能优化 | `catlass-dsl-optimize` | 已有可运行的实现、`solution.json` 与冻结的 `workload_dev.jsonl` |
 | 知识查询与记录 | `catlass-dsl-knowledge` | 无 |
 
-- 一次只在一个阶段工作；阶段切换由实际产物决定，不因“感觉可以了”或用户催促而切换。
+- 一次只在一个阶段工作：同一时刻只做当前阶段的动作、只按当前阶段的口径记录；阶段切换由
+  实际产物和门禁决定，不因“感觉可以了”或用户催促而切换。
 - 用户未指定阶段时，选最上游未满足的产物：无 `DESIGN.md` → design；有设计未交付 →
   develop；已有交付 → bench / optimize。
-- 禁止在一次回复里跨阶段执行；禁止在 develop 里重做设计与 reference；禁止在 optimize
-  里改语义、容差或计时口径。
+- **阶段隔离不是停止点**：禁止把多个阶段的动作混在同一次执行/校验里（例如 design 未冻结
+  就写实现、focused test 未过就跑 optimize），但当前阶段门禁通过并记录后，必须立即进入
+  下一阶段继续推进；不得停在阶段边界等用户确认，也不得用阶段卡或进展汇报代替继续执行。
+  门禁 FAIL 只禁止向下游阶段推进，不禁止在本阶段继续诊断和修复；失败用例应回到本阶段的
+  debug 循环，批量修复、逐例复验后重跑该门禁，不得把“如实汇报失败”当作阶段终点。
+- 禁止在 develop 里重做设计与 reference；禁止在 optimize 里改语义、容差或计时口径。
 
 ## 3. 阶段推进（带门禁）
 
@@ -139,6 +151,9 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
   全量测试通过后直接 finish，不采集性能，也不写 benchmark 里程碑。
 - 每个里程碑先在 `ITERATIONS.md` 追加一行，再进入下一步；写实现文件前至少已有
   `skeleton` 记录（可运行则记 `passed`，无 NPU 则记 `blocked` / `not_run` 并附重跑命令）。
+  包含 MMAD 的算子（纯 matmul 与 CV 融合都算）在 `remote-connected` / `local` 模式下，
+  **每个 matmul 阶段**都必须按性能 DoD 各自判定为 `passed` 或 `passed (waived)`，不得
+  只测主 GEMM、不得因整体不是 GEMM 主导而跳过，也不得用“能跑通”记过。
 - 代码变化后，受影响的测试、评审与性能结论需要重新评估；交付只认当前 kernel 的全量测试
   与 final review。优化全部未采纳、kernel 未变化时 `full test #1` 继续有效；采纳改动导致
   kernel 变化时必须补跑 `full test #2`，优化轮次作为过程证据保留，不要求重跑。
@@ -243,15 +258,24 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
   4. 解压到临时目录（路径尽量短；Windows 上过深的路径会触发 260 字符限制），再把解压
      出的内容移动到 `.catlass-dsl/references/catlass/`，使最终样例位于
      `.catlass-dsl/references/catlass/examples/...`；
-  5. 确认该目录存在且包含 `examples/python/tla_dsl`。下载或解压失败时记录原因，继续用
-     知识库兜底，不得把残留旧目录当作最新 master。
+  5. 确认该目录存在且包含 `examples/python/tla_dsl`，且 `find ... -name '*.py'` 能列出
+     样例。下载、校验或解压任一失败即为阻塞：记录失败原因与重试命令，停止推进，不得进入
+     design / develop，也不得用知识库、已安装 Python 包源码或残留旧目录替代。
 
   下载、解压和移动的具体命令按当前平台选择，只要求每次任务启动都重新获取最新 master。
 
   样例分布在 `examples/python/tla_dsl/` 下的 `tla/kernel`、`experimental/kernel`、
   `dsl_tutorials`、`helpers` 四类目录，挑选参考前先全量浏览（例如
   `find <refs>/examples/python/tla_dsl -name '*.py' | sort`），避免只看顶层或单个子树
-  而漏掉 `experimental/kernel/matmul/...` 这类深层样例。
+  而漏掉 `experimental/kernel/matmul/...` 这类深层样例。按结构优先看：Cube-only →
+  `tla/kernel/matmul/basic_mmad/basic_matmul.py`；Cube-Vector →
+  `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+  Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
+  纯 vector → `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
+  `dsl_tutorials/vector_simt_ops/`。整体结构优先：先选阶段序列、数据流、任务映射、同步方式都接近的
+  主参考；主参考是基线不是约束，偏离写清理由。没有足够契合的主参考时，可以组合多个
+  分步样例，但要显式设计整体结构并照常跑 skeleton DoD。同名样例不存在时按结构检索
+  等价样例，不得凭记忆引用。
 - 用户指定标杆代码并禁止参考兄弟目录时：标杆文件、其用例文件与 catlass 参考源码仍可读，
   禁止扫描同工程其他算子目录。
 - 用户暂未提供上板信息时：design 与代码生成照常推进，验证与性能记 `blocked` /
@@ -269,6 +293,8 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
 ```text
 🔎 流程自检 ｜ 阶段：<...> ｜ 依据：<SKILL.md 约束原文> ｜ 本轮执行：<命令或文件> ｜ 证据：<路径> ｜ 下一步：<动作>
 ```
+
+自检不是停止点：输出后立即执行“下一步”，除非该动作需要用户提供信息。
 
 ## 9. 语言
 

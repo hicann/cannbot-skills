@@ -13,13 +13,13 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/core_api.py
     title: Current range and synchronization implementation
   - id: mmad
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul.py
     title: MMAD unit_flag and pipeline example
   - id: vadd
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_vadd/basic_vadd.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/vec/basic_vadd/basic_vadd.py
     title: VADD flag, mutex and barrier variants
   - id: auto-sync
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul_auto_sync.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul_auto_sync.py
     title: MMAD compiler-inserted synchronization example
   - id: component-pipeline-kernel
     resource: project-evidence:python/tla_dsl/examples/end_to_end/chunk_gla_fwd_kernel_o/chunk_gla_fwd_kernel_o_kernels.py?kernel-sha256=9678ff7347025489d5153413075a577123b4e7f527803def05aadd0d2f31d0b0

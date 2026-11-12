@@ -10,16 +10,16 @@ verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: scalar
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/debug_print/README.md
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/debug_print/README.md
     title: Scalar debug print guide
   - id: tensor
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/print_tensor/README.md
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/print_tensor/README.md
     title: Tensor print guide
   - id: scalar-code
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/debug_print/debug_print.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/debug_print/debug_print.py
     title: Scalar print executable example
   - id: tensor-code
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/print_tensor/print_tensor.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/print_tensor/print_tensor.py
     title: Tensor print executable example
 arch: [c310]
 ---

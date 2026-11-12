@@ -25,10 +25,21 @@ skills:
 
 1. 完整加载 `catlass-dsl-workflow` 的 `SKILL.md`（入口契约）。
 2. 按其中的启动检查确定阶段、完整读取目标阶段 `SKILL.md`、检查工作区已有产物。
-3. 在回复开头输出阶段卡，然后才允许执行动作。
+3. 在回复开头输出阶段卡，然后立即执行该阶段第一个动作，不等待用户确认。
+4. 涉及 design / develop 时，确认 `.catlass-dsl/references/catlass/examples/python/tla_dsl`
+   已成功下载且能列出 `.py` 样例；下载失败即停止推进，不得用知识库或已安装包源码替代。
 
 未加载入口契约就开始设计、实现、调试、benchmark 或优化，视为流程违规：立即停止，
 回到入口重新执行。
+
+## 上板运行固定动作
+
+1. 运行命令必须以 `timeout -k 5 60s` 开头，禁止 `long` / 默认超时 / 裸跑。
+2. 跑完立刻在 `ITERATIONS.md` 的 Run Log 写 `Timeout / Wall / Exit` 三项。
+3. `Wall > 120s` 或 `Exit = killed by timeout` 时，下一条运行必须缩小 shape 或加中间打印，
+   不允许原样重试。
+4. 编译与运行分成两条命令，只重编改动过的 kernel。
+5. 单例超过 60s 按失败处理，不是“设备慢”。
 
 ## 阶段路由（简表）
 
@@ -91,8 +102,31 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
 - **本地只生成**：本地生成、远端验证时，本地只做设计与代码生成。reference（标杆）运行、
   静态检查、模拟检查、编译、上板、精度、benchmark、profiling 全部留到真实环境，本地
   一件都不做；NPU 类结果记 `blocked` / `not_run`，待环境就绪后在真实环境补跑。
-- **先跑一次再扩展**：develop 先落一个可编译、可执行的最小骨架并记录，再按
-  「正确性 → 边界 → 性能」增量扩展。
+- **先跑性能骨架再扩展**：凡含 MMAD 的算子（纯 matmul 与 CV 融合都算）先剥掉 vector /
+  epilogue，把**每个 matmul 阶段**做成单 GEMM 骨架，用各自的最大 dev shape（或各维 ≥50%
+  的等价合成 shape）按流水线指标（`mac` / `mte2` / `overlap` 与同 shape `torch.mm` 对比）
+  判定并记录，再叠加 epilogue、其余 vector / GEMM 阶段；多 matmul 时逐个测，不得只测主
+  GEMM，也不得因整体不是 GEMM 主导而跳过。骨架只用于测量，不改变 kernel 划分，也不作为
+  拆成独立 Cube / Vector kernel 的理由。正确性在性能骨架之后收敛，不得先落一个能跑但
+  串行的骨架。CV 融合算子叠完 epilogue 后要回测一次 GEMM 段的有效算力，与骨架同 shape
+  偏差超过 15% 时写清归因（tile 退化、交棒等待或流水被打断）。
+- **骨架判据可豁免**：指标不达标但有可核对理由（带宽受限、尾块、波次、profiler 口径等）
+  时，写清实测值、原因、已做过的判断或改动和 optimize 补偿计划，记 `passed (waived)` 继续，
+  不设二次确认。
+- **多 kernel 精度先定位首个偏差边**：跨 kernel 中间张量出现数值不匹配时，先按
+  `knowledge/debug/multi-kernel-precision-localization.md` 建阶段 oracle；局部检查用
+  标杆中间量作输入，下游通过不能证明上游正确。
+- **对齐优先于容差**：标杆定义的存储/累加 dtype、舍入位置与模式、归约顺序必须复现；
+  不复现就是精度 bug，容差只吸收完全对齐后的浮点尾差，不能当作保留下来的理由。
+- **按结构选参考样例**：Cube-only → `tla/kernel/matmul/basic_mmad/basic_matmul.py`；
+  Cube-Vector → `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+  Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
+  纯 vector → `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
+  `dsl_tutorials/vector_simt_ops/`。整体结构
+  优先：先选阶段序列、数据流、任务映射、同步方式都接近的主参考；主参考是基线不是约束，
+  偏离写清理由。没有足够契合的主参考时，可以组合多个分步样例，但要显式设计整体结构并
+  照常跑 skeleton DoD。路径以工作区 `.catlass-dsl/references/catlass/` 下 `find` 的
+  结果为准。
 
 ## 自动执行
 
@@ -102,6 +136,9 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
   不要停下来找用户确认，直到解决或所有可行路径都确认真实不可行。
 - **等待就等着**：需要等待外部事件（远端任务、编译、benchmark、设备释放、长跑用例）时，
   直接等待并轮询，不要结束回合，也不要用“进展汇报”代替继续执行。
+- **失败不是终点**：测试失败或门禁 FAIL 只表示当前阶段未通过、不得进入下游，不表示本轮
+  工作结束。存在可执行的诊断或修复路径时，继续定位、修复并重跑该阶段门禁；如实汇报失败
+  不等于任务完成，不得以“已汇报”为由结束回合。
 - **只在真阻塞时停**：仅当缺少只有用户能提供的信息（凭据、上板信息、无法自行判断的方案
   取舍），或可行路径已穷尽时才向用户提问，并列出已尝试的路径和失败原因。
 - **优化不提前收口**：optimize 模式 B 默认做完 3 轮、模式 A 至少 1 轮；不得以收益小、
@@ -109,16 +146,15 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
 
 ## 超时纪律
 
-编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块，一次只做一类
-动作，禁止串成一条长命令。上板或可能阻塞的命令必须带硬超时：编译独立 300s，单例运行
-`timeout -k 5 60s`，批量按分片逐段执行，禁止整批套一次性超时，禁止裸跑。超时、无输出
-增长或卡住时立即终止命令，不得死等或加大超时。
+执行细则见「上板运行固定动作」。补充三条：
 
-**重要！本地生成、远端调试时**，不得用一条超时命令打包传输、编译与运行；传输、编译、
-单例运行各自独立，运行算子逐例拆成单条命令并加 `timeout -k 5 60s`。
+- 编译、算子运行、benchmark、profiling 与普通 shell 命令拆成独立命令块，一次只做一类动作，
+  禁止串成一条长命令；编译独立 300s，批量按分片逐段执行，禁止整批套一次性超时。
+- 超时、无输出增长或卡住时立即终止命令，不得死等或加大超时。
+- 终止后先做卡健康判定：在同一张卡跑一个 60s 内的小探针或官方算子；探针能过就判定为本
+  算子实现的死锁，直接转 debug 定位；探针也失败才判定为设备问题，换卡重试一次。
 
-终止后先做卡健康判定：在同一张卡跑一个 60s 内的小探针或官方算子；探针能过就判定为本
-算子实现的死锁，直接转 debug 定位；探针也失败才判定为设备问题，换卡重试一次。
+**重要！本地生成、远端调试时**，传输、编译、单例运行各自独立，不得用一条超时命令打包。
 
 ## 维护者通道（不参与算子流程）
 

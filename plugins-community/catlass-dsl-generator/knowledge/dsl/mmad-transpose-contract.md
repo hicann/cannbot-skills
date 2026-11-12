@@ -15,7 +15,7 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/docs/en/api/kernel_api_reference.md
     title: CATLASS layout tag, C0 and stride constraints
   - id: fa
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/flash_attention_infer/flash_attention_infer.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/attention/flash_attention_infer/flash_attention_infer.py
     title: CATLASS ColumnMajor K operand recipe in the flash-attention example
 operator_families: [matmul, sparse-attention]
 arch: [c310]

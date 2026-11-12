@@ -13,7 +13,7 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/catlass/core_api.py
     title: SIMT and tensor indexing Core API
   - id: simt-example
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/simt/basic_vadd_simt.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simt_ops/basic_vadd_simt/basic_vadd_simt.py
     title: Basic SIMT VADD example
   - id: indexing-tests
     resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/tests/test_tensor_indexing.py

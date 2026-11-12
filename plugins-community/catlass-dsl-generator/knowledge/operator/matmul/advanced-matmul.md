@@ -10,10 +10,10 @@ verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: batched
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/batched_matmul/batched_matmul.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/batched_matmul/batched_matmul.py
     title: Batched matmul end-to-end example
   - id: grouped
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/grouped_matmul_slice_m/grouped_matmul_slice_m.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/gmm/grouped_matmul_slice_m/grouped_matmul_slice_m.py
     title: Grouped matmul slice-M example
 operator_families: [matmul]
 arch: [c310]

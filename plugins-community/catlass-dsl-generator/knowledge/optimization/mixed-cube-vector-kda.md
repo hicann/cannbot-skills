@@ -11,7 +11,7 @@ verified:
   - {by: process:catlass-dsl-kda-architecture-review, at: '2026-10-11T00:00:00+08:00'}
 sources:
   - id: mixed
-    resource: https://gitcode.com/cann/catlass/blob/6ccf88e89723b65461e9921047c7970a71b67b42/python/tla_dsl/examples/end_to_end/basic_mixed/basic_mixed.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed.py
     title: CATLASS DSL mixed Cube and Vector example
   - id: api
     resource: https://gitcode.com/cann/catlass/blob/6ccf88e89723b65461e9921047c7970a71b67b42/python/tla_dsl/catlass/core_api.py

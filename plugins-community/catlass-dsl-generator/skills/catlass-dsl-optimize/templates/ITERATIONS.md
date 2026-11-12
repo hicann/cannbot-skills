@@ -13,6 +13,14 @@
 | Round | Axis | Bottleneck | Before (ms) | After (ms) | Decision | Evidence |
 |------:|------|------------|------------:|-----------:|----------|----------|
 
+## Diagnosis
+
+每轮预登记至少 2 个候选根因；实测与预期方向相反时必须追加一条重新诊断记录，
+不得直接 rejected 收工。
+
+| Round | Candidate root causes (≥2) | Discriminative test | Expected | Actual | Conclusion |
+|------:|----------------------------|---------------------|----------|--------|------------|
+
 ## Final Verdict
 
 - 轮次数：

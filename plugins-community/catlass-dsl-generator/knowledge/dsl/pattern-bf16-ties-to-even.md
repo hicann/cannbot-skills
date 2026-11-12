@@ -44,6 +44,8 @@ rounded = tla.bitwise_and(
 - 只适用于 f32→bf16；f16 的偏置与掩码位数不同。
 - 依赖小端与 IEEE754 位序，不允许在打包/解包路径重复做。
 - 会增加一段全 tile 的 SIMD 位运算，需评估对流水的影响。
+- 本条目在 2.1.0 上验证；目标版本升级后需重新确认 `to()` 的默认舍入模式是否仍为
+  round-half-away-from-zero，再决定是否继续仿真。
 
 # 失败表现
 
@@ -52,8 +54,8 @@ rounded = tla.bitwise_and(
 
 # 验证方法
 
-构造 halfway 输入（如 `1 + 2^-9`），与 numpy 的 `round-half-to-even` 结果逐位比对；
-再用同一 shape 与 GEMM 输出做 bitwise 比较。
+构造 halfway 输入（如 `1 + 2^-8`；1 附近 bf16 相邻间隔为 `2^-7`，中点是 `1 + 2^-8`），
+与 numpy 的 `round-half-to-even` 结果逐位比对；再用同一 shape 与 GEMM 输出做 bitwise 比较。
 
 接口行为以固定提交的实现为准。[^api]
 

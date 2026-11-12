@@ -1,7 +1,7 @@
 ---
 type: CATLASS DSL Programming Concept
 title: 广播加载与 SIMT 收尾
-description: 用 DIST_BRC_B32 做行广播，用 simt 模式的 thread_block_dim 处理非对齐标量写。
+description: 用 DIST_BRC_B32 做行广播，用 simt 模式的 thread_block_dim 处理非对齐标量写；混合 pattern 先按 UB 空间反推 tile 面积，再调旋钮。
 tags: [catlass-dsl, vector, broadcast, simt, epilogue]
 status: stable
 generated: {by: process:catlass-dsl-pattern-capture, at: '2026-10-23T12:00:00Z'}
@@ -57,6 +57,22 @@ with tla.vec.func(mode="simt", thread_block_dim=128):
   `mark_layout_dynamic` 会报 `requires statically shaped buffers`。
 - UB 标量访问的基址必须直接来自 `tla.allocate` 返回的指针；先对 arena 指针做加减
   再标量访问会报 `tla.vec.func cannot outline scalar access`。
+
+# 空间预算（先算这笔账，再调旋钮）
+
+SIMD 段与 SIMT 段处理的是**同一块** tile，UB 剩余空间就是 tile 面积的上限；tile 面积又决定
+搬运、广播、barrier、写回这些每块固定开销能摊到多少元素。该段吞吐明显低于向量占比应有的
+水平时，先核空间账，再调算子细节：
+
+- 每多一份整 tile 的中间缓冲，tile 面积就被钉低一档；同一块缓冲在多段之间复用，
+  等于把面积上限抬高一档。
+- 优先做不改算法的那件事：tile 内**原地复用**（读出 → 改写 → 写回同一块）。SIMT region
+  要求静态 shape，省空间只能靠缩 buffer，不能靠动态 shape。
+- 判定看 elem/core/cycle 而不是只看向量占比：`elem/core/cycle = 该段元素数 ÷（该段耗时 ×
+  参与 block 数 × 核频）`；向量占比接近 1 但该值明显偏低，说明单块 tile 太小、固定开销
+  摊不开，此时放大 tile 比继续调算子细节更有效。
+- 放大后仍要 fresh profile 复核：吞吐随面积增长通常次线性，固定开销占比降下来后瓶颈会切到
+  别的管道，此时再按该管道的判据决定下一步。
 
 # 收益参考
 

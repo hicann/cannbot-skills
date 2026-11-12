@@ -1,7 +1,7 @@
 ---
 type: CATLASS DSL Programming Concept
-title: 预计算索引结构（bucket + 链表）替代 gather
-description: 逐 chunk 寄存器 gather 的成本随 V 线性增长（O(M·K·V/64)）；预计算索引把它降到 O(M·K + M·V/BN)，大 V 时快两个数量级。
+title: 预计算索引结构（bucket + 链表 / scatter run 表）
+description: 逐 chunk 寄存器 gather 的成本随 V 线性增长（O(M·K·V/64)）；预计算索引把它降到 O(M·K + M·V/BN)。gather 用 bucket + 链表，scatter 用按 tile 分组的 CSR / run 表。
 tags: [catlass-dsl, gather, index, scatter, simt, fallback]
 status: stable
 generated: {by: process:catlass-dsl-pattern-capture, at: '2026-10-23T15:20:00+08:00'}
@@ -44,6 +44,55 @@ arch: [c310]
 
 因为每个 (row, k) 只属于一个 V 块，写入不需要原子操作；每行由固定线程负责，
 天然满足单写者原则。
+
+# scatter：run 表（CSR）形态
+
+官方样例只有 gather，没有 scatter，但 SIMT 标量读写的写法仍以
+`examples/python/tla_dsl/experimental/kernel/indexer/gather/gather.py` 为准；
+scatter 的特殊之处在索引结构：**按输出 tile 把目标地址压平成 CSR / run 表，不要用链表**。
+
+- 建表：只保留 owned id（越界 id 在建表时丢弃）；按 `(tile, row, col, k)` 排序后，
+  对每个 `(row, col)` 把重复 id 按 k 递增合并成一段 run。表为 `tile_off[t]`（该 tile
+  的 run 区间）、`run_row[]`、`run_col[]`、`run_start[]` / `run_end[]`（`run_val` 的
+  区间）与 `run_val[]`（上游值，按 k 递增）。
+- 消费：每个线程取若干整段 run，`acc = Σ run_val[s0..s1)`，再对目标格执行一次
+  `ub[row, col] += acc`。每个目标格只有一个线程写一次：无原子、无跨 lane 争用，
+  重复 id 的顺序语义在建表时已复现。
+
+```python
+# 消费（SIMT；thread_block_dim 与 run 总数解耦，按段数跨步）
+r0, r1 = tile_off[t], tile_off[t + 1]
+for rr in tla.range(r0 + tid, r1, threads):
+    acc = tla.as_numeric(0.0)
+    for j in tla.range(run_start[rr], run_end[rr], 1):
+        acc = acc + run_val[j]
+    ub[run_row[rr], run_col[rr]] = ub[run_row[rr], run_col[rr]] + acc
+```
+
+成本：一次 `O(M·K log(M·K))` 建表（建议在设备上用 torch 完成，避免 CPU 侧大规模
+排序与索引拷贝），加多张表的 GM 读写；表容量（tile 数、
+run 数）在建表时静态校验，超限要分块或报错。SIMT `tla.vec.func` region 需要静态
+shape 的缓冲，表按固定容量分配、只读已填充的前缀，循环上界全部取自 `tile_off`。
+
+## 放置位置与失败特征
+
+- 放置位置不做默认规定，两种都可行，按 `DESIGN.md` 的收益与风险权衡：
+  - **独立 Vector kernel**：kernel 边界提供完整同步与可见性，该段可独立复现、独立
+    替换；代价是中间结果（如 fp32 logits）要经 GM 往返。
+  - **与 Cube 融合的 epilogue**（Cube→fixpipe→UB→SIMD→SIMT→SIMD）：省掉中间结果的
+    GM 往返，但交棒面更大。至少保持单写者；SIMD/SIMT 交界按 `gather.py` 样例在 SIMT
+    块后放 `pipe_barrier`；单写者结构下通常不需要额外线程间同步，存在线程间写后读
+    依赖时再用 `tla.arch.sync_threads()`（该接口只能在 SIMT region 内使用）。
+- 该段在骨架阶段验证不到（骨架只测纯 GEMM），建议先按两段式跑通全量再合并，理由与
+  验证记录写入 `ITERATIONS.md`。融合后 SIMD/SIMT 的数据可见性、UB 复用是否需要额外
+  处理，以目标版本实测为准，本文档不作假定。
+- 典型失败特征：绝大多数元素正确、个别元素异常且重跑结果不一致，shape 放大后才出现；
+  这类现象优先按竞态或可见性排查，不要先当精度问题调容差。
+
+## 验证方法
+
+最小 shape 对拍，覆盖重复 id、越界 id 与 `K < 线程数`；同一进程重复运行两次逐位比较
+确认确定性；确认每个目标格写次数为 1、run 覆盖全部 owned 项。
 
 # 若坚持用 gather：2.1.0 的实测契约
 

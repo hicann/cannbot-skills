@@ -86,6 +86,68 @@ class 或模板。
 - 总搬运字节 = Σ（各输入的重读次数 × 其体积），给出具体数字，并折算成带宽下界时间
 - tiling 参数与参考样例不同时，逐项说明差异、理由及对搬运量的影响
 
+### GEMM 骨架与优化阶梯（含 MMAD 时必填）
+
+- 是否含 MMAD：`<是 / 否>`；包含的 matmul 阶段：`<QK / PV / dK / dV ...>`；纯 vector
+  算子写“否”并说明为何不适用
+- 知识条目：`knowledge/dsl/pattern-gemm-optimization-ladder`（须完整读取）
+- 目标级别：`<第 3 级（默认）/ 第 2 级（须写理由）>`；理由：`<tiling、容量、同步复杂度>`
+- 骨架验证 shape：`<主 matmul：M, N, K, dtype, batch>`；来源 dev 用例：`<uuid>`
+- 全部 matmul 阶段清单（逐行）：`<名称 / 所在 kernel 或阶段 / 预计占比 / 各自最大 dev shape(M,N,K,dtype,batch) / 来源 uuid；每个都要各自跑一次骨架评测>`
+- 骨架形态：`<剥掉 vector / epilogue 后的单 GEMM；与最终融合 kernel 的差异，以及融合后的真实占用由哪一步复核；骨架仅用于测量，不反推 kernel 划分>`
+- 首版骨架必须包含：`<L1A/L1B 各 2 份、L0A/L0B 各 2 份、BK > SK、auto_sync 或等价 flag 结构>`
+- 明确排除的反模式：`<单缓冲串行、BK == SK、多个 ready flag 共享同一 MTE1→CUBE 对>`
+- skeleton 性能验收：默认判据、豁免与带宽受限规则见 `catlass-dsl-develop/SKILL.md` 的
+  「skeleton 性能 DoD」；不达标但有可核对理由时记 `passed (waived)`，理由写入
+  ITERATIONS；验收 shape 与来源 dev 用例同上
+
+### 结构类型与参考样例
+
+- 整体结构：`<阶段数 / Cube-Vector 交替方式 / 数据流 / 任务映射 / 同步方式>`
+- 结构类型：`<Cube-only / Cube-Vector / Cube-Vector-Cube / Vector-only>`
+- 主参考样例（整体结构，可为空）：`<Cube-only → tla/kernel/matmul/basic_mmad/basic_matmul.py；Cube-Vector → experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py；Cube-Vector-Cube → experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py；Vector-only → tla/kernel/vec/basic_vadd/basic_vadd.py、dsl_tutorials/vector_simd_ops/、dsl_tutorials/vector_simt_ops/；没有足够契合的样例时写“无”>`
+- 整体结构匹配点 / 偏离点：`<阶段序列 / 数据流 / 任务映射 / 同步；偏离时写理由>`
+- 任务映射与结论迁移：`<样例的任务分解 → 本 kernel 的任务分解；逐项说明哪些结论可迁移、
+  哪些必须重算（并发度、数据复用、每块工作量、归约范围、跨核 / 跨引擎同步开销等），
+  并给出核算值；设计期估算即可，后续用 profile 校正>`
+- 局部参考样例（补机制或组合）：`<path + 机制，如 gather SIMT / atomic add / epilogue；或组合方案>`
+- 组合后的整体结构（无主参考时必填）：`<阶段顺序 / 接口 / 同步 / 验证方式>`
+- 不适用点：`<主参考与本算子的差异，以及准备怎么改>`
+
+### 数值契约（所有算子必填）
+
+先固定每个阶段/中间量的数值语义。单 kernel 内部的 C→V→C、epilogue、fixpipe 窄化同样要
+逐行列出，不只看跨 kernel 边。
+
+| 阶段 / 中间量 | 存储 dtype | 累加 dtype | 窄化或提升发生在哪一步 | 舍入 / 饱和 / 近似 |
+|---|---|---|---|---|
+| `<...>` | `<...>` | `<...>` | `<...>` | `<...>` |
+
+标杆步骤映射（逐行覆盖 `reference.py` 的每个计算步骤，含 cast / scale / 归约 / scatter /
+广播，不得跳步或合并；漏一步视为契约未完成）：
+
+| reference 步骤 | 对应 kernel 阶段 | 存储 / 累加 dtype | 舍入与顺序 | 对齐结论 |
+|---|---|---|---|---|
+| `<...>` | `<...>` | `<...>` | `<...>` | `<一致 / deviation>` |
+
+- reference 精度路径：`<输入 f16/bf16 是否先 .float() 再计算、结果按输出 dtype 还是 f32 转回；必须与 candidate 的转换点一一对应>`
+- 累加 / 归约顺序：`<K 分块与 BK 循环顺序、是否 splitK、atomic add、分段归约、online softmax 或整行一趟；哪些会改变结果、误差量级、是否在容差内>`
+- 舍入 / 饱和 / 近似：`<cast 的 round mode（如 RINT，支持情况随子包而异）、f32→f16 溢出处理、HF32、exp/rcp 近似；模式支持范围以目标 ascend-catlass-dsl 版本的包实际 API 能力为准，不支持时写替代方案，不得按“应该支持”假设>`
+- 无效值与边界语义：`<padding 是否参与归约（sum 补 0 / max 补 -inf）、被 mask 的 lane、空输入、全 mask 行、NaN/Inf 传播>`
+- 容差口径（按输出 dtype 写死）：`<max_atol / max_rtol / required_matched_ratio / max_error_cap；debug 期不得放宽，放宽必须改设计并记录>`
+- 与标杆的对齐结论：`<逐项一致；或列出 deviation：哪一项没复现、为什么不可复现、量级或对照实验、影响用例、补偿计划、high risk；不得只写“容差内”>`
+
+### 跨 kernel 阶段 oracle（多 kernel 时必填）
+
+- 跨 kernel 边：`<from → to；中间量名称/路径>`
+- 数学语义：`<...>`
+- shape/stride/有效区/padding：`<...>`
+- 输入/输出 dtype、累加 dtype、舍入位置：`<...>`
+- 归约/重复 ID/chunk 顺序：`<...>`
+- 消费分支：`<...>`
+- 对应 oracle：`<reference 中间量 / 独立实现 / 替代验证>`
+- 阶段检查计划：`<局部检查、真实链路、双向替换>`
+
 ### 内存与同步
 
 说明 GM/L1/L0/UB 等内存空间、buffer、pipeline、flag、mutex 或 barrier 的使用方式。

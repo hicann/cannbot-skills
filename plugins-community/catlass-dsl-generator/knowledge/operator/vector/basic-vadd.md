@@ -9,10 +9,10 @@ verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
 sources:
   - id: source
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_vadd/basic_vadd.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/vec/basic_vadd/basic_vadd.py
     title: Basic VADD source
   - id: guide
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_vadd/README.md
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/vec/basic_vadd/README.md
     title: Basic VADD guide
 operator_families: [elementwise, vadd]
 arch: [c310]

@@ -12,7 +12,7 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/docs/en/core_concepts/tensor_layout.md
     title: CATLASS Tensor and Layout concepts
   - id: simt
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/vector_simt/vector_simt.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/vector_simt_ops/basic_vadd_simt/basic_vadd_simt.py
     title: CATLASS SIMT scalar access example
 operator_families: [sparse-attention, matmul, elementwise]
 arch: [c310]

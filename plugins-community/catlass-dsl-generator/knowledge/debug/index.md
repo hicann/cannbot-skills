@@ -7,4 +7,5 @@
 - [AICError 异常定位与 msDebug Core dump 解析](aicerror-exception-localization.md)
 - [Cube Vector 死锁与 Credit 审计](cube-vector-deadlock-and-credit-audit.md)
 - [尾块数据损坏定位](tail-corruption-localization.md)
+- [多 kernel 精度定位与标杆对齐](multi-kernel-precision-localization.md)
 - [原子累加残值分布诊断](atomic-residue-pattern-diagnostic.md)

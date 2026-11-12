@@ -9,10 +9,10 @@ verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-10T00:00:00Z'}
 sources:
   - id: mmad
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul.py
     title: MMAD buffering example
   - id: mixed
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mixed/basic_mixed.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed.py
     title: Mixed Cube and Vector data movement
 operator_families: [matmul, mixed, elementwise]
 arch: [c310]

@@ -10,10 +10,10 @@ verified:
   - {by: process:catlass-dsl-source-audit, at: '2026-08-29T00:00:00Z'}
 sources:
   - id: kernel
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul.py
     title: Basic MMAD kernels
   - id: guide
-    resource: https://gitcode.com/cann/catlass/blob/81da64bca9da5c782f6589541b967456d4fdc4c7/python/tla_dsl/examples/end_to_end/basic_mmad/README.md
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/README.md
     title: Basic MMAD guide
 operator_families: [matmul]
 arch: [c310]

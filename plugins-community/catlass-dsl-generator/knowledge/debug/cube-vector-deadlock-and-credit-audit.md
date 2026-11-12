@@ -9,10 +9,10 @@ verified:
   - {by: human:maintainer, at: '2026-09-20T00:00:00-07:00'}
 sources:
   - id: mixed
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mixed/basic_mixed.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mixed/basic_mixed.py
     title: CATLASS mixed cross-core flag pattern
   - id: sync
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/cross_flag_two_way/cross_flag_two_way.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/dsl_tutorials/cross_flag_two_way/cross_flag_two_way.py
     title: CATLASS two-way cross flag example
 operator_families: [sparse-attention, matmul]
 arch: [c310]

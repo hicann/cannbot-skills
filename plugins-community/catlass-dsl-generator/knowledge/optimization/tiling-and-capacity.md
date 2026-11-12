@@ -1,7 +1,7 @@
 ---
 type: CATLASS DSL Optimization Guide
 title: Tile 与本地内存容量预算
-description: 依据 C310 L1/L0/UB 容量筛选 tile 候选，并用实测决定是否接受。
+description: 依据 C310 L1/L0/UB 容量筛选 tile 候选，并用实测决定是否接受；多段共用同一 UB tile 时按剩余空间反推 tile 面积。
 tags: [catlass-dsl, optimization, tiling, memory, c310]
 status: stable
 generated: {by: process:catlass-dsl-source-extract, at: '2026-08-10T00:00:00Z'}
@@ -12,7 +12,7 @@ sources:
     resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/catlass/base_dsl/arch.py
     title: C310 local-memory capacities
   - id: mmad
-    resource: https://gitcode.com/cann/catlass/blob/7b574fb3547e76bff47c8514b07741d123a2766b/python/tla_dsl/examples/end_to_end/basic_mmad/basic_matmul.py
+    resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/basic_mmad/basic_matmul.py
     title: MMAD tiling implementation
 operator_families: [matmul, elementwise]
 arch: [c310]
@@ -49,6 +49,17 @@ L0C         = 256 * 256 * 4 = 262144 bytes <= 262144
 ```
 
 L0C 在此正好触及容量上限，没有额外 accumulator 空间。[^mmad]
+
+## UB 多段共用同一 tile
+
+SIMD 段与 SIMT 段处理同一块 tile 时（典型是读改写型 epilogue），UB 剩余空间直接就是 tile
+面积的上限：每多一份整 tile 的中间缓冲，tile 面积就被压低一档。不改算法的放大手段是在 tile
+内原地复用：读入 → 改写 → 写回同一块缓冲，省掉一份整 tile 占用。
+
+SIMT region 要求静态 shape，所以省空间只能缩 buffer，不能靠动态 shape 少分配。判定要在
+测量之后：向量占比接近 1 而元素吞吐明显偏低时，先核算 tile 面积与每块固定开销的摊销，
+再决定是放大 tile 还是换结构。具体写法见
+[广播加载与 SIMT 收尾](../dsl/pattern-broadcast-and-simt-epilogue.md)。
 
 # 代码模式
 
