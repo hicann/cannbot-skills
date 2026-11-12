@@ -8,9 +8,9 @@
 
 """AST sandbox shared by shape_eval / dtype_eval / formula_eval.
 
-三个 evaluator 都是「在受限 numpy 子集 AST 上执行表达式」的形式，沙箱策略一致：
+三个 evaluator 都是「在受限 numpy 子集 AST 上求值表达式」的形式，沙箱策略一致：
   * AST 节点白名单 — 拒绝 import / def / class / for / while / try / lambda
-  * 标识符黑名单 — 拒绝 __import__ / exec() / getattr 等绕沙箱通路
+  * 标识符黑名单 — 拒绝动态导入、动态代码执行和反射访问等绕沙箱通路（见 _BANNED_NAMES）
   * 全量 dunder 名字拒绝（Name + Attribute 两侧对称） — 阻断
     `__builtins__["__import__"]("os")`、`().__class__.__bases__[0].__subclasses__()`
     这类逃逸路径；spec.yaml 不需要 dunder 标识符

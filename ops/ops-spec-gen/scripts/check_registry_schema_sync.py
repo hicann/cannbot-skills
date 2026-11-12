@@ -11,12 +11,14 @@
 
 背景：schema enum 与 registry 当前需要手工同步；漂移会让 spec 看起来通过 stage 1 但
 stage 2 报名字未知，或反过来。本脚本批量检查所有已对应 enum，差异 ⇒ exit 1。
+官方 dtype/format 全集以 schema 为准，本脚本另行检查其中的别名、限制列表及芯片引用。
 
 不在本脚本范围（这些 registry 的语义不是简单 enum）：
   * category_paradigm_map.yaml — 映射，不是单一 enum
   * boundary_min_cases.yaml    — 数据驱动 stage 6
   * tolerance_defaults.yaml    — 默认值，不是 enum
 """
+
 from __future__ import annotations
 
 import json
@@ -24,6 +26,8 @@ import sys
 from pathlib import Path
 
 import yaml
+
+from support_catalog import load_catalog
 
 
 SKILL_ROOT = Path(__file__).resolve().parent.parent
@@ -85,29 +89,44 @@ def _schema_paradigm(s: dict) -> set:
 
 
 def _schema_primitive(s: dict) -> set:
-    return set(s["properties"]["math_semantics"]["properties"]["composition"]
-               ["properties"]["primitives"]["items"]["properties"]["op"]["enum"])
+    return set(
+        s["properties"]["math_semantics"]["properties"]["composition"]["properties"][
+            "primitives"
+        ]["items"]["properties"]["op"]["enum"]
+    )
 
 
 def _schema_invariant_kind(s: dict) -> set:
-    return set(s["properties"]["math_semantics"]["properties"]["invariants"]
-               ["items"]["properties"]["kind"]["enum"])
+    return set(
+        s["properties"]["math_semantics"]["properties"]["invariants"]["items"][
+            "properties"
+        ]["kind"]["enum"]
+    )
 
 
 def _schema_machine_check(s: dict) -> set:
     # 在 $defs.case_with_check.properties.machine_check.properties.kind
-    return set(s["$defs"]["case_with_check"]["properties"]["machine_check"]
-               ["properties"]["kind"]["enum"])
+    return set(
+        s["$defs"]["case_with_check"]["properties"]["machine_check"]["properties"][
+            "kind"
+        ]["enum"]
+    )
 
 
 def _schema_framework(s: dict) -> set:
-    return set(s["properties"]["math_semantics"]["properties"]
-               ["reference_oracle"]["properties"]["framework"]["enum"])
+    return set(
+        s["properties"]["math_semantics"]["properties"]["reference_oracle"][
+            "properties"
+        ]["framework"]["enum"]
+    )
 
 
 def _schema_chips(s: dict) -> set:
-    return set(s["properties"]["op"]["properties"]
-               ["platform_constraints"]["properties"]["supported_chips"]["items"]["enum"])
+    return set(
+        s["properties"]["op"]["properties"]["platform_constraints"]["properties"][
+            "supported_chips"
+        ]["items"]["enum"]
+    )
 
 
 def _schema_error_codes(s: dict) -> set:
@@ -115,20 +134,91 @@ def _schema_error_codes(s: dict) -> set:
 
 
 CHECKS = [
-    ("category",          "category_enum.yaml",                 _from_categories,        _schema_category),
-    ("paradigm",          "paradigm_enum.yaml",                  _from_paradigms,         _schema_paradigm),
-    ("primitive_op",      "primitive_whitelist.yaml",            _from_primitives,        _schema_primitive),
-    ("invariant_kind",    "invariant_kind_registry.yaml",        _from_invariant_kinds,   _schema_invariant_kind),
-    ("machine_check",     "machine_check_kind_registry.yaml",    _from_machine_check,     _schema_machine_check),
-    ("framework",         "framework_oracle_registry.yaml",      _from_frameworks,        _schema_framework),
-    ("chip",              "chip_registry.yaml",                  _from_chips,             _schema_chips),
-    ("error_code",        "error_code_enum.yaml",                _from_error_codes,       _schema_error_codes),
+    ("category", "category_enum.yaml", _from_categories, _schema_category),
+    ("paradigm", "paradigm_enum.yaml", _from_paradigms, _schema_paradigm),
+    ("primitive_op", "primitive_whitelist.yaml", _from_primitives, _schema_primitive),
+    (
+        "invariant_kind",
+        "invariant_kind_registry.yaml",
+        _from_invariant_kinds,
+        _schema_invariant_kind,
+    ),
+    (
+        "machine_check",
+        "machine_check_kind_registry.yaml",
+        _from_machine_check,
+        _schema_machine_check,
+    ),
+    (
+        "framework",
+        "framework_oracle_registry.yaml",
+        _from_frameworks,
+        _schema_framework,
+    ),
+    ("chip", "chip_registry.yaml", _from_chips, _schema_chips),
+    ("error_code", "error_code_enum.yaml", _from_error_codes, _schema_error_codes),
 ]
+
+
+def _official_type_failures(
+    schema: dict, catalog: dict, chip_registry: dict
+) -> list[str]:
+    failures: list[str] = []
+    for kind, definition, legacy in (
+        ("dtypes", "official_dtype", "dtype"),
+        ("formats", "official_format", "layout"),
+    ):
+        values = schema["$defs"][definition]["enum"]
+        expected = set(values)
+        if not values or len(values) != len(expected):
+            failures.append(
+                f"[official_types] {definition}.enum must be nonempty and unique"
+            )
+        if kind == "dtypes":
+            aliases = list(catalog["dtypes"].values())
+            if set(aliases) != expected or len(aliases) != len(expected):
+                failures.append(
+                    "[official_types] dtype_aliases must map one-to-one onto official_dtype.enum"
+                )
+        if not expected.issubset(schema["$defs"][legacy]["enum"]):
+            failures.append(f"[official_types] {legacy} lacks official values")
+        excluded_field = (
+            "unsupported_dtypes" if kind == "dtypes" else "unsupported_layouts"
+        )
+        reference = "official_dtype" if kind == "dtypes" else "official_format"
+        if (
+            schema["$defs"][excluded_field]["items"].get("$ref")
+            != f"#/$defs/{reference}"
+        ):
+            failures.append(
+                f"[official_types] {excluded_field} must reference #/$defs/{reference}"
+            )
+        fields = [f"non_tensor_{kind}", f"restricted_{kind}"]
+        if kind == "formats":
+            fields.append("ir_graph_input_unsupported_formats")
+        for field_name in fields:
+            unknown = set(catalog[field_name]) - expected
+            if unknown:
+                failures.append(
+                    f"[official_types] {field_name} 包含官方 {kind} 全集外值: {sorted(unknown)}"
+                )
+    chip_ids = _from_chips(chip_registry)
+    unknown_chips = set(catalog["restricted_chips"]) - chip_ids
+    if unknown_chips:
+        failures.append(
+            f"[official_types] restricted_chips 引用未知芯片: {sorted(unknown_chips)}"
+        )
+    return failures
 
 
 def main(argv: list[str] | None = None) -> int:
     schema = json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
     failures: list[str] = []
+    catalog = load_catalog(schema)
+    chip_registry = yaml.safe_load(
+        (REG_DIR / "chip_registry.yaml").read_text(encoding="utf-8")
+    )
+    failures.extend(_official_type_failures(schema, catalog, chip_registry))
 
     for label, reg_file, reg_extractor, schema_extractor in CHECKS:
         reg_path = REG_DIR / reg_file
@@ -160,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     print(f"OK: {len(CHECKS)} 项 enum 全部同步")
+    print("OK: schema 官方 dtype/format 全集、别名、限制列表及芯片引用一致")
     return 0
 
 

@@ -1,22 +1,23 @@
 # spec.yaml 范例
 
-11 个范例覆盖典型复杂度阶梯。**全部通过 9 stage 校验**（stage 9 因测试环境未装 torch 走 SKIP，不算失败）。可以直接拷出来作为新算子起手模板。
+12 个范例覆盖典型复杂度阶梯，可用于起手和回归。下表保留已有的旧版 9-stage 校验记录，不代表当前 12-stage 校验结果；split 未附该历史记录。使用前请在当前代码和依赖环境中重新运行校验，记录 PASS / FAIL / SKIP 及 findings；SKIP 表示未执行，不是通过证据。
 
 | 算子 | 复杂度 | category | 主要 paradigms | stage 通过情况 | 教学点 |
 |---|---|---|---|---|---|
-| [add](add/spec.yaml) | 入门 | broadcast | Broadcast | ✅ 1-8 PASS · ↷ 9 SKIP | 双输入 numpy promote、algebraic invariant（交换律 / 加法零元）、`patterns[]` 数组写法 |
-| [softmax](softmax/spec.yaml) | 中等 | reduction_composite | Reduction + Broadcast + NumericalStable + FusedComposite | ✅ 1-8 PASS · ↷ 9 SKIP | dim attribute 自动注入、accumulator_dtype 必填、composition 五原语链（max-shift + exp + reduce + div）、4 种 invariant 综合（elementwise_ge/le + reduce_equals + no_leak_intermediates）、AP-004 反模式联动 |
-| [reduce_sum](reduce_sum/spec.yaml) | 中等 | reduction | Reduction | ✅ 1-8 PASS · ↷ 9 SKIP | **axis 作为 tensor input**（axis_source=input_tensor）、data_dependent shape_rule_kind、运行时 axis 值决定输出 shape |
-| [reduce_sum_fixed](reduce_sum_fixed/spec.yaml) | 中等 | reduction | Reduction | ✅ 1-8 PASS · ↷ 9 SKIP | **固定归约轴**（axis_source=fixed）、无 dim attribute、reduction.fixed_value 声明固定轴、shape_rule 用字面量 axis |
-| [reduce_sum_all](reduce_sum_all/spec.yaml) | 中等 | reduction | Reduction | ✅ 1-8 PASS · ↷ 9 SKIP | **隐式全轴归约**（axis_source=implicit_all）、无 axis/keep_dims attribute、输出为标量、reduction.axis_source: implicit_all |
-| [cumsum](cumsum/spec.yaml) | 中等 | recurrence | Recurrence | ✅ 1-8 PASS · ↷ 9 SKIP | 沿轴累加、accumulation_order: sequential、dim attribute |
-| [dropout](dropout/spec.yaml) | 中等 | random_sampling | Elementwise + RandomSampling | ✅ 1-8 PASS · ↷ 9 SKIP | seed attribute 自动注入、training/eval 双路径、固定 seed 下 deterministic invariant |
-| [matmul](matmul/spec.yaml) | 进阶 | contraction | Contraction + Broadcast | ✅ 1-8 PASS · ↷ 9 SKIP | 折叠维 + 显式维混合（`"...batch_a", "M", "K"`）、shape_rule 用 numpy_expr + IfExp 表达 transpose、explicit broadcast.rules、algebraic invariant（`equals_when_input_is_zero` / `associative_along_batch`） |
-| [complex](complex/spec.yaml) | 进阶 | layout_transform | Elementwise + Broadcast + LayoutTransform | ✅ 1-8 PASS · ↷ 9 SKIP | 双 input 不同 dtype（real/imag 各 fp32/fp64）、IfExp dtype_rule（fp→complex64/128）、numpy promote 行 + complex 输出 |
-| [nonzero](nonzero/spec.yaml) | 进阶 | variable_output | IndexGather + VariableOutput | ✅ 1-8 PASS · ↷ 9 SKIP | data_dependent shape_rule_kind、shape_bounds.max_elements 上界声明、static_dims/dynamic_dims 拆分、固定输出 dtype int64 |
-| [fused_quant_matmul](fused_quant_matmul/spec.yaml) | 高阶 | fused_composite | Contraction + Broadcast + Quantization + FusedComposite | ✅ 1-8 PASS · ↷ 9 SKIP | composition DAG oracle（5 节点链）+ Quantization + FusedComposite 三合一；CANN 公式 2（FP bias）+ gelu_tanh |
+| [add](add/spec.yaml) | 入门 | broadcast | Broadcast | 旧版 9-stage：1-8 PASS · 9 SKIP | 双输入 numpy promote、algebraic invariant（交换律 / 加法零元）、`patterns[]` 数组写法 |
+| [softmax](softmax/spec.yaml) | 中等 | reduction_composite | Reduction + Broadcast + NumericalStable + FusedComposite | 旧版 9-stage：1-8 PASS · 9 SKIP | dim attribute 自动注入、accumulator_dtype 必填、composition 五原语链（max-shift + exp + reduce + div）、4 种 invariant 综合（elementwise_ge/le + reduce_equals + no_leak_intermediates）、AP-004 反模式联动 |
+| [reduce_sum](reduce_sum/spec.yaml) | 中等 | reduction | Reduction | 旧版 9-stage：1-8 PASS · 9 SKIP | **axis 作为 tensor input**（axis_source=input_tensor）、data_dependent shape_rule_kind、运行时 axis 值决定输出 shape |
+| [reduce_sum_fixed](reduce_sum_fixed/spec.yaml) | 中等 | reduction | Reduction | 旧版 9-stage：1-8 PASS · 9 SKIP | **固定归约轴**（axis_source=fixed）、无 dim attribute、reduction.fixed_value 声明固定轴、shape_rule 用字面量 axis |
+| [reduce_sum_all](reduce_sum_all/spec.yaml) | 中等 | reduction | Reduction | 旧版 9-stage：1-8 PASS · 9 SKIP | **隐式全轴归约**（axis_source=implicit_all）、无 axis/keep_dims attribute、输出为标量、reduction.axis_source: implicit_all |
+| [cumsum](cumsum/spec.yaml) | 中等 | recurrence | Recurrence | 旧版 9-stage：1-8 PASS · 9 SKIP | 沿轴累加、accumulation_order: sequential、dim attribute |
+| [dropout](dropout/spec.yaml) | 中等 | random_sampling | Elementwise + RandomSampling | 旧版 9-stage：1-8 PASS · 9 SKIP | seed attribute 自动注入、training/eval 双路径、固定 seed 下 deterministic invariant |
+| [matmul](matmul/spec.yaml) | 进阶 | contraction | Contraction + Broadcast | 旧版 9-stage：1-8 PASS · 9 SKIP | 折叠维 + 显式维混合（`"...batch_a", "M", "K"`）、shape_rule 用 numpy_expr + IfExp 表达 transpose、explicit broadcast.rules、algebraic invariant（`equals_when_input_is_zero` / `associative_along_batch`） |
+| [complex](complex/spec.yaml) | 进阶 | layout_transform | Elementwise + Broadcast + LayoutTransform | 旧版 9-stage：1-8 PASS · 9 SKIP | 双 input 不同 dtype（real/imag 各 fp32/fp64）、IfExp dtype_rule（fp→complex64/128）、numpy promote 行 + complex 输出 |
+| [nonzero](nonzero/spec.yaml) | 进阶 | variable_output | IndexGather + VariableOutput | 旧版 9-stage：1-8 PASS · 9 SKIP | data_dependent shape_rule_kind、shape_bounds.max_elements 上界声明、static_dims/dynamic_dims 拆分、固定输出 dtype int64 |
+| [fused_quant_matmul](fused_quant_matmul/spec.yaml) | 高阶 | fused_composite | Contraction + Broadcast + Quantization + FusedComposite | 旧版 9-stage：1-8 PASS · 9 SKIP | composition DAG oracle（5 节点链）+ Quantization + FusedComposite 三合一；CANN 公式 2（FP bias）+ gelu_tanh |
+| [split](split/spec.yaml) | 进阶 | VariableOutput | VariableOutput | 需在当前环境运行 12-stage 校验 | 输出个数由 attribute 决定、按属性推导输出 shape |
 
-> 安装 torch 后 stage 9 也会变 ✅（`pip install torch`）。
+> 安装 torch 只满足 framework 导入的一个依赖条件；stage 9 仍可能因 API 不可达、占位符错误或其他 finding 而 FAIL。stage 10/12 的 oracle 检查还取决于公式和条目适用条件，以实际重跑结果为准。
 
 ## 阅读顺序
 
@@ -55,11 +56,11 @@ pytest ../tests/test_examples.py -v
 4. 改 `inputs` / `outputs` / `attributes`
 5. 重写 `math_semantics.formula` 与 `reference_oracle.api`
 6. 调整 `boundary_conditions` / `extreme_inputs`
-7. 跑 `validate_spec.py` 直到 PASS
+7. 跑当前 `validate_spec.py`；修复 FAIL，记录 SKIP 原因，不把 SKIP 当作已执行通过
 
 ## 不在范例里的范式
 
-11 个范例覆盖 elementwise / reduction_composite / reduction（三种 axis_source）/ contraction / fused_composite / layout_transform / recurrence / random_sampling / variable_output 等类型。其他算子起手时，先用**生成器**搭骨架：
+12 个范例覆盖 elementwise / reduction_composite / reduction（三种 axis_source）/ contraction / fused_composite / layout_transform / recurrence / random_sampling / variable_output 等类型。其他算子起手时，先用**生成器**搭骨架：
 
 ```
 python3 ../scripts/generate_spec.py \

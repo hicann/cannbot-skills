@@ -78,18 +78,21 @@ def _group_by_stage(ids: set[str]) -> dict[str, list[str]]:
 
 
 _STAGE_LABEL = {
-    "schema_static":                       "Stage 1 schema_static",
-    "category_paradigm_consistency":       "Stage 2 category_paradigm_consistency",
-    "paradigm_constraint":                 "Stage 2 paradigm_constraint",
-    "invariant_kind_resolved":             "Stage 2 invariant_kind_resolved",
-    "interface_contract":                  "Stage 2 interface_contract",
-    "shape_closure":                       "Stage 3 shape_closure",
-    "dtype_closure":                       "Stage 4 dtype_closure",
-    "broadcast_legality":                  "Stage 5 broadcast_legality",
-    "boundary_min_set":                    "Stage 6 boundary_min_set",
-    "tolerance_coverage":                  "Stage 7 tolerance_coverage",
-    "formula_smoke_eval":                  "Stage 8 formula_smoke_eval",
-    "oracle_reachable":                    "Stage 9 oracle_reachable",
+    "schema_static": "Stage 1 schema_static",
+    "category_paradigm_consistency": "Stage 2 category_paradigm_consistency",
+    "paradigm_constraint": "Stage 2 paradigm_constraint",
+    "invariant_kind_resolved": "Stage 2 invariant_kind_resolved",
+    "interface_contract": "Stage 2 interface_contract",
+    "shape_closure": "Stage 3 shape_closure",
+    "dtype_closure": "Stage 4 dtype_closure",
+    "broadcast_legality": "Stage 5 broadcast_legality",
+    "boundary_min_set": "Stage 6 boundary_min_set",
+    "tolerance_coverage": "Stage 7 tolerance_coverage",
+    "formula_smoke_eval": "Stage 8 formula_smoke_eval",
+    "oracle_reachable": "Stage 9 oracle_reachable",
+    "formula_oracle_equiv": "Stage 10 formula_oracle_equiv",
+    "invariant_exec": "Stage 11 invariant_exec",
+    "extreme_check": "Stage 12 extreme_check",
 }
 
 
@@ -101,7 +104,7 @@ def render(rule_ids: set[str], dsl_codes: set[str]) -> str:
         "> 由 `scripts/dump_rule_ids.py` 自动生成；改动 validator 后跑 `--write` 同步。CI 由",
         "> `tests/test_doc_drift.py` 守门：源文件中的 rule_id 与本文件不一致即 fail。",
         "",
-        "本目录列出 11-stage L0 校验器输出的所有 `rule_id` 字面量。新增 finding 时把字符串",
+        "本目录列出当前 12-stage L0 校验器输出的所有 `rule_id` 字面量。新增 finding 时把字符串",
         "登记到对应 stage；若是 evaluator（numpy AST 求值器）内部抛 `DslError`，code 会在 stages.py 拼成",
         "`<stage>.<code>`，所以**新增 evaluator 错误码必须同时拓宽 SKILL.md §4.x 表**。",
         "",
@@ -129,7 +132,7 @@ def render(rule_ids: set[str], dsl_codes: set[str]) -> str:
 
     lines.append("## Evaluator 错误码（`DslError(code, ...)`）")
     lines.append("")
-    lines.append("以下错误码由 `scripts/evaluators/` 内部抛出，被 stage 3-5 / 8 / 9 包装为 `<stage>.<code>`。")
+    lines.append("以下错误码由 `scripts/evaluators/` 内部抛出，被相应阶段包装为 `<stage>.<code>`。")
     lines.append("")
     for code in sorted(dsl_codes):
         lines.append(f"- `{code}`")

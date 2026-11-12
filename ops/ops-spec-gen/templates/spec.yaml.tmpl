@@ -12,14 +12,15 @@
 # 由 ops/ops-spec-gen/scripts/generate_spec.py 生成；请手动填充 {{...}} 占位符
 # ============================================================
 schema_version: 1
+{{support_universe_block}}
 
 op:
 {{op_block}}
 {{paradigm_groups_block}}
-# 若算子含 AICPU 前置计算（如元数据/量化参数预处理），在 op 节点追加：aicpu_kernel: <kernel_name>
-# 测试生成 Skill 检测到此字段后，会在 NPU 测试时自动插入 AICPU 调用链；无此前置则无需填写
 
 inputs:
+# support_universe 指定官方全集；dtype_set / supported_layouts 必须完整。
+# 对应 unsupported_* 是官方全集减支持集合；旧 spec 无 support_universe 时沿用旧语义。
 {{inputs_block}}
 
 attributes:
@@ -52,7 +53,7 @@ broadcast:
 math_semantics:
   formula_kind: numpy_expr
   formula: |
-    # TODO: 用 numpy 可求值的表达式描述算子语义
+    # TODO: 用 numpy 可 eval 的表达式描述算子语义
     {{first_output}} = {{first_input}}
 
   reference_oracle:
@@ -100,8 +101,3 @@ determinism:
   required: true
   accumulation_order: {{accumulation_order}}
   bitwise_reproducible: true
-
-# 负载均衡：存在负载均衡设计或已确认要求时必须填写；没有时省略。
-# 将以下字段追加到上方已有的 op 映射中，不新增顶层字段：
-#   load_balancing: |
-#     记录相关要求或已确认方案及其来源，按需说明任务划分、负载估算、核数来源与分配策略。

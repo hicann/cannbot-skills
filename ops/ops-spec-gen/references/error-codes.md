@@ -3,7 +3,7 @@
 > 由 `scripts/dump_rule_ids.py` 自动生成；改动 validator 后跑 `--write` 同步。CI 由
 > `tests/test_doc_drift.py` 守门：源文件中的 rule_id 与本文件不一致即 fail。
 
-本目录列出 11-stage L0 校验器输出的所有 `rule_id` 字面量。新增 finding 时把字符串
+本目录列出当前 12-stage L0 校验器输出的所有 `rule_id` 字面量。新增 finding 时把字符串
 登记到对应 stage；若是 evaluator（numpy AST 求值器）内部抛 `DslError`，code 会在 stages.py 拼成
 `<stage>.<code>`，所以**新增 evaluator 错误码必须同时拓宽 SKILL.md §4.x 表**。
 
@@ -131,23 +131,8 @@
 - `oracle_reachable.placeholder_unresolved`
 - `oracle_reachable.unknown_framework`
 
-## 其他 / 未归类
+## Stage 10 formula_oracle_equiv
 
-- `composition_single_primitive`
-- `composition_without_fused_composite`
-- `error_type_unknown`
-- `machine_check_kind_unknown`
-- `schema_static`
-- `stage_skipped`
-- `synthesize_legacy_format`
-- `synthesize_pattern_unknown`
-- `data_distribution.accumulation_requires_normal`
-- `data_distribution.non_accumulation_must_omit`
-- `extreme_check.nan_propagates_violated`
-- `extreme_check.produces_nan_conflict`
-- `format_variants.oracle_kwargs_dim_mismatch`
-- `format_variants.reduction_axes_negative`
-- `format_variants.reduction_axes_out_of_rank`
 - `formula_oracle_equiv.absent`
 - `formula_oracle_equiv.api_unreachable`
 - `formula_oracle_equiv.composition_not_supported`
@@ -164,6 +149,9 @@
 - `formula_oracle_equiv.skipped_non_numpy`
 - `formula_oracle_equiv.value_divergence`
 - `formula_oracle_equiv.zero_sign_divergence`
+
+## Stage 11 invariant_exec
+
 - `invariant_exec.elementwise_eq_violated`
 - `invariant_exec.equals_input_when_other_is_zero_violated`
 - `invariant_exec.equals_under_swap_violated`
@@ -179,16 +167,47 @@
 - `invariant_exec.reduce_equals_unresolved`
 - `invariant_exec.reduce_equals_violated`
 - `invariant_exec.skipped_non_numpy`
+
+## Stage 12 extreme_check
+
+- `extreme_check.nan_propagates_violated`
+- `extreme_check.produces_nan_conflict`
+
+## 其他 / 未归类
+
+- `composition_single_primitive`
+- `composition_without_fused_composite`
+- `error_type_unknown`
+- `machine_check_kind_unknown`
+- `schema_static`
+- `stage_skipped`
+- `synthesize_legacy_format`
+- `synthesize_pattern_unknown`
+- `data_distribution.accumulation_requires_normal`
+- `data_distribution.non_accumulation_must_omit`
+- `format_variants.oracle_kwargs_dim_mismatch`
+- `format_variants.reduction_axes_negative`
+- `format_variants.reduction_axes_out_of_rank`
 - `paradigm_groups.combination_missing_switch`
 - `paradigm_groups.combination_missing_when`
 - `paradigm_groups.combination_should_exist`
 - `paradigm_groups.fusion_min_basic`
 - `paradigm_groups.mismatch`
 - `paradigm_groups.mode_switch_may_need_combination`
+- `support_exclusions.dtype_conflict`
+- `support_exclusions.layout_conflict`
+- `support_partition.canonical`
+- `support_partition.chip_scope`
+- `support_partition.coverage`
+- `support_partition.dtype_contract`
+- `support_partition.layout_contract`
+- `support_partition.non_tensor`
+- `support_partition.required`
+- `support_partition.universe`
 
 ## Evaluator 错误码（`DslError(code, ...)`）
 
-以下错误码由 `scripts/evaluators/` 内部抛出，被 stage 3-5 / 8 / 9 包装为 `<stage>.<code>`。
+以下错误码由 `scripts/evaluators/` 内部抛出，被相应阶段包装为 `<stage>.<code>`。
 
 - `dsl_eval_error`
 - `dsl_parse_error`

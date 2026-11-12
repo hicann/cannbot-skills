@@ -1,16 +1,18 @@
 # 算子 spec.yaml 速查表
 
 > 字段速查；权威约束以 `schemas/op-spec.json` 与 `registries/*.yaml` 为准。
-> 子规则（rule_id 列表与失败码）见 SKILL.md §4 各 stage，不在此处重复。
+> 子规则（rule_id 列表与失败码）见 [stage-rules.md](stage-rules.md)，阶段概览见 [SKILL.md §4](../SKILL.md)。
 
 ---
 
-## A. 顶层 17 个字段（test_matrix 已移出）
+## A. 顶层 18 个字段（test_matrix 已移出）
 
 ### A0. 字段职责分层
 
 | 职责层级 | 字段 | 说明 |
 |----------|------|------|
+| **契约版本** | `schema_version` / `support_universe` | `support_universe` 为 schema 可选字段，新生成的完整全集契约必须携带；旧规格可省略 |
+| **L0 语义** | `reduction` | 可选归约轴来源及固定轴配置 |
 | **L0 语义** | `op` / `inputs` / `attributes` / `outputs` / `semantic_cases` / `layout_contract` / `shape_constraints` / `dtype_policy` / `broadcast`（计算是否需要数据广播） / `math_semantics` | 数学约束，下游不可覆盖 |
 | **L0 语义** | `boundary_conditions`（合法但退化的输入 case）/ `extreme_inputs`（NaN / Inf / 全零等异常输入 case） | 下游不可覆盖 |
 | **L0 语义** | `numerical_tolerance` / `numerical_stability` / `determinism` | 精度语义，下游不可覆盖 |
@@ -20,12 +22,14 @@
 
 ```yaml
 schema_version: 1          # 固定值
+support_universe: huawei-cann-types-2026-10-15  # schema 可选，新契约必带；旧契约省略
 op:                        # 元信息：name / version / description / category（单选 26 类） / paradigms（多选 27 项） / paradigm_groups（范式分组）
 inputs: []                 # 张量/标量/state，按位置排列
 attributes: []             # 非张量参数，含 machine_constraint
 outputs: []                # 用 numpy 子集表达式描述 shape/dtype 推导规则
 semantic_cases: []         # 可选输入/输出的条件存在性；when 只允许 attr.<name>、input.<name>.dtype 或 input.<name>.is_present
 layout_contract: {}        # 可选逻辑布局变体：selector + 已声明 Tensor 的 logical_axes；不替代各 I/O 的 layout
+reduction: {}              # 可选归约轴来源及固定轴配置
 shape_constraints: {}      # 全局符号表 + global_constraints（咨询性字段，当前不参与 12-stage 机器校验，见 §D.8）+ notes
 dtype_policy: {}           # promotion + supported_combinations 显式枚举 + accumulator_dtype
 broadcast: {}              # 算子计算的 broadcast 语义（数据复制/扩展）。kind: numpy | none | explicit (+rules)
@@ -45,11 +49,11 @@ determinism: {}            # accumulation_order + bitwise_reproducible（语义�
 ### B1. 26 类 category（单选）
 
 ```
-elementwise · reduction · reduction_composite · contraction · layout_transform
-index_gather · scatter_update · mask_predicate · sort_select · fused_composite
-random_sampling · sliding_window · collective · control_flow · recurrence
-interpolation · quantization · stateful · arg_reduce · sparse · padding
-variable_output · spectral · histogram · atomic_update · broadcast
+Elementwise · Reduction · ReductionComposite · Contraction · LayoutTransform
+IndexGather · ScatterUpdate · MaskPredicate · SortSelect · FusedComposite
+RandomSampling · SlidingWindow · Collective · ControlFlow · Recurrence
+Interpolation · Quantization · Stateful · ArgReduce · Sparse · Padding
+VariableOutput · Spectral · Histogram · AtomicUpdate · Broadcast
 ```
 
 ### B2. 27 项 paradigm（PascalCase，多选）
@@ -75,11 +79,11 @@ variable_output · spectral · histogram · atomic_update · broadcast
 
 | category | 必含 |
 |---|---|
-| reduction_composite | Reduction + FusedComposite |
-| fused_composite | FusedComposite + ≥ 2 基础 paradigm（Elementwise 被其他范式吸收，不计入） |
-| sliding_window | SlidingWindow（通常再带 Contraction 或 Reduction） |
-| arg_reduce | ArgReduce（输出 dtype_rule 必须求值为 `np.int32` 或 `np.int64`） |
-| atomic_update | AtomicUpdate（与 ScatterUpdate 互斥） |
+| ReductionComposite | Reduction + FusedComposite |
+| FusedComposite | FusedComposite + ≥ 2 基础 paradigm（Elementwise 被其他范式吸收，不计入） |
+| SlidingWindow | SlidingWindow（通常再带 Contraction 或 Reduction） |
+| ArgReduce | ArgReduce（输出 dtype_rule 必须求值为 `np.int32` 或 `np.int64`） |
+| AtomicUpdate | AtomicUpdate（与 ScatterUpdate 互斥） |
 
 #### 分类决策（从 REQUIREMENTS.md 推导）
 
@@ -97,14 +101,14 @@ variable_output · spectral · histogram · atomic_update · broadcast
 **易混淆场景**：
 - **tile/repeat/expand** → LayoutTransform（数据重组织是目的，不是计算手段）
 - **add/mul 的 shape 对齐** → Broadcast（广播是计算的前置步骤）
-- **slice/gather 的区别** → slice 是 LayoutTransform/IndexGather（确定性裁剪），gather 是 IndexGather（自由索引采集）
+- **slice/gather 的区别** → 确定性裁剪按 LayoutTransform 的数据重组织语义判断；自由整数索引采集按 IndexGather 判断，具体以注册表定义和真实接口为准
 
 记录决策理由（输入数量 → category_enum.yaml 匹配项 → category → paradigms 推导链）。
 
 ### B4. shape_rule (numpy_expr)
 
 `outputs[].shape_rule` 是受限 numpy 子集表达式（不再是 DSL 函数）。完整语义、子规则和失败码见
-[SKILL.md §4.3](../SKILL.md)。
+[stage-rules.md 的 stage 3](stage-rules.md)。
 
 | kind | 适用 | shape_rule 内容 |
 |---|---|---|
@@ -114,7 +118,7 @@ variable_output · spectral · histogram · atomic_update · broadcast
 
 `inputs[].shape.symbolic` 列表元素三类：显式维（`"M"` 大写） / 折叠维（`"...d"` 小写，仅可作首元素） / 常量维（整数）。
 
-> **`symbolic` 名字仅为 owner 自留命名，不参与跨 input 绑定**：两个 input 都写 `"K"` 或都写 `"...batch"` 不会被 evaluator 视为"必相等"。跨 input 形状关系（如 matmul `K==K`、elementwise 同形 / 可广播）必须通过 `outputs.shape_rule` 表达，由 stage 5/8 跑出来。stage 5 在 `broadcast.kind=none` 下只静态校核 rank 结构 + const 维相等，其余放到 stage 8 跑公式时由 numpy 自身验证。
+> **`symbolic` 名字仅为 owner 自留命名，不参与跨 input 绑定**：两个 input 都写 `"K"` 或都写 `"...batch"` 不会被 evaluator 视为"必相等"。跨 input 形状关系应通过 `outputs.shape_rule` 表达并由 stage 3 求值；适用且有 numpy 时，该阶段还比较 shape_rule 与公式实际输出 shape。stage 5 校验广播语义，stage 8 试执行公式，均不能替代完整的输出 shape 规则。
 
 ### B5. dtype_rule (numpy_expr)
 
@@ -128,7 +132,9 @@ variable_output · spectral · histogram · atomic_update · broadcast
 | `y.dtype = np.int32` / `np.float16` / `np.complex64` | 固定 dtype |
 | `out.dtype = np.complex64 if real.dtype == np.float32 else np.complex128` | IfExp 条件分支 |
 
-dtype 常量字符串覆盖（25 个；与 `schemas/op-spec.json` `$defs.dtype.enum` 单一真值）：
+以下为常用 dtype 速查，并非全量枚举。完整 spec 词汇见 `schemas/op-spec.json` 的
+`$defs.dtype.enum`；官方全集以同一 schema 的 `$defs.official_dtype.enum` 为准，
+名称映射和上下文限制见 `x-support-catalog`，边界与能力要求见 [官方全集契约](support-universe.md)。
 
 | 组 | dtype | 来源 / 备注 |
 |---|---|---|
@@ -138,8 +144,10 @@ dtype 常量字符串覆盖（25 个；与 `schemas/op-spec.json` `$defs.dtype.e
 | 有符号整 | `int4` · `int8` · `int16` · `int32` · `int64` | int4 为 ascend 量化扩展 |
 | 无符号整 | `uint1` · `uint4` · `uint8` · `uint16` · `uint32` · `uint64` | uint1 / uint4 为 ascend 量化扩展。uint1 与 bool 语义不同：uint1 是 1-bit 数值（可算术），bool 是逻辑布尔（True/False） |
 | 布尔 | `bool` | 仅参与逻辑/掩码语义；如需 1-bit 数值用 `uint1` |
+| 量化整型 | `qint8` · `qint16` · `qint32` · `quint8` · `quint16` | 已登记到官方全集，可出现在排除补集中；声明支持需要真实 dtype_rule / oracle 能力 |
+| 其他官方成员 | 完整列表见 `schemas/op-spec.json` | 包括 int2 / uint2、float6、特殊类型及固定排除的状态/边界标记；枚举登记不代表计算能力 |
 
-写法上 `np.<dtype>`（如 `np.hifloat8`）与字符串字面量 `"hifloat8"` 等价；都会被 `dtype_eval._NpDtypeNamespace` 解析为字符串后落入 `promote_pair`。新增 dtype 时同步改三处：`schemas/op-spec.json` `$defs.dtype.enum` + `evaluators/promote.py` `_ALL_DTYPES` 相关表 + 在 `tests/test_dtype_eval.py::TestNamespaceSync` 加一条用例。
+对于 evaluator 已实现的 dtype，`np.<dtype>`（如 `np.hifloat8`）与字符串字面量 `"hifloat8"` 等价。官方枚举登记与 evaluator 能力分别维护：扩充全集时更新 schema 中的官方枚举、名称映射和相关限制；增加计算支持时还必须实现 `evaluators/promote.py` 等相关能力并补充 dtype_rule / oracle 测试。不能仅靠登记枚举就宣称可计算。
 
 #### CANN ↔ spec dtype 命名对照
 
@@ -161,11 +169,14 @@ CANN 文档使用 `DT_*` 大写命名；spec.yaml 走 numpy/PyTorch 风格小写
 | `DT_INT4/8/16/32/64` | `int4` / `int8` / `int16` / `int32` / `int64` | |
 | `DT_UINT1/4/8/16/32/64` | `uint1` / `uint4` / `uint8` / `uint16` / `uint32` / `uint64` | |
 | `DT_BOOL` | `bool` | |
-| `DT_QINT8/16/32`、`DT_QUINT8/16` | **暂不支持** | 结构化量化整型（带 scale / zero_point 元数据）；语义上应走 `inputs[].quantization` 字段而非 dtype 枚举，避免每条 supported_combinations 展开量化变体。如需对接 CANN 量化族，请单独提 issue |
+| `DT_QINT8/16/32`、`DT_QUINT8/16` | `qint8` / `qint16` / `qint32` / `quint8` / `quint16` | 已进入官方全集枚举，可作为 unsupported 补集成员；声明支持仍需真实 dtype_rule、组合表、oracle 和运行环境，见 [官方全集契约](support-universe.md) |
 
 ### B5b. layout 枚举速查
 
-`inputs[].layout` / `outputs[].layout` 接受以下 9 种，与 `schemas/op-spec.json` `$defs.layout.enum` 同步：
+以下仅为常用 layout 速查。完整词汇见 `schemas/op-spec.json` 的 `$defs.layout.enum`；
+官方 format 全集由同一 schema 的 `$defs.official_format.enum` 定义，来源见
+[华为 Format 原文](format.md)。旧契约保留 NZ / CSR / COO / BSR，
+新契约将 NZ 归一为 FRACTAL_NZ，且不接受 CSR / COO / BSR。
 
 | layout | 含义 | 典型用途 |
 |---|---|---|
@@ -325,34 +336,70 @@ math_semantics:
 | `composition.primitives[].op` | `registries/primitive_whitelist.yaml` |
 | `raises_error.error_type` | `registries/error_code_enum.yaml` |
 
+### B9. 支持与排除范围
+
+新生成文件使用 `support_universe: huawei-cann-types-2026-10-15`，每个输入/输出都具有
+`dtype_set`、`unsupported_dtypes`、`supported_layouts`、`unsupported_layouts`。
+每一对列表必须互斥，且并集恰好等于对应官方全集（42 个 dtype / 57 个 format，含固定排除的标记值）。
+支持集合必须先按完整需求确认，然后由生成器计算补集。
+
+```yaml
+support_universe: huawei-cann-types-2026-10-15
+inputs:
+  - name: x
+    dtype_set: [float16, float32]
+    # unsupported_dtypes: 由工具生成其余 40 个官方成员的完整列表
+    layout: ND
+    supported_layouts: [ND]
+    # unsupported_layouts: 由工具生成其余 56 个官方成员的完整列表
+    # role / rank_range / shape 等字段照常填写
+outputs:
+  - name: y
+    dtype_set: [float16, float32]  # 必须等于输出组合表投影
+    # unsupported_dtypes: 同样由工具生成完整列表
+    layout: ND
+    supported_layouts: [ND]
+    # unsupported_layouts: 同样由工具生成完整列表
+    # shape_rule / dtype_rule 等字段照常填写
+```
+
+上面是字段说明片段；注释不能替代真实的完整列表，不能直接作为完整 spec 校验。
+工具使用 `--supported-formats "input.x:ND;output.y:ND"` 指定各接口完整格式范围；原有排除参数
+作为额外断言保留。`NZ` 归一化为 `FRACTAL_NZ`，不会在全集中重复计数。
+只有不带 `support_universe` 的旧 spec 才沿用部分排除语义；不能宣称它已覆盖官方全集。
+上下文和芯片限制见 [官方全集契约](support-universe.md)。这些检查不验证设备运行时拒绝行为。
+
 ---
 
 ## C. 12-stage L0 校验器（全景）
 
 | stage | 名称 | 范围 |
 |---|---|---|
-| 1 | schema_static | JSON Schema |
-| 2 | category_paradigm_consistency | category↔paradigm + 白名单 + 内部约束 |
-| 3 | shape_closure | numpy_expr 求值 outputs[].shape_rule（含 data_dependent 分流） |
-| 4 | dtype_closure | numpy_expr 求值 outputs[].dtype_rule，与 supported_combinations 交叉验证 |
-| 5 | broadcast_legality | 算子计算的 broadcast 语义校验（numpy / none / explicit；2 输入 + matmul 形式 explicit rules） |
-| 6 | boundary_min_set | 范式 → 最低 case 集（关键词子串匹配版） |
-| 7 | tolerance_coverage | 容差 dtype 覆盖 + 紧度启发式 |
-| 8 | formula_smoke_eval | 小 shape `[2,3]` 沙箱 numpy eval（缺 numpy ⇒ SKIP） |
-| 9 | oracle_reachable | 真 import framework + getattr 链 + 占位符校验（缺 framework ⇒ SKIP，不算 FAIL） |
+| 1 | schema_static | JSON Schema 必填项、类型、enum、pattern 和额外字段 |
+| 2 | category_paradigm_consistency | category↔paradigm、paradigm_groups、内部约束和白名单；支持/排除声明的重叠、跨字段矛盾；全量契约检查全集覆盖与全集外值 |
+| 3 | shape_closure | 求值 outputs[].shape_rule、检查 data_dependent 声明及适用时的公式输出 shape |
+| 4 | dtype_closure | dtype_rule 推导与 supported_combinations 交叉验证 |
+| 5 | broadcast_legality | numpy / none / explicit 广播语义 |
+| 6 | boundary_min_set | 各范式所需的最低 boundary/extreme case 覆盖 |
+| 7 | tolerance_coverage | 输出 dtype 容差覆盖与紧度启发式 |
+| 8 | formula_smoke_eval | 在 numpy 沙箱运行小 shape formula；缺依赖或不适用时 SKIP |
+| 9 | oracle_reachable | 检查 framework/API 可达性和占位符；不调用 oracle |
+| 10 | formula_oracle_equiv | 适用时实际比较 formula 与 oracle 的特殊值输出 |
+| 11 | invariant_exec | 执行公式并验证所声明的不变量；无需 oracle |
+| 12 | extreme_check | 合成极端输入并核对 machine_check；适用的 matches_oracle 条目会调用 oracle |
 
-全部 PASS / SKIP ⇒ spec 视为 L0 契约通过。SKIP 不算失败，环境降级时常见。
+PASS / FAIL / SKIP 是阶段状态；SKIP 表示相关检查没有执行，不代表实际通过。当前进程允许纯 info SKIP 而不阻断，overall PASS 或退出码 0 也不证明全部 12 阶段都已执行。stage 9 只检查可达性；stage 10 和 stage 12 的 matches_oracle 路径在依赖及条目条件满足时才会调用 oracle，stage 11 无需 oracle。退出码、依赖、SKIP 条件和 findings 以 [SKILL.md §4](../SKILL.md) 与 [stage-rules.md](stage-rules.md) 为准。
 
 ---
 
 ## D. 常见陷阱
 
 1. **paradigms 字段**：必须 `paradigms: [Reduction, ...]`（PascalCase 受控集合）。
-2. **fused_composite 与 FusedComposite 不等价**：前者是 category（结构主分类），后者是 paradigm（"复合形态"标签）。category=FusedComposite 必须含 paradigm FusedComposite + ≥ 2 条基础 paradigm。
+2. **category 与 paradigms 职责不同**：两者均使用注册表中的 PascalCase 拼写；category=FusedComposite 时 paradigms 必须含 FusedComposite + ≥ 2 条基础 paradigm，不能把小写 snake_case 当作有效 category。
 3. **折叠维登记**：`"...d"` 折叠维**不应**登记到 `shape_constraints.symbols`；只有显式大写维（`M` / `K` / `N`）才登记。
 4. **supported_combinations 必须显式枚举**：numpy_expr 推导（`np.promote_types(...)`）已能算，但显式表是"锁定意图"的真值，避免 promote 表升级时静默改语义。
-5. **accumulator_dtype 必填触发**：category=Contraction / reduction_composite / paradigms 含 `NumericalStable+Reduction` 时必填，且必须 ≥ 输入侧最高精度。
-6. **invariants 至少 1 条**：reduction_composite / NumericalStable 范式强制要求；structural 组的 kind 不允许 `tolerance_inherit: true`。
+5. **accumulator_dtype 必填触发**：category=Contraction / ReductionComposite / paradigms 含 `NumericalStable+Reduction` 时必填，且必须 ≥ 输入侧最高精度。
+6. **invariants 至少 1 条**：ReductionComposite / NumericalStable 范式强制要求；structural 组的 kind 不允许 `tolerance_inherit: true`。
 7. **boundary 与 extreme 不要混淆**：boundary 是合法但退化的 case（rank=0 / 空 Tensor / 参数越界 raise）；extreme 是异常输入（NaN / Inf / 上溢）。
-8. **`global_constraints` 是咨询性字段**：当前 evaluator 不解析；与 `notes` 同语义，仅供下游设计/测试人工阅读。机器可断言的 shape 关系（如 matmul `K of x == K of w`）请改写在 `outputs.shape_rule` 的 numpy_expr 中——它会真正被 stage 5 跑出来。
+8. **`global_constraints` 是咨询性字段**：当前 evaluator 不解析；与 `notes` 同语义，仅供下游设计/测试人工阅读。机器可断言的 shape 关系（如 matmul `K of x == K of w`）请改写在 `outputs.shape_rule` 的 numpy_expr 中，由 stage 3 求值。
 9. **占位符不嵌套**：`${attr.dim}` 合法，`${attr.${attr.dim}}` 非法。

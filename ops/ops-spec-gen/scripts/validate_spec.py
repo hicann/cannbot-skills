@@ -12,7 +12,8 @@
 Stage 1: jsonschema validation against schemas/op-spec.json.
 Stage 2: category ↔ paradigm consistency, mutual exclusion,
          paradigm internal constraints, and white-list checks for
-         primitives.op / invariants.kind / machine_check.kind / synthesize.patterns / error_type.
+         primitives.op / invariants.kind / machine_check.kind / synthesize.patterns / error_type;
+         support/exclusion consistency and full-universe partition contracts.
 Stage 3: shape_closure — solve outputs[].shape_rule via shape DSL.
 Stage 4: dtype_closure — cross-check dtype_rule with supported_combinations.
 Stage 5: broadcast_legality — validate broadcast semantics of operator computation.
@@ -21,6 +22,8 @@ Stage 7: tolerance_coverage — per-dtype tolerance covers output dtypes + tight
 Stage 8: formula_smoke_eval — run formula on tiny tensors via numpy sandbox.
 Stage 9: oracle_reachable — real import framework + walk api attribute chain.
 Stage 10: formula_oracle_equiv — compare formula vs oracle outputs on special-value inputs (NaN/inf/large/signed-zero).
+Stage 11: invariant_exec — check declared invariants without calling an oracle.
+Stage 12: extreme_check — check synthesized extreme inputs; matches_oracle may call an oracle.
 
 Stage interface contract:
   - status ∈ {PASS, FAIL, SKIP}
@@ -46,11 +49,15 @@ from typing import Any
 
 import yaml
 
+from support_catalog import canonical, load_catalog, load_schema, universe
+
 try:
-    import jsonschema
     from jsonschema import Draft202012Validator
 except ImportError:
-    print("ERROR: jsonschema not installed. Run: pip install jsonschema pyyaml", file=sys.stderr)
+    print(
+        "ERROR: jsonschema not installed. Run: pip install jsonschema pyyaml",
+        file=sys.stderr,
+    )
     sys.exit(2)
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -60,7 +67,7 @@ SCHEMA_PATH = SKILL_DIR / "schemas" / "op-spec.json"
 
 @dataclass
 class Finding:
-    severity: str       # error | warning | info
+    severity: str  # error | warning | info
     rule_id: str
     field_path: str
     message: str
@@ -70,7 +77,7 @@ class Finding:
 @dataclass
 class StageResult:
     stage_id: int
-    status: str         # PASS | FAIL | SKIP
+    status: str  # PASS | FAIL | SKIP
     findings: list[Finding] = field(default_factory=list)
 
 
@@ -98,29 +105,32 @@ def stage_1(spec: dict) -> StageResult:
     errors = sorted(validator.iter_errors(spec), key=lambda e: list(e.absolute_path))
     for err in errors:
         path = "/".join(str(p) for p in err.absolute_path) or "<root>"
-        res.findings.append(Finding(
-            severity="error",
-            rule_id="schema_static",
-            field_path=path,
-            message=err.message,
-            suggested_fix=None,
-        ))
+        res.findings.append(
+            Finding(
+                severity="error",
+                rule_id="schema_static",
+                field_path=path,
+                message=err.message,
+                suggested_fix=None,
+            )
+        )
     if res.findings:
         res.status = "FAIL"
     return res
 
 
-@functools.lru_cache(maxsize=1)
 def _load_schema() -> dict:
-    """Cached JSON Schema; deserialized once per process."""
-    return json.loads(SCHEMA_PATH.read_text(encoding="utf-8"))
+    """Use the same schema snapshot as the support catalog and generator."""
+    return load_schema()
 
 
 def _output_count_attr_determined(spec: dict) -> bool:
     """True 当算子声明 op.output_count_determined_by=attribute（split/chunk/unbind 类：
     输出个数由属性决定，非 data-dependent）。用于豁免 VariableOutput 的 data_dependent_shape
     与 nonzero 类 boundary case。"""
-    return (spec.get("op") or {}).get("output_count_determined_by", "data") == "attribute"
+    return (spec.get("op") or {}).get(
+        "output_count_determined_by", "data"
+    ) == "attribute"
 
 
 def stage_2(spec: dict, registries: dict) -> StageResult:
@@ -147,6 +157,8 @@ def stage_2(spec: dict, registries: dict) -> StageResult:
     _check_composition_hint(spec, paradigms, res.findings)
     _check_broadcast_paradigm_hint(spec, paradigms, res.findings)
     _check_format_variants(spec, res.findings)
+    _check_support_exclusions(spec, res.findings)
+    _check_support_partition(spec, res.findings)
     _check_interface_contracts(spec, res.findings)
     _check_data_distribution(spec, cat, paradigms, res.findings)
 
@@ -156,6 +168,301 @@ def stage_2(spec: dict, registries: dict) -> StageResult:
 
 
 # ---------- stage 2 sub-checks --------------------------------------------
+
+
+def _check_support_exclusions(spec: dict, findings: list[Finding]) -> None:
+    """Cross-check confirmed exclusions against positive I/O declarations."""
+
+    def list_value(value) -> list:
+        return value if isinstance(value, list) else []
+
+    combinations = (
+        _get(spec, "dtype_policy", "supported_combinations", default=[]) or []
+    )
+    valid_combinations = []
+    for combo in list_value(combinations):
+        if isinstance(combo, dict):
+            valid_combinations.append(combo)
+    combinations = valid_combinations
+    variants = _get(spec, "math_semantics", "format_variants", default=[]) or []
+    valid_variants = []
+    for variant in list_value(variants):
+        if isinstance(variant, dict):
+            valid_variants.append(variant)
+    variants = valid_variants
+    for side in ("inputs", "outputs"):
+        for index, tensor in enumerate(list_value(spec.get(side))):
+            if not isinstance(tensor, dict):
+                continue
+            path = f"{side}[{index}]"
+            supported_dtypes = {
+                canonical(value, "dtypes")
+                for value in list_value(tensor.get("dtype_set"))
+                if isinstance(value, str)
+            }
+            for combo in combinations:
+                side_values = combo.get(side) or {}
+                dtype = (
+                    side_values.get(tensor.get("name"))
+                    if isinstance(side_values, dict)
+                    else None
+                )
+                if isinstance(dtype, str):
+                    supported_dtypes.add(canonical(dtype, "dtypes"))
+            excluded_dtypes = {
+                canonical(value, "dtypes")
+                for value in list_value(tensor.get("unsupported_dtypes"))
+                if isinstance(value, str)
+            }
+            conflicts = supported_dtypes & excluded_dtypes
+            if conflicts:
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="support_exclusions.dtype_conflict",
+                        field_path=f"{path}.unsupported_dtypes",
+                        message=f"{side}.{tensor.get('name')} 同时支持和不支持 dtype {sorted(conflicts)}。",
+                        suggested_fix="依据需求修正 dtype_set、supported_combinations 或 unsupported_dtypes。",
+                    )
+                )
+            supported_layouts = (
+                {tensor["layout"]} if isinstance(tensor.get("layout"), str) else set()
+            )
+            supported_layouts.update(
+                value
+                for value in list_value(tensor.get("supported_layouts"))
+                if isinstance(value, str)
+            )
+            if side == "inputs" and tensor.get("role", "tensor") in {
+                "tensor",
+                "tensor_list",
+                "state",
+            }:
+                supported_layouts.update(
+                    v["format"] for v in variants if isinstance(v.get("format"), str)
+                )
+            supported_layouts = {
+                canonical(value, "formats")
+                for value in supported_layouts
+                if isinstance(value, str)
+            }
+            conflicts = supported_layouts & {
+                canonical(value, "formats")
+                for value in list_value(tensor.get("unsupported_layouts"))
+                if isinstance(value, str)
+            }
+            if conflicts:
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="support_exclusions.layout_conflict",
+                        field_path=f"{path}.unsupported_layouts",
+                        message=f"{side}.{tensor.get('name')} 同时支持和不支持 format {sorted(conflicts)}。",
+                        suggested_fix=(
+                            "依据需求修正 layout、supported_layouts、format_variants "
+                            "或 unsupported_layouts；NZ 与 FRACTAL_NZ 是同一格式。"
+                        ),
+                    )
+                )
+
+
+def _check_support_partition(spec: dict, findings: list[Finding]) -> None:
+    """New contracts partition the pinned official universe for every interface."""
+    if "support_universe" not in spec:
+        _check_legacy_tensor_values(spec, findings)
+        return
+
+    def error(rule_id: str, path: str, message: str, fix: str) -> None:
+        findings.append(Finding("error", rule_id, path, message, fix))
+
+    catalog = load_catalog()
+    if spec["support_universe"] != catalog["id"]:
+        error(
+            "support_partition.universe",
+            "support_universe",
+            f"未知官方全集快照：{spec['support_universe']!r}。",
+            f"将 support_universe 设置为 {catalog['id']}，并按 schemas/op-spec.json 重新核对完整支持和排除范围。",
+        )
+        return
+    combinations = (
+        _get(spec, "dtype_policy", "supported_combinations", default=[]) or []
+    )
+    combinations = [row for row in combinations if isinstance(row, dict)]
+    chips = set(
+        _get(spec, "op", "platform_constraints", "supported_chips", default=[]) or []
+    )
+    variants = _get(spec, "math_semantics", "format_variants", default=[]) or []
+    variants = [variant for variant in variants if isinstance(variant, dict)]
+    for side in ("inputs", "outputs"):
+        for index, tensor in enumerate(spec.get(side) or []):
+            if not isinstance(tensor, dict):
+                continue
+            path = f"{side}[{index}]"
+            for kind, positive, negative in (
+                ("dtypes", "dtype_set", "unsupported_dtypes"),
+                ("formats", "supported_layouts", "unsupported_layouts"),
+            ):
+                if positive not in tensor or negative not in tensor:
+                    error(
+                        "support_partition.required",
+                        path,
+                        f"新契约必须同时声明 {positive} 与 {negative}。",
+                        f"确认完整 {positive}，再将官方全集减去支持集合的补集填入 {negative}，空补集也要保留 []。",
+                    )
+                    continue
+                values = tensor[positive]
+                excluded = tensor[negative]
+                if not isinstance(values, list) or not isinstance(excluded, list):
+                    continue  # Stage 1 reports invalid field types.
+                if any(not isinstance(value, str) for value in values + excluded):
+                    continue
+                supported, unsupported = set(values), set(excluded)
+                all_values = set(universe(kind))
+                if any(canonical(value, kind) != value for value in values + excluded):
+                    error(
+                        "support_partition.canonical",
+                        path,
+                        "支持与排除列表包含未归一化的官方名称或历史别名。",
+                        "按 schemas/op-spec.json 使用规范 spec 名称；DT_FLOAT 写为 float32，FORMAT_ 前缀去除，NZ 写为 FRACTAL_NZ。",
+                    )
+                unknown = (supported | unsupported) - all_values
+                missing = all_values - (supported | unsupported)
+                if unknown or missing or supported & unsupported or not supported:
+                    error(
+                        "support_partition.coverage",
+                        path,
+                        f"{kind} 全集划分不完整：缺失={sorted(missing)}，"
+                        f"全集外值={sorted(unknown)}，正反重叠={sorted(supported & unsupported)}；"
+                        "支持列表必须非空。",
+                        f"移除全集外值，确认非空且无重复的 {positive}，并将 {negative} 重算为官方全集减去支持集合的完整补集，补齐缺失成员并消除重叠。",
+                    )
+                if supported & set(catalog[f"non_tensor_{kind}"]):
+                    error(
+                        "support_partition.non_tensor",
+                        path,
+                        "枚举边界或状态标记不能声明为 Tensor 支持项。",
+                        f"从 {positive} 移除 schemas/op-spec.json 中 non_tensor_{kind} 列出的标记，并将它们保留在 {negative}。",
+                    )
+                if supported & set(catalog[f"restricted_{kind}"]) and (
+                    not chips or not chips.issubset(catalog["restricted_chips"])
+                ):
+                    error(
+                        "support_partition.chip_scope",
+                        path,
+                        f"受限 {kind} 只允许在显式声明的 Ascend950PR / Ascend950DT 范围内支持。",
+                        "依据真实需求显式设置 op.platform_constraints.supported_chips "
+                        "为受支持的 Ascend950PR / Ascend950DT 子集，"
+                        f"或从 {positive} 移除受限值并加入 {negative}。",
+                    )
+                if kind == "dtypes":
+                    projected = {
+                        row[side][tensor["name"]]
+                        for row in combinations
+                        if tensor.get("name") in (row.get(side) or {})
+                    }
+                    if not projected.issubset(supported) or (
+                        side == "outputs" and projected != supported
+                    ):
+                        error(
+                            "support_partition.dtype_contract",
+                            path,
+                            "dtype_set 必须覆盖 supported_combinations；输出 dtype_set 必须等于组合表在该输出上的投影。",
+                            "核对 dtype_policy.supported_combinations："
+                            "输入 dtype_set 覆盖对应输入的组合值，"
+                            "输出 dtype_set 与对应输出投影完全一致，"
+                            "然后同步重算 unsupported_dtypes。",
+                        )
+                else:
+                    declared = {tensor["layout"]} if tensor.get("layout") else set()
+                    if side == "inputs" and tensor.get("role", "tensor") in {
+                        "tensor",
+                        "tensor_list",
+                        "state",
+                    }:
+                        declared.update(
+                            v["format"]
+                            for v in variants
+                            if isinstance(v.get("format"), str)
+                        )
+                    if not declared.issubset(supported):
+                        error(
+                            "support_partition.layout_contract",
+                            path,
+                            "layout 和输入 format_variants 的格式必须属于 supported_layouts。",
+                            "将 layout 及输入 format_variants 的规范格式纳入 supported_layouts，"
+                            "并同步重算 unsupported_layouts；或按真实需求修正格式声明。",
+                        )
+
+
+def _check_legacy_tensor_values(spec: dict, findings: list[Finding]) -> None:
+    """Keep expanded enum vocabularies from loosening legacy positive claims."""
+    catalog = load_catalog()
+    forbidden_dtypes = set(catalog["non_tensor_dtypes"]) | {
+        "string",
+        "string_ref",
+        "resource",
+        "variant",
+        "dual",
+    }
+    forbidden_formats = set(catalog["non_tensor_formats"])
+    combinations = (
+        _get(spec, "dtype_policy", "supported_combinations", default=[]) or []
+    )
+    for side in ("inputs", "outputs"):
+        for index, tensor in enumerate(spec.get(side) or []):
+            if not isinstance(tensor, dict):
+                continue
+            declarations = {
+                "dtype_set": (
+                    tensor.get("dtype_set") or [],
+                    "dtypes",
+                    forbidden_dtypes,
+                ),
+                "layout": (
+                    [tensor["layout"]] if tensor.get("layout") else [],
+                    "formats",
+                    forbidden_formats,
+                ),
+                "supported_layouts": (
+                    tensor.get("supported_layouts") or [],
+                    "formats",
+                    forbidden_formats,
+                ),
+            }
+            for field_name, (values, kind, forbidden) in declarations.items():
+                if not isinstance(values, list):
+                    continue  # Stage 1 reports invalid list field types.
+                invalid = {
+                    canonical(value, kind) for value in values if isinstance(value, str)
+                } & forbidden
+                if invalid:
+                    findings.append(
+                        Finding(
+                            "error",
+                            "support_partition.non_tensor",
+                            f"{side}[{index}].{field_name}",
+                            f"旧契约不能将非数值类型或枚举标记声明为 Tensor 支持项：{sorted(invalid)}。",
+                            "移除该正向声明；排除项仍可记录官方枚举。若需特殊类型，请确认真实 dtype_rule/oracle 能力后迁移到 support_universe 完整契约。",
+                        )
+                    )
+    for index, row in enumerate(combinations):
+        if not isinstance(row, dict):
+            continue
+        for side in ("inputs", "outputs"):
+            for name, value in (row.get(side) or {}).items():
+                if (
+                    isinstance(value, str)
+                    and canonical(value, "dtypes") in forbidden_dtypes
+                ):
+                    findings.append(
+                        Finding(
+                            "error",
+                            "support_partition.non_tensor",
+                            f"dtype_policy.supported_combinations[{index}].{side}.{name}",
+                            f"旧契约组合表不能声明非数值类型或枚举标记 {value!r}。",
+                            "修正 supported_combinations 中的支持 dtype，并同步核对接口 dtype_set 与 dtype_rule。",
+                        )
+                    )
 
 
 def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
@@ -181,14 +488,16 @@ def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
         length = item.get("list_length")
         if role == "tensor_list" and not isinstance(length, dict):
             error(
-                "interface_contract.tensor_list_length_missing", path,
+                "interface_contract.tensor_list_length_missing",
+                path,
                 "role=tensor_list 必须声明 list_length。",
                 "添加 list_length: {kind: unconstrained} 或来源支持的更强约束。",
             )
             return
         if role != "tensor_list" and length is not None:
             error(
-                "interface_contract.list_length_non_list", f"{path}.list_length",
+                "interface_contract.list_length_non_list",
+                f"{path}.list_length",
                 "list_length 只允许用于 role=tensor_list。",
                 "删除 list_length，或将 role 改为 tensor_list。",
             )
@@ -204,29 +513,39 @@ def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
             "same_as": {"kind", "ref"},
             "expression": {"kind", "value"},
         }
-        if kind in allowed_fields and (unexpected := set(length) - allowed_fields[kind]):
+        if kind in allowed_fields and (
+            unexpected := set(length) - allowed_fields[kind]
+        ):
             error(
-                "interface_contract.list_length_unexpected_field", f"{path}.list_length",
+                "interface_contract.list_length_unexpected_field",
+                f"{path}.list_length",
                 f"list_length.kind={kind!r} 不允许字段 {sorted(unexpected)}。",
                 f"仅保留 {sorted(allowed_fields[kind])}。",
             )
         if kind == "fixed" and isinstance(length.get("value"), int):
             if length["value"] < 0:
                 error(
-                    "interface_contract.list_length_negative", f"{path}.list_length.value",
+                    "interface_contract.list_length_negative",
+                    f"{path}.list_length.value",
                     "list_length.fixed value 必须非负。",
                     "将 value 设置为大于等于 0 的整数。",
                 )
-        elif kind == "range" and isinstance(length.get("min"), int) and isinstance(length.get("max"), int):
+        elif (
+            kind == "range"
+            and isinstance(length.get("min"), int)
+            and isinstance(length.get("max"), int)
+        ):
             if length["min"] < 0 or length["max"] < 0:
                 error(
-                    "interface_contract.list_length_negative", f"{path}.list_length",
+                    "interface_contract.list_length_negative",
+                    f"{path}.list_length",
                     "list_length.range 的 min 和 max 必须非负。",
                     "将 min 和 max 设置为大于等于 0 的整数。",
                 )
             if length["min"] > length["max"]:
                 error(
-                    "interface_contract.list_length_invalid_range", f"{path}.list_length",
+                    "interface_contract.list_length_invalid_range",
+                    f"{path}.list_length",
                     "list_length.range 必须满足 min <= max。",
                     "交换或修正 min/max。",
                 )
@@ -239,22 +558,27 @@ def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
                 target = output_by_name.get(ref.removeprefix("output."))
             if target is None:
                 error(
-                    "interface_contract.list_length_unknown_ref", f"{path}.list_length.ref",
+                    "interface_contract.list_length_unknown_ref",
+                    f"{path}.list_length.ref",
                     f"list_length.same_as 引用了不存在的 {ref!r}。",
                     "引用已声明的 input.<name> 或 output.<name>。",
                 )
             elif target.get("role", "tensor") != "tensor_list":
                 error(
-                    "interface_contract.list_length_ref_not_list", f"{path}.list_length.ref",
+                    "interface_contract.list_length_ref_not_list",
+                    f"{path}.list_length.ref",
                     f"{ref!r} 不是 role=tensor_list，不能作为列表长度引用。",
                     "改为引用 tensor_list，或为目标声明 role: tensor_list。",
                 )
         elif kind == "expression":
             expression = length.get("value")
             if isinstance(expression, str):
-                for message in _validate_list_length_expression(expression, attrs_by_name, set(input_by_name)):
+                for message in _validate_list_length_expression(
+                    expression, attrs_by_name, set(input_by_name)
+                ):
                     error(
-                        "interface_contract.list_length_expression", f"{path}.list_length.value",
+                        "interface_contract.list_length_expression",
+                        f"{path}.list_length.value",
                         message,
                         "只使用 attr.<name>、len(attr.<list_attr>)、shape.<input>[<常量轴>]、整数、+、-、* 和括号。",
                     )
@@ -272,7 +596,8 @@ def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
         case_id = case.get("id")
         if case_id in seen_ids:
             error(
-                "interface_contract.semantic_case_duplicate_id", f"{path}.id",
+                "interface_contract.semantic_case_duplicate_id",
+                f"{path}.id",
                 f"semantic case id {case_id!r} 重复。",
                 "为每个 semantic case 使用唯一 id。",
             )
@@ -280,9 +605,13 @@ def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
 
         when = case.get("when")
         if isinstance(when, str):
-            for message in _validate_semantic_guard(when, attr_names, set(input_by_name)):
+            for message in _validate_semantic_guard(
+                when, attr_names, set(input_by_name)
+            ):
                 error(
-                    "interface_contract.semantic_case_invalid_guard", f"{path}.when", message,
+                    "interface_contract.semantic_case_invalid_guard",
+                    f"{path}.when",
+                    message,
                     "guard 只可引用 attr.<name>、input.<name>.dtype、input.<name>.is_present，"
                     "并使用 ==/!=/in/not in/and/or/not。",
                 )
@@ -293,28 +622,39 @@ def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
         forbidden = set(case_inputs.get("forbidden") or [])
         present = set(case_outputs.get("present") or [])
         absent = set(case_outputs.get("absent") or [])
-        _check_case_name_set(required, forbidden, input_by_name, "input", path, findings)
+        _check_case_name_set(
+            required, forbidden, input_by_name, "input", path, findings
+        )
         _check_case_name_set(present, absent, output_by_name, "output", path, findings)
 
         for name in required | forbidden:
             if name in input_by_name and not input_by_name[name].get("optional", False):
                 error(
-                    "interface_contract.semantic_case_input_not_optional", f"{path}.inputs",
+                    "interface_contract.semantic_case_input_not_optional",
+                    f"{path}.inputs",
                     f"{name!r} 不是 optional input，不能由 semantic_cases 改变存在性。",
                     "在 input 上添加 optional: true，或删除该 case 约束。",
                 )
         for name in present | absent:
-            if name in output_by_name and not output_by_name[name].get("optional", False):
+            if name in output_by_name and not output_by_name[name].get(
+                "optional", False
+            ):
                 error(
-                    "interface_contract.semantic_case_output_not_optional", f"{path}.outputs",
+                    "interface_contract.semantic_case_output_not_optional",
+                    f"{path}.outputs",
                     f"{name!r} 不是 optional output，不能由 semantic_cases 改变存在性。",
                     "在 output 上添加 optional: true，或删除该 case 约束。",
                 )
 
         signature = (required, forbidden, present, absent)
-        if isinstance(when, str) and when in signatures and signatures[when] != signature:
+        if (
+            isinstance(when, str)
+            and when in signatures
+            and signatures[when] != signature
+        ):
             error(
-                "interface_contract.semantic_case_conflicting_same_guard", path,
+                "interface_contract.semantic_case_conflicting_same_guard",
+                path,
                 f"guard {when!r} 与先前 case 的 input/output 存在性约束冲突。",
                 "合并 case，或使用互斥的 when guard。",
             )
@@ -322,13 +662,20 @@ def _check_interface_contracts(spec: dict, findings: list[Finding]) -> None:
             signatures[when] = signature
 
     _check_layout_contract(
-        spec.get("layout_contract"), input_by_name, output_by_name, attr_names, findings,
+        spec.get("layout_contract"),
+        input_by_name,
+        output_by_name,
+        attr_names,
+        findings,
     )
 
 
 def _check_layout_contract(
-    contract: Any, input_by_name: dict, output_by_name: dict,
-    attr_names: set[str], findings: list[Finding],
+    contract: Any,
+    input_by_name: dict,
+    output_by_name: dict,
+    attr_names: set[str],
+    findings: list[Finding],
 ) -> None:
     """Validate cross references in the optional logical-layout contract.
 
@@ -350,7 +697,8 @@ def _check_layout_contract(
         variant_id = variant.get("id")
         if variant_id in seen_ids:
             error(
-                "interface_contract.layout_contract_duplicate_variant_id", f"{path}.id",
+                "interface_contract.layout_contract_duplicate_variant_id",
+                f"{path}.id",
                 f"layout variant id {variant_id!r} 重复。",
                 "为每个 layout variant 使用唯一 id。",
             )
@@ -358,9 +706,13 @@ def _check_layout_contract(
 
         when = variant.get("when")
         if isinstance(when, str):
-            for message in _validate_semantic_guard(when, attr_names, set(input_by_name)):
+            for message in _validate_semantic_guard(
+                when, attr_names, set(input_by_name)
+            ):
                 error(
-                    "interface_contract.layout_contract_invalid_guard", f"{path}.when", message,
+                    "interface_contract.layout_contract_invalid_guard",
+                    f"{path}.when",
+                    message,
                     "guard 只可引用 attr.<name>、input.<name>.dtype、input.<name>.is_present，"
                     "并使用 ==/!=/in/not in/and/or/not。",
                 )
@@ -373,7 +725,8 @@ def _check_layout_contract(
             ref = tensor.get("ref")
             if ref in seen_refs:
                 error(
-                    "interface_contract.layout_contract_duplicate_tensor_ref", f"{tensor_path}.ref",
+                    "interface_contract.layout_contract_duplicate_tensor_ref",
+                    f"{tensor_path}.ref",
                     f"{ref!r} 在同一 layout variant 中重复。",
                     "每个 Tensor 在一个 variant 中只声明一次 logical_axes。",
                 )
@@ -388,14 +741,16 @@ def _check_layout_contract(
                 target = output_by_name.get(ref.removeprefix("output."))
             if target is None:
                 error(
-                    "interface_contract.layout_contract_unknown_ref", f"{tensor_path}.ref",
+                    "interface_contract.layout_contract_unknown_ref",
+                    f"{tensor_path}.ref",
                     f"layout_contract 引用了未声明的 Tensor {ref!r}。",
                     "引用已声明的 input.<name> 或 output.<name>。",
                 )
                 continue
             if target.get("role", "tensor") != "tensor":
                 error(
-                    "interface_contract.layout_contract_ref_not_tensor", f"{tensor_path}.ref",
+                    "interface_contract.layout_contract_ref_not_tensor",
+                    f"{tensor_path}.ref",
                     f"{ref!r} 的 role={target.get('role', 'tensor')!r}，不能声明单 Tensor 的 logical_axes。",
                     "只引用 role=tensor 的 input/output；TensorList 的元素布局需单独建模。",
                 )
@@ -406,37 +761,54 @@ def _check_layout_contract(
             rank_range = target.get("rank_range") if is_input else None
             axes = tensor.get("logical_axes")
             if (
-                isinstance(rank_range, list) and len(rank_range) == 2
+                isinstance(rank_range, list)
+                and len(rank_range) == 2
                 and rank_range[0] == rank_range[1]
                 and isinstance(rank_range[0], int)
-                and isinstance(axes, list) and len(axes) != rank_range[0]
+                and isinstance(axes, list)
+                and len(axes) != rank_range[0]
             ):
                 error(
-                    "interface_contract.layout_contract_rank_mismatch", f"{tensor_path}.logical_axes",
+                    "interface_contract.layout_contract_rank_mismatch",
+                    f"{tensor_path}.logical_axes",
                     f"{ref!r} 的固定 rank 为 {rank_range[0]}，但 logical_axes 有 {len(axes)} 项。",
                     "使 logical_axes 项数与该 input 的固定 rank 一致，或修正 rank_range。",
                 )
 
 
 def _check_case_name_set(
-    positive: set[str], negative: set[str], declared: dict, kind: str,
-    path: str, findings: list[Finding],
+    positive: set[str],
+    negative: set[str],
+    declared: dict,
+    kind: str,
+    path: str,
+    findings: list[Finding],
 ) -> None:
     if overlap := positive & negative:
-        findings.append(Finding(
-            "error", "interface_contract.semantic_case_conflicting_members", path,
-            f"同一 semantic case 中 {kind} 同时出现在相反集合：{sorted(overlap)}。",
-            "将每个名称仅保留在 required/forbidden 或 present/absent 的一侧。",
-        ))
+        findings.append(
+            Finding(
+                "error",
+                "interface_contract.semantic_case_conflicting_members",
+                path,
+                f"同一 semantic case 中 {kind} 同时出现在相反集合：{sorted(overlap)}。",
+                "将每个名称仅保留在 required/forbidden 或 present/absent 的一侧。",
+            )
+        )
     for name in sorted((positive | negative) - set(declared)):
-        findings.append(Finding(
-            "error", "interface_contract.semantic_case_unknown_member", path,
-            f"semantic case 引用了未声明的 {kind} {name!r}。",
-            f"改为已声明的 {kind} 名称，或先在接口中声明它。",
-        ))
+        findings.append(
+            Finding(
+                "error",
+                "interface_contract.semantic_case_unknown_member",
+                path,
+                f"semantic case 引用了未声明的 {kind} {name!r}。",
+                f"改为已声明的 {kind} 名称，或先在接口中声明它。",
+            )
+        )
 
 
-def _check_list_length_cycles(inputs: list[dict], outputs: list[dict], findings: list[Finding]) -> None:
+def _check_list_length_cycles(
+    inputs: list[dict], outputs: list[dict], findings: list[Finding]
+) -> None:
     """same_as may follow input/output references, but it must not form a cycle."""
     refs: dict[str, str] = {}
     for prefix, items in (("input", inputs), ("output", outputs)):
@@ -451,19 +823,28 @@ def _check_list_length_cycles(inputs: list[dict], outputs: list[dict], findings:
         current = start
         while current in refs:
             if current in seen:
-                cycle = seen[seen.index(current):] + [current]
+                cycle_start = seen.index(current)
+                cycle = seen[cycle_start:] + [current]
                 cycle_nodes = frozenset(cycle[:-1])
                 if cycle_nodes not in reported_cycles:
-                    findings.append(Finding(
-                        "error", "interface_contract.list_length_cycle", "list_length.ref",
-                        f"list_length.same_as 存在循环引用：{' -> '.join(cycle)}。",
-                        "让至少一个 TensorList 使用 unconstrained/fixed/range/expression 作为长度根。",
-                    ))
+                    findings.append(
+                        Finding(
+                            "error",
+                            "interface_contract.list_length_cycle",
+                            "list_length.ref",
+                            f"list_length.same_as 存在循环引用：{' -> '.join(cycle)}。",
+                            "让至少一个 TensorList 使用 unconstrained/fixed/range/expression 作为长度根。",
+                        )
+                    )
                     reported_cycles.add(cycle_nodes)
                 break
             seen.append(current)
             current = refs[current]
-def _validate_semantic_guard(guard: str, attr_names: set[str], input_names: set[str]) -> list[str]:
+
+
+def _validate_semantic_guard(
+    guard: str, attr_names: set[str], input_names: set[str]
+) -> list[str]:
     """Return validation errors for the non-executable semantic-case guard DSL."""
     try:
         tree = ast.parse(guard, mode="eval")
@@ -485,7 +866,11 @@ def _validate_semantic_guard(guard: str, attr_names: set[str], input_names: set[
         if isinstance(node.value, ast.Name) and node.value.id == "input":
             # `input.x` 是 `input.x.dtype/is_present` 的中间 AST 节点。
             return ("input_base", node.attr, "")
-        if isinstance(node.value, ast.Attribute) and isinstance(node.value.value, ast.Name) and node.value.value.id == "input":
+        if (
+            isinstance(node.value, ast.Attribute)
+            and isinstance(node.value.value, ast.Name)
+            and node.value.value.id == "input"
+        ):
             return ("input", node.value.attr, node.attr)
         return None
 
@@ -494,12 +879,17 @@ def _validate_semantic_guard(guard: str, attr_names: set[str], input_names: set[
             errors.append("guard 不允许函数调用。")
         elif isinstance(node, ast.BinOp):
             errors.append("guard 不允许算术运算。")
-        elif isinstance(node, ast.Compare) and any(not isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn)) for op in node.ops):
+        elif isinstance(node, ast.Compare) and any(
+            not isinstance(op, (ast.Eq, ast.NotEq, ast.In, ast.NotIn))
+            for op in node.ops
+        ):
             errors.append("guard 只允许 ==、!=、in、not in 比较。")
         elif isinstance(node, ast.Attribute):
             parsed = ref(node)
             if parsed is None:
-                errors.append("guard 引用必须是 attr.<name>、input.<name>.dtype 或 input.<name>.is_present。")
+                errors.append(
+                    "guard 引用必须是 attr.<name>、input.<name>.dtype 或 input.<name>.is_present。"
+                )
                 continue
             kind, name, leaf = parsed
             if kind == "attr" and name not in attr_names:
@@ -514,12 +904,39 @@ def _validate_semantic_guard(guard: str, attr_names: set[str], input_names: set[
                             f"guard 不支持裸 input.{name}；只允许 input.{name}.dtype 或 input.{name}.is_present。"
                         )
                 if kind == "input" and leaf not in {"dtype", "is_present"}:
-                    errors.append(f"guard 不支持 input.{name}.{leaf}；只允许 dtype 或 is_present。")
-        elif isinstance(node, ast.Name) and node.id not in {"attr", "input", "true", "false"}:
+                    errors.append(
+                        f"guard 不支持 input.{name}.{leaf}；只允许 dtype 或 is_present。"
+                    )
+        elif isinstance(node, ast.Name) and node.id not in {
+            "attr",
+            "input",
+            "true",
+            "false",
+        }:
             errors.append(f"guard 不允许名称 {node.id!r}。")
-        elif isinstance(node, (ast.Expression, ast.Name, ast.BoolOp, ast.UnaryOp, ast.Compare, ast.Load,
-                               ast.And, ast.Or, ast.Not, ast.Eq, ast.NotEq, ast.In, ast.NotIn,
-                               ast.Constant, ast.List, ast.Tuple)):
+        elif isinstance(
+            node,
+            (
+                ast.Expression,
+                ast.Name,
+                ast.BoolOp,
+                ast.UnaryOp,
+                ast.Compare,
+                ast.Load,
+                ast.And,
+                ast.Or,
+                ast.Not,
+                ast.Eq,
+                ast.NotEq,
+                ast.In,
+                ast.NotIn,
+                ast.Constant,
+                ast.List,
+                ast.Tuple,
+            ),
+        ):
+            continue
+        elif isinstance(node, ast.Attribute):
             continue
         else:
             errors.append(f"guard 不允许语法节点 {type(node).__name__}。")
@@ -527,7 +944,9 @@ def _validate_semantic_guard(guard: str, attr_names: set[str], input_names: set[
 
 
 def _validate_list_length_expression(
-    expression: str, attrs_by_name: dict[str, dict], input_names: set[str],
+    expression: str,
+    attrs_by_name: dict[str, dict],
+    input_names: set[str],
 ) -> list[str]:
     """Validate the intentionally small integer-expression language for list length."""
     try:
@@ -552,9 +971,17 @@ def _validate_list_length_expression(
         return lower, upper
 
     def interval(node: ast.AST) -> tuple[int | None, int | None]:
-        if isinstance(node, ast.Constant) and isinstance(node.value, int) and not isinstance(node.value, bool):
+        if (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, int)
+            and not isinstance(node.value, bool)
+        ):
             return node.value, node.value
-        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id == "attr":
+        if (
+            isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "attr"
+        ):
             return attribute_interval(node.attr)
         if isinstance(node, ast.Call):
             return 0, None
@@ -566,11 +993,13 @@ def _validate_list_length_expression(
             if isinstance(node.op, ast.Add):
                 lower = (
                     left_lower + right_lower
-                    if left_lower is not None and right_lower is not None else None
+                    if left_lower is not None and right_lower is not None
+                    else None
                 )
                 upper = (
                     left_upper + right_upper
-                    if left_upper is not None and right_upper is not None else None
+                    if left_upper is not None and right_upper is not None
+                    else None
                 )
                 return lower, upper
             if isinstance(node.op, ast.Mult):
@@ -578,8 +1007,10 @@ def _validate_list_length_expression(
                 # are provably non-negative.
                 lower = (
                     left_lower * right_lower
-                    if left_lower is not None and right_lower is not None
-                    and left_lower >= 0 and right_lower >= 0
+                    if left_lower is not None
+                    and right_lower is not None
+                    and left_lower >= 0
+                    and right_lower >= 0
                     else None
                 )
                 if None not in (left_lower, left_upper, right_lower, right_upper):
@@ -594,11 +1025,13 @@ def _validate_list_length_expression(
             if isinstance(node.op, ast.Sub):
                 lower = (
                     left_lower - right_upper
-                    if left_lower is not None and right_upper is not None else None
+                    if left_lower is not None and right_upper is not None
+                    else None
                 )
                 upper = (
                     left_upper - right_lower
-                    if left_upper is not None and right_lower is not None else None
+                    if left_upper is not None and right_lower is not None
+                    else None
                 )
                 return lower, upper
         return None, None
@@ -609,35 +1042,83 @@ def _validate_list_length_expression(
         elif isinstance(node, ast.Attribute):
             if isinstance(node.value, ast.Name) and node.value.id == "attr":
                 if node.attr not in attrs_by_name:
-                    errors.append(f"list_length expression 引用了未声明属性 attr.{node.attr}。")
+                    errors.append(
+                        f"list_length expression 引用了未声明属性 attr.{node.attr}。"
+                    )
             elif isinstance(node.value, ast.Name) and node.value.id == "shape":
                 if node.attr not in input_names:
-                    errors.append(f"list_length expression 引用了未声明输入 shape.{node.attr}。")
+                    errors.append(
+                        f"list_length expression 引用了未声明输入 shape.{node.attr}。"
+                    )
             else:
-                errors.append("list_length expression 的属性引用只允许 attr.<name> 或 shape.<input>。")
+                errors.append(
+                    "list_length expression 的属性引用只允许 attr.<name> 或 shape.<input>。"
+                )
         elif isinstance(node, ast.Call):
             valid_len_arg = (
-                len(node.args) == 1 and isinstance(node.args[0], ast.Attribute)
-                and isinstance(node.args[0].value, ast.Name) and node.args[0].value.id == "attr"
+                len(node.args) == 1
+                and isinstance(node.args[0], ast.Attribute)
+                and isinstance(node.args[0].value, ast.Name)
+                and node.args[0].value.id == "attr"
             )
-            if not (isinstance(node.func, ast.Name) and node.func.id == "len" and valid_len_arg and not node.keywords):
-                errors.append("list_length expression 只允许 len(attr.<list_attr>) 调用。")
-            elif not str(attrs_by_name.get(node.args[0].attr, {}).get("type", "")).startswith("list["):
-                errors.append(f"len(attr.{node.args[0].attr}) 只能引用 list[...] 类型属性。")
+            if not (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "len"
+                and valid_len_arg
+                and not node.keywords
+            ):
+                errors.append(
+                    "list_length expression 只允许 len(attr.<list_attr>) 调用。"
+                )
+            elif not str(
+                attrs_by_name.get(node.args[0].attr, {}).get("type", "")
+            ).startswith("list["):
+                errors.append(
+                    f"len(attr.{node.args[0].attr}) 只能引用 list[...] 类型属性。"
+                )
         elif isinstance(node, ast.Subscript):
-            if not (isinstance(node.value, ast.Attribute) and isinstance(node.value.value, ast.Name)
-                    and node.value.value.id == "shape" and isinstance(node.slice, ast.Constant)
-                    and isinstance(node.slice.value, int) and node.slice.value >= 0):
-                errors.append("list_length expression 下标只允许 shape.<input>[<非负常量轴>]。")
-        elif isinstance(node, ast.BinOp) and not isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)):
+            if not (
+                isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "shape"
+                and isinstance(node.slice, ast.Constant)
+                and isinstance(node.slice.value, int)
+                and node.slice.value >= 0
+            ):
+                errors.append(
+                    "list_length expression 下标只允许 shape.<input>[<非负常量轴>]。"
+                )
+        elif isinstance(node, ast.BinOp) and not isinstance(
+            node.op, (ast.Add, ast.Sub, ast.Mult)
+        ):
             errors.append("list_length expression 只允许 +、-、* 运算。")
-        elif isinstance(node, ast.Constant) and (not isinstance(node.value, int) or isinstance(node.value, bool) or node.value < 0):
+        elif isinstance(node, ast.Constant) and (
+            not isinstance(node.value, int)
+            or isinstance(node.value, bool)
+            or node.value < 0
+        ):
             errors.append("list_length expression 只允许非负整数常量。")
-        elif isinstance(node, (ast.Expression, ast.Name, ast.Attribute, ast.Call, ast.Subscript,
-                               ast.BinOp, ast.Add, ast.Sub, ast.Mult, ast.Load, ast.Constant)):
+        elif isinstance(
+            node,
+            (
+                ast.Expression,
+                ast.Name,
+                ast.Attribute,
+                ast.Call,
+                ast.Subscript,
+                ast.BinOp,
+                ast.Add,
+                ast.Sub,
+                ast.Mult,
+                ast.Load,
+                ast.Constant,
+            ),
+        ):
             continue
         else:
-            errors.append(f"list_length expression 不允许语法节点 {type(node).__name__}。")
+            errors.append(
+                f"list_length expression 不允许语法节点 {type(node).__name__}。"
+            )
     bound, _ = interval(tree.body)
     if bound is None:
         errors.append(
@@ -655,25 +1136,34 @@ def _check_category_paradigm_consistency(cat, paradigms, registries, findings):
     required = set(cmap["category_requires_paradigms"].get(cat, []))
     missing = required - paradigms
     if missing:
-        findings.append(Finding(
-            severity="error",
-            rule_id="category_paradigm_consistency.required_paradigm_missing",
-            field_path="op.paradigms",
-            message=f"category={cat} 必含 paradigm {sorted(missing)}",
-            suggested_fix=f"在 op.paradigms 中加入 {sorted(missing)}",
-        ))
+        findings.append(
+            Finding(
+                severity="error",
+                rule_id="category_paradigm_consistency.required_paradigm_missing",
+                field_path="op.paradigms",
+                message=f"category={cat} 必含 paradigm {sorted(missing)}",
+                suggested_fix=f"在 op.paradigms 中加入 {sorted(missing)}",
+            )
+        )
 
     if cat == "FusedComposite":
-        basic = {"Broadcast", "Reduction", "Contraction",
-                 "ArgReduce", "LayoutTransform"}
+        basic = {
+            "Broadcast",
+            "Reduction",
+            "Contraction",
+            "ArgReduce",
+            "LayoutTransform",
+        }
         if len(paradigms & basic) < 2:
-            findings.append(Finding(
-                severity="error",
-                rule_id="category_paradigm_consistency.fused_composite_basics",
-                field_path="op.paradigms",
-                message="category=fused_composite 必须含 ≥ 2 条基础 paradigm（Elementwise 被其他范式吸收，不计入）",
-                suggested_fix=f"从 {sorted(basic)} 中至少选 2 条加入 paradigms",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="category_paradigm_consistency.fused_composite_basics",
+                    field_path="op.paradigms",
+                    message="category=fused_composite 必须含 ≥ 2 条基础 paradigm（Elementwise 被其他范式吸收，不计入）",
+                    suggested_fix=f"从 {sorted(basic)} 中至少选 2 条加入 paradigms",
+                )
+            )
 
 
 def _check_broadcast_paradigm_hint(spec, paradigms, findings):
@@ -685,28 +1175,32 @@ def _check_broadcast_paradigm_hint(spec, paradigms, findings):
     )
 
     if broadcast_kind == "numpy" and "Broadcast" not in paradigms:
-        findings.append(Finding(
-            severity="error",
-            rule_id="category_paradigm_consistency.broadcast_kind_requires_paradigm",
-            field_path="op.paradigms",
-            message=(
-                f"broadcast.kind=numpy 但 paradigms {sorted(paradigms)} 不含 Broadcast。"
-                "当算子计算需要 broadcast 数据时，paradigms 必须包含 Broadcast"
-            ),
-            suggested_fix="在 op.paradigms 中加入 Broadcast，并将 op.category 改为 Broadcast",
-        ))
+        findings.append(
+            Finding(
+                severity="error",
+                rule_id="category_paradigm_consistency.broadcast_kind_requires_paradigm",
+                field_path="op.paradigms",
+                message=(
+                    f"broadcast.kind=numpy 但 paradigms {sorted(paradigms)} 不含 Broadcast。"
+                    "当算子计算需要 broadcast 数据时，paradigms 必须包含 Broadcast"
+                ),
+                suggested_fix="在 op.paradigms 中加入 Broadcast，并将 op.category 改为 Broadcast",
+            )
+        )
 
     if has_broadcast_shape_rule and "Broadcast" not in paradigms:
-        findings.append(Finding(
-            severity="error",
-            rule_id="category_paradigm_consistency.shape_rule_broadcast_requires_paradigm",
-            field_path="op.paradigms",
-            message=(
-                f"outputs[].shape_rule 使用了 np.broadcast_shapes 但 paradigms {sorted(paradigms)} 不含 Broadcast。"
-                "输出 shape 由 broadcast 推导的算子应使用 Broadcast paradigm"
-            ),
-            suggested_fix="在 op.paradigms 中加入 Broadcast，并将 op.category 改为 Broadcast",
-        ))
+        findings.append(
+            Finding(
+                severity="error",
+                rule_id="category_paradigm_consistency.shape_rule_broadcast_requires_paradigm",
+                field_path="op.paradigms",
+                message=(
+                    f"outputs[].shape_rule 使用了 np.broadcast_shapes 但 paradigms {sorted(paradigms)} 不含 Broadcast。"
+                    "输出 shape 由 broadcast 推导的算子应使用 Broadcast paradigm"
+                ),
+                suggested_fix="在 op.paradigms 中加入 Broadcast，并将 op.category 改为 Broadcast",
+            )
+        )
 
 
 def _check_mutually_exclusive_paradigms(paradigms, registries, findings):
@@ -714,13 +1208,15 @@ def _check_mutually_exclusive_paradigms(paradigms, registries, findings):
     cmap = registries["category_map"]
     for pair in cmap.get("mutually_exclusive_paradigms", []):
         if set(pair) <= paradigms:
-            findings.append(Finding(
-                severity="error",
-                rule_id="category_paradigm_consistency.mutually_exclusive",
-                field_path="op.paradigms",
-                message=f"paradigms 互斥：{pair}",
-                suggested_fix=f"删除 {pair} 之一；写冲突另成 atomic_update",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="category_paradigm_consistency.mutually_exclusive",
+                    field_path="op.paradigms",
+                    message=f"paradigms 互斥：{pair}",
+                    suggested_fix=f"删除 {pair} 之一；写冲突另成 atomic_update",
+                )
+            )
 
 
 def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
@@ -733,13 +1229,15 @@ def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
 
     if "NumericalStable" in paradigms:
         if not _get(spec, "numerical_stability", "required"):
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.numerical_stable",
-                field_path="numerical_stability.required",
-                message="paradigms 含 NumericalStable ⇒ numerical_stability.required 必须为 true",
-                suggested_fix="把 numerical_stability.required 改为 true 并补 techniques",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.numerical_stable",
+                    field_path="numerical_stability.required",
+                    message="paradigms 含 NumericalStable ⇒ numerical_stability.required 必须为 true",
+                    suggested_fix="把 numerical_stability.required 改为 true 并补 techniques",
+                )
+            )
 
     if "FusedComposite" in paradigms:
         _check_fused_composite(spec, primitives_wl, findings)
@@ -761,23 +1259,25 @@ def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
         has_implicit_all = reduction.get("axis_source") == "implicit_all"
 
         if not (has_input_axis or has_attr_axis or has_fixed_axis or has_implicit_all):
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.reduction_axis_missing",
-                field_path="inputs | attributes | reduction",
-                message=(
-                    "paradigms 含 Reduction（且不含 Recurrence）⇒ 必须通过以下方式之一指定规约轴："
-                    "(A) 名为 axes/axis/dim 且 dtype∈{int32,int64} 的输入张量；"
-                    "(B) 名为 axis/dim/axes 的属性；"
-                    "(C) reduction.axis_source: fixed 声明固定轴；"
-                    "(D) reduction.axis_source: implicit_all 声明隐式全轴归约"
-                ),
-                suggested_fix=(
-                    "添加 axes/axis/dim 输入、添加 axis/dim/axes 属性、"
-                    "声明 reduction: {axis_source: fixed, fixed_value: <N>}、"
-                    "或声明 reduction: {axis_source: implicit_all}"
-                ),
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.reduction_axis_missing",
+                    field_path="inputs | attributes | reduction",
+                    message=(
+                        "paradigms 含 Reduction（且不含 Recurrence）⇒ 必须通过以下方式之一指定规约轴："
+                        "(A) 名为 axes/axis/dim 且 dtype∈{int32,int64} 的输入张量；"
+                        "(B) 名为 axis/dim/axes 的属性；"
+                        "(C) reduction.axis_source: fixed 声明固定轴；"
+                        "(D) reduction.axis_source: implicit_all 声明隐式全轴归约"
+                    ),
+                    suggested_fix=(
+                        "添加 axes/axis/dim 输入、添加 axis/dim/axes 属性、"
+                        "声明 reduction: {axis_source: fixed, fixed_value: <N>}、"
+                        "或声明 reduction: {axis_source: implicit_all}"
+                    ),
+                )
+            )
 
     if "ArgReduce" in paradigms:
         # ArgReduce 输出必须是 int32 / int64；用 dtype_eval 求值后检查
@@ -794,39 +1294,47 @@ def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
             if _de is not None and kind == "numpy_expr" and rule:
                 # 用 dtype_policy.supported_combinations[0] 作为试探输入；
                 # ArgReduce 通常 dtype_rule 是 `y.dtype = np.int32 / int64` 不依赖输入
-                combos = ((spec.get("dtype_policy") or {})
-                          .get("supported_combinations") or [])
+                combos = (spec.get("dtype_policy") or {}).get(
+                    "supported_combinations"
+                ) or []
                 in_dt = combos[0].get("inputs", {}) if combos else {}
                 try:
                     derived = _de.evaluate_dtype_rule(
-                        rule, output_name=out.get("name"),
+                        rule,
+                        output_name=out.get("name"),
                         input_dtypes=in_dt,
                     )
                 except _DslError:
                     derived = None
             if derived not in ("int32", "int64"):
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="paradigm_constraint.argreduce_dtype",
-                    field_path=f"outputs[{i}].dtype_rule",
-                    message=f"ArgReduce 输出 dtype 必须为 int32 / int64，当前 dtype_rule={rule!r} 推得 {derived!r}",
-                    suggested_fix="把 dtype_rule 改为 `<output>.dtype = np.int32` 或 `np.int64`",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="paradigm_constraint.argreduce_dtype",
+                        field_path=f"outputs[{i}].dtype_rule",
+                        message=f"ArgReduce 输出 dtype 必须为 int32 / int64，当前 dtype_rule={rule!r} 推得 {derived!r}",
+                        suggested_fix="把 dtype_rule 改为 `<output>.dtype = np.int32` 或 `np.int64`",
+                    )
+                )
 
     if "Stateful" in paradigms:
-        has_state_input = any(inp.get("role") == "state" for inp in spec.get("inputs", []))
+        has_state_input = any(
+            inp.get("role") == "state" for inp in spec.get("inputs", [])
+        )
         has_inplace_output = any(
             re.match(r"^inplace_with\(", out.get("aliasing") or "")
             for out in spec.get("outputs", [])
         )
         if not (has_state_input or has_inplace_output):
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.stateful_state_or_inplace",
-                field_path="inputs[*].role | outputs[*].aliasing",
-                message="Stateful 必须有 inputs.role=state 或 outputs.aliasing=inplace_with(<state_input>)",
-                suggested_fix="添加 role: state 的 input，或在某 output 加 aliasing: inplace_with(<state_input>)",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.stateful_state_or_inplace",
+                    field_path="inputs[*].role | outputs[*].aliasing",
+                    message="Stateful 必须有 inputs.role=state 或 outputs.aliasing=inplace_with(<state_input>)",
+                    suggested_fix="添加 role: state 的 input，或在某 output 加 aliasing: inplace_with(<state_input>)",
+                )
+            )
 
     if "Quantization" in paradigms:
         attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
@@ -849,17 +1357,19 @@ def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
         op_name = (_get(spec, "op", "name") or "").lower()
         name_match = "quant" in op_name
         if not name_match and not any(form <= all_names for form in canonical_forms):
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.quantization_attrs",
-                field_path="attributes",
-                message=(
-                    "Quantization 必须含以下任一组量化参数（attribute 或 input 均可）："
-                    "{scale, zero_point} / {scale} / {x1Scale, x2Scale} / "
-                    "{dequant_scale} / {deqScale}，或算子名含 'quant'"
-                ),
-                suggested_fix="按算子语义选择对应形式；对称量化只需 scale；双输入分别量化用 x1Scale + x2Scale",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.quantization_attrs",
+                    field_path="attributes",
+                    message=(
+                        "Quantization 必须含以下任一组量化参数（attribute 或 input 均可）："
+                        "{scale, zero_point} / {scale} / {x1Scale, x2Scale} / "
+                        "{dequant_scale} / {deqScale}，或算子名含 'quant'"
+                    ),
+                    suggested_fix="按算子语义选择对应形式；对称量化只需 scale；双输入分别量化用 x1Scale + x2Scale",
+                )
+            )
 
     if "VariableOutput" in paradigms:
         # 属性决定输出个数（split/chunk/unbind 类）：输出个数与 shape 由属性决定，
@@ -868,34 +1378,44 @@ def _check_paradigm_internal_constraints(spec, paradigms, registries, findings):
         if not _attr_determined:
             for i, out in enumerate(spec.get("outputs", [])):
                 if not out.get("data_dependent_shape"):
-                    findings.append(Finding(
-                        severity="error",
-                        rule_id="paradigm_constraint.variable_output_flag",
-                        field_path=f"outputs[{i}].data_dependent_shape",
-                        message="VariableOutput 输出必须配 data_dependent_shape: true",
-                        suggested_fix="在该 output 加 data_dependent_shape: true，或若输出个数由属性决定则在 op 声明 output_count_determined_by: attribute",
-                    ))
+                    findings.append(
+                        Finding(
+                            severity="error",
+                            rule_id="paradigm_constraint.variable_output_flag",
+                            field_path=f"outputs[{i}].data_dependent_shape",
+                            message="VariableOutput 输出必须配 data_dependent_shape: true",
+                            suggested_fix=(
+                                "在该 output 加 data_dependent_shape: true，"
+                                "或若输出个数由属性决定则在 op 声明 "
+                                "output_count_determined_by: attribute"
+                            ),
+                        )
+                    )
 
     if "RandomSampling" in paradigms:
         attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
         if "seed" not in attr_names:
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.random_sampling_seed",
-                field_path="attributes",
-                message="RandomSampling 必须含 seed 属性",
-                suggested_fix="在 attributes 中添加 seed (int64)",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.random_sampling_seed",
+                    field_path="attributes",
+                    message="RandomSampling 必须含 seed 属性",
+                    suggested_fix="在 attributes 中添加 seed (int64)",
+                )
+            )
 
     if "CollectiveCommunication" in paradigms:
         if not _get(spec, "op", "platform_constraints", "requires_hccl"):
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.collective_hccl",
-                field_path="op.platform_constraints.requires_hccl",
-                message="CollectiveCommunication 必须声明 op.platform_constraints.requires_hccl: true",
-                suggested_fix="在 op 下添加 platform_constraints: {requires_hccl: true}",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.collective_hccl",
+                    field_path="op.platform_constraints.requires_hccl",
+                    message="CollectiveCommunication 必须声明 op.platform_constraints.requires_hccl: true",
+                    suggested_fix="在 op 下添加 platform_constraints: {requires_hccl: true}",
+                )
+            )
 
 
 def _check_paradigm_groups(spec, paradigms, findings):
@@ -911,53 +1431,70 @@ def _check_paradigm_groups(spec, paradigms, findings):
     # ── 通用信号检测：模式切换属性 ────────────────────────────────────────
     # string_in 和 enum_in 语义等价，都表示属性在多个离散值之间切换。
     # int_in_range 且 lower_inclusive=0 也视为模式切换信号（0 值通常对应
-    # none/identity/passthrough，如 reduction=0→none, mode=0→求值 等）。
+    # none/identity/passthrough，如 reduction=0→none, mode=0→运行 等）。
     _MODE_SWITCH_KINDS = {"string_in", "enum_in"}
     attrs = spec.get("attributes") or []
     mode_switch_attr = next(
-        (a for a in attrs
-         if (a.get("machine_constraint") or {}).get("kind") in _MODE_SWITCH_KINDS),
+        (
+            a
+            for a in attrs
+            if (a.get("machine_constraint") or {}).get("kind") in _MODE_SWITCH_KINDS
+        ),
         None,
     )
     # 扩展检测：int_in_range + lower=0 也暗示模式切换
     if mode_switch_attr is None:
         mode_switch_attr = next(
-            (a for a in attrs
-             if (a.get("machine_constraint") or {}).get("kind") == "int_in_range"
-             and (a.get("machine_constraint") or {}).get("lower_inclusive", 1) == 0),
+            (
+                a
+                for a in attrs
+                if (a.get("machine_constraint") or {}).get("kind") == "int_in_range"
+                and (a.get("machine_constraint") or {}).get("lower_inclusive", 1) == 0
+            ),
             None,
         )
 
     # ── combination_should_exist ──────────────────────────────────────────
     # 修饰符范式（不参与计算主路径，不强制要求分组）
     _MODIFIER_PARADIGMS = {
-        "NumericalStable", "FusedComposite", "Quantization",
-        "RandomSampling", "DynamicShape", "VariableOutput",
-        "Stateful", "Sparse", "CollectiveCommunication",
+        "NumericalStable",
+        "FusedComposite",
+        "Quantization",
+        "RandomSampling",
+        "DynamicShape",
+        "VariableOutput",
+        "Stateful",
+        "Sparse",
+        "CollectiveCommunication",
     }
     base_paradigms = paradigms - _MODIFIER_PARADIGMS
 
     if not groups:
         if len(base_paradigms) >= 2:
             # 情况 A：≥2 基础范式 + 无 groups → 明确需要 paradigm_groups
-            findings.append(Finding(
-                severity="warning",
-                rule_id="paradigm_groups.combination_should_exist",
-                field_path="op.paradigm_groups",
-                message=(
-                    f"op.paradigms 包含 ≥ 2 个基础范式 {sorted(base_paradigms)} "
-                    f"但未声明 paradigm_groups。"
-                    + (f"属性 {mode_switch_attr.get('name')!r} 是模式切换属性"
-                       f"（{mode_switch_attr.get('machine_constraint', {}).get('kind')}），"
-                       f"强烈暗示横向组合（combination）。"
-                       if mode_switch_attr else "")
-                    + " 建议声明 paradigm_groups 明确范式之间的关系"
-                      "（combination=横向组合 / fusion=纵向融合）"
-                ),
-                suggested_fix=(
-                    "添加 paradigm_groups，参考 stage-rules.md 中的 mse_loss 横向组合示例"
-                ),
-            ))
+            findings.append(
+                Finding(
+                    severity="warning",
+                    rule_id="paradigm_groups.combination_should_exist",
+                    field_path="op.paradigm_groups",
+                    message=(
+                        f"op.paradigms 包含 ≥ 2 个基础范式 {sorted(base_paradigms)} "
+                        f"但未声明 paradigm_groups。"
+                        + (
+                            f"属性 {mode_switch_attr.get('name')!r} 是模式切换属性"
+                            f"（{mode_switch_attr.get('machine_constraint', {}).get('kind')}），"
+                            f"强烈暗示横向组合（combination）。"
+                            if mode_switch_attr
+                            else ""
+                        )
+                        + " 建议声明 paradigm_groups 明确范式之间的关系"
+                        "（combination=横向组合 / fusion=纵向融合）"
+                    ),
+                    suggested_fix=(
+                        "添加 paradigm_groups，参考 stage-rules.md 中的 mse_loss 横向组合示例"
+                    ),
+                )
+            )
         elif mode_switch_attr and "Elementwise" not in paradigms:
             # 情况 B：只有 1 个基础范式，但有模式切换属性，且 Elementwise 未在 paradigms 中
             # 典型场景：mse_loss 的 reduction=none 使算子退化为 Elementwise，
@@ -965,29 +1502,35 @@ def _check_paradigm_groups(spec, paradigms, findings):
             mc = mode_switch_attr.get("machine_constraint") or {}
             mc_kind = mc.get("kind", "")
             values = mc.get("values") or []
-            none_like = [v for v in values if str(v).lower() in ("none", "identity", "passthrough")]
+            none_like = [
+                v
+                for v in values
+                if str(v).lower() in ("none", "identity", "passthrough")
+            ]
             # int_in_range + lower=0：值 0 通常对应 none/identity 模式
             if mc_kind == "int_in_range" and mc.get("lower_inclusive", 1) == 0:
                 none_like = [0]
             if none_like:
-                findings.append(Finding(
-                    severity="warning",
-                    rule_id="paradigm_groups.mode_switch_may_need_combination",
-                    field_path="op.paradigm_groups",
-                    message=(
-                        f"属性 {mode_switch_attr.get('name')!r} 存在模式切换值 "
-                        f"{none_like}（kind={mc.get('kind')}），"
-                        f"该值可能使算子退化为 Elementwise 等非归约行为，"
-                        f"但 paradigms 中未包含对应范式且无 paradigm_groups。"
-                        f" 建议检查该属性值下的计算模式，必要时添加 Elementwise 范式"
-                        f"并声明 paradigm_groups combination"
-                    ),
-                    suggested_fix=(
-                        f"分析 {mode_switch_attr.get('name')}={none_like[0]} 时的计算行为；"
-                        f"若为逐元素输出，添加 Elementwise 到 paradigms 并声明 "
-                        f"paradigm_groups combination（参考 stage-rules.md mse_loss 示例）"
-                    ),
-                ))
+                findings.append(
+                    Finding(
+                        severity="warning",
+                        rule_id="paradigm_groups.mode_switch_may_need_combination",
+                        field_path="op.paradigm_groups",
+                        message=(
+                            f"属性 {mode_switch_attr.get('name')!r} 存在模式切换值 "
+                            f"{none_like}（kind={mc.get('kind')}），"
+                            f"该值可能使算子退化为 Elementwise 等非归约行为，"
+                            f"但 paradigms 中未包含对应范式且无 paradigm_groups。"
+                            f" 建议检查该属性值下的计算模式，必要时添加 Elementwise 范式"
+                            f"并声明 paradigm_groups combination"
+                        ),
+                        suggested_fix=(
+                            f"分析 {mode_switch_attr.get('name')}={none_like[0]} 时的计算行为；"
+                            f"若为逐元素输出，添加 Elementwise 到 paradigms 并声明 "
+                            f"paradigm_groups combination（参考 stage-rules.md mse_loss 示例）"
+                        ),
+                    )
+                )
 
     if not groups:
         return
@@ -1003,99 +1546,117 @@ def _check_paradigm_groups(spec, paradigms, findings):
         if kind == "fusion":
             basic_count = len(group_paradigms & basic)
             if basic_count < 2:
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="paradigm_groups.fusion_min_basic",
-                    field_path=f"op.paradigm_groups[{i}].paradigms",
-                    message=f"fusion 组必须含 ≥ 2 条基础范式（Elementwise 不计入），当前 {basic_count} 条",
-                    suggested_fix=f"从 {sorted(basic)} 中至少选 2 条加入该组 paradigms",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="paradigm_groups.fusion_min_basic",
+                        field_path=f"op.paradigm_groups[{i}].paradigms",
+                        message=f"fusion 组必须含 ≥ 2 条基础范式（Elementwise 不计入），当前 {basic_count} 条",
+                        suggested_fix=f"从 {sorted(basic)} 中至少选 2 条加入该组 paradigms",
+                    )
+                )
         elif kind == "combination":
             if not group.get("switch"):
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="paradigm_groups.combination_missing_switch",
-                    field_path=f"op.paradigm_groups[{i}].switch",
-                    message="combination 组必须有 switch 字段",
-                    suggested_fix="添加 switch: <属性名>",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="paradigm_groups.combination_missing_switch",
+                        field_path=f"op.paradigm_groups[{i}].switch",
+                        message="combination 组必须有 switch 字段",
+                        suggested_fix="添加 switch: <属性名>",
+                    )
+                )
             if "when" not in group:
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="paradigm_groups.combination_missing_when",
-                    field_path=f"op.paradigm_groups[{i}].when",
-                    message="combination 组必须有 when 字段",
-                    suggested_fix="添加 when: <属性值>",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="paradigm_groups.combination_missing_when",
+                        field_path=f"op.paradigm_groups[{i}].when",
+                        message="combination 组必须有 when 字段",
+                        suggested_fix="添加 when: <属性值>",
+                    )
+                )
 
     extra = all_grouped - paradigms
     if extra:
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_groups.mismatch",
-            field_path="op.paradigm_groups",
-            message=f"paradigm_groups 包含 op.paradigms 中没有的 {sorted(extra)}",
-            suggested_fix="确保 paradigm_groups 中的 paradigms 都在 op.paradigms 中",
-        ))
+        findings.append(
+            Finding(
+                severity="error",
+                rule_id="paradigm_groups.mismatch",
+                field_path="op.paradigm_groups",
+                message=f"paradigm_groups 包含 op.paradigms 中没有的 {sorted(extra)}",
+                suggested_fix="确保 paradigm_groups 中的 paradigms 都在 op.paradigms 中",
+            )
+        )
 
 
 def _check_fused_composite(spec, primitives_wl, findings):
     """FusedComposite 子项：composition 必填、primitives ≥ 2、白名单、不泄漏、闭合。"""
     comp = _get(spec, "math_semantics", "composition")
     if comp is None:
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.fused_composite_composition_missing",
-            field_path="math_semantics.composition",
-            message="paradigms 含 FusedComposite ⇒ math_semantics.composition 必填",
-            suggested_fix="添加 composition.primitives (≥2 条) 与 dataflow",
-        ))
+        findings.append(
+            Finding(
+                severity="error",
+                rule_id="paradigm_constraint.fused_composite_composition_missing",
+                field_path="math_semantics.composition",
+                message="paradigms 含 FusedComposite ⇒ math_semantics.composition 必填",
+                suggested_fix="添加 composition.primitives (≥2 条) 与 dataflow",
+            )
+        )
         return
 
     prims = comp.get("primitives", []) or []
     if len(prims) < 2:
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.fused_composite_min_primitives",
-            field_path="math_semantics.composition.primitives",
-            message=f"FusedComposite 要求 primitives 长度 ≥ 2（当前 {len(prims)}）",
-            suggested_fix="拆分成至少 2 条白名单内原语",
-        ))
+        findings.append(
+            Finding(
+                severity="error",
+                rule_id="paradigm_constraint.fused_composite_min_primitives",
+                field_path="math_semantics.composition.primitives",
+                message=f"FusedComposite 要求 primitives 长度 ≥ 2（当前 {len(prims)}）",
+                suggested_fix="拆分成至少 2 条白名单内原语",
+            )
+        )
     for i, prim in enumerate(prims):
         if prim.get("op") not in primitives_wl:
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.primitive_not_whitelisted",
-                field_path=f"math_semantics.composition.primitives[{i}].op",
-                message=f"原语 op={prim.get('op')!r} 不在 PRIMITIVE_WHITELIST",
-                suggested_fix=f"改为白名单内之一: {sorted(primitives_wl)}",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.primitive_not_whitelisted",
+                    field_path=f"math_semantics.composition.primitives[{i}].op",
+                    message=f"原语 op={prim.get('op')!r} 不在 PRIMITIVE_WHITELIST",
+                    suggested_fix=f"改为白名单内之一: {sorted(primitives_wl)}",
+                )
+            )
 
     df = comp.get("dataflow") or {}
     if df.get("no_leak"):
         output_names = {o["name"] for o in spec.get("outputs", [])}
         leaked = set(df.get("intermediates") or []) & output_names
         if leaked:
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.intermediate_leak",
-                field_path="math_semantics.composition.dataflow.intermediates",
-                message=f"中间 tensor 泄漏到 outputs: {sorted(leaked)}",
-                suggested_fix="把这些名字从 intermediates 移除或重命名 outputs",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.intermediate_leak",
+                    field_path="math_semantics.composition.dataflow.intermediates",
+                    message=f"中间 tensor 泄漏到 outputs: {sorted(leaked)}",
+                    suggested_fix="把这些名字从 intermediates 移除或重命名 outputs",
+                )
+            )
 
     # dataflow 闭合：每个 prim.input 要么是 spec.inputs，要么是先前 prim.outputs
     produced = {inp["name"] for inp in spec.get("inputs", [])}
     for i, prim in enumerate(prims):
-        for x in (prim.get("inputs") or []):
+        for x in prim.get("inputs") or []:
             if x not in produced:
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="paradigm_constraint.dataflow_unclosed",
-                    field_path=f"math_semantics.composition.primitives[{i}].inputs",
-                    message=f"未定义的中间 tensor: {x!r}",
-                    suggested_fix=f"先在前序 primitive 的 outputs 中产出 {x}",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="paradigm_constraint.dataflow_unclosed",
+                        field_path=f"math_semantics.composition.primitives[{i}].inputs",
+                        message=f"未定义的中间 tensor: {x!r}",
+                        suggested_fix=f"先在前序 primitive 的 outputs 中产出 {x}",
+                    )
+                )
         produced.update(prim.get("outputs") or [])
 
 
@@ -1107,39 +1668,50 @@ def _check_invariants(spec, registries, findings):
         kind = inv.get("kind")
         info = invariant_kinds.get(kind)
         if info is None:
-            findings.append(Finding(
-                severity="error",
-                rule_id="invariant_kind_resolved.unknown_kind",
-                field_path=f"math_semantics.invariants[{i}].kind",
-                message=f"未知 invariant kind: {kind!r}",
-                suggested_fix="使用 registries/invariant_kind_registry.yaml 中的 kind",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="invariant_kind_resolved.unknown_kind",
+                    field_path=f"math_semantics.invariants[{i}].kind",
+                    message=f"未知 invariant kind: {kind!r}",
+                    suggested_fix="使用 registries/invariant_kind_registry.yaml 中的 kind",
+                )
+            )
             continue
         for f in info.get("required_fields", []):
             if f not in inv:
-                findings.append(Finding(
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="invariant_kind_resolved.missing_field",
+                        field_path=f"math_semantics.invariants[{i}].{f}",
+                        message=f"invariant kind={kind} 缺必填字段 {f!r}",
+                        suggested_fix=f"补充 {f}",
+                    )
+                )
+        if (
+            info.get("forbid_tolerance_inherit")
+            and inv.get("tolerance_inherit") is True
+        ):
+            findings.append(
+                Finding(
                     severity="error",
-                    rule_id="invariant_kind_resolved.missing_field",
-                    field_path=f"math_semantics.invariants[{i}].{f}",
-                    message=f"invariant kind={kind} 缺必填字段 {f!r}",
-                    suggested_fix=f"补充 {f}",
-                ))
-        if info.get("forbid_tolerance_inherit") and inv.get("tolerance_inherit") is True:
-            findings.append(Finding(
-                severity="error",
-                rule_id="invariant_kind_resolved.tolerance_inherit_forbidden",
-                field_path=f"math_semantics.invariants[{i}].tolerance_inherit",
-                message=f"kind={kind} 不允许 tolerance_inherit: true（结构性/离散）",
-                suggested_fix="改为 false 或删除该字段",
-            ))
+                    rule_id="invariant_kind_resolved.tolerance_inherit_forbidden",
+                    field_path=f"math_semantics.invariants[{i}].tolerance_inherit",
+                    message=f"kind={kind} 不允许 tolerance_inherit: true（结构性/离散）",
+                    suggested_fix="改为 false 或删除该字段",
+                )
+            )
         if info.get("require_tolerance_inherit") and not inv.get("tolerance_inherit"):
-            findings.append(Finding(
-                severity="warning",
-                rule_id="invariant_kind_resolved.tolerance_inherit_required",
-                field_path=f"math_semantics.invariants[{i}].tolerance_inherit",
-                message=f"kind={kind} 建议 tolerance_inherit: true（浮点累加）",
-                suggested_fix="添加 tolerance_inherit: true",
-            ))
+            findings.append(
+                Finding(
+                    severity="warning",
+                    rule_id="invariant_kind_resolved.tolerance_inherit_required",
+                    field_path=f"math_semantics.invariants[{i}].tolerance_inherit",
+                    message=f"kind={kind} 建议 tolerance_inherit: true（浮点累加）",
+                    suggested_fix="添加 tolerance_inherit: true",
+                )
+            )
 
 
 def _check_machine_check(spec, registries, findings):
@@ -1151,23 +1723,27 @@ def _check_machine_check(spec, registries, findings):
             mc = c.get("machine_check") or {}
             kind = mc.get("kind")
             if kind not in machine_check_kinds:
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="machine_check_kind_unknown",
-                    field_path=f"{sect}[{i}].machine_check.kind",
-                    message=f"未知 machine_check.kind: {kind!r}",
-                    suggested_fix="使用 registries/machine_check_kind_registry.yaml 中的 kind",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="machine_check_kind_unknown",
+                        field_path=f"{sect}[{i}].machine_check.kind",
+                        message=f"未知 machine_check.kind: {kind!r}",
+                        suggested_fix="使用 registries/machine_check_kind_registry.yaml 中的 kind",
+                    )
+                )
             elif kind == "raises_error":
                 etype = mc.get("error_type")
                 if etype not in error_codes:
-                    findings.append(Finding(
-                        severity="error",
-                        rule_id="error_type_unknown",
-                        field_path=f"{sect}[{i}].machine_check.error_type",
-                        message=f"未知 error_type: {etype!r}",
-                        suggested_fix=f"使用 registries/error_code_enum.yaml 中的枚举值",
-                    ))
+                    findings.append(
+                        Finding(
+                            severity="error",
+                            rule_id="error_type_unknown",
+                            field_path=f"{sect}[{i}].machine_check.error_type",
+                            message=f"未知 error_type: {etype!r}",
+                            suggested_fix="使用 registries/error_code_enum.yaml 中的枚举值",
+                        )
+                    )
 
 
 _PATTERN_RE = re.compile(r"^(?P<name>[a-z_]+)(\([^()]*\))?$")
@@ -1183,27 +1759,34 @@ def _check_synthesize_patterns(spec, registries, findings):
             plist = [(idx, p.get("pattern")) for idx, p in enumerate(synth["patterns"])]
         elif "pattern" in synth:
             plist = [(None, synth["pattern"])]
-            findings.append(Finding(
-                severity="warning",
-                rule_id="synthesize_legacy_format",
-                field_path=f"extreme_inputs[{i}].synthesize",
-                message="旧 'pattern:' 顶层写法已过时（v1 兼容期 90 天），建议迁移到 'patterns: [{pattern, target}]'",
-                suggested_fix="改为 patterns: [{pattern: <name>, target: <input_name>}, ...]",
-            ))
+            findings.append(
+                Finding(
+                    severity="warning",
+                    rule_id="synthesize_legacy_format",
+                    field_path=f"extreme_inputs[{i}].synthesize",
+                    message="旧 'pattern:' 顶层写法已过时（v1 兼容期 90 天），建议迁移到 'patterns: [{pattern, target}]'",
+                    suggested_fix="改为 patterns: [{pattern: <name>, target: <input_name>}, ...]",
+                )
+            )
         for idx, pname in plist:
             if not pname:
                 continue
             m = _PATTERN_RE.match(pname)
             if not m or m.group("name") not in pattern_names:
-                fp = (f"extreme_inputs[{i}].synthesize.patterns[{idx}].pattern"
-                      if idx is not None else f"extreme_inputs[{i}].synthesize.pattern")
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="synthesize_pattern_unknown",
-                    field_path=fp,
-                    message=f"未知 pattern: {pname!r}",
-                    suggested_fix=f"使用 registries/synthesize_pattern_registry.yaml 中的 name",
-                ))
+                fp = (
+                    f"extreme_inputs[{i}].synthesize.patterns[{idx}].pattern"
+                    if idx is not None
+                    else f"extreme_inputs[{i}].synthesize.pattern"
+                )
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="synthesize_pattern_unknown",
+                        field_path=fp,
+                        message=f"未知 pattern: {pname!r}",
+                        suggested_fix="使用 registries/synthesize_pattern_registry.yaml 中的 name",
+                    )
+                )
 
 
 def _check_supported_chips(spec, registries, findings):
@@ -1232,29 +1815,33 @@ def _check_supported_chips(spec, registries, findings):
     for chip_id in chip_ids:
         chip = chips.get(chip_id)
         if chip is None:
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.unknown_chip",
-                field_path="op.platform_constraints.supported_chips",
-                message=f"未注册的芯片 id: {chip_id!r}",
-                suggested_fix="在 registries/chip_registry.yaml 登记，或修正拼写",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.unknown_chip",
+                    field_path="op.platform_constraints.supported_chips",
+                    message=f"未注册的芯片 id: {chip_id!r}",
+                    suggested_fix="在 registries/chip_registry.yaml 登记，或修正拼写",
+                )
+            )
             continue
         unsupported = declared_dtypes - chip["dtypes"]
         if unsupported:
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.dtype_chip_mismatch",
-                field_path="op.platform_constraints.supported_chips",
-                message=(
-                    f"芯片 {chip_id!r} 不支持以下 dtype: {sorted(unsupported)}；"
-                    f"已知该芯片支持: {sorted(chip['dtypes'])}"
-                ),
-                suggested_fix=(
-                    "从 supported_chips 移除不兼容的型号，或从 dtype_set / "
-                    "supported_combinations 移除该芯片不支持的 dtype"
-                ),
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.dtype_chip_mismatch",
+                    field_path="op.platform_constraints.supported_chips",
+                    message=(
+                        f"芯片 {chip_id!r} 不支持以下 dtype: {sorted(unsupported)}；"
+                        f"已知该芯片支持: {sorted(chip['dtypes'])}"
+                    ),
+                    suggested_fix=(
+                        "从 supported_chips 移除不兼容的型号，或从 dtype_set / "
+                        "supported_combinations 移除该芯片不支持的 dtype"
+                    ),
+                )
+            )
 
 
 def _check_anti_pattern_ids(spec, registries, findings):
@@ -1272,17 +1859,19 @@ def _check_anti_pattern_ids(spec, registries, findings):
         if ap_id is None:
             continue
         if ap_id not in valid:
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.unknown_anti_pattern",
-                field_path=f"numerical_stability.techniques[{i}].anti_pattern_id",
-                message=(
-                    f"未注册的 anti_pattern_id: {ap_id!r}；已知 IDs={sorted(valid)}"
-                ),
-                suggested_fix=(
-                    "在 registries/anti_pattern_registry.yaml 中登记新编号，或修正拼写"
-                ),
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.unknown_anti_pattern",
+                    field_path=f"numerical_stability.techniques[{i}].anti_pattern_id",
+                    message=(
+                        f"未注册的 anti_pattern_id: {ap_id!r}；已知 IDs={sorted(valid)}"
+                    ),
+                    suggested_fix=(
+                        "在 registries/anti_pattern_registry.yaml 中登记新编号，或修正拼写"
+                    ),
+                )
+            )
 
 
 def _check_op_error_codes(spec, registries, findings):
@@ -1306,30 +1895,34 @@ def _check_op_error_codes(spec, registries, findings):
 
     if not declared_set and raises_cases:
         etypes_used = sorted({e for _, _, e in raises_cases})
-        findings.append(Finding(
-            severity="error",
-            rule_id="paradigm_constraint.error_codes_undeclared",
-            field_path="op.error_codes",
-            message=(
-                f"boundary/extreme 中使用了 raises_error (error_type={etypes_used}) "
-                f"但 op.error_codes 未声明；error_codes 是算子契约，必须显式列全集"
-            ),
-            suggested_fix=f"在 op 块下添加 error_codes: {etypes_used}",
-        ))
+        findings.append(
+            Finding(
+                severity="error",
+                rule_id="paradigm_constraint.error_codes_undeclared",
+                field_path="op.error_codes",
+                message=(
+                    f"boundary/extreme 中使用了 raises_error (error_type={etypes_used}) "
+                    f"但 op.error_codes 未声明；error_codes 是算子契约，必须显式列全集"
+                ),
+                suggested_fix=f"在 op 块下添加 error_codes: {etypes_used}",
+            )
+        )
         return
 
     for sect, i, etype in raises_cases:
         if etype not in declared_set:
-            findings.append(Finding(
-                severity="error",
-                rule_id="paradigm_constraint.error_code_not_declared",
-                field_path=f"{sect}[{i}].machine_check.error_type",
-                message=(
-                    f"error_type={etype!r} 不在 op.error_codes 声明的全集 "
-                    f"{sorted(declared_set)} 中"
-                ),
-                suggested_fix="把该 error_type 加到 op.error_codes，或修正本 case",
-            ))
+            findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="paradigm_constraint.error_code_not_declared",
+                    field_path=f"{sect}[{i}].machine_check.error_type",
+                    message=(
+                        f"error_type={etype!r} 不在 op.error_codes 声明的全集 "
+                        f"{sorted(declared_set)} 中"
+                    ),
+                    suggested_fix="把该 error_type 加到 op.error_codes，或修正本 case",
+                )
+            )
 
 
 def _check_composition_hint(spec, paradigms, findings):
@@ -1339,21 +1932,25 @@ def _check_composition_hint(spec, paradigms, findings):
         return
     prims = _get(spec, "math_semantics", "composition", "primitives", default=[]) or []
     if len(prims) >= 2:
-        findings.append(Finding(
-            severity="warning",
-            rule_id="composition_without_fused_composite",
-            field_path="op.paradigms",
-            message="composition.primitives ≥ 2 但 paradigms 不含 FusedComposite，建议补 FusedComposite",
-            suggested_fix="在 op.paradigms 添加 FusedComposite",
-        ))
+        findings.append(
+            Finding(
+                severity="warning",
+                rule_id="composition_without_fused_composite",
+                field_path="op.paradigms",
+                message="composition.primitives ≥ 2 但 paradigms 不含 FusedComposite，建议补 FusedComposite",
+                suggested_fix="在 op.paradigms 添加 FusedComposite",
+            )
+        )
     elif len(prims) == 1:
-        findings.append(Finding(
-            severity="warning",
-            rule_id="composition_single_primitive",
-            field_path="math_semantics.composition",
-            message="composition.primitives 只有 1 条，建议删除 composition 段",
-            suggested_fix="删除 math_semantics.composition",
-        ))
+        findings.append(
+            Finding(
+                severity="warning",
+                rule_id="composition_single_primitive",
+                field_path="math_semantics.composition",
+                message="composition.primitives 只有 1 条，建议删除 composition 段",
+                suggested_fix="删除 math_semantics.composition",
+            )
+        )
 
 
 def _check_format_variants(spec, findings):
@@ -1391,22 +1988,28 @@ def _check_format_variants(spec, findings):
             if not isinstance(ax, int):
                 continue
             if ax < 0:
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="format_variants.reduction_axes_negative",
-                    field_path=f"{prefix}.reduction_axes",
-                    message=f"reduction_axes 含负值 {ax}（{v.get('format', '?')} 格式）",
-                    suggested_fix="使用非负轴索引",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="format_variants.reduction_axes_negative",
+                        field_path=f"{prefix}.reduction_axes",
+                        message=f"reduction_axes 含负值 {ax}（{v.get('format', '?')} 格式）",
+                        suggested_fix="使用非负轴索引",
+                    )
+                )
             elif variant_max_rank > 0 and ax >= variant_max_rank:
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="format_variants.reduction_axes_out_of_rank",
-                    field_path=f"{prefix}.reduction_axes",
-                    message=(f"reduction_axes 含 {ax}，超出 {v.get('format', '?')} "
-                             f"格式的 rank={variant_max_rank}"),
-                    suggested_fix=f"确保所有 reduction_axes < {variant_max_rank}",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="format_variants.reduction_axes_out_of_rank",
+                        field_path=f"{prefix}.reduction_axes",
+                        message=(
+                            f"reduction_axes 含 {ax}，超出 {v.get('format', '?')} "
+                            f"格式的 rank={variant_max_rank}"
+                        ),
+                        suggested_fix=f"确保所有 reduction_axes < {variant_max_rank}",
+                    )
+                )
 
         # 2. oracle_kwargs.dim 与 reduction_axes 对齐
         oracle_kw = v.get("oracle_kwargs")
@@ -1414,37 +2017,56 @@ def _check_format_variants(spec, findings):
             dim_val = oracle_kw.get("dim")
             if dim_val is not None and isinstance(dim_val, list):
                 if sorted(dim_val) != sorted(axes):
-                    findings.append(Finding(
-                        severity="warning",
-                        rule_id="format_variants.oracle_kwargs_dim_mismatch",
-                        field_path=f"{prefix}.oracle_kwargs",
-                        message=(f"{v.get('format', '?')} 格式：oracle_kwargs.dim={dim_val} "
-                                 f"与 reduction_axes={axes} 不一致"),
-                        suggested_fix=f"将 oracle_kwargs.dim 改为 {axes}",
-                    ))
+                    findings.append(
+                        Finding(
+                            severity="warning",
+                            rule_id="format_variants.oracle_kwargs_dim_mismatch",
+                            field_path=f"{prefix}.oracle_kwargs",
+                            message=(
+                                f"{v.get('format', '?')} 格式：oracle_kwargs.dim={dim_val} "
+                                f"与 reduction_axes={axes} 不一致"
+                            ),
+                            suggested_fix=f"将 oracle_kwargs.dim 改为 {axes}",
+                        )
+                    )
 
 
 # 涉及累加的 category —— 这些算子的输入数据分布必须是正态分布（normal），
 # 因为均匀分布在累加链路上容易掩盖精度问题（值域窄、无大数吃小数），正态分布
 # 能暴露累加顺序敏感的精度缺陷。
 _ACCUMULATION_CATEGORIES = {
-    "Reduction", "ReductionComposite",
-    "Recurrence", "AtomicUpdate", "Histogram",
+    "Reduction",
+    "ReductionComposite",
+    "Recurrence",
+    "AtomicUpdate",
+    "Histogram",
 }
 
 
 def _check_data_distribution(spec, cat, paradigms, findings):
     """data_distribution 约束：
-      - 累加类算子（Reduction/ReductionComposite/Recurrence/AtomicUpdate/Histogram）⇒
-        tensor role 的数据输入必须声明 data_distribution: normal
-        （dtype_set 全为整型的索引/轴输入跳过，不适用正态分布）
-        注：Contraction（matmul）不计入累加类——矩阵乘法精度取决于条件数而非累加顺序
-      - 非累加类算子 ⇒ 不应声明 data_distribution（留空 / 不写）
+    - 累加类算子（Reduction/ReductionComposite/Recurrence/AtomicUpdate/Histogram）⇒
+      tensor role 的数据输入必须声明 data_distribution: normal
+      （dtype_set 全为整型的索引/轴输入跳过，不适用正态分布）
+      注：Contraction（matmul）不计入累加类——矩阵乘法精度取决于条件数而非累加顺序
+    - 非累加类算子 ⇒ 不应声明 data_distribution（留空 / 不写）
     """
     is_accum = cat in _ACCUMULATION_CATEGORIES
     inputs = spec.get("inputs") or []
-    _integer_dtypes = {"int4", "int8", "int16", "int32", "int64",
-                       "uint1", "uint4", "uint8", "uint16", "uint32", "uint64", "bool"}
+    _integer_dtypes = {
+        "int4",
+        "int8",
+        "int16",
+        "int32",
+        "int64",
+        "uint1",
+        "uint4",
+        "uint8",
+        "uint16",
+        "uint32",
+        "uint64",
+        "bool",
+    }
 
     for i, inp in enumerate(inputs):
         if not isinstance(inp, dict):
@@ -1461,29 +2083,33 @@ def _check_data_distribution(spec, cat, paradigms, findings):
 
         if is_accum:
             if dist != "normal":
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="data_distribution.accumulation_requires_normal",
-                    field_path=prefix,
-                    message=(
-                        f"category={cat} 属累加类算子，tensor 数据输入必须声明 "
-                        f"data_distribution: normal（当前为 {dist!r}）。"
-                        "正态分布能暴露累加顺序敏感的精度缺陷，均匀分布会掩盖"
-                    ),
-                    suggested_fix="添加 data_distribution: normal",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="data_distribution.accumulation_requires_normal",
+                        field_path=prefix,
+                        message=(
+                            f"category={cat} 属累加类算子，tensor 数据输入必须声明 "
+                            f"data_distribution: normal（当前为 {dist!r}）。"
+                            "正态分布能暴露累加顺序敏感的精度缺陷，均匀分布会掩盖"
+                        ),
+                        suggested_fix="添加 data_distribution: normal",
+                    )
+                )
         else:
             if dist is not None:
-                findings.append(Finding(
-                    severity="error",
-                    rule_id="data_distribution.non_accumulation_must_omit",
-                    field_path=prefix,
-                    message=(
-                        f"category={cat} 非累加类算子，不应声明 data_distribution"
-                        f"（当前为 {dist!r}）。data_distribution 仅累加类算子填写"
-                    ),
-                    suggested_fix="删除该字段的 data_distribution",
-                ))
+                findings.append(
+                    Finding(
+                        severity="error",
+                        rule_id="data_distribution.non_accumulation_must_omit",
+                        field_path=prefix,
+                        message=(
+                            f"category={cat} 非累加类算子，不应声明 data_distribution"
+                            f"（当前为 {dist!r}）。data_distribution 仅累加类算子填写"
+                        ),
+                        suggested_fix="删除该字段的 data_distribution",
+                    )
+                )
 
 
 def stage_6(spec: dict, registries: dict) -> StageResult:
@@ -1498,7 +2124,9 @@ def stage_6(spec: dict, registries: dict) -> StageResult:
     """
     res = StageResult(stage_id=6, status="PASS")
     paradigms = set(_get(spec, "op", "paradigms", default=[]) or [])
-    requirements = (registries.get("boundary_min_cases") or {}).get("paradigm_requirements", {})
+    requirements = (registries.get("boundary_min_cases") or {}).get(
+        "paradigm_requirements", {}
+    )
 
     boundary_cases = spec.get("boundary_conditions") or []
     extreme_cases = spec.get("extreme_inputs") or []
@@ -1508,7 +2136,7 @@ def stage_6(spec: dict, registries: dict) -> StageResult:
         text = " | ".join(str(c.get("case", "")) for c in cases)
         tags: set = set()
         for c in cases:
-            for t in (c.get("tags") or []):
+            for t in c.get("tags") or []:
                 tags.add(str(t))
         return text, tags
 
@@ -1539,20 +2167,22 @@ def stage_6(spec: dict, registries: dict) -> StageResult:
             keywords = req.get("match_any", []) or []
 
             if req_id in tags:
-                continue   # 显式 tag 命中
+                continue  # 显式 tag 命中
             if any(kw in text for kw in keywords):
-                continue   # 子串兜底命中
+                continue  # 子串兜底命中
 
-            res.findings.append(Finding(
-                severity="error",
-                rule_id="boundary_min_set.missing_required_case",
-                field_path=f"{section}",
-                message=f"paradigm={paradigm} 缺必含 case: {summary} (id={req_id})",
-                suggested_fix=(
-                    f"在 {section} 中添加一条 case，加 `tags: [{req_id}]` "
-                    f"或描述包含以下任一关键词：{keywords}"
-                ),
-            ))
+            res.findings.append(
+                Finding(
+                    severity="error",
+                    rule_id="boundary_min_set.missing_required_case",
+                    field_path=f"{section}",
+                    message=f"paradigm={paradigm} 缺必含 case: {summary} (id={req_id})",
+                    suggested_fix=(
+                        f"在 {section} 中添加一条 case，加 `tags: [{req_id}]` "
+                        f"或描述包含以下任一关键词：{keywords}"
+                    ),
+                )
+            )
 
     if any(f.severity == "error" for f in res.findings):
         res.status = "FAIL"
@@ -1562,7 +2192,9 @@ def stage_6(spec: dict, registries: dict) -> StageResult:
 # 容差紧度阈值从 registries/tolerance_defaults.yaml 加载（与 generator 共享数据源）
 @functools.lru_cache(maxsize=1)
 def _tolerance_tight_threshold() -> dict[str, float]:
-    data = yaml.safe_load((REGISTRIES / "tolerance_defaults.yaml").read_text(encoding="utf-8"))
+    data = yaml.safe_load(
+        (REGISTRIES / "tolerance_defaults.yaml").read_text(encoding="utf-8")
+    )
     return data.get("tightness_threshold") or {}
 
 
@@ -1586,13 +2218,15 @@ def stage_7(spec: dict) -> StageResult:
 
     uncovered = declared_output_dtypes - declared_tol_dtypes
     for d in sorted(uncovered):
-        res.findings.append(Finding(
-            severity="error",
-            rule_id="tolerance_coverage.uncovered_output_dtype",
-            field_path=f"numerical_tolerance.per_dtype.{d}",
-            message=f"输出 dtype {d!r} 未在 numerical_tolerance.per_dtype 中声明容差",
-            suggested_fix=f"为 {d} 补充 {{rtol, atol, metric}}",
-        ))
+        res.findings.append(
+            Finding(
+                severity="error",
+                rule_id="tolerance_coverage.uncovered_output_dtype",
+                field_path=f"numerical_tolerance.per_dtype.{d}",
+                message=f"输出 dtype {d!r} 未在 numerical_tolerance.per_dtype 中声明容差",
+                suggested_fix=f"为 {d} 补充 {{rtol, atol, metric}}",
+            )
+        )
 
     # 紧度提示（启发式 WARN）
     thresholds = _tolerance_tight_threshold()
@@ -1602,16 +2236,18 @@ def stage_7(spec: dict) -> StageResult:
             continue
         rtol = entry.get("rtol")
         if isinstance(rtol, (int, float)) and 0 < rtol < threshold:
-            res.findings.append(Finding(
-                severity="warning",
-                rule_id="tolerance_coverage.tolerance_too_tight",
-                field_path=f"numerical_tolerance.per_dtype.{d}.rtol",
-                message=(
-                    f"{d} rtol={rtol:.1e} 低于该 dtype 单步舍入量级 ({threshold:.0e})；"
-                    "大量累加后实际不可能达到，可能导致 PR 误报"
-                ),
-                suggested_fix=f"放宽 {d} 的 rtol 到至少 {threshold:.0e}",
-            ))
+            res.findings.append(
+                Finding(
+                    severity="warning",
+                    rule_id="tolerance_coverage.tolerance_too_tight",
+                    field_path=f"numerical_tolerance.per_dtype.{d}.rtol",
+                    message=(
+                        f"{d} rtol={rtol:.1e} 低于该 dtype 单步舍入量级 ({threshold:.0e})；"
+                        "大量累加后实际不可能达到，可能导致 PR 误报"
+                    ),
+                    suggested_fix=f"放宽 {d} 的 rtol 到至少 {threshold:.0e}",
+                )
+            )
 
     if any(f.severity == "error" for f in res.findings):
         res.status = "FAIL"
@@ -1622,25 +2258,43 @@ def stage_7(spec: dict) -> StageResult:
 def load_registries() -> dict:
     """Load all registries from disk; cached per-process."""
     inv = {}
-    inv_data = yaml.safe_load((REGISTRIES / "invariant_kind_registry.yaml").read_text(encoding="utf-8"))
+    inv_data = yaml.safe_load(
+        (REGISTRIES / "invariant_kind_registry.yaml").read_text(encoding="utf-8")
+    )
     for group in ("value", "algebraic", "structural"):
         for entry in inv_data.get(group, []) or []:
             inv[entry["kind"]] = entry
 
     return {
-        "primitives": yaml.safe_load((REGISTRIES / "primitive_whitelist.yaml").read_text(encoding="utf-8"))["primitives"],
+        "primitives": yaml.safe_load(
+            (REGISTRIES / "primitive_whitelist.yaml").read_text(encoding="utf-8")
+        )["primitives"],
         "invariant_kinds": inv,
         "machine_check_kinds": [
-            x["kind"] for x in
-            yaml.safe_load((REGISTRIES / "machine_check_kind_registry.yaml").read_text(encoding="utf-8"))["machine_check_kinds"]
+            x["kind"]
+            for x in yaml.safe_load(
+                (REGISTRIES / "machine_check_kind_registry.yaml").read_text(
+                    encoding="utf-8"
+                )
+            )["machine_check_kinds"]
         ],
         "patterns": [
-            x["name"] for x in
-            yaml.safe_load((REGISTRIES / "synthesize_pattern_registry.yaml").read_text(encoding="utf-8"))["patterns"]
+            x["name"]
+            for x in yaml.safe_load(
+                (REGISTRIES / "synthesize_pattern_registry.yaml").read_text(
+                    encoding="utf-8"
+                )
+            )["patterns"]
         ],
-        "error_codes": yaml.safe_load((REGISTRIES / "error_code_enum.yaml").read_text(encoding="utf-8"))["error_codes"],
-        "category_map": yaml.safe_load((REGISTRIES / "category_paradigm_map.yaml").read_text(encoding="utf-8")),
-        "boundary_min_cases": yaml.safe_load((REGISTRIES / "boundary_min_cases.yaml").read_text(encoding="utf-8")),
+        "error_codes": yaml.safe_load(
+            (REGISTRIES / "error_code_enum.yaml").read_text(encoding="utf-8")
+        )["error_codes"],
+        "category_map": yaml.safe_load(
+            (REGISTRIES / "category_paradigm_map.yaml").read_text(encoding="utf-8")
+        ),
+        "boundary_min_cases": yaml.safe_load(
+            (REGISTRIES / "boundary_min_cases.yaml").read_text(encoding="utf-8")
+        ),
         "chips": _load_chip_registry(),
         "anti_patterns": _load_anti_pattern_registry(),
     }
@@ -1678,8 +2332,13 @@ def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
     """
     try:
         from evaluators import stages as eval_stages
-        from evaluators import (formula_eval, oracle_check, formula_oracle_equiv,
-                                invariant_exec, extreme_inputs_check)
+        from evaluators import (
+            formula_eval,
+            oracle_check,
+            formula_oracle_equiv,
+            invariant_exec,
+            extreme_inputs_check,
+        )
     except ImportError as e:
         skip_finding = Finding(
             severity="info",
@@ -1708,17 +2367,21 @@ def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
         try:
             status, raw_findings = fn(spec)
         except Exception as ex:  # 防御性 — DSL 内部 bug 不应整体打断
-            results.append(StageResult(
-                stage_id=stage_id,
-                status="FAIL",
-                findings=[Finding(
-                    severity="error",
-                    rule_id=f"stage_{stage_id}_internal_error",
-                    field_path="<internal>",
-                    message=f"stage {stage_id} 内部异常：{type(ex).__name__}: {ex}",
-                    suggested_fix="向 ops-spec-gen 维护者反馈完整堆栈",
-                )]
-            ))
+            results.append(
+                StageResult(
+                    stage_id=stage_id,
+                    status="FAIL",
+                    findings=[
+                        Finding(
+                            severity="error",
+                            rule_id=f"stage_{stage_id}_internal_error",
+                            field_path="<internal>",
+                            message=f"stage {stage_id} 内部异常：{type(ex).__name__}: {ex}",
+                            suggested_fix="向 ops-spec-gen 维护者反馈完整堆栈",
+                        )
+                    ],
+                )
+            )
             continue
         findings = [Finding(**f) for f in raw_findings]
         results.append(StageResult(stage_id=stage_id, status=status, findings=findings))
@@ -1736,11 +2399,15 @@ def render_text(stages: list[StageResult], *, quiet: bool = False) -> str:
         skipped = [s for s in stages if s.status == "SKIP"]
         failed = [s for s in stages if s.status == "FAIL"]
         if passed:
-            lines.append(f"  {icons['PASS']}  {len(passed)} 个 stage PASS: "
-                         + ", ".join(f"stage {s.stage_id}" for s in passed))
+            lines.append(
+                f"  {icons['PASS']}  {len(passed)} 个 stage PASS: "
+                + ", ".join(f"stage {s.stage_id}" for s in passed)
+            )
         if skipped:
-            lines.append(f"  {icons['SKIP']}  {len(skipped)} 个 stage SKIP: "
-                         + ", ".join(f"stage {s.stage_id}" for s in skipped))
+            lines.append(
+                f"  {icons['SKIP']}  {len(skipped)} 个 stage SKIP: "
+                + ", ".join(f"stage {s.stage_id}" for s in skipped)
+            )
         for st in failed:
             lines.append(f"\n[stage {st.stage_id}] {icons[st.status]} {st.status}")
             for f in st.findings:
@@ -1763,11 +2430,7 @@ def render_text(stages: list[StageResult], *, quiet: bool = False) -> str:
                 if f.suggested_fix:
                     lines.append(f"        fix : {f.suggested_fix}")
 
-    overall = (
-        "PASS"
-        if all(s.status in ("PASS", "SKIP") for s in stages)
-        else "FAIL"
-    )
+    overall = "PASS" if all(s.status in ("PASS", "SKIP") for s in stages) else "FAIL"
     lines.append(f"\n=== overall: {overall} ===")
     return "\n".join(lines)
 
@@ -1776,13 +2439,22 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Validate spec.yaml (full 12-stage).")
     ap.add_argument("spec_path")
     ap.add_argument("--json", action="store_true", help="Emit JSON instead of text")
-    ap.add_argument("--strict", action="store_true",
-                    help="Exit non-zero on warnings as well as errors")
-    ap.add_argument("--stage", action="append", type=int, choices=range(1, 13),
-                    metavar="N",
-                    help="只跑指定 stage（可多次：--stage 1 --stage 2）；省略时跑全部 12 个")
-    ap.add_argument("--quiet", action="store_true",
-                    help="只打 FAIL 的 stage（仍输出 overall 行）")
+    ap.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit non-zero on warnings as well as errors",
+    )
+    ap.add_argument(
+        "--stage",
+        action="append",
+        type=int,
+        choices=range(1, 13),
+        metavar="N",
+        help="只跑指定 stage（可多次：--stage 1 --stage 2）；省略时跑全部 12 个",
+    )
+    ap.add_argument(
+        "--quiet", action="store_true", help="只打 FAIL 的 stage（仍输出 overall 行）"
+    )
     args = ap.parse_args()
 
     spec_path = Path(args.spec_path)
@@ -1796,7 +2468,9 @@ def main() -> int:
         print(f"  {e}", file=sys.stderr)
         return 2
     if not isinstance(spec, dict):
-        print(f"ERROR: {args.spec_path} did not parse as a YAML mapping", file=sys.stderr)
+        print(
+            f"ERROR: {args.spec_path} did not parse as a YAML mapping", file=sys.stderr
+        )
         return 2
 
     selected = set(args.stage) if args.stage else None
@@ -1824,12 +2498,23 @@ def main() -> int:
     stages.sort(key=lambda s: s.stage_id)
 
     if args.json:
-        print(json.dumps({
-            "spec": str(args.spec_path),
-            "stages": [{"stage_id": s.stage_id, "status": s.status,
-                        "findings": [asdict(f) for f in s.findings]}
-                       for s in stages],
-        }, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                {
+                    "spec": str(args.spec_path),
+                    "stages": [
+                        {
+                            "stage_id": s.stage_id,
+                            "status": s.status,
+                            "findings": [asdict(f) for f in s.findings],
+                        }
+                        for s in stages
+                    ],
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
     else:
         print(render_text(stages, quiet=args.quiet))
 

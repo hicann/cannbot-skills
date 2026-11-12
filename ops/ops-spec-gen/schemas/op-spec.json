@@ -21,7 +21,72 @@
     "determinism"
   ],
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {"required": ["support_universe"]},
+      "then": {
+        "properties": {
+          "inputs": {
+            "items": {
+              "$ref": "#/$defs/complete_support",
+              "properties": {"layout": {"$ref": "#/$defs/official_format"}}
+            }
+          },
+          "outputs": {
+            "items": {
+              "$ref": "#/$defs/complete_support",
+              "properties": {"layout": {"$ref": "#/$defs/official_format"}}
+            }
+          },
+          "dtype_policy": {
+            "properties": {
+              "supported_combinations": {
+                "items": {
+                  "properties": {
+                    "inputs": {"additionalProperties": {"$ref": "#/$defs/official_dtype"}},
+                    "outputs": {"additionalProperties": {"$ref": "#/$defs/official_dtype"}}
+                  }
+                }
+              }
+            }
+          },
+          "math_semantics": {
+            "properties": {
+              "format_variants": {
+                "items": {"properties": {"format": {"$ref": "#/$defs/official_format"}}}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"not": {"required": ["support_universe"]}},
+      "then": {
+        "properties": {
+          "inputs": {"items": {"properties": {
+            "dtype_set": {"items": {"$ref": "#/$defs/legacy_dtype"}},
+            "layout": {"$ref": "#/$defs/legacy_layout"},
+            "supported_layouts": {"items": {"$ref": "#/$defs/legacy_layout"}}
+          }}},
+          "outputs": {"items": {"properties": {
+            "dtype_set": {"items": {"$ref": "#/$defs/legacy_dtype"}},
+            "layout": {"$ref": "#/$defs/legacy_layout"},
+            "supported_layouts": {"items": {"$ref": "#/$defs/legacy_layout"}}
+          }}},
+          "dtype_policy": {"properties": {"supported_combinations": {"items": {"properties": {
+            "inputs": {"additionalProperties": {"$ref": "#/$defs/legacy_dtype"}},
+            "outputs": {"additionalProperties": {"$ref": "#/$defs/legacy_dtype"}}
+          }}}}},
+          "math_semantics": {"properties": {"format_variants": {"items": {"properties": {
+            "format": {"$ref": "#/$defs/legacy_layout"}
+          }}}}}
+        }
+      }
+    }
+  ],
   "properties": {
+    "support_universe": {"const": "huawei-cann-types-2026-10-15"},
     "schema_version": {
       "const": 1
     },
@@ -133,11 +198,6 @@
               "description": "本算子适用的 Atlas 芯片型号白名单（与 registries/chip_registry.yaml 对齐）"
             }
           }
-        },
-        "aicpu_kernel": {
-          "type": "string",
-          "pattern": "^[a-z][a-z0-9_]*$",
-          "description": "AICPU 前置算子名称（可选）。若算子数据流包含 AICPU 前置计算（如元数据计算、量化参数预处理等），在此声明对应的 AICPU kernel 名称。"
         }
       }
     },
@@ -164,6 +224,9 @@
             "items": {"type": "integer", "minimum": 0, "maximum": 16}
           },
           "layout": {"$ref": "#/$defs/layout"},
+          "unsupported_dtypes": {"$ref": "#/$defs/unsupported_dtypes"},
+          "unsupported_layouts": {"$ref": "#/$defs/unsupported_layouts"},
+          "supported_layouts": {"$ref": "#/$defs/supported_layouts"},
           "shape": {
             "type": "object",
             "required": ["symbolic"],
@@ -261,6 +324,10 @@
           "dtype_rule": {"type": "string", "minLength": 1},
           "dtype_rule_description": {"type": "string"},
           "layout": {"$ref": "#/$defs/layout"},
+          "unsupported_dtypes": {"$ref": "#/$defs/unsupported_dtypes"},
+          "unsupported_layouts": {"$ref": "#/$defs/unsupported_layouts"},
+          "supported_layouts": {"$ref": "#/$defs/supported_layouts"},
+          "dtype_set": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/dtype"}},
           "aliasing": {
             "type": "string",
             "pattern": "^(none|inplace_with\\([a-zA-Z_][a-zA-Z0-9_]*\\))$"
@@ -678,7 +745,147 @@
       }
     }
   },
+  "x-support-catalog": {
+    "description": "Official snapshot sources, dtype aliases and contextual restrictions. Full universes are defined only by $defs.official_dtype.enum and $defs.official_format.enum; the snapshot id is properties.support_universe.const.",
+    "sources": [
+      "metadef/res/docs/api/DataType_res.md",
+      "metadef/res/docs/api/Format_res.md"
+    ],
+    "dtype_aliases": {
+      "DT_FLOAT": "float32",
+      "DT_FLOAT16": "float16",
+      "DT_INT8": "int8",
+      "DT_INT32": "int32",
+      "DT_UINT8": "uint8",
+      "DT_INT16": "int16",
+      "DT_UINT16": "uint16",
+      "DT_UINT32": "uint32",
+      "DT_INT64": "int64",
+      "DT_UINT64": "uint64",
+      "DT_DOUBLE": "float64",
+      "DT_BOOL": "bool",
+      "DT_STRING": "string",
+      "DT_DUAL_SUB_INT8": "dual_sub_int8",
+      "DT_DUAL_SUB_UINT8": "dual_sub_uint8",
+      "DT_COMPLEX64": "complex64",
+      "DT_COMPLEX128": "complex128",
+      "DT_QINT8": "qint8",
+      "DT_QINT16": "qint16",
+      "DT_QINT32": "qint32",
+      "DT_QUINT8": "quint8",
+      "DT_QUINT16": "quint16",
+      "DT_RESOURCE": "resource",
+      "DT_STRING_REF": "string_ref",
+      "DT_DUAL": "dual",
+      "DT_VARIANT": "variant",
+      "DT_BF16": "bfloat16",
+      "DT_UNDEFINED": "undefined",
+      "DT_INT4": "int4",
+      "DT_UINT1": "uint1",
+      "DT_INT2": "int2",
+      "DT_UINT2": "uint2",
+      "DT_COMPLEX32": "complex32",
+      "DT_HIFLOAT8": "hifloat8",
+      "DT_FLOAT8_E5M2": "float8_e5m2",
+      "DT_FLOAT8_E4M3FN": "float8_e4m3fn",
+      "DT_FLOAT8_E8M0": "float8_e8m0",
+      "DT_FLOAT6_E3M2": "float6_e3m2",
+      "DT_FLOAT6_E2M3": "float6_e2m3",
+      "DT_FLOAT4_E2M1": "float4_e2m1",
+      "DT_FLOAT4_E1M2": "float4_e1m2",
+      "DT_MAX": "max"
+    },
+    "non_tensor_dtypes": [
+      "undefined",
+      "max"
+    ],
+    "non_tensor_formats": [
+      "RESERVED",
+      "ALL",
+      "NULL",
+      "END",
+      "MAX"
+    ],
+    "restricted_chips": [
+      "Ascend950PR",
+      "Ascend950DT"
+    ],
+    "restricted_dtypes": [
+      "hifloat8",
+      "float8_e5m2",
+      "float8_e4m3fn",
+      "float8_e8m0",
+      "float6_e3m2",
+      "float6_e2m3",
+      "float4_e2m1",
+      "float4_e1m2"
+    ],
+    "restricted_formats": [
+      "FRACTAL_NZ_C0_16",
+      "FRACTAL_NZ_C0_32",
+      "FRACTAL_NZ_C0_2",
+      "FRACTAL_NZ_C0_4",
+      "FRACTAL_NZ_C0_8"
+    ],
+    "ir_graph_input_unsupported_formats": [
+      "NC1HWC0",
+      "FRACTAL_Z",
+      "NC1C0HWPAD",
+      "NHWC1C0",
+      "FRACTAL_DECONV",
+      "C1HWNC0",
+      "FRACTAL_DECONV_TRANSPOSE",
+      "FRACTAL_DECONV_SP_STRIDE_TRANS",
+      "NC1HWC0_C04",
+      "FRACTAL_Z_C04",
+      "FRACTAL_DECONV_SP_STRIDE8_TRANS",
+      "NC1KHKWHWC0",
+      "C1HWNCoC0",
+      "FRACTAL_ZZ",
+      "FRACTAL_NZ",
+      "NDC1HWC0",
+      "FRACTAL_Z_3D",
+      "FRACTAL_Z_3D_TRANSPOSE",
+      "FRACTAL_ZN_LSTM",
+      "FRACTAL_Z_G",
+      "ND_RNN_BIAS",
+      "FRACTAL_ZN_RNN",
+      "NYUV",
+      "NYUV_A"
+    ]
+  },
   "$defs": {
+    "official_dtype": {
+      "enum": ["float32","float16","int8","int32","uint8","int16","uint16","uint32","int64","uint64","float64","bool","string","dual_sub_int8","dual_sub_uint8","complex64","complex128","qint8","qint16","qint32","quint8","quint16","resource","string_ref","dual","variant","bfloat16","undefined","int4","uint1","int2","uint2","complex32","hifloat8","float8_e5m2","float8_e4m3fn","float8_e8m0","float6_e3m2","float6_e2m3","float4_e2m1","float4_e1m2","max"]
+    },
+    "official_format": {
+      "enum": ["NCHW","NHWC","ND","NC1HWC0","FRACTAL_Z","NC1C0HWPAD","NHWC1C0","FSR_NCHW","FRACTAL_DECONV","C1HWNC0","FRACTAL_DECONV_TRANSPOSE","FRACTAL_DECONV_SP_STRIDE_TRANS","NC1HWC0_C04","FRACTAL_Z_C04","CHWN","FRACTAL_DECONV_SP_STRIDE8_TRANS","HWCN","NC1KHKWHWC0","BN_WEIGHT","FILTER_HWCK","HASHTABLE_LOOKUP_LOOKUPS","HASHTABLE_LOOKUP_KEYS","HASHTABLE_LOOKUP_VALUE","HASHTABLE_LOOKUP_OUTPUT","HASHTABLE_LOOKUP_HITS","C1HWNCoC0","MD","NDHWC","FRACTAL_ZZ","FRACTAL_NZ","NCDHW","DHWCN","NDC1HWC0","FRACTAL_Z_3D","CN","NC","DHWNC","FRACTAL_Z_3D_TRANSPOSE","FRACTAL_ZN_LSTM","FRACTAL_Z_G","RESERVED","ALL","NULL","ND_RNN_BIAS","FRACTAL_ZN_RNN","NYUV","NYUV_A","NCL","FRACTAL_Z_WINO","C1HWC0","FRACTAL_NZ_C0_16","FRACTAL_NZ_C0_32","FRACTAL_NZ_C0_2","FRACTAL_NZ_C0_4","FRACTAL_NZ_C0_8","END","MAX"]
+    },
+    "legacy_dtype": {"enum": ["float64", "float32", "float16", "bfloat16", "float8_e4m3fn", "float8_e5m2", "float8_e8m0", "hifloat8", "float4_e2m1", "float4_e1m2", "int4", "int8", "int16", "int32", "int64", "uint1", "uint4", "uint8", "uint16", "uint32", "uint64", "bool", "complex32", "complex64", "complex128"]},
+    "legacy_layout": {"enum": ["ND", "NCHW", "NHWC", "NCDHW", "NDHWC", "NZ", "FRACTAL_NZ", "FRACTAL_Z", "CSR", "COO", "BSR"]},
+    "supported_layouts": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/layout"}},
+    "complete_support": {
+      "type": "object",
+      "required": ["dtype_set", "unsupported_dtypes", "supported_layouts", "unsupported_layouts"],
+      "properties": {
+        "dtype_set": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/official_dtype"}},
+        "unsupported_dtypes": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/official_dtype"}},
+        "supported_layouts": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/official_format"}},
+        "unsupported_layouts": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/official_format"}}
+      }
+    },
+    "unsupported_dtypes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/official_dtype"},
+      "description": "新契约为官方 dtype 全集减 dtype_set；无 support_universe 的旧 spec 仅记录已确认排除项。"
+    },
+    "unsupported_layouts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/official_format"},
+      "description": "新契约为官方 format 全集减 supported_layouts；无 support_universe 的旧 spec 沿用部分排除语义。"
+    },
     "list_length": {
       "type": "object",
       "required": ["kind"],
@@ -722,17 +929,10 @@
       "items": {"type": "string", "pattern": "^[a-z][a-zA-Z0-9_]*$"}
     },
     "dtype": {
-      "enum": [
-        "float64", "float32", "float16", "bfloat16",
-        "float8_e4m3fn", "float8_e5m2", "float8_e8m0", "hifloat8",
-        "float4_e2m1", "float4_e1m2",
-        "int4", "int8", "int16", "int32", "int64",
-        "uint1", "uint4", "uint8", "uint16", "uint32", "uint64",
-        "bool", "complex32", "complex64", "complex128"
-      ]
+      "enum": ["float32","float16","int8","int32","uint8","int16","uint16","uint32","int64","uint64","float64","bool","string","dual_sub_int8","dual_sub_uint8","complex64","complex128","qint8","qint16","qint32","quint8","quint16","resource","string_ref","dual","variant","bfloat16","undefined","int4","uint1","int2","uint2","complex32","hifloat8","float8_e5m2","float8_e4m3fn","float8_e8m0","float6_e3m2","float6_e2m3","float4_e2m1","float4_e1m2","max","uint4"]
     },
     "layout": {
-      "enum": ["ND", "NCHW", "NHWC", "NCDHW", "NDHWC", "NZ", "FRACTAL_NZ", "FRACTAL_Z", "CSR", "COO", "BSR"]
+      "enum": ["NCHW","NHWC","ND","NC1HWC0","FRACTAL_Z","NC1C0HWPAD","NHWC1C0","FSR_NCHW","FRACTAL_DECONV","C1HWNC0","FRACTAL_DECONV_TRANSPOSE","FRACTAL_DECONV_SP_STRIDE_TRANS","NC1HWC0_C04","FRACTAL_Z_C04","CHWN","FRACTAL_DECONV_SP_STRIDE8_TRANS","HWCN","NC1KHKWHWC0","BN_WEIGHT","FILTER_HWCK","HASHTABLE_LOOKUP_LOOKUPS","HASHTABLE_LOOKUP_KEYS","HASHTABLE_LOOKUP_VALUE","HASHTABLE_LOOKUP_OUTPUT","HASHTABLE_LOOKUP_HITS","C1HWNCoC0","MD","NDHWC","FRACTAL_ZZ","FRACTAL_NZ","NCDHW","DHWCN","NDC1HWC0","FRACTAL_Z_3D","CN","NC","DHWNC","FRACTAL_Z_3D_TRANSPOSE","FRACTAL_ZN_LSTM","FRACTAL_Z_G","RESERVED","ALL","NULL","ND_RNN_BIAS","FRACTAL_ZN_RNN","NYUV","NYUV_A","NCL","FRACTAL_Z_WINO","C1HWC0","FRACTAL_NZ_C0_16","FRACTAL_NZ_C0_32","FRACTAL_NZ_C0_2","FRACTAL_NZ_C0_4","FRACTAL_NZ_C0_8","END","MAX","NZ","CSR","COO","BSR"]
     },
     "tolerance_metric": {
       "enum": ["max_relative", "max_absolute", "mean_relative", "cosine_similarity", "bitwise_equal"]

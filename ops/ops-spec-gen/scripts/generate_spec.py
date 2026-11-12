@@ -9,7 +9,8 @@
 
 """Interactive algorithm-spec.yaml generator.
 
-Reads registries/*.yaml to get controlled enums (26 categories, 27 paradigms,
+Reads schemas/op-spec.json for dtype/format universes and registries/*.yaml
+for other controlled enums (26 categories, 27 paradigms,
 category->required-paradigms map), prompts the user for the minimum information
 needed, and writes ops/<op>/spec.yaml using templates/spec.yaml.tmpl.
 
@@ -36,6 +37,10 @@ from pathlib import Path
 
 import yaml
 
+from evaluators.promote import promote_many
+from evaluators.types import DslError
+from support_catalog import canonical, load_catalog, load_schema, partition, universe
+
 SKILL_DIR = Path(__file__).resolve().parent.parent
 REGISTRIES = SKILL_DIR / "registries"
 TEMPLATE = SKILL_DIR / "templates" / "spec.yaml.tmpl"
@@ -47,14 +52,15 @@ def _load(name: str) -> dict:
 
 
 def load_registries() -> dict:
-    import json as _json
-    schema = _json.loads((SKILL_DIR / "schemas" / "op-spec.json").read_text(encoding="utf-8"))
+    schema = load_schema()
     return {
         "categories": _load("category_enum.yaml")["categories"],
         "paradigms": [p["name"] for p in _load("paradigm_enum.yaml")["paradigms"]],
         "category_map": _load("category_paradigm_map.yaml"),
         "chips": _load("chip_registry.yaml")["chips"],
         "layouts": schema.get("$defs", {}).get("layout", {}).get("enum", []),
+        "dtypes": schema.get("$defs", {}).get("dtype", {}).get("enum", []),
+        "official_formats": universe("formats"),
     }
 
 
@@ -89,6 +95,9 @@ class TensorSpec:
     role: str | None = None
     optional: bool = False
     list_length: dict | None = None
+    unsupported_dtypes: list[str] = field(default_factory=list)
+    unsupported_layouts: list[str] = field(default_factory=list)
+    supported_layouts: list[str] = field(default_factory=lambda: ["ND"])
 
 
 @dataclass
@@ -97,6 +106,9 @@ class OutputSpec:
     role: str = "tensor"
     optional: bool = False
     list_length: dict | None = None
+    unsupported_dtypes: list[str] = field(default_factory=list)
+    unsupported_layouts: list[str] = field(default_factory=list)
+    supported_layouts: list[str] = field(default_factory=lambda: ["ND"])
 
 
 @dataclass
@@ -118,6 +130,8 @@ class GenInput:
     attributes: list[dict] = field(default_factory=list)
     semantic_cases: list[dict] = field(default_factory=list)
     layout_contract: dict | None = None
+    # Empty preserves the historical Python API; the CLI always sets the snapshot.
+    support_universe: str = ""
 
     def __post_init__(self):
         if self.supported_chips is None:
@@ -180,10 +194,16 @@ def _resolve_category(category: str, paradigms: list[str]) -> str:
 
 
 def _is_pure_reduction(category: str, paradigms: list[str]) -> bool:
-    return category == "Reduction" and "Reduction" in paradigms and "Recurrence" not in paradigms
+    return (
+        category == "Reduction"
+        and "Reduction" in paradigms
+        and "Recurrence" not in paradigms
+    )
 
 
-def parse_format_variants(raw: str, valid_layouts: list[str] | None = None) -> list[dict]:
+def parse_format_variants(
+    raw: str, valid_layouts: list[str] | None = None
+) -> list[dict]:
     """Parse 'FORMAT:RANK:AXES;...' into list of variant dicts.
 
     Example: 'NCHW:4:0,2,3;NHWC:4:0,1,2;NCDHW:5:0,2,3,4'
@@ -202,25 +222,38 @@ def parse_format_variants(raw: str, valid_layouts: list[str] | None = None) -> l
         if len(tokens) != 3:
             raise SystemExit(
                 f"--format-variants 格式错误：'{part}'，"
-                "期望 FORMAT:RANK:AXES (如 NCHW:4:0,2,3)")
+                "期望 FORMAT:RANK:AXES (如 NCHW:4:0,2,3)"
+            )
         fmt, rank_str, axes_str = tokens
         fmt = fmt.strip()
+        fmt = canonical(fmt, "formats")
+        try:
+            partition([fmt], [], "formats")
+        except ValueError as exc:
+            raise SystemExit(
+                f"--format-variants 格式错误：'{fmt}' 不能声明为支持格式；"
+                "完整值域见 schemas/op-spec.json"
+            ) from exc
         if valid_layouts and fmt not in valid_layouts:
             raise SystemExit(
                 f"--format-variants 格式错误：'{fmt}' 不是有效的 layout 值，"
-                f"有效值: {valid_layouts}")
+                "完整值域见 schemas/op-spec.json"
+            )
         try:
             ranks = [int(r.strip()) for r in rank_str.split(",") if r.strip()]
             axes = [int(a.strip()) for a in axes_str.split(",") if a.strip()]
         except ValueError:
             raise SystemExit(
                 f"--format-variants 格式错误：'{part}'，"
-                "RANK 和 AXES 必须是逗号分隔的整数")
-        variants.append({
-            "format": fmt.strip(),
-            "rank": ranks,
-            "reduction_axes": axes,
-        })
+                "RANK 和 AXES 必须是逗号分隔的整数"
+            )
+        variants.append(
+            {
+                "format": fmt.strip(),
+                "rank": ranks,
+                "reduction_axes": axes,
+            }
+        )
     return variants
 
 
@@ -228,27 +261,142 @@ def parse_tensor_arg(s: str) -> TensorSpec:
     """Parse 'x:float16,float32,bfloat16' or 'x'."""
     if ":" in s:
         name, dtypes = s.split(":", 1)
-        dtype_set = [d.strip() for d in dtypes.split(",") if d.strip()]
+        dtype_set = []
+        for dtype in dtypes.split(","):
+            if dtype.strip():
+                dtype_set.append(canonical(dtype.strip(), "dtypes"))
     else:
         name, dtype_set = s, ["float32"]
     if not re.match(r"^[a-z][a-zA-Z0-9_]*$", name):
         raise ValueError(f"Invalid tensor name: {name}")
+    partition(dtype_set, [], "dtypes")
     return TensorSpec(name=name, dtype_set=dtype_set)
 
 
 def _normalize_outputs(outputs: list[str | OutputSpec]) -> list[OutputSpec]:
     """Preserve the historical list[str] caller interface while supporting roles."""
-    return [item if isinstance(item, OutputSpec) else OutputSpec(name=item) for item in outputs]
+    return [
+        item if isinstance(item, OutputSpec) else OutputSpec(name=item)
+        for item in outputs
+    ]
 
 
 def _output_names(outputs: list[str | OutputSpec]) -> list[str]:
     return [item.name if isinstance(item, OutputSpec) else item for item in outputs]
 
 
+def apply_unsupported_arg(
+    raw: str,
+    inputs: list[TensorSpec],
+    outputs: list[OutputSpec],
+    field_name: str,
+    allowed: list[str],
+    official: bool = False,
+    flag_name: str | None = None,
+    warn_override: bool = False,
+) -> None:
+    """Apply per-interface lists; official mode accepts canonical enum aliases."""
+    flag_name = (
+        flag_name
+        or {
+            "supported_layouts": "--supported-formats",
+            "unsupported_layouts": "--unsupported-formats",
+            "unsupported_dtypes": "--unsupported-dtypes",
+        }[field_name]
+    )
+    kind = "formats" if "layouts" in field_name else "dtypes"
+    if official:
+        allowed = universe(kind)
+    tensors = {f"input.{t.name}": t for t in inputs}
+    tensors.update({f"output.{t.name}": t for t in outputs})
+    seen: set[str] = set()
+    for entry in raw.split(";"):
+        if not entry.strip():
+            continue
+        ref, sep, values = entry.strip().partition(":")
+        ref = ref.strip()
+        if not sep or ref not in tensors or ref in seen:
+            raise ValueError(
+                f"{flag_name}: 无效或重复的接口引用 {ref!r}；请使用 input.NAME 或 output.NAME"
+            )
+        items = [v.strip() for v in values.split(",") if v.strip()]
+        if official:
+            items = [canonical(value, kind) for value in items]
+        if (
+            not items
+            or len(items) != len(set(items))
+            or not set(items).issubset(allowed)
+        ):
+            raise ValueError(
+                f"{flag_name}: {ref} 的值无效或重复：{items}；"
+                "使用非空、不重复的合法枚举；完整值域见 schemas/op-spec.json"
+            )
+        if field_name == "supported_layouts":
+            try:
+                partition(items, [], kind)
+            except ValueError as exc:
+                raise ValueError(
+                    f"{flag_name}: {ref} 的支持值无效：{exc}；"
+                    "完整值域见 schemas/op-spec.json"
+                ) from exc
+        previous = getattr(tensors[ref], field_name)
+        if warn_override and previous != items:
+            print(
+                f"警告：{flag_name} 覆盖向导中 {ref}.{field_name} 的答案：{previous} → {items}。",
+                file=sys.stderr,
+            )
+        setattr(tensors[ref], field_name, items)
+        seen.add(ref)
+
+
+def collect_unsupported(reg: dict) -> dict[str, list[str]]:
+    """An empty answer means no confirmed exclusions, not universal support."""
+    result = {}
+    for name, enum_key in (
+        ("unsupported_dtypes", "dtypes"),
+        ("unsupported_layouts", "layouts"),
+    ):
+        while True:
+            raw = prompt(
+                f"  {name}（仅填写已确认不支持的值；未确认留空）", allow_empty=True
+            )
+            kind = "formats" if enum_key == "layouts" else "dtypes"
+            values = [canonical(v.strip(), kind) for v in raw.split(",") if v.strip()]
+            allowed = universe(kind)
+            if len(values) == len(set(values)) and set(values).issubset(allowed):
+                result[name] = values
+                break
+            print(f"  有效值（不可重复；接受官方别名）: {allowed}")
+    return result
+
+
+def collect_input_dtypes() -> list[str]:
+    """Normalize and validate the answer before chip narrowing."""
+    while True:
+        raw = prompt(
+            "  完整 dtype_set (comma-separated)", default="float16,float32,bfloat16"
+        )
+        values = [
+            canonical(value.strip(), "dtypes")
+            for value in raw.split(",")
+            if value.strip()
+        ]
+        try:
+            supported, _ = partition(values, [], "dtypes")
+        except ValueError as exc:
+            print(
+                f"  dtype_set 无效：{exc}；请重新输入，完整值域见 schemas/op-spec.json"
+            )
+            continue
+        return supported
+
+
 def _render_mapping(lines: list[str], key: str, value: dict, indent: str) -> None:
     """Render a small YAML mapping without introducing a second serializer path."""
     lines.append(f"{indent}{key}:")
-    dumped = yaml.safe_dump(value, allow_unicode=True, default_flow_style=False, sort_keys=False).rstrip()
+    dumped = yaml.safe_dump(
+        value, allow_unicode=True, default_flow_style=False, sort_keys=False
+    ).rstrip()
     lines.extend(f"{indent}  {line}" for line in dumped.splitlines())
 
 
@@ -300,7 +448,9 @@ def prompt_choice(msg: str, choices: list[str], default: str = "") -> str:
         print(f"  ✗ 无效输入 {ans!r}；请输入 1-{len(choices)} 的编号或选项名")
 
 
-def prompt_multi_choice(msg: str, choices: list[str], defaults: list[str] | None = None) -> list[str]:
+def prompt_multi_choice(
+    msg: str, choices: list[str], defaults: list[str] | None = None
+) -> list[str]:
     """Pick one or more from a list (comma-separated indices or names).
 
     空回车 → 返回 defaults（若提供）或全选。q / Ctrl-D 退出生成。
@@ -314,7 +464,9 @@ def prompt_multi_choice(msg: str, choices: list[str], defaults: list[str] | None
     print(f"  ({hint})")
     while True:
         try:
-            ans = input(f"  selection [{','.join(defaults) if defaults else 'all'}]: ").strip()
+            ans = input(
+                f"  selection [{','.join(defaults) if defaults else 'all'}]: "
+            ).strip()
         except (EOFError, KeyboardInterrupt):
             print("\n  ↷ 用户取消生成")
             raise SystemExit(0)
@@ -339,7 +491,7 @@ def prompt_multi_choice(msg: str, choices: list[str], defaults: list[str] | None
             print(f"  ✗ 无效项: {bad}；请重新输入")
             continue
         if not picked:
-            print(f"  ✗ 至少选一项")
+            print("  ✗ 至少选一项")
             continue
         return picked
 
@@ -376,16 +528,19 @@ def collect_list_length(label: str) -> dict:
         return {
             "kind": kind,
             "value": _prompt_non_negative_int(
-                "    value (non-negative integer)", default="0",
+                "    value (non-negative integer)",
+                default="0",
             ),
         }
     if kind == "range":
         while True:
             minimum = _prompt_non_negative_int(
-                "    min (non-negative integer)", default="0",
+                "    min (non-negative integer)",
+                default="0",
             )
             maximum = _prompt_non_negative_int(
-                "    max (non-negative integer)", default="1",
+                "    max (non-negative integer)",
+                default="1",
             )
             if minimum <= maximum:
                 return {"kind": kind, "min": minimum, "max": maximum}
@@ -400,11 +555,18 @@ def collect_list_length(label: str) -> dict:
 def collect_conditional_attributes() -> list[dict]:
     """Collect existing `attributes[]` entries needed by conditional signatures."""
     attributes: list[dict] = []
-    if prompt_choice("是否补充用于条件签名的 attributes", ["no", "yes"], default="no") != "yes":
+    if (
+        prompt_choice("是否补充用于条件签名的 attributes", ["no", "yes"], default="no")
+        != "yes"
+    ):
         return attributes
     print("  仅填写条件签名实际依赖的属性；自动注入属性无需重复填写。")
     while True:
-        name = prompt(f"Attribute #{len(attributes) + 1} name (blank to finish)", default="", allow_empty=True)
+        name = prompt(
+            f"Attribute #{len(attributes) + 1} name (blank to finish)",
+            default="",
+            allow_empty=True,
+        )
         if not name:
             break
         attr_type = prompt_choice(
@@ -413,50 +575,75 @@ def collect_conditional_attributes() -> list[dict]:
             default="bool",
         )
         default_text = prompt(
-            "  default (YAML scalar/list)", default="false" if attr_type == "bool" else "", allow_empty=True,
+            "  default (YAML scalar/list)",
+            default="false" if attr_type == "bool" else "",
+            allow_empty=True,
         )
         try:
             default = yaml.safe_load(default_text)
         except yaml.YAMLError as exc:
             print(f"  ✗ default 不是合法 YAML 值: {exc}")
             continue
-        attributes.append({
-            "name": name,
-            "type": attr_type,
-            "default": default,
-            "semantics": prompt("  semantics"),
-        })
+        attributes.append(
+            {
+                "name": name,
+                "type": attr_type,
+                "default": default,
+                "semantics": prompt("  semantics"),
+            }
+        )
     return attributes
 
 
-def collect_semantic_cases(inputs: list[TensorSpec], outputs: list[OutputSpec]) -> list[dict]:
+def collect_semantic_cases(
+    inputs: list[TensorSpec], outputs: list[OutputSpec]
+) -> list[dict]:
     """Collect only presence contracts; formula/shape/dtype stay in their existing fields."""
     if not any(item.optional for item in [*inputs, *outputs]):
         return []
-    if prompt_choice("是否声明 optional I/O 的 semantic_cases", ["no", "yes"], default="no") != "yes":
+    if (
+        prompt_choice(
+            "是否声明 optional I/O 的 semantic_cases", ["no", "yes"], default="no"
+        )
+        != "yes"
+    ):
         return []
     cases: list[dict] = []
     print("  when 可使用 attr.<name>、input.<name>.dtype、input.<name>.is_present。")
     while True:
-        case_id = prompt(f"Case #{len(cases) + 1} id (blank to finish)", default="", allow_empty=True)
+        case_id = prompt(
+            f"Case #{len(cases) + 1} id (blank to finish)", default="", allow_empty=True
+        )
         if not case_id:
             break
-        cases.append({
-            "id": case_id,
-            "when": prompt("  when"),
-            "inputs": {
-                "required": prompt_name_list("  required inputs (comma-separated, blank for none)"),
-                "forbidden": prompt_name_list("  forbidden inputs (comma-separated, blank for none)"),
-            },
-            "outputs": {
-                "present": prompt_name_list("  present outputs (comma-separated, blank for none)"),
-                "absent": prompt_name_list("  absent outputs (comma-separated, blank for none)"),
-            },
-        })
+        cases.append(
+            {
+                "id": case_id,
+                "when": prompt("  when"),
+                "inputs": {
+                    "required": prompt_name_list(
+                        "  required inputs (comma-separated, blank for none)"
+                    ),
+                    "forbidden": prompt_name_list(
+                        "  forbidden inputs (comma-separated, blank for none)"
+                    ),
+                },
+                "outputs": {
+                    "present": prompt_name_list(
+                        "  present outputs (comma-separated, blank for none)"
+                    ),
+                    "absent": prompt_name_list(
+                        "  absent outputs (comma-separated, blank for none)"
+                    ),
+                },
+            }
+        )
     return cases
 
 
-def collect_layout_contract(inputs: list[TensorSpec], outputs: list[OutputSpec]) -> dict | None:
+def collect_layout_contract(
+    inputs: list[TensorSpec], outputs: list[OutputSpec]
+) -> dict | None:
     """Collect an optional logical-layout contract without adding CLI parameters.
 
     Physical format stays in the existing per-I/O ``layout`` field.  This
@@ -472,19 +659,26 @@ def collect_layout_contract(inputs: list[TensorSpec], outputs: list[OutputSpec])
     ]
     if not eligible:
         return None
-    if prompt_choice(
-        "是否声明 layout_contract（逻辑布局变体及各 Tensor 的轴顺序）",
-        ["no", "yes"], default="no",
-    ) != "yes":
+    if (
+        prompt_choice(
+            "是否声明 layout_contract（逻辑布局变体及各 Tensor 的轴顺序）",
+            ["no", "yes"],
+            default="no",
+        )
+        != "yes"
+    ):
         return None
 
     variants: list[dict] = []
-    print("  when 可使用 attr.<name>、input.<name>.dtype、input.<name>.is_present；留空表示无条件。")
+    print(
+        "  when 可使用 attr.<name>、input.<name>.dtype、input.<name>.is_present；留空表示无条件。"
+    )
     print(f"  可声明的单 Tensor 引用: {', '.join(eligible)}")
     while True:
         variant_id = prompt(
             f"Layout variant #{len(variants) + 1} id (blank to finish)",
-            default="", allow_empty=True,
+            default="",
+            allow_empty=True,
         )
         if not variant_id:
             if not variants:
@@ -498,7 +692,8 @@ def collect_layout_contract(inputs: list[TensorSpec], outputs: list[OutputSpec])
         while True:
             ref = prompt(
                 "  tensor ref (input.<name> or output.<name>; blank to finish this variant)",
-                default="", allow_empty=True,
+                default="",
+                allow_empty=True,
             )
             if not ref:
                 if not variant["tensors"]:
@@ -506,10 +701,14 @@ def collect_layout_contract(inputs: list[TensorSpec], outputs: list[OutputSpec])
                     continue
                 break
             axes = prompt("    logical_axes (comma-separated, e.g. B,S,N,D)")
-            variant["tensors"].append({
-                "ref": ref,
-                "logical_axes": [axis.strip() for axis in axes.split(",") if axis.strip()],
-            })
+            variant["tensors"].append(
+                {
+                    "ref": ref,
+                    "logical_axes": [
+                        axis.strip() for axis in axes.split(",") if axis.strip()
+                    ],
+                }
+            )
         variants.append(variant)
     return {"variants": variants}
 
@@ -521,13 +720,16 @@ def interactive_collect(reg: dict) -> GenInput:
         raise SystemExit(f"Invalid op name: {op_name}")
     description = prompt("One-line description")
 
-    category = prompt_choice("Pick category (single-select, 26 controlled values):",
-                             reg["categories"])
+    category = prompt_choice(
+        "Pick category (single-select, 26 controlled values):", reg["categories"]
+    )
     required = reg["category_map"]["category_requires_paradigms"].get(category, [])
     print(f"\n  category={category} requires paradigm(s): {required}")
     extra = prompt(
         "Add extra paradigms (comma-separated, blank for none)",
-        default="", allow_empty=True).strip()
+        default="",
+        allow_empty=True,
+    ).strip()
     paradigms = list(required)
     if extra:
         for p in [x.strip() for x in extra.split(",") if x.strip()]:
@@ -540,7 +742,8 @@ def interactive_collect(reg: dict) -> GenInput:
         paradigm_groups_mode = prompt_choice(
             "paradigm_groups (范式之间的关系)",
             ["none", "combination", "fusion"],
-            default="none")
+            default="none",
+        )
         if paradigm_groups_mode == "none":
             paradigm_groups_mode = ""
 
@@ -554,7 +757,8 @@ def interactive_collect(reg: dict) -> GenInput:
         axis_source = prompt_choice(
             "axis_source (how the reduction axis is specified)",
             ["attribute", "input_tensor", "fixed", "implicit_all"],
-            default="attribute")
+            default="attribute",
+        )
 
     # format_variants: 多数据排布格式
     format_variants: list[dict] = []
@@ -562,73 +766,115 @@ def interactive_collect(reg: dict) -> GenInput:
         fv_answer = prompt_choice(
             "是否声明 format_variants（归约轴因数据排布格式而异）",
             ["no", "yes"],
-            default="no")
+            default="no",
+        )
         if fv_answer == "yes":
-            valid_layouts = reg.get("layouts", [])
-            print(f"  有效 layout 值: {valid_layouts}")
+            valid_layouts = reg["official_formats"]
+            print("  只接受官方 format；完整值域见 schemas/op-spec.json")
             while True:
                 fmt = prompt(
-                    f"  format #{len(format_variants)+1} name (blank to finish)",
-                    default="", allow_empty=True).strip()
+                    f"  format #{len(format_variants) + 1} name (blank to finish)",
+                    default="",
+                    allow_empty=True,
+                ).strip()
                 if not fmt:
                     if not format_variants:
                         print("  至少需要 1 个 format variant 或选 no")
                         continue
                     break
+                fmt = canonical(fmt, "formats")
                 if valid_layouts and fmt not in valid_layouts:
-                    print(f"  ✗ '{fmt}' 不是有效 layout 值；有效值: {valid_layouts}")
+                    print(
+                        f"  ✗ '{fmt}' 不是官方 format 值；完整值域见 schemas/op-spec.json"
+                    )
                     continue
-                rank_str = prompt(f"    rank (comma-separated, e.g. 4 or 4,5)",
-                                  default="4")
-                axes_str = prompt(f"    reduction_axes (comma-separated, e.g. 0,2,3)",
-                                  default="0")
+                try:
+                    partition([fmt], [], "formats")
+                except ValueError as exc:
+                    print(f"  ✗ format 无法声明为 Tensor 支持项：{exc}")
+                    continue
+                rank_str = prompt(
+                    "    rank (comma-separated, e.g. 4 or 4,5)", default="4"
+                )
+                axes_str = prompt(
+                    "    reduction_axes (comma-separated, e.g. 0,2,3)", default="0"
+                )
                 try:
                     ranks = [int(r.strip()) for r in rank_str.split(",")]
                     axes = [int(a.strip()) for a in axes_str.split(",")]
                 except ValueError:
                     print("  ✗ rank 和 axes 必须是逗号分隔的整数")
                     continue
-                format_variants.append({
-                    "format": fmt,
-                    "rank": ranks,
-                    "reduction_axes": axes,
-                })
+                format_variants.append(
+                    {
+                        "format": fmt,
+                        "rank": ranks,
+                        "reduction_axes": axes,
+                    }
+                )
 
     print("\n--- Inputs ---")
     inputs: list[TensorSpec] = []
     while True:
-        name = prompt(f"Input #{len(inputs)+1} name (blank to finish)", default="", allow_empty=True)
+        name = prompt(
+            f"Input #{len(inputs) + 1} name (blank to finish)",
+            default="",
+            allow_empty=True,
+        )
         if not name:
             if not inputs:
                 print("  must have ≥ 1 input")
                 continue
             break
-        dtypes = prompt("  dtype_set (comma-separated)", default="float16,float32,bfloat16")
+        dtypes = collect_input_dtypes()
         role = prompt_choice(
             "  role",
             ["tensor", "tensor_list", "scalar", "attribute_alias", "state"],
             default=_default_input_role(None, paradigms, len(inputs)),
         )
-        optional = prompt_choice("  optional", ["false", "true"], default="false") == "true"
+        optional = (
+            prompt_choice("  optional", ["false", "true"], default="false") == "true"
+        )
         list_length = collect_list_length(name) if role == "tensor_list" else None
-        inputs.append(TensorSpec(
-            name=name, dtype_set=[d.strip() for d in dtypes.split(",")],
-            role=role, optional=optional, list_length=list_length,
-        ))
+        unsupported = collect_unsupported(reg)
+        inputs.append(
+            TensorSpec(
+                name=name,
+                dtype_set=dtypes,
+                role=role,
+                optional=optional,
+                list_length=list_length,
+                **unsupported,
+            )
+        )
 
     print("\n--- Outputs ---")
     outputs: list[OutputSpec] = []
     while True:
-        name = prompt(f"Output #{len(outputs)+1} name (blank to finish)", default="", allow_empty=True)
+        name = prompt(
+            f"Output #{len(outputs) + 1} name (blank to finish)",
+            default="",
+            allow_empty=True,
+        )
         if not name:
             if not outputs:
                 print("  must have ≥ 1 output")
                 continue
             break
         role = prompt_choice("  role", ["tensor", "tensor_list"], default="tensor")
-        optional = prompt_choice("  optional", ["false", "true"], default="false") == "true"
+        optional = (
+            prompt_choice("  optional", ["false", "true"], default="false") == "true"
+        )
         list_length = collect_list_length(name) if role == "tensor_list" else None
-        outputs.append(OutputSpec(name=name, role=role, optional=optional, list_length=list_length))
+        outputs.append(
+            OutputSpec(
+                name=name,
+                role=role,
+                optional=optional,
+                list_length=list_length,
+                **collect_unsupported(reg),
+            )
+        )
 
     attributes = collect_conditional_attributes()
     semantic_cases = collect_semantic_cases(inputs, outputs)
@@ -637,15 +883,16 @@ def interactive_collect(reg: dict) -> GenInput:
     promotion = prompt_choice(
         "dtype_policy.promotion",
         ["same_as_first_input", "numpy_promote", "fixed", "upcast_for_accum"],
-        default="same_as_first_input")
+        default="same_as_first_input",
+    )
     broadcast_kind = prompt_choice(
-        "broadcast.kind",
-        ["none", "numpy", "explicit"],
-        default="numpy")
+        "broadcast.kind", ["none", "numpy", "explicit"], default="numpy"
+    )
     accumulation_order = prompt_choice(
         "determinism.accumulation_order",
         ["none", "stable_in_axis", "tree", "sequential"],
-        default="none")
+        default="none",
+    )
 
     # supported_chips: 按 inputs.dtype_set 收窄候选
     declared_dtypes: set[str] = set()
@@ -655,7 +902,7 @@ def interactive_collect(reg: dict) -> GenInput:
     if not candidates:
         # 没有任一芯片覆盖全部 dtype（典型：dtype_set 横跨 fp4 + 老芯片）
         print(f"\n  ⚠ 没有芯片同时支持所有 dtype {sorted(declared_dtypes)}；")
-        print(f"    请手动从全集挑选并在生成后修正 dtype_set / supported_combinations")
+        print("    请手动从全集挑选并在生成后修正 dtype_set / supported_combinations")
         candidates = [c["id"] for c in reg["chips"]]
     supported_chips = prompt_multi_choice(
         f"\nsupported_chips（按 dtype_set {sorted(declared_dtypes)} 自动收窄；多选）",
@@ -684,8 +931,13 @@ def interactive_collect(reg: dict) -> GenInput:
     )
 
 
-def build_attributes_block(category: str, paradigms: list[str], inputs: list[TensorSpec],
-                           axis_source: str = "attribute", explicit_attributes: list[dict] | None = None) -> str:
+def build_attributes_block(
+    category: str,
+    paradigms: list[str],
+    inputs: list[TensorSpec],
+    axis_source: str = "attribute",
+    explicit_attributes: list[dict] | None = None,
+) -> str:
     """Inject minimum required attrs per paradigm injection table.
 
     Multiple injectors may apply (e.g. Quantization + RandomSampling). Order
@@ -702,9 +954,12 @@ def build_attributes_block(category: str, paradigms: list[str], inputs: list[Ten
 
     if "Reduction" in paradigms and "Recurrence" not in paradigms:
         if axis_source == "attribute":
-            _axis_input_names = {inp.name for inp in inputs
-                                 if inp.name in ("axes", "axis", "dim")
-                                 and any(d in ("int32", "int64") for d in inp.dtype_set)}
+            _axis_input_names = {
+                inp.name
+                for inp in inputs
+                if inp.name in ("axes", "axis", "dim")
+                and any(d in ("int32", "int64") for d in inp.dtype_set)
+            }
             if not _axis_input_names:
                 target = inputs[0].name
                 blocks.append(
@@ -756,15 +1011,27 @@ def build_attributes_block(category: str, paradigms: list[str], inputs: list[Ten
         raise ValueError(f"attributes 与自动注入属性重名: {sorted(duplicates)}")
     explicit_block = ""
     if explicit_attributes:
-        dumped = yaml.safe_dump(explicit_attributes, allow_unicode=True, default_flow_style=False, sort_keys=False).rstrip()
+        dumped = yaml.safe_dump(
+            explicit_attributes,
+            allow_unicode=True,
+            default_flow_style=False,
+            sort_keys=False,
+        ).rstrip()
         explicit_block = "\n".join(f"  {line}" for line in dumped.splitlines())
-    return "\n".join(part for part in ("\n".join(blocks), explicit_block) if part) or "  []"
+    return (
+        "\n".join(part for part in ("\n".join(blocks), explicit_block) if part)
+        or "  []"
+    )
 
 
-def build_op_block(op_name: str, description: str, category: str,
-                   paradigms: list[str],
-                   supported_chips: list[str] | None = None,
-                   error_codes: list[str] | None = None) -> str:
+def build_op_block(
+    op_name: str,
+    description: str,
+    category: str,
+    paradigms: list[str],
+    supported_chips: list[str] | None = None,
+    error_codes: list[str] | None = None,
+) -> str:
     """Build the `op:` field.
 
     发射规则：
@@ -774,7 +1041,7 @@ def build_op_block(op_name: str, description: str, category: str,
     """
     parts = [
         f"  name: {op_name}",
-        f'  version: "1.0"',
+        '  version: "1.0"',
         f'  description: "{description}"',
         f"  category: {category}",
         f"  paradigms: [{', '.join(paradigms)}]",
@@ -795,14 +1062,34 @@ def build_op_block(op_name: str, description: str, category: str,
 
 
 _ACCUMULATION_CATEGORIES = {
-    "Reduction", "ReductionComposite",
-    "Recurrence", "AtomicUpdate", "Histogram",
+    "Reduction",
+    "ReductionComposite",
+    "Recurrence",
+    "AtomicUpdate",
+    "Histogram",
 }
-_INTEGER_DTYPES = {"int4", "int8", "int16", "int32", "int64",
-                   "uint1", "uint4", "uint8", "uint16", "uint32", "uint64", "bool"}
+_INTEGER_DTYPES = {
+    "int4",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint1",
+    "uint4",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "bool",
+}
 
 
-def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str], category: str) -> str:
+def build_inputs_block(
+    inputs: list[TensorSpec],
+    paradigms: list[str],
+    category: str,
+    support: dict | None = None,
+) -> str:
     lines = []
     is_pure_reduction = _is_pure_reduction(category, paradigms)
     is_accumulation = category in _ACCUMULATION_CATEGORIES
@@ -813,18 +1100,38 @@ def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str], category:
         role = _default_input_role(inp.role, paradigms, i)
         lines.append(f"  - name: {inp.name}")
         lines.append(f"    role: {role}")
-        lines.append(f"    dtype_set: [{', '.join(inp.dtype_set)}]")
-        rank_min = max(inp.rank_range[0], 1) if is_pure_reduction and i == 0 else inp.rank_range[0]
+        if support is not None:
+            for key, values in support[inp.name].items():
+                lines.append(
+                    f"    {key}: {yaml.safe_dump(values, default_flow_style=True, width=10000).strip()}"
+                )
+        else:
+            lines.append(f"    dtype_set: [{', '.join(inp.dtype_set)}]")
+            for key, values in (
+                ("unsupported_dtypes", inp.unsupported_dtypes),
+                ("unsupported_layouts", inp.unsupported_layouts),
+            ):
+                rendered = yaml.safe_dump(
+                    values, default_flow_style=True, width=10000
+                ).strip()
+                lines.append(f"    {key}: {rendered}")
+        rank_min = (
+            max(inp.rank_range[0], 1)
+            if is_pure_reduction and i == 0
+            else inp.rank_range[0]
+        )
         lines.append(f"    rank_range: [{rank_min}, {inp.rank_range[1]}]")
-        lines.append(f"    layout: ND")
+        lines.append(f"    layout: {inp.supported_layouts[0]}")
         # 累加类算子的 tensor 数据输入（非整型索引/轴）自动注入 data_distribution: normal
         # 整型 tensor（axis/index）和非累加类不注入
-        is_integer_tensor = role == "tensor" and set(inp.dtype_set).issubset(_INTEGER_DTYPES)
+        is_integer_tensor = role == "tensor" and set(inp.dtype_set).issubset(
+            _INTEGER_DTYPES
+        )
         if is_accumulation and role == "tensor" and not is_integer_tensor:
-            lines.append(f"    data_distribution: normal")
+            lines.append("    data_distribution: normal")
         elif inp.data_distribution:
             lines.append(f"    data_distribution: {inp.data_distribution}")
-        lines.append(f"    shape:")
+        lines.append("    shape:")
         if is_pure_reduction and i == 0:
             lines.append(f'      symbolic: ["...{folded_name}", "R"]')
         else:
@@ -836,8 +1143,15 @@ def build_inputs_block(inputs: list[TensorSpec], paradigms: list[str], category:
     return "\n".join(lines)
 
 
-def build_outputs_block(outputs: list[str | OutputSpec], first_input: str, category: str, paradigms: list[str],
-                        inputs: list[TensorSpec], axis_source: str = "attribute") -> str:
+def build_outputs_block(
+    outputs: list[str | OutputSpec],
+    first_input: str,
+    category: str,
+    paradigms: list[str],
+    inputs: list[TensorSpec],
+    axis_source: str = "attribute",
+    support: dict | None = None,
+) -> str:
     """生成 outputs 段。
 
     - VariableOutput（nonzero / unique）→ data_dependent
@@ -859,6 +1173,20 @@ def build_outputs_block(outputs: list[str | OutputSpec], first_input: str, categ
     for output in _normalize_outputs(outputs):
         out = output.name
         lines.append(f"  - name: {out}")
+        if support is not None:
+            for key, values in support[out].items():
+                lines.append(
+                    f"    {key}: {yaml.safe_dump(values, default_flow_style=True, width=10000).strip()}"
+                )
+        else:
+            for key, values in (
+                ("unsupported_dtypes", output.unsupported_dtypes),
+                ("unsupported_layouts", output.unsupported_layouts),
+            ):
+                rendered = yaml.safe_dump(
+                    values, default_flow_style=True, width=10000
+                ).strip()
+                lines.append(f"    {key}: {rendered}")
         if output.role != "tensor":
             lines.append(f"    role: {output.role}")
         if output.optional:
@@ -866,67 +1194,85 @@ def build_outputs_block(outputs: list[str | OutputSpec], first_input: str, categ
         if output.list_length is not None:
             _render_mapping(lines, "list_length", output.list_length, "    ")
         if is_variable_output:
-            lines.append(f"    shape_rule_kind: data_dependent")
-            lines.append(f"    data_dependent_shape: true")
-            lines.append(f"    shape_rule_description: |")
-            lines.append(f"      # TODO: 描述 {out}.shape 与 {first_input} 实际值的关系")
-            lines.append(f"      # 例如：{out}.shape = (K, rank({first_input}))，K = count({first_input} != 0)")
-            lines.append(f"    shape_bounds:")
-            lines.append(f"      max_elements: \"prod({first_input}.shape)\"  # TODO 上界")
-            lines.append(f"      output_rank: 2  # TODO")
-            lines.append(f"    dtype_rule_kind: numpy_expr")
-            lines.append(f"    dtype_rule: |")
-            lines.append(f"      {out}.dtype = np.int64  # TODO: VariableOutput 通常输出索引")
-        elif is_reduction_like and (axis_source == "input_tensor"
-                                    or (axis_source == "attribute" and has_axis_input)):
-            lines.append(f"    shape_rule_kind: data_dependent")
-            lines.append(f"    data_dependent_shape: true")
-            lines.append(f"    shape_rule_description: |")
-            lines.append(f"      # keep_dims=true:  {out}.shape = {first_input}.shape 归约轴置 1")
-            lines.append(f"      # keep_dims=false: {out}.shape = {first_input}.shape 去除归约轴")
-            lines.append(f"    shape_bounds:")
-            lines.append(f"      max_elements: \"prod({first_input}.shape)\"")
-            lines.append(f"      output_rank: 8  # TODO: 替换为实际最大 rank")
-            lines.append(f"    dtype_rule_kind: numpy_expr")
-            lines.append(f"    dtype_rule: |")
+            lines.append("    shape_rule_kind: data_dependent")
+            lines.append("    data_dependent_shape: true")
+            lines.append("    shape_rule_description: |")
+            lines.append(
+                f"      # TODO: 描述 {out}.shape 与 {first_input} 实际值的关系"
+            )
+            lines.append(
+                f"      # 例如：{out}.shape = (K, rank({first_input}))，K = count({first_input} != 0)"
+            )
+            lines.append("    shape_bounds:")
+            lines.append(
+                f'      max_elements: "prod({first_input}.shape)"  # TODO 上界'
+            )
+            lines.append("      output_rank: 2  # TODO")
+            lines.append("    dtype_rule_kind: numpy_expr")
+            lines.append("    dtype_rule: |")
+            lines.append(
+                f"      {out}.dtype = np.int64  # TODO: VariableOutput 通常输出索引"
+            )
+        elif is_reduction_like and (
+            axis_source == "input_tensor"
+            or (axis_source == "attribute" and has_axis_input)
+        ):
+            lines.append("    shape_rule_kind: data_dependent")
+            lines.append("    data_dependent_shape: true")
+            lines.append("    shape_rule_description: |")
+            lines.append(
+                f"      # keep_dims=true:  {out}.shape = {first_input}.shape 归约轴置 1"
+            )
+            lines.append(
+                f"      # keep_dims=false: {out}.shape = {first_input}.shape 去除归约轴"
+            )
+            lines.append("    shape_bounds:")
+            lines.append(f'      max_elements: "prod({first_input}.shape)"')
+            lines.append("      output_rank: 8  # TODO: 替换为实际最大 rank")
+            lines.append("    dtype_rule_kind: numpy_expr")
+            lines.append("    dtype_rule: |")
             lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
         elif _is_pure_reduction(category, paradigms) and axis_source == "fixed":
-            lines.append(f"    shape_rule_kind: numpy_expr")
-            lines.append(f"    shape_rule: |")
+            lines.append("    shape_rule_kind: numpy_expr")
+            lines.append("    shape_rule: |")
             lines.append(
                 f"      {out}.shape = np.reduce_shape({first_input}.shape, axis=-1, keepdims=keep_dims)"
             )
-            lines.append(f"    dtype_rule_kind: numpy_expr")
-            lines.append(f"    dtype_rule: |")
+            lines.append("    dtype_rule_kind: numpy_expr")
+            lines.append("    dtype_rule: |")
             lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
         elif _is_pure_reduction(category, paradigms) and axis_source == "implicit_all":
-            lines.append(f"    shape_rule_kind: numpy_expr")
-            lines.append(f"    shape_rule: |")
+            lines.append("    shape_rule_kind: numpy_expr")
+            lines.append("    shape_rule: |")
             lines.append(f"      {out}.shape = ()  # reduce all axes → scalar")
-            lines.append(f"    dtype_rule_kind: numpy_expr")
-            lines.append(f"    dtype_rule: |")
+            lines.append("    dtype_rule_kind: numpy_expr")
+            lines.append("    dtype_rule: |")
             lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
         else:
-            lines.append(f"    shape_rule_kind: numpy_expr")
-            lines.append(f"    shape_rule: |")
+            lines.append("    shape_rule_kind: numpy_expr")
+            lines.append("    shape_rule: |")
             if _is_pure_reduction(category, paradigms):
                 lines.append(
                     f"      {out}.shape = np.reduce_shape({first_input}.shape, axis=tuple(dim), keepdims=keep_dims)"
                 )
             else:
-                lines.append(f"      {out}.shape = {first_input}.shape  # TODO: numpy 表达式")
-            lines.append(f"    dtype_rule_kind: numpy_expr")
-            lines.append(f"    dtype_rule: |")
+                lines.append(
+                    f"      {out}.shape = {first_input}.shape  # TODO: numpy 表达式"
+                )
+            lines.append("    dtype_rule_kind: numpy_expr")
+            lines.append("    dtype_rule: |")
             lines.append(f"      {out}.dtype = {first_input}.dtype  # TODO")
-        lines.append(f"    layout: ND")
-        lines.append(f"    aliasing: none")
+        lines.append(f"    layout: {output.supported_layouts[0]}")
+        lines.append("    aliasing: none")
     return "\n".join(lines)
 
 
 def build_semantic_cases_block(cases: list[dict]) -> str:
     if not cases:
         return ""
-    dumped = yaml.safe_dump(cases, allow_unicode=True, default_flow_style=False, sort_keys=False).rstrip()
+    dumped = yaml.safe_dump(
+        cases, allow_unicode=True, default_flow_style=False, sort_keys=False
+    ).rstrip()
     lines = ["semantic_cases:"]
     lines.extend(f"  {line}" for line in dumped.splitlines())
     return "\n".join(lines)
@@ -936,7 +1282,9 @@ def build_layout_contract_block(contract: dict | None) -> str:
     """Render the optional top-level logical-layout contract."""
     if not contract:
         return ""
-    dumped = yaml.safe_dump(contract, allow_unicode=True, default_flow_style=False, sort_keys=False).rstrip()
+    dumped = yaml.safe_dump(
+        contract, allow_unicode=True, default_flow_style=False, sort_keys=False
+    ).rstrip()
     lines = ["layout_contract:"]
     # The root key was emitted above; insert only its mapping contents.
     lines.extend(f"  {line}" for line in dumped.splitlines())
@@ -962,23 +1310,23 @@ def build_reduction_block(axis_source: str) -> str:
             "  fixed_value: -1  # 替换为实际固定归约轴；同步修改 shape_rule 中的 axis 值"
         )
     if axis_source == "implicit_all":
-        return (
-            "reduction:\n"
-            "  axis_source: implicit_all"
-        )
+        return "reduction:\n  axis_source: implicit_all"
     return ""
 
 
-def build_supported_combinations_block(inputs: list[TensorSpec],
-                                        outputs: list[str],
-                                        promotion: str,
-                                        axis_source: str = "attribute") -> str:
+def build_supported_combinations_block(
+    inputs: list[TensorSpec],
+    outputs: list[str],
+    promotion: str,
+    axis_source: str = "attribute",
+) -> str:
     """生成 dtype_policy.supported_combinations。
 
     策略：
       * 同 dtype 直传 — 取所有输入 dtype_set 交集（每个 dtype 一行）
       * promotion=numpy_promote：在交集行外加几行 promote 组合（取 fp16+fp32 / bf16+fp32 这种典型对）
-      * 其他 promotion：仅同 dtype 直传，开发者后续补充
+      * 基线组合保留每个输入自身的首选 dtype，输出遵循 promotion
+      * 其他 promotion：输出沿用首个数据输入 dtype，开发者后续补充
       * axis_source=input_tensor：axis 输入不参与 dtype 交集计算，单独用其 dtype
     """
     if not inputs or not outputs:
@@ -986,47 +1334,77 @@ def build_supported_combinations_block(inputs: list[TensorSpec],
 
     axis_input_names = set()
     if axis_source == "input_tensor":
-        axis_input_names = {inp.name for inp in inputs
-                           if inp.name in ("axes", "axis", "dim")
-                           and any(d in ("int32", "int64") for d in inp.dtype_set)}
+        axis_input_names = {
+            inp.name
+            for inp in inputs
+            if inp.name in ("axes", "axis", "dim")
+            and any(d in ("int32", "int64") for d in inp.dtype_set)
+        }
 
     data_inputs = [inp for inp in inputs if inp.name not in axis_input_names]
     if not data_inputs:
         data_inputs = inputs
 
+    lines = []
+    seen_inputs: set[tuple[str, ...]] = set()
+
+    def append_combination(assigned: list[str]) -> None:
+        # Derive outputs consistently for every row, then deduplicate by inputs.
+        # Axis tensors retain their own dtype but do not participate in promotion.
+        key = tuple(assigned)
+        if key in seen_inputs:
+            return
+        data_dtypes = []
+        for inp, dtype in zip(inputs, assigned):
+            if inp in data_inputs:
+                data_dtypes.append(dtype)
+        output_dtype = data_dtypes[0]
+        if promotion == "numpy_promote" and len(set(data_dtypes)) > 1:
+            try:
+                output_dtype = promote_many(data_dtypes)
+            except DslError as exc:
+                raise ValueError(
+                    f"Cannot derive numpy_promote for {data_dtypes}: {exc.message}. "
+                    "Confirm the dtype promotion rule before generating combinations."
+                ) from exc
+        in_part = ", ".join(
+            f"{inp.name}: {dtype}" for inp, dtype in zip(inputs, assigned)
+        )
+        out_part = ", ".join(f"{out}: {output_dtype}" for out in outputs)
+        lines.append(f"    - {{inputs: {{{in_part}}}, outputs: {{{out_part}}}}}")
+        seen_inputs.add(key)
+
+    # Preserve heterogeneous inputs such as floating-point data and integer indices.
+    append_combination([inp.dtype_set[0] for inp in inputs])
+
     dtype_intersection = set(data_inputs[0].dtype_set)
     for inp in data_inputs[1:]:
         dtype_intersection &= set(inp.dtype_set)
-    if not dtype_intersection:
-        dtype_intersection = {data_inputs[0].dtype_set[0]}
 
-    lines = []
     for dtype in sorted(dtype_intersection):
-        in_parts = []
-        for inp in inputs:
-            if inp.name in axis_input_names:
-                in_parts.append(f"{inp.name}: {inp.dtype_set[0]}")
-            else:
-                in_parts.append(f"{inp.name}: {dtype}")
-        in_part = ", ".join(in_parts)
-        out_part = ", ".join(f"{out}: {dtype}" for out in outputs)
-        lines.append(f"    - {{inputs: {{{in_part}}}, outputs: {{{out_part}}}}}")
+        append_combination(
+            [
+                inp.dtype_set[0] if inp.name in axis_input_names else dtype
+                for inp in inputs
+            ]
+        )
 
     if promotion == "numpy_promote" and len(data_inputs) >= 2:
         mid = len(data_inputs) // 2 or 1
         for narrow, wide in (("float16", "float32"), ("bfloat16", "float32")):
             assigned = [narrow if i < mid else wide for i in range(len(data_inputs))]
-            if all(d in inp.dtype_set for d, inp in zip(assigned, data_inputs)) and narrow != wide:
-                in_parts = []
-                for inp in inputs:
-                    if inp.name in axis_input_names:
-                        in_parts.append(f"{inp.name}: {inp.dtype_set[0]}")
-                    else:
-                        idx = data_inputs.index(inp)
-                        in_parts.append(f"{inp.name}: {assigned[idx]}")
-                in_part = ", ".join(in_parts)
-                out_part = ", ".join(f"{out}: {wide}" for out in outputs)
-                lines.append(f"    - {{inputs: {{{in_part}}}, outputs: {{{out_part}}}}}")
+            if (
+                all(d in inp.dtype_set for d, inp in zip(assigned, data_inputs))
+                and narrow != wide
+            ):
+                append_combination(
+                    [
+                        inp.dtype_set[0]
+                        if inp.name in axis_input_names
+                        else assigned[data_inputs.index(inp)]
+                        for inp in inputs
+                    ]
+                )
 
     return "\n".join(lines)
 
@@ -1044,11 +1422,14 @@ def _format_tol_value(v) -> str:
     return str(v)
 
 
-def build_per_dtype_tolerance_block(inputs: list[TensorSpec], outputs: list[str],
-                                     promotion: str,
-                                     axis_source: str = "attribute",
-                                     category: str = "",
-                                     op_name: str = "") -> str:
+def build_per_dtype_tolerance_block(
+    inputs: list[TensorSpec],
+    outputs: list[str],
+    promotion: str,
+    axis_source: str = "attribute",
+    category: str = "",
+    op_name: str = "",
+) -> str:
     """生成 numerical_tolerance.per_dtype，覆盖 supported_combinations 中所有出现的 output dtype。"""
     defaults = _load_tolerance_defaults()
 
@@ -1056,34 +1437,24 @@ def build_per_dtype_tolerance_block(inputs: list[TensorSpec], outputs: list[str]
     is_reduction = category in reduction_categories
     is_exact_reduce = is_reduction and op_name.endswith(("max", "min"))
 
-    fp32_default = defaults.get("float32", {"rtol": 1.0e-5, "atol": 1.0e-5, "metric": "max_relative"})
-    
-    axis_input_names = set()
-    if axis_source == "input_tensor":
-        axis_input_names = {inp.name for inp in inputs
-                           if inp.name in ("axes", "axis", "dim")
-                           and any(d in ("int32", "int64") for d in inp.dtype_set)}
+    fp32_default = defaults.get(
+        "float32", {"rtol": 1.0e-5, "atol": 1.0e-5, "metric": "max_relative"}
+    )
 
-    data_inputs = [inp for inp in inputs if inp.name not in axis_input_names]
-    if not data_inputs:
-        data_inputs = inputs
-    
-    dtype_intersection = set(data_inputs[0].dtype_set) if data_inputs else {"float32"}
-    for inp in (data_inputs[1:] if data_inputs else []):
-        dtype_intersection &= set(inp.dtype_set)
-    if not dtype_intersection:
-        dtype_intersection = {data_inputs[0].dtype_set[0]} if data_inputs else {"float32"}
-    out_dtypes = set(dtype_intersection)
-    if promotion == "numpy_promote" and len(data_inputs) >= 2:
-        for narrow, wide in (("float16", "float32"), ("bfloat16", "float32")):
-            mid = len(data_inputs) // 2 or 1
-            assigned = [narrow if i < mid else wide for i in range(len(data_inputs))]
-            if all(d in inp.dtype_set for d, inp in zip(assigned, data_inputs)):
-                out_dtypes.add(wide)
+    combinations = yaml.safe_load(
+        build_supported_combinations_block(inputs, outputs, promotion, axis_source)
+    )
+    out_dtypes = set()
+    for row in combinations:
+        out_dtypes.update(row["outputs"].values())
 
     lines = []
     for dtype in sorted(out_dtypes):
-        entry = defaults.get(dtype) or {"rtol": 1.0e-5, "atol": 1.0e-5, "metric": "max_relative"}
+        entry = defaults.get(dtype) or {
+            "rtol": 1.0e-5,
+            "atol": 1.0e-5,
+            "metric": "max_relative",
+        }
         if is_reduction and not is_exact_reduce and entry["metric"] == "bitwise_equal":
             entry = dict(fp32_default)
         rtol = _format_tol_value(entry["rtol"])
@@ -1102,8 +1473,9 @@ def build_accumulator_block(category: str, paradigms: list[str]) -> str:
     return ""
 
 
-def build_composition_block(paradigms: list[str], inputs: list[TensorSpec],
-                            outputs: list[str]) -> str:
+def build_composition_block(
+    paradigms: list[str], inputs: list[TensorSpec], outputs: list[str]
+) -> str:
     if "FusedComposite" not in paradigms:
         return ""
     in_names = ",".join(inp.name for inp in inputs)
@@ -1178,13 +1550,13 @@ _PARADIGM_BOUNDARY_TEMPLATES = {
 _PURE_REDUCTION_BOUNDARY_TEMPLATES = [
     '  - case: "reduce 轴长度为 1"\n'
     '    synthesize: { __FIRST_INPUT__.shape: "[1]", attr.dim: [-1], attr.keep_dims: false }\n'
-    '    machine_check: {kind: matches_oracle}',
+    "    machine_check: {kind: matches_oracle}",
     '  - case: "空 Tensor（A 轴=0，输出为空）"\n'
     '    synthesize: { __FIRST_INPUT__.shape: "[0, 4]", attr.dim: [-1], attr.keep_dims: false }\n'
-    '    machine_check: {kind: returns_empty}',
+    "    machine_check: {kind: returns_empty}",
     '  - case: "reduce 轴 R=0（归约轴为空，输出=A 轴 shape）"\n'
     '    synthesize: { __FIRST_INPUT__.shape: "[4, 0]", attr.dim: [-1], attr.keep_dims: false }\n'
-    '    machine_check: {kind: matches_oracle}',
+    "    machine_check: {kind: matches_oracle}",
 ]
 
 
@@ -1214,8 +1586,12 @@ _PARADIGM_EXTREME_TEMPLATES = {
 }
 
 
-def build_default_boundary_case(category: str, paradigms: list[str], first_input: str,
-                                axis_source: str = "attribute") -> str:
+def build_default_boundary_case(
+    category: str,
+    paradigms: list[str],
+    first_input: str,
+    axis_source: str = "attribute",
+) -> str:
     if _is_pure_reduction(category, paradigms):
         if axis_source == "fixed":
             return (
@@ -1244,8 +1620,12 @@ def build_default_boundary_case(category: str, paradigms: list[str], first_input
     )
 
 
-def build_extra_boundary_cases(category: str, paradigms: list[str], first_input: str,
-                               axis_source: str = "attribute") -> str:
+def build_extra_boundary_cases(
+    category: str,
+    paradigms: list[str],
+    first_input: str,
+    axis_source: str = "attribute",
+) -> str:
     """生成 paradigm 必含的 boundary case 占位，避免 stage 6 FAIL。"""
     lines: list[str] = []
     for p in paradigms:
@@ -1285,8 +1665,14 @@ def infer_error_codes(paradigms: list[str], attributes_block: str) -> list[str]:
     """
     codes: list[str] = ["null_input"]
     shape_paradigms = {
-        "Broadcast", "Reduction", "Contraction", "IndexGather",
-        "ScatterUpdate", "LayoutTransform", "Padding", "SortSelect",
+        "Broadcast",
+        "Reduction",
+        "Contraction",
+        "IndexGather",
+        "ScatterUpdate",
+        "LayoutTransform",
+        "Padding",
+        "SortSelect",
         "ArgReduce",
     }
     if any(p in shape_paradigms for p in paradigms):
@@ -1335,10 +1721,12 @@ def build_paradigm_groups_block(paradigms: list[str], mode: str) -> str:
     if mode == "combination":
         lines = ["  paradigm_groups:"]
         for p in paradigms:
-            lines.append(f"    - kind: combination")
+            lines.append("    - kind: combination")
             lines.append(f"      paradigms: [{p}]")
-            lines.append(f"      switch: TODO  # 属性名（如 reduction）")
-            lines.append(f"      when: TODO    # 属性值（如 none），最后一个组用 \"*\" 表示兜底")
+            lines.append("      switch: TODO  # 属性名（如 reduction）")
+            lines.append(
+                '      when: TODO    # 属性值（如 none），最后一个组用 "*" 表示兜底'
+            )
         return "\n".join(lines)
     if mode == "fusion":
         return (
@@ -1376,6 +1764,46 @@ def render(gi: GenInput) -> str:
     first_input = gi.inputs[0].name
     output_names = _output_names(gi.outputs)
     first_output = output_names[0]
+    combinations_block = build_supported_combinations_block(
+        gi.inputs, output_names, gi.promotion, gi.axis_source
+    )
+    support = {"inputs": None, "outputs": None}
+    if gi.support_universe:
+        if gi.support_universe != load_catalog()["id"]:
+            raise ValueError(f"Unknown support universe: {gi.support_universe}")
+        combinations = yaml.safe_load(combinations_block)
+        for side, tensors in (
+            ("inputs", gi.inputs),
+            ("outputs", _normalize_outputs(gi.outputs)),
+        ):
+            support[side] = {}
+            for tensor in tensors:
+                dtypes = (
+                    tensor.dtype_set
+                    if side == "inputs"
+                    else sorted({row[side][tensor.name] for row in combinations})
+                )
+                layouts = list(tensor.supported_layouts)
+                if side == "inputs" and _default_input_role(
+                    tensor.role, gi.paradigms, gi.inputs.index(tensor)
+                ) in {"tensor", "tensor_list", "state"}:
+                    layouts.extend(
+                        v["format"]
+                        for v in gi.format_variants
+                        if v["format"] not in layouts
+                    )
+                supported_dtypes, unsupported_dtypes = partition(
+                    dtypes, tensor.unsupported_dtypes, "dtypes"
+                )
+                supported_layouts, unsupported_layouts = partition(
+                    layouts, tensor.unsupported_layouts, "formats"
+                )
+                support[side][tensor.name] = {
+                    "dtype_set": supported_dtypes,
+                    "unsupported_dtypes": unsupported_dtypes,
+                    "supported_layouts": supported_layouts,
+                    "unsupported_layouts": unsupported_layouts,
+                }
 
     techniques = "[]"
     if gi.numerical_stability_required:
@@ -1388,34 +1816,62 @@ def render(gi: GenInput) -> str:
 
     # 范式驱动的 boundary/extreme 占位 case
     # 让生成器产出的骨架自身就过 stage 6（不需要用户额外想关键词）
-    default_boundary_case = build_default_boundary_case(gi.category, gi.paradigms, first_input, gi.axis_source)
-    extra_boundary_cases = build_extra_boundary_cases(gi.category, gi.paradigms, first_input, gi.axis_source)
+    default_boundary_case = build_default_boundary_case(
+        gi.category, gi.paradigms, first_input, gi.axis_source
+    )
+    extra_boundary_cases = build_extra_boundary_cases(
+        gi.category, gi.paradigms, first_input, gi.axis_source
+    )
     extra_extreme_cases = build_extra_extreme_cases(gi.paradigms, first_input)
 
     # 推断错误码集合并补一条 raises_error 占位 case，让 stage 2 J 规则有可校验对象
     attributes_block = build_attributes_block(
-        gi.category, gi.paradigms, gi.inputs, gi.axis_source, gi.attributes,
+        gi.category,
+        gi.paradigms,
+        gi.inputs,
+        gi.axis_source,
+        gi.attributes,
     )
     error_codes = infer_error_codes(gi.paradigms, attributes_block)
     raises_error_case = build_raises_error_boundary_case(error_codes, first_input)
-    extra_boundary_cases = (extra_boundary_cases + "\n" + raises_error_case
-                            if extra_boundary_cases.strip()
-                            else raises_error_case)
+    extra_boundary_cases = (
+        extra_boundary_cases + "\n" + raises_error_case
+        if extra_boundary_cases.strip()
+        else raises_error_case
+    )
 
     replacements = {
+        "{{support_universe_block}}": f"support_universe: {gi.support_universe}"
+        if gi.support_universe
+        else "",
         "{{op_name}}": gi.op_name,
         "{{description}}": gi.description,
         "{{category}}": gi.category,
         "{{paradigms_csv}}": ", ".join(gi.paradigms),
-        "{{op_block}}": build_op_block(gi.op_name, gi.description,
-                                        gi.category, gi.paradigms,
-                                        supported_chips=gi.supported_chips,
-                                        error_codes=error_codes),
+        "{{op_block}}": build_op_block(
+            gi.op_name,
+            gi.description,
+            gi.category,
+            gi.paradigms,
+            supported_chips=gi.supported_chips,
+            error_codes=error_codes,
+        ),
         "{{paradigm_groups_block}}": build_paradigm_groups_block(
-            gi.paradigms, gi.paradigm_groups_mode),
-        "{{inputs_block}}": build_inputs_block(gi.inputs, gi.paradigms, gi.category),
+            gi.paradigms, gi.paradigm_groups_mode
+        ),
+        "{{inputs_block}}": build_inputs_block(
+            gi.inputs, gi.paradigms, gi.category, support["inputs"]
+        ),
         "{{attributes_block}}": attributes_block,
-        "{{outputs_block}}": build_outputs_block(gi.outputs, first_input, gi.category, gi.paradigms, gi.inputs, gi.axis_source),
+        "{{outputs_block}}": build_outputs_block(
+            gi.outputs,
+            first_input,
+            gi.category,
+            gi.paradigms,
+            gi.inputs,
+            gi.axis_source,
+            support["outputs"],
+        ),
         "{{semantic_cases_block}}": build_semantic_cases_block(gi.semantic_cases),
         "{{layout_contract_block}}": build_layout_contract_block(gi.layout_contract),
         "{{reduction_block}}": build_reduction_block(gi.axis_source),
@@ -1426,15 +1882,24 @@ def render(gi: GenInput) -> str:
         "{{broadcast_kind}}": gi.broadcast_kind,
         "{{default_boundary_case}}": default_boundary_case,
         "{{accumulation_order}}": gi.accumulation_order,
-        "{{numerical_stability_required}}": str(gi.numerical_stability_required).lower(),
+        "{{numerical_stability_required}}": str(
+            gi.numerical_stability_required
+        ).lower(),
         "{{numerical_stability_techniques}}": techniques,
         "{{accumulator_block}}": build_accumulator_block(gi.category, gi.paradigms),
-        "{{composition_block}}": build_composition_block(gi.paradigms, gi.inputs, output_names),
+        "{{composition_block}}": build_composition_block(
+            gi.paradigms, gi.inputs, output_names
+        ),
         "{{format_variants_block}}": build_format_variants_block(gi.format_variants),
-        "{{supported_combinations_block}}": build_supported_combinations_block(
-            gi.inputs, output_names, gi.promotion, gi.axis_source),
+        "{{supported_combinations_block}}": combinations_block,
         "{{per_dtype_tolerance_block}}": build_per_dtype_tolerance_block(
-            gi.inputs, output_names, gi.promotion, gi.axis_source, gi.category, gi.op_name),
+            gi.inputs,
+            output_names,
+            gi.promotion,
+            gi.axis_source,
+            gi.category,
+            gi.op_name,
+        ),
         "{{extra_boundary_cases}}": extra_boundary_cases,
         "{{extra_extreme_cases}}": extra_extreme_cases,
     }
@@ -1447,34 +1912,71 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Generate spec.yaml skeleton.")
     ap.add_argument("--op-name")
     ap.add_argument("--category")
-    ap.add_argument("--paradigms", help="Comma-separated PascalCase, e.g. Reduction,NumericalStable")
+    ap.add_argument(
+        "--paradigms", help="Comma-separated PascalCase, e.g. Reduction,NumericalStable"
+    )
     ap.add_argument("--inputs", help="Comma-separated 'name:dtype1,dtype2'", default="")
     ap.add_argument("--outputs", help="Comma-separated names", default="")
-    ap.add_argument("--description", default=None,
-                    help="算子一句话描述；省略时生成 'TODO: describe <op_name>'")
+    ap.add_argument(
+        "--supported-formats",
+        default="",
+        help="Exhaustive physical formats per I/O: 'input.x:ND,NCHW;output.y:ND' (default ND)",
+    )
+    ap.add_argument(
+        "--unsupported-dtypes",
+        default="",
+        help="Optional assertions checked against the complete support set: 'input.x:int8;output.y:int8'",
+    )
+    ap.add_argument(
+        "--unsupported-formats",
+        default="",
+        help="Optional physical-format exclusion assertions: 'input.x:FRACTAL_NZ;output.y:FRACTAL_NZ'",
+    )
+    ap.add_argument(
+        "--description",
+        default=None,
+        help="算子一句话描述；省略时生成 'TODO: describe <op_name>'",
+    )
     ap.add_argument("--promotion", default="same_as_first_input")
     ap.add_argument("--broadcast-kind", dest="broadcast_kind", default="numpy")
     ap.add_argument("--accumulation-order", dest="accumulation_order", default="none")
-    ap.add_argument("--chips", default="",
-                    help="Comma-separated chip ids（如 Ascend910B,Ascend950PR）；"
-                         "省略时按 inputs.dtype_set 自动收窄到全部兼容芯片")
-    ap.add_argument("--axis-source", dest="axis_source", default="attribute",
-                    choices=["attribute", "input_tensor", "fixed", "implicit_all"],
-                    help="How the reduction axis is specified (only for Reduction paradigms): "
-                         "attribute (dim attr), input_tensor (axis as tensor input), "
-                         "fixed (hardcoded axis), implicit_all (reduce all axes)")
-    ap.add_argument("--paradigm-groups", dest="paradigm_groups", default="",
-                    choices=["", "combination", "fusion"],
-                    help="范式组合模式: combination（横向组合，属性切换范式）"
-                         "或 fusion（纵向融合，范式串联执行）。"
-                         "combination 模式下 Elementwise 不会被过滤。")
-    ap.add_argument("--format-variants", dest="format_variants", default="",
-                    help="数据排布格式变体，格式: 'FORMAT:RANK:AXES;...' "
-                         "(如 'NCHW:4:0,2,3;NHWC:4:0,1,2;NCDHW:5:0,2,3,4')")
-    ap.add_argument("--output-dir", required=True,
-                    help="Directory to write spec.yaml into (created if absent)")
-    ap.add_argument("--force", action="store_true",
-                    help="Overwrite existing spec.yaml")
+    ap.add_argument(
+        "--chips",
+        default="",
+        help="Comma-separated chip ids（如 Ascend910B,Ascend950PR）；"
+        "省略时按 inputs.dtype_set 自动收窄到全部兼容芯片",
+    )
+    ap.add_argument(
+        "--axis-source",
+        dest="axis_source",
+        default="attribute",
+        choices=["attribute", "input_tensor", "fixed", "implicit_all"],
+        help="How the reduction axis is specified (only for Reduction paradigms): "
+        "attribute (dim attr), input_tensor (axis as tensor input), "
+        "fixed (hardcoded axis), implicit_all (reduce all axes)",
+    )
+    ap.add_argument(
+        "--paradigm-groups",
+        dest="paradigm_groups",
+        default="",
+        choices=["", "combination", "fusion"],
+        help="范式组合模式: combination（横向组合，属性切换范式）"
+        "或 fusion（纵向融合，范式串联执行）。"
+        "combination 模式下 Elementwise 不会被过滤。",
+    )
+    ap.add_argument(
+        "--format-variants",
+        dest="format_variants",
+        default="",
+        help="数据排布格式变体，格式: 'FORMAT:RANK:AXES;...' "
+        "(如 'NCHW:4:0,2,3;NHWC:4:0,1,2;NCDHW:5:0,2,3,4')",
+    )
+    ap.add_argument(
+        "--output-dir",
+        required=True,
+        help="Directory to write spec.yaml into (created if absent)",
+    )
+    ap.add_argument("--force", action="store_true", help="Overwrite existing spec.yaml")
     args = ap.parse_args()
 
     reg = load_registries()
@@ -1488,7 +1990,13 @@ def main() -> int:
             paradigms = _filter_elementwise(paradigms)
         category = _resolve_category(args.category, paradigms)
         if args.inputs:
-            inputs = [parse_tensor_arg(s) for s in args.inputs.split(";") if s.strip()]
+            try:
+                inputs = []
+                for tensor_arg in args.inputs.split(";"):
+                    if tensor_arg.strip():
+                        inputs.append(parse_tensor_arg(tensor_arg))
+            except ValueError as exc:
+                ap.error(f"--inputs: {exc}")
             outputs = [s.strip() for s in args.outputs.split(",") if s.strip()] or ["y"]
             attributes = []
             semantic_cases = []
@@ -1532,7 +2040,9 @@ def main() -> int:
             supported_chips=supported_chips,
             axis_source=args.axis_source,
             paradigm_groups_mode=pg_mode,
-            format_variants=parse_format_variants(args.format_variants, reg.get("layouts")),
+            format_variants=parse_format_variants(
+                args.format_variants, reg["official_formats"]
+            ),
             attributes=attributes,
             semantic_cases=semantic_cases,
             layout_contract=None,
@@ -1551,6 +2061,79 @@ def main() -> int:
                 raise SystemExit(f"Unknown paradigm: {p}")
     else:
         gi = interactive_collect(reg)
+        for tensor in gi.inputs + _normalize_outputs(gi.outputs):
+            while True:
+                raw = prompt(
+                    f"{tensor.name} 完整支持物理 format (comma-separated)", default="ND"
+                )
+                values = [
+                    canonical(value.strip(), "formats")
+                    for value in raw.split(",")
+                    if value.strip()
+                ]
+                try:
+                    partition(values, tensor.unsupported_layouts, "formats")
+                except ValueError as exc:
+                    print(f"  {exc}")
+                    continue
+                tensor.supported_layouts = values
+                break
+
+    gi.outputs = _normalize_outputs(gi.outputs)
+    gi.support_universe = load_catalog()["id"]
+    try:
+        # Normalize official enum symbols and historical NZ before computing complements.
+        for tensor in gi.inputs:
+            normalized_dtypes = []
+            for value in tensor.dtype_set:
+                normalized_dtypes.append(canonical(value, "dtypes"))
+            tensor.dtype_set = normalized_dtypes
+        apply_unsupported_arg(
+            args.supported_formats,
+            gi.inputs,
+            gi.outputs,
+            "supported_layouts",
+            universe("formats"),
+            official=True,
+            warn_override=not non_interactive,
+        )
+        apply_unsupported_arg(
+            args.unsupported_dtypes,
+            gi.inputs,
+            gi.outputs,
+            "unsupported_dtypes",
+            universe("dtypes"),
+            official=True,
+            warn_override=not non_interactive,
+        )
+        apply_unsupported_arg(
+            args.unsupported_formats,
+            gi.inputs,
+            gi.outputs,
+            "unsupported_layouts",
+            universe("formats"),
+            official=True,
+            warn_override=not non_interactive,
+        )
+        for tensor in gi.inputs + gi.outputs:
+            normalized_layouts = []
+            for value in tensor.supported_layouts:
+                normalized_layouts.append(canonical(value, "formats"))
+            tensor.supported_layouts = normalized_layouts
+        for variant in gi.format_variants:
+            variant["format"] = canonical(variant["format"], "formats")
+        rendered = render(gi)
+    except ValueError as exc:
+        ap.error(str(exc))
+    # Fail before writing if the complete partition contradicts other declarations.
+    from validate_spec import _check_support_exclusions, _check_support_partition
+
+    findings = []
+    scaffold = yaml.safe_load(rendered)
+    _check_support_exclusions(scaffold, findings)
+    _check_support_partition(scaffold, findings)
+    if findings:
+        ap.error("; ".join(f.message for f in findings))
 
     out_dir = Path(args.output_dir).resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1558,11 +2141,13 @@ def main() -> int:
     if out_path.exists() and not args.force:
         raise SystemExit(f"{out_path} exists. Use --force to overwrite.")
 
-    out_path.write_text(render(gi), encoding="utf-8")
+    out_path.write_text(rendered, encoding="utf-8")
     print(f"\n✓ Wrote {out_path}")
     print(f"  category={gi.category}  paradigms={gi.paradigms}")
     print("\nNext steps:")
-    print("  1. Fill in TODOs (formula / oracle.api / supported_combinations / boundary cases)")
+    print(
+        "  1. Fill in TODOs (formula / oracle.api / supported_combinations / boundary cases)"
+    )
     print(f"  2. Validate: python3 {SKILL_DIR}/scripts/validate_spec.py {out_path}")
     return 0
 

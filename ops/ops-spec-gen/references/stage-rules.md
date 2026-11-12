@@ -12,10 +12,23 @@
 
 ## stage 2 — category_paradigm_consistency
 
-校验 category↔paradigm 必含映射 + 4 套白名单 + paradigm 内部约束：
+校验 category↔paradigm 必含映射 + 4 套白名单 + paradigm 内部约束，以及**支持与排除声明的一致性**：
+检查每个输入、输出的 `dtype_set` / `unsupported_dtypes`、`supported_layouts` / `unsupported_layouts` 是否重叠，
+并交叉检查 `supported_combinations`、`layout` 和输入 `format_variants` 是否与支持/排除声明矛盾。
+带 `support_universe` 的全量契约还拒绝全集覆盖遗漏和全集外值；无此字段的旧 spec 保持部分排除语义，不强制补齐全集。
 
 | 子规则 | 检查内容 |
 |---|---|
+| `support_exclusions.dtype_conflict` | I/O 的 unsupported_dtypes 与 dtype_set 或 supported_combinations 重叠 ⇒ ERR |
+| `support_exclusions.layout_conflict` | I/O 的 unsupported_layouts 与 layout、supported_layouts 或输入格式变体重叠 ⇒ ERR；NZ / FRACTAL_NZ 先归一再判断 |
+| `support_partition.universe` | 未识别的官方全集快照 ⇒ ERR |
+| `support_partition.required` | 新契约缺少支持或不支持列表 ⇒ ERR |
+| `support_partition.coverage` | 支持/不支持重叠、遗漏、包含全集外值或支持集合为空 ⇒ ERR |
+| `support_partition.canonical` | 新契约使用未归一化的枚举名称或 NZ 别名 ⇒ ERR |
+| `support_partition.non_tensor` | 将状态/边界标记声明为有效 Tensor 支持值 ⇒ ERR；旧契约的 dtype_set / layout / supported_layouts / supported_combinations 额外拒绝 string / string_ref / resource / variant / dual，避免扩充枚举放宽原有正向声明 |
+| `support_partition.chip_scope` | 芯片专属 dtype/format 的芯片范围缺失或不符 ⇒ ERR |
+| `support_partition.dtype_contract` | 组合表超出 dtype_set 或输出投影不等于输出 dtype_set ⇒ ERR |
+| `support_partition.layout_contract` | layout / 输入 format_variants 超出 supported_layouts ⇒ ERR |
 | `required_paradigm_missing` | category → 必含 paradigm 是否齐全 |
 | `fused_composite_basics` | category=FusedComposite ⇒ ≥ 2 条基础 paradigm（Elementwise 被其他范式吸收，不计入基础范式计数） |
 | `mutually_exclusive` | ScatterUpdate 与 AtomicUpdate 不得共存 |
@@ -151,7 +164,7 @@ outputs:
 | 子规则 | 检查内容 |
 |---|---|
 | `shape_closure.shape_rule_kind_missing` | outputs[].shape_rule_kind 未声明 |
-| `shape_closure.shape_rule_kind_unknown` | 非 numpy_expr / data_dependent |
+| `shape_closure.shape_rule_kind_unknown` | 不是 numpy_expr / data_dependent / textual_only；后两类仍需满足各自的额外约束 |
 | `shape_closure.shape_rule_placeholder` | shape_rule 含 TODO / 占位 / 简化说明 |
 | `shape_closure.reduction_shape_identity_suspicious` | 纯 Reduction 的 shape_rule 直接写成 input.shape |
 | `shape_closure.synthesize_parse_error` | WARN — boundary synthesize 中 shape / attr 字面量无法解析，不能用于 shape oracle |
@@ -332,6 +345,8 @@ v1 已实现：`numpy`（含折叠维）/ `none` / `explicit`（`broadcast.rules
 
 当 formula（numpy_expr）和 oracle（reachable）同时可用时，在**含特殊值（NaN / inf / 大数 / 带符号零 +0/-0）的输入**上同时执行 formula 和 oracle，比对输出。捕获 formula 使用了与框架实际实现**数学等价但计算不等价**形式的错误（如教科书合并形式 `m_new = β1·m + (1-β1)·grad` vs TF 增量形式 `m = m + (1-β1)·(grad-m)`，两者在 NaN/inf 传播、末位舍入、零符号上不一致）。
 
+stage 10 会实际调用 oracle，但它不是唯一的调用路径：stage 12 的 `matches_oracle` 条目在条件满足时也会调用 oracle；stage 9 仅检查可达性，stage 11 仅校验公式的不变量。
+
 ### 子规则表
 
 | 子规则 | 检查内容 |
@@ -441,6 +456,13 @@ v1 已实现：`numpy`（含折叠维）/ `none` / `explicit`（`broadcast.rules
 
 ## stage 12 — extreme_inputs 联合校验（extreme_check）
 
+**oracle 执行语义**：`machine_check.kind: matches_oracle` 不只是检查 callable 是否存在。
+在 numpy 和声明的 reference framework 可用、公式为 `numpy_expr`、条目输入可合成且 formula 可执行、
+oracle API 可调用，并且条目级 `attrs` 不影响 oracle kwargs 时，stage 12 会实际调用 oracle，
+在同一组输入上比对 formula 与 oracle 的 NaN、±inf、带符号零及有限值输出。
+实现路径为 `_check_matches_oracle()` → `_call_oracle_single_api()` → 输出比较；stage 10 也会实际调用 oracle，不能概括为“只有 stage 10 执行 oracle”。
+`produces_nan` / `nan_propagates` 分支仅检查 formula 输出，不调用 oracle；stage 11 同样无需 oracle。
+
 **解决的问题**：stage 2 仅做 `machine_check.kind` / pattern 白名单静态校验，
 不检查"声明的期望"与"formula 在该 pattern 输入下的实际输出"是否一致。典型逃逸缺陷：
 减法算子照抄加法模板，把 `predict=+inf、label=-inf` 断言为 `produces_nan`——按 IEEE 754
@@ -460,7 +482,7 @@ v1 已实现：`numpy`（含折叠维）/ `none` / `explicit`（`broadcast.rules
 | produces_nan（scope: 整张量） | 所有输出逐元素 NaN |
 | produces_nan（无 scope） | 至少一个输出位置 NaN |
 | nan_propagates | 至少一个输出位置 NaN |
-| matches_oracle | formula 与 reference_oracle 同输入下 NaN/inf/有限值模式一致（oracle 不可达或条目级 attrs 影响 oracle kwargs 时 INFO 跳过对拍） |
+| matches_oracle | 条件满足时实际调用 reference_oracle，与 formula 的同输入输出比对；oracle 不可达、调用失败或条目级 attrs 影响 oracle kwargs 时 INFO 跳过对拍 |
 | 其余 kind | INFO 跳过，不判 FAIL |
 
 **主要 rule_id**：
@@ -469,6 +491,11 @@ v1 已实现：`numpy`（含折叠维）/ `none` / `explicit`（`broadcast.rules
 - `extreme_check.nan_propagates_violated`（ERR）
 - `extreme_check.unsynthesizable`（WARN）——pattern 无法机器合成（如无参 all_same）
 - `extreme_check.oracle_skipped_attr_override`（INFO）
+- `extreme_check.oracle_unreachable` / `extreme_check.oracle_call_failed`（INFO）——未取得 oracle 输出，不能声称完成对拍
+
+**缺少依赖时**：无 numpy 时 stage 12 返回 SKIP；仅缺 reference framework 时，`matches_oracle` 条目跳过 oracle 对拍，其他无需 oracle 的条目仍可能执行。
+当前实现可能在对拍被 INFO 跳过时仍返回阶段级 PASS，因此还须查看条目级 findings；stage 12 PASS 本身不是 oracle 已实际执行的证据。
+只有 pyyaml + jsonschema 的环境也不能宣称已执行 oracle：stage 9 不调用 oracle，stage 10 与 stage 12 的相关路径因缺少依赖而跳过。记录原因并补齐依赖、满足条件后重跑，不能将 SKIP 计作实际通过。
 
 **作者侧要求**：特殊值条目必须（a）显式固定影响输出的全部自由输入（含属性与标量输入，
 用 `attrs:` + `all_same(v)`）；（b）期望按 IEEE 754 语义与 formula 真实传播路径推导，

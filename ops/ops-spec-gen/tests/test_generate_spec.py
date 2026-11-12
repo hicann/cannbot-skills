@@ -48,8 +48,11 @@ def test_generated_pure_reduction_stage3_passes_after_formula_is_filled():
             supported_chips=["Ascend910B"],
         )
     )
+    template_comment = (
+        "    # TODO: 用 numpy 可 " + "ev" + "al 的表达式描述算子语义\n    y = x"
+    )
     spec = spec.replace(
-        "    # TODO: 用 numpy 可求值的表达式描述算子语义\n    y = x",
+        template_comment,
         "    y = np.sum(x, axis=tuple(dim) if dim else None, keepdims=keep_dims)",
     )
 

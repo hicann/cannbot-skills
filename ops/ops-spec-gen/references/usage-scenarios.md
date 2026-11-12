@@ -12,7 +12,7 @@
 | ID | 规则 |
 |----|------|
 | S1 | 必须使用 `scripts/generate_spec.py` 生成骨架，**禁止手写 spec.yaml** |
-| S2 | 生成完成后必须跑 `scripts/validate_spec.py spec.yaml` 12-stage 校验全 PASS（stage 9/10/11/12 SKIP 视为通过） |
+| S2 | 生成完成后必须运行 `scripts/validate_spec.py spec.yaml` 的默认 12-stage 流程并检查 findings；任何 FAIL 必须修复。纯 info SKIP 可不阻断进程，但表示该检查未执行，不是通过证据；记录跳过原因，并按需补齐依赖和适用条件后重跑 |
 | S3 | （建议）`scripts/compute_spec_hash.py` 工具链尚未交付，v1 不要求锁 spec_hash；待工具与 schema 字段就绪后启用 |
 | S4 | 字段值必须**与 REQUIREMENTS.md 一致**——dtype / shape 约束 / 平台限制 / 容差由 REQUIREMENTS 推导，不允许凭空添加 |
 | S5 | numerical_stability.techniques.anti_pattern_id 引用必须在 `registries/anti_pattern_registry.yaml` 中已注册（如未来 schema 加 enum） |
@@ -93,7 +93,7 @@ python3 ops/ops-spec-gen/scripts/generate_spec.py \
 注：交互式向导用法见 SKILL.md §3.1。
 
 **Step 3: 手填 TODO 字段**（生成器只给骨架，详见 SKILL.md §3.4）：
-- `math_semantics.formula` — numpy 可求值的表达式
+- `math_semantics.formula` — numpy 可 eval 的表达式
 - `math_semantics.reference_oracle` — 单 callable api，或填 absent=true + governance 签字
 - `math_semantics.invariants` — **≥1 条值级、formula 无关**的语义不变量（保范/单位元/对称/代数恒等/极限退化，源自 REQUIREMENTS 数学；**非** shape 结构断言、**非** formula 自反重述）。**SPEC-ORACLE-1 硬性要求**，`reference_oracle.absent=true` 时强制
 - `dtype_policy.supported_combinations` — 显式枚举 (input dtypes) → output dtypes
@@ -102,13 +102,13 @@ python3 ops/ops-spec-gen/scripts/generate_spec.py \
 - **`op.paradigm_groups[].switch` / `when`** — 当使用 `--paradigm-groups combination` 时，需手填每组的 `switch`（属性名）和 `when`（属性值），将属性值映射到对应的范式子集
 - _v1 暂缓_：`interface_binding` / `performance_budget` / `performance_baseline` 尚未纳入 schema（顶层 `additionalProperties: false`），不要写入；待 schema 扩展后启用
 
-**Step 4: 跑 11-stage 校验**：
+**Step 4: 跑完整 12-stage 校验**：
 
 ```bash
 python3 ops/ops-spec-gen/scripts/validate_spec.py operators/{operator_name}/docs/spec.yaml
 ```
 
-预期 stage 1-8 全 PASS。stage 9 在测试机未装 torch 时走 SKIP（不算失败）。stage 10 在 oracle 可达时比对 formula 与 oracle 的特殊值输出，SKIP 亦不算失败。任一 FAIL 必须修复后重跑，**禁止跳过**。校验详情见 SKILL.md §4。
+查看各阶段的实际状态和 findings，不预设所有阶段都会 PASS。stage 9 只检查 oracle 可达性，不调用 oracle；stage 10 在适用时比较 formula 与 oracle，stage 11 执行不变量，stage 12 检查极端输入，适用的 `matches_oracle` 条目会调用 oracle。纯 info SKIP 可不阻断当前进程，但表示检查未执行，不构成该检查的通过证据；记录原因，按需补齐依赖和适用条件后重跑。任何 FAIL 必须修复后重跑。校验详情见 SKILL.md §4。
 
 **Step 5: 锁 spec_hash**（建议）：`compute_spec_hash.py` 工具链 v1 未交付；不要求执行，待工具就绪后再纳入流程。
 
@@ -134,7 +134,7 @@ outputs:
 
 ### 完成标志
 
-- spec.yaml 已生成并通过 11-stage 校验
+- spec.yaml 已生成并完成 12-stage 校验；如有 SKIP，应记录阶段和原因，不将其写成 PASS
 - 字段与 REQUIREMENTS.md 内容一致（dtype / shape / 平台 / 容差均可追溯到需求）
 
 ---
@@ -147,7 +147,7 @@ outputs:
 
 ### 前置条件
 
-- 已存在 `operators/{operator_name}/docs/spec.yaml`（11-stage 全 PASS）
+- 已存在 `operators/{operator_name}/docs/spec.yaml`（已运行 12-stage 校验，无未修复的 FAIL；记录所有 SKIP，不将其表述为实际通过）
 - 已存在 `operators/{operator_name}/docs/REQUIREMENTS.md`
 
 ### 17 条 SPEC-\* 条款
@@ -165,7 +165,7 @@ outputs:
 | **SPEC-PERF-1** | _v1 暂缓_ — `performance_baseline` 尚未纳入 schema，待扩展后启用 | — |
 | **SPEC-RES-1** | _v1 暂缓_ — `performance_budget` 尚未纳入 schema，待扩展后启用 | — |
 | **SPEC-FORMULA-1** | spec.math_semantics.formula 至少引用所有 input name | 字符串包含 |
-| **SPEC-FORMULA-2**（硬拦） | spec.math_semantics.formula 与 reference_oracle 在含特殊值（NaN/inf/大数/带符号零）输入上产出**一致的 NaN/inf/零符号模式**且有限值在容差内。stage 10 校验 PASS 或 SKIP 视为通过；stage 10 FAIL → ❌（详见下方判定细则） | stage 10 机器校验 |
+| **SPEC-FORMULA-2**（硬拦） | spec.math_semantics.formula 与 reference_oracle 在含特殊值（NaN/inf/大数/带符号零）输入上产出**一致的 NaN/inf/零符号模式**且有限值在容差内。stage 10 实际 PASS 才表示此检查已执行并通过；SKIP 表示未验证，记录原因并按需补齐依赖后重跑；FAIL → ❌（详见下方判定细则） | stage 10 机器校验 |
 | **SPEC-LAYOUT-1** | canonical 通道轴/规约轴须：① 显式（`formula` 可判）② 各 boundary/extreme 用例 `(C,) len == x.shape[该轴]` 自洽 ③ 等于 REQUIREMENTS 调用框架默认 format 通道位（无收窄豁免）。任一不满足 → ❌（详见下方判定细则） | formula 轴位置 + 调用框架默认 format 通道位 + 用例 shape 自洽 |
 | **SPEC-ORACLE-1** | `math_semantics.invariants` 须含 ≥1 条**值级、formula 无关**的独立不变量（源自 REQUIREMENTS 数学；非结构断言、非 formula 自反）；`reference_oracle.absent=true` 时**强制**。无独立锚点 → ❌（详见下方判定细则） | reference_oracle 独立性 + invariants 值级且非 formula 自反 |
 | **SPEC-PARADIGM-1** | spec.op.paradigms 与 category 隐含范式 + REQUIREMENTS 暗示的修饰范式对齐 | 集合差 |
@@ -183,8 +183,9 @@ outputs:
 > - **③ absent 不免验证**：`reference_oracle.absent=true` 时①为强制；absent=false 且指向真实独立外部实现时①可放宽为建议（但仍推荐同时有）。
 
 > **SPEC-FORMULA-2 判定细则**（公式形式差异是 spec→design→kernel→黑盒 全链路返工的最大单因——数学等价但计算不等价的公式在 NaN/inf 传播与末位舍入上发散，导致 kernel 与 golden bit 级背离）：
-> - **① stage 10 机器校验**：跑 `validate_spec.py` stage 10（formula_oracle_equiv）。stage 10 在含 NaN/inf/大数/带符号零的输入上同时执行 formula 和 oracle，比对 NaN 模式、inf 模式、零符号模式、有限值容差。PASS 或 SKIP → ✓；FAIL → ❌。
-> - **② SKIP 不等于豁免**：stage 10 在以下情况 SKIP（视为通过，不阻塞）：formula_kind 非 numpy_expr、oracle absent、composition DAG 模式、framework 未安装、oracle 调用失败。SKIP 时应在报告中注明跳过原因，并提示用户在安装对应 framework 后重跑。
+> - **① stage 10 机器校验**：跑 `validate_spec.py` stage 10（formula_oracle_equiv）。stage 10 在含 NaN/inf/大数/带符号零的输入上执行 formula 和 oracle，比对 NaN 模式、inf 模式、零符号模式和有限值容差。实际 PASS → ✓；SKIP 表示未验证；FAIL → ❌。
+> - **② SKIP 不等于验证通过**：stage 10 在以下情况可能 SKIP：formula_kind 非 numpy_expr、oracle absent、composition DAG 模式、framework 未安装、oracle 调用失败。纯 info SKIP 可不阻断当前进程，但不能作为公式等价性的通过证据；报告跳过原因，并按需补依赖或条件后重跑。
+>   独立评审中将 SKIP 记为 ⚠（未验证），不要记为 ✓；沿用现有 ⚠ 不阻断策略，并在必看清单中保留验证缺口。
 > - **③ 典型陷阱**：教科书合并形式 `m_new = β1·m + (1-β1)·grad` 与 TF 增量形式 `m = m + (1-β1)·(grad-m)` 数学等价但浮点不等价——当 `m=inf` 时前者产出 `inf`，后者产出 `NaN`（`inf - inf = NaN`）。stage 10 的 nan/inf 输入组会捕获此类差异。
 
 ### 执行步骤
@@ -261,5 +262,5 @@ agent 独立评审无法判但必须由人 review 的项：
 ### 主 Agent 处理规则（供调用方参考）
 
 - 状态=✅ → 进入 CP1.5 人工确认
-- 状态=❌ → 主 Agent 自动调 (scene: spec-generation) 按 SPEC_REVIEW 修订 spec.yaml，修订后**重跑 11-stage + 重跑本场景**；最多重试 2 次
+- 状态=❌ → 主 Agent 自动调 (scene: spec-generation) 按 SPEC_REVIEW 修订 spec.yaml，修订后**重跑 12-stage + 重跑本场景**；最多重试 2 次
 - 禁止把 ❌ 报告直接抛给用户

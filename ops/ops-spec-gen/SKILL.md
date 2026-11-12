@@ -5,7 +5,9 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 
 # 算子 spec.yaml 生成与校验
 
-为 CANNBot 算子产出符合 schema 的 `spec.yaml`，并对其执行完整 12-stage L0 校验，确保算子规格定义的正确性与完整性：
+为 CANNBot 算子产出符合 schema 的 `spec.yaml`，并对其执行完整 12-stage L0 校验：
+具体阶段根据适用条件和可选依赖返回 `PASS`、`FAIL` 或 `SKIP`。`SKIP` 表示相关检查未执行，不代表该阶段已实际执行通过。
+回答“主要功能”或“两种运行模式”时，必须一并说明上述状态语义，不可只列出 `PASS/FAIL/SKIP` 三种状态。
 - **stage 1** schema_static — JSON Schema 字段静态校验
 - **stage 2** category_paradigm_consistency — category↔paradigm 一致性 + paradigm_groups + paradigm 内部约束
 - **stage 3** shape_closure — numpy_expr 求值 `outputs[].shape_rule`（含 `data_dependent` 分流）
@@ -75,6 +77,8 @@ python3 scripts/generate_spec.py --output-dir <ops_dir>/<op_name>
 ```
 
 向导会问：op 名称、category（26 类单选）、paradigms（在 category 必含基础上自由追加）、每个 input/output 名+dtype、promotion / broadcast / accumulation_order；当需求存在逻辑布局变体时，还会收集 `layout_contract`。
+每个 input/output 还会收集支持的物理 format 和可选的排除断言；支持列表必须是当前契约的完整范围。
+交互向导与 `--supported-formats` / `--unsupported-dtypes` / `--unsupported-formats` 混用时，CLI 对指定接口的同名列表整体覆盖向导答案；值变化时会打印警告。最终一致性检查采用覆盖后的值，冲突时不写文件。
 
 ### 3.2 非交互式（CI / 脚本）
 
@@ -90,6 +94,40 @@ python3 scripts/generate_spec.py \
 ```
 
 注：`--inputs` 多个时用 `;` 分隔（避免与 dtype_set 的 `,` 冲突），如 `"a:float16,float32;b:float16,float32"`。
+
+### 3.2.1 官方全集下的完整支持与不支持范围
+
+新生成规格固定 `support_universe: huawei-cann-types-2026-10-15`，全集来自用户提供的
+华为 DataType / Format 文档，统一登记在 `schemas/op-spec.json`：
+`$defs.official_dtype.enum` / `$defs.official_format.enum` 定义完整枚举，
+`x-support-catalog` 保存名称映射和上下文限制。生成器与校验器均直接读取该 schema。
+每个输入、输出都必须满足：
+
+- `dtype_set` 与 `unsupported_dtypes` 互斥，并集等于官方 dtype 全集。
+- `supported_layouts` 与 `unsupported_layouts` 互斥，并集等于官方 format 全集。
+- 支持集合是当前算子契约的完整范围；生成器按全集计算补集。若资料只是示例或支持范围
+  尚未确认，应先核实完整范围，不能把生成的骨架当成已确认的算子规格。
+- CLI 的 `--inputs` 指定完整输入 dtype；输出 dtype 从 `supported_combinations` 投影生成。
+  修改组合表时同步修订输出 `dtype_set` 和补集。`--supported-formats` 按接口指定完整物理格式，
+  默认 ND；输入的 `format_variants` 也纳入支持集合。`layout` 是其中的代表格式。
+- `--unsupported-dtypes` / `--unsupported-formats` 允许传入部分排除断言；断言只做校验，输出恒为完整补集。
+- 只使用官方全集内的规范名称。接受 `DT_FLOAT` 等官方 dtype 名称及 `FORMAT_` 前缀；
+  保存时使用现有 spec 拼写，如 float32 / float64 / bfloat16。`NZ` 统一为 `FRACTAL_NZ`。
+  旧的 uint4 / CSR / COO / BSR 不在这份官方全集中，只能用于旧契约。
+- 枚举边界/状态标记也计入全集，并固定归入不支持项；芯片专属类型/格式只允许在对应
+  950PR/950DT 范围内声明支持。IR 构图输入限制只适用于该上下文，不可套用到所有 kernel I/O。
+- dtype 和 format 是分别完整分类，不代表两者的笛卡尔积、所有输入组合都受支持。
+  属性、芯片或组合条件继续在对应契约和边界说明中表达；不编造运行时拒绝错误码。
+
+```text
+--supported-formats "input.x:ND,NCHW;output.y:ND" \
+--unsupported-dtypes "input.x:int8,int32;output.y:int8,int32"
+```
+
+stage 1 检查枚举、必填项及重复值；stage 2 拒绝遗漏、重叠、全集外值及与组合表、layout、
+输入格式变体的矛盾。旧 spec 缺少 `support_universe` 时保持原有部分排除语义，不能视为
+已通过全量覆盖检查。详细来源、特殊值和迁移方式见
+[官方全集契约](references/support-universe.md)。
 
 ### 3.3 自动注入
 
@@ -116,19 +154,16 @@ python3 scripts/generate_spec.py \
   `data_dependent` + `shape_rule_description` + `shape_bounds`。
 - `outputs[].dtype_rule` — numpy 子集表达式（如 `c.dtype = np.promote_types(a.dtype, b.dtype)`、
   `y.dtype = x.dtype`、`y.dtype = np.int32`）
-- `math_semantics.formula` — numpy 可求值的表达式
+- `math_semantics.formula` — numpy 可 eval 的表达式
 - `math_semantics.reference_oracle.api` — 真实的 torch/numpy/scipy API 全限定名
 - `dtype_policy.supported_combinations` — 显式枚举 (input dtypes) → output dtypes
 - `numerical_tolerance.per_dtype` — 覆盖 supported_combinations 中所有 output dtype
-- 生成 spec 时，为所有数值/枚举断言建立“支持域声明表”（写入调用方的 spec 执行记录）：`shape_constraints.symbols.*.range` 的下界/上界分别成行（缺失写“未声明”）、`kind=const` 的 value、`kind=rank` 的无数值声明、`attributes.*` 的数值/枚举与默认值、`outputs.*.shape_bounds`、`dtype_policy.supported_combinations`、`numerical_tolerance.*`、`reduction.fixed_value`、`boundary_conditions`/`extreme_inputs` 的数值阈值、`global_constraints` 的跨字段关系；缺失的界不得补数。
-- 每行标注 `specified`/`derived`/`implicit`/`platform`/`implementation`/`not_applicable`；无来源不得写 `specified`；`platform`/`implementation` 作为限制记录，不得作为需求界。
 
 按需补充（生成器已自动注入按 paradigm 必含的最低 case，stage 6 通过；下面这些是把生成器的占位描述改成项目语境下的真值）：
 - `boundary_conditions` — 校核 / 补全自动注入的退化 case 描述（详见 cheatsheet §B6）
 - `extreme_inputs` — 校核 / 补全 NaN / Inf / 全零三类
 - `math_semantics.format_variants` — 若算子支持多种数据排布（NCHW/NHWC/NCDHW 等）且计算因格式而异，校核每种格式的 reduction_axes 和 oracle_kwargs
 - `layout_contract` — 若存在逻辑布局变体，校核 selector、参与 Tensor 和每个 variant 的逻辑轴顺序；未确认的布局事实不得猜测生成
-- `op.load_balancing` — 存在负载均衡设计或已确认要求时必须以 YAML 多行文本填写，注明来源；内容包括实际涉及的任务划分、负载估算、核数来源与分配策略，以及尾任务或拆分合并处理。没有相关设计或要求时省略，不在规格生成阶段推测设计结论；详细推导由方案设计文档承载。
 
 ## 4. 校验 spec.yaml
 
@@ -311,7 +346,6 @@ pip install torch  # 或 jax / scipy / tensorflow
 | 17 | `determinism` | 确定性保证 | ✓ | ✓ |
 | 18 | `numerical_stability` | 数值稳定性技术 | ✓ | ✓ |
 | 19 | `inputs[].data_distribution` | 输入数据分布策略（累加类 Reduction/ReductionComposite/Recurrence/AtomicUpdate/Histogram 必须 normal，非累加类不填；stage 2 强校验） | ✓ | ✓ |
-| 20 | `op.aicpu_kernel` | AICPU 前置算子名称（可选）。若算子数据流包含 AICPU 前置计算，在此声明；测试生成 Skill 自动检测并在 NPU 测试时插入 AICPU 调用链 | ✓ | |
 
 #### 字段职责分层
 
