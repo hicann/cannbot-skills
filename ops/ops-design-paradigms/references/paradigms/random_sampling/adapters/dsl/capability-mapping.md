@@ -10,13 +10,13 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 # RandomSampling 范式 CANNBotDSL 能力映射
 
-> 通用层 [capability-contract.md](../../generic/capability-contract.md) 谓词在 CANNBotDSL（下文简称 DSL，0.7.0，Ascend 950PR/950DT / NPU ARCH 3510 口径）下的真值。其他 SoC 须重新核实，禁止外推。
+> 通用层 [capability-contract.md](../../generic/capability-contract.md) 谓词在 CANNBotDSL（下文简称 DSL，0.8.0，Ascend 950PR/950DT / NPU ARCH 3510 口径）下的真值。其他 SoC 须重新核实，禁止外推。
 >
 > 依据：cannbot-dsl 仓 `docs/zh/guide/`（compute / hardware-model / synchronization）、`docs/zh/api/compute/vector/（reg_* 类目）`。**DSL 仓无随机算子样例**——标注"类目成立、无先例"的项须在首例接入时实测收敛。
 
 ## 1 真值表
 
-| 谓词 | 真值（DSL 0.7.0 / 3510） | 依据 |
+| 谓词 | 真值（DSL 0.8.0 / 3510） | 依据 |
 |------|---------------------------|------|
 | `CAP_PRNG_ALG` | **Philox4x32-10（语义锁定，载体自研）**——无公共底座；轮函数经 reg 算子（SIMD）或 `cb.simt` 标量数学（SIMT）自实现。常数池见 §2 | 通用层 prng-model §1；DSL API 面核对（无 RNG 类目） |
 | `CAP_PRNG_VECTORIZED` | ✅ 类目成立、**无先例**——SIMD reg 算子齐备：`vmull`（int32/uint32 widening 乘，返回 (high,low) 对）、`vbitwise-and/or/xor`、`vshl/vshr`、`vadd/vaddc`、`vreinterpret`、`vcast`。验证义务：首例与流基准对拍 | reg_compute API（reg_arith/reg_logic/reg_convert） |
@@ -25,7 +25,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 | `CAP_INDEX_BIT_WIDTH` | 64bit 可全程承载（`cb.simt.cast(..., dtypes.int64)` 先例）；32bit 为快路径优化档（host 判 `numel ≤ INT32_MAX` 选路径）——块协议按 32bit 快路径缺失触发 | scatter_elements `has_flat_axis_coordinates` 先例 |
 | `CAP_SPLIT_BLOCK_MAX` | **待验证**——无 enableSplitBlocks 底座；DSL 形态 = host 多段 launch + offset 累进（块数上限自定，首例登记） | — |
 | `CAP_STATE_WRITE_BACK` | ✅ 类目成立、无先例——SIMT VF 内 GM 直写 + `cb.simt.threadfence*`（同步与 Cache 类目）；写者选唯一线程（`block_idx==0 and thread_idx==0`）。验证义务：可见性与时序首例实测 | compute.md 接口分类「同步与 Cache」 |
-| `CAP_CORE_SYNC_ALL` | ✅ `global_sync_all()`（模式2→0→0→2 四次同步，禁内层循环）；替代惯用法：**回写拆独立顺序 launch**（stream 排序天然有序） | synchronization.md |
+| `CAP_CORE_SYNC_ALL` | ✅ `global_sync_all()`（模式2→0→0→2 四次同步，禁内层循环；0.8 新增 `flag_ids` 参数——默认占 flag id 0/1/2，与手写 block 同步协议共存时须避开或显式指定）；替代惯用法：**回写拆独立顺序 launch**（stream 排序天然有序） | synchronization.md |
 | `CAP_FAST_DIV` | ✅ host 侧可算（构图期纯 Python 预计算 magic/shift，同 AscendC `GetUintDivMagicAndShift` 算法）；kernel 侧可表达（SIMD `vmul/vshr`、SIMT 整数乘移位）。**无库先例**，首例登记实现 | jit-arguments（host 常量经 Constexpr/params 传递） |
 | `CAP_LOCAL_MEM_HYBRID_SIZE` | SIMD 口径 248 KB（`get_mem_size("ub")`=253952，勿再减顶部预留）；开 SIMT 后按 **216 KB** 口径（SIMT Data Cache ~32 KB 不在 `get_mem_size` 返回内，自己留）；混用按最紧侧 | hardware-model.md danger 块 |
 

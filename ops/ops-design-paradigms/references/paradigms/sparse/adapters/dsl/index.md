@@ -12,7 +12,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 > **层级**：CANNBotDSL 语言适配层（adapters/dsl/）。语言中立的算法与模型见 [../../generic/index.md](../../generic/index.md)；范式入口与语言路由见 [../../patterns.md](../../patterns.md)。
 >
-> 本适配层基于 **CANNBotDSL SIMT 编程模型**（`vf(mode="simt")`，索引驱动离散访存的标准选择），调度密集场景叠加 **AI CPU metadata 模式**（`@aicpu_kernel` 分核计划外置）。权威依据：cannbot-dsl 仓（开源：https://gitcode.com/cann/cannbot-dsl ，docs/zh/guide/ 与 samples/，DSL 0.7.0，Ascend 950PR/950DT）。
+> 本适配层基于 **CANNBotDSL SIMT 编程模型**（`vf(mode="simt")`，索引驱动离散访存的标准选择），调度密集场景叠加 **AI CPU metadata 模式**（`@aicpu_kernel` 分核计划外置）。权威依据：cannbot-dsl 仓（开源：https://gitcode.com/cann/cannbot-dsl ，docs/zh/guide/ 与 samples/，DSL 0.8.0，Ascend 950PR/950DT）。
 
 ## 1 定位
 

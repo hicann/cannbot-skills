@@ -10,13 +10,13 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 # ControlFlow 范式 CANNBotDSL 能力映射
 
-> 通用层 [capability-contract.md](../../generic/capability-contract.md) 谓词在 CANNBotDSL（下文简称 DSL，0.7.0，Ascend 950PR/950DT 口径）下的真值。其他 SoC 须重新核实，禁止外推。
+> 通用层 [capability-contract.md](../../generic/capability-contract.md) 谓词在 CANNBotDSL（下文简称 DSL，0.8.0，Ascend 950PR/950DT 口径）下的真值。其他 SoC 须重新核实，禁止外推。
 >
 > 依据：cannbot-dsl 仓 docs/zh/api/compute/scalar/ 与 docs/zh/api/execution/device/（system 类目）、docs/zh/guide/compute.md。
 
 ## 1 真值表
 
-| 谓词 | 真值（DSL 0.7.0 / 3510） | 依据 |
+| 谓词 | 真值（DSL 0.8.0 / 3510） | 依据 |
 |------|---------------------------|------|
 | `CAP_FP_STATUS_READ` | ❌ **未暴露**——DSL kernel API 面无 FP 异常状态读取 intrinsic（scalar_compute 仅位运算/转换/bypass 访存）。get 的空实现（恒写规范零值）在 DSL 是**当前唯一形态** | docs/zh/api/compute/scalar/ 类目核对 |
 | `CAP_FP_STATUS_CLEAR_API` | ❌ **未暴露**——无标志复位接口 | 同上 |

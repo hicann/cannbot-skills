@@ -51,4 +51,4 @@ See LICENSE in the root of the software repository for the full text of the Lice
 ## 4 工程类
 
 - **`cbd.print` 覆盖内建**：设备打印写 `cbd.print`（仅调试用，生产禁用）；构图期打印用内建
-- **CANN 版本**：SIMT VF（clear 数据面段）需 CANN ≥ 9.2.0
+- **CANN 版本**：SIMT VF（clear 数据面段）需 CANN ≥ 9.2.0（cannbot-dsl 仓配套 9.2.1）

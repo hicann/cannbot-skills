@@ -24,7 +24,8 @@ import cannbotdsl as cbd
 from cannbotdsl import Tensor, dtypes, MemLoc, dim3
 from cannbotdsl.buffer import Buffer
 from cannbotdsl.lang.vf import vf
-from cannbotdsl.lang.kernel import kernel, host
+from cannbotdsl.lang.host import host
+from cannbotdsl.lang.kernel import kernel
 from cannbotdsl.ops.reg import full_mask, vdups, vstore
 
 STATUS_ELEMS = 8  # [8]×fp32 固定契约（CAP_STATUS_LAYOUT）

@@ -23,7 +23,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 满足以下条件的算子属于 RandomSampling 范式：
 
-> **前置约束（芯片 SIMT 编程能力，按路线分档）**：B/D 接口族（torch 对标）与路由 b（随机 + 逐元素复合）的执行体为 **SIMT（GM 直写）**，依赖芯片 SIMT 编程能力（**Ascend 950PR/950DT / arch35 系列及以上**；DSL 侧另需 CANN ≥ 9.2.0）；A/C 接口族（TF 对标）走 SIMD 路线，不依赖 SIMT，但公共底座（`random_common`）与实测口径基于 arch35。**目标芯片（`op.platform_constraints.supported_chips`）不支持 SIMT 时：A/C 族可进本范式走 SIMD 路线；B/D 族与路由 b 不进入本范式**——改按通用方法论论证并报告能力缺口。
+> **前置约束（芯片 SIMT 编程能力，按路线分档）**：B/D 接口族（torch 对标）与路由 b（随机 + 逐元素复合）的执行体为 **SIMT（GM 直写）**，依赖芯片 SIMT 编程能力（**Ascend 950PR/950DT / arch35 系列及以上**；DSL 侧另需 CANN ≥ 9.2.0（cannbot-dsl 仓配套 9.2.1））；A/C 接口族（TF 对标）走 SIMD 路线，不依赖 SIMT，但公共底座（`random_common`）与实测口径基于 arch35。**目标芯片（`op.platform_constraints.supported_chips`）不支持 SIMT 时：A/C 族可进本范式走 SIMD 路线；B/D 族与路由 b 不进入本范式**——改按通用方法论论证并报告能力缺口。
 
 1. **输出值由 PRNG 驱动**——输出元素值来自伪随机数采样（均匀/正态/指数/截断/伯努利/多项/排列等），而非输入张量的确定性函数
 2. **随机流为 counter-based**——`(key, counter)` 状态经确定性变换产生随机数，流位置可精确跳越（Philox 族）

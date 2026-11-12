@@ -20,7 +20,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 |------|------|
 | 执行体 | `@kernel` 内 `vf(mode="simd")` 作用域，AIV 寄存器级计算 |
 | 随机数生成 | 自研 SIMD Philox（[prng-implementation.md](prng-implementation.md) §1；`vmull/vbitwise_xor/vshl/vshr/vaddc` 轮链） |
-| 数据通路 | GM ─mem_copy→ `Channel(UB)` ─vload→ 寄存器 ─轮链+变换→ 寄存器 ─vstore→ UB ─mem_copy→ GM |
+| 数据通路 | GM ─mem_copy→ `Buffer(UB)` ─vload→ 寄存器 ─轮链+变换→ 寄存器 ─vstore→ UB ─mem_copy→ GM |
 | buffer 预算 | 片上存活节点 P = 流结果暂存（uint32）+ 输出 × 缓冲份数；单块 ≤ UB 预算（248 KB 口径，`get_mem_size("ub")`）÷ P，对齐粒度按实测登记 |
 | 线程几何 | 混合形态（`kernel[block_count]` + `vf(mode="simt", thread=N)`）；纯 SIMD 无 thread 维 |
 
@@ -43,7 +43,7 @@ def _uniform_simd(seed_key: Tensor, out: Tensor, params: Tensor,
     mem_copy(tile_slice(out, ...), out_buf)                   # 搬出在 VF 外
 ```
 
-- **VF 内禁 `Channel.produce()/consume()` 与 `self._xxx` 成员访问**——槽位与局部变量在进 VF 前备好（compute.md VF 作用域两条铁律）
+- **VF 内禁 `RingBuffer.next_write()/next_read()` 与 `self._xxx` 成员访问**——槽位与局部变量在进 VF 前备好（compute.md VF 作用域两条铁律）
 - 掩码处理非整除尾块：`mask_counter` + `update_mask` 迭代推进（设备循环不支持 `break`，尾块用掩码不用分支）
 
 ## 3 状态与 seed 处理

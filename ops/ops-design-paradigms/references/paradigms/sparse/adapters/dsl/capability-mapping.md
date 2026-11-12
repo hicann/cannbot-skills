@@ -10,19 +10,19 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 # Sparse 范式 CANNBotDSL 能力映射
 
-> 通用层 [capability-contract.md](../../generic/capability-contract.md) 谓词在 CANNBotDSL（下文简称 DSL，0.7.0，Ascend 950PR/950DT / NPU ARCH 3510 口径）下的真值。其他 SoC 须重新核实，禁止外推。
+> 通用层 [capability-contract.md](../../generic/capability-contract.md) 谓词在 CANNBotDSL（下文简称 DSL，0.8.0，Ascend 950PR/950DT / NPU ARCH 3510 口径）下的真值。其他 SoC 须重新核实，禁止外推。
 >
-> 依据：cannbot-dsl 仓 `docs/zh/guide/`（hardware-model / compute / synchronization）与 `docs/zh/api/compute/atomic/`、`samples/scatter_elements/`。SIMT 需 CANN ≥ 9.2.0。
+> 依据：cannbot-dsl 仓 `docs/zh/guide/`（hardware-model / compute / synchronization）与 `docs/zh/api/compute/atomic/`、`samples/scatter_elements/`。SIMT 需 CANN ≥ 9.2.0（cannbot-dsl 仓配套 9.2.1）。
 
 ## 1 真值表
 
-| 谓词 | 真值（DSL 0.7.0 / 3510） | 依据 |
+| 谓词 | 真值（DSL 0.8.0 / 3510） | 依据 |
 |------|---------------------------|------|
 | `CAP_SIMT_GM_DIRECT` | ✅ `vf(mode="simt")` 内 Tensor 下标读写直访 GM 离散地址（`output[flat] = updates[flat]`）；每个线程独立计算地址、可走不同控制流 | scatter_elements 全部 SIMT kernel；compute.md「SIMT 模式」 |
 | `CAP_SIMT_ATOMIC_ADD_DTYPE_SET` | 标量 `cb.simt.atomic_add(ptr, value)`：`{int32, uint32, float32, int64, uint64}`——**无 fp16/bf16/double**。批量累积另有 `mem_copy(..., atomic_add=True)`：`{int8, int16, int32, bf16, fp16, fp32}`，仅 UB/L0C → GM | atomic API 文档（产品支持：仅 950PR/DT）；compute.md「原子操作」 |
 | `CAP_SIMT_ATOMIC_ADD_RETURN_RELIABLE_SET` | **待验证**——接口声明返回计算前原值（`-> ScalarValue`），返回值语义已文档化但 Sparse 场景实测口径未登记。验证义务：首例以单测复核返回旧值语义；此前只用写语义 | atomic_add API 文档 |
 | `CAP_SIMT_ATOMIC_CAS_WIDTH` | `cb.simt.atomic_cas` 存在；支持的位宽集合**待验证**（API 分类可证类目存在，dtype/位宽表未核对）。double CAS 模拟路线就位前须复核 | compute.md 接口分类表；atomic API 文档 |
-| `CAP_SYNC_ALL` | ✅ `global_sync_all()`（等价 模式2→0→0→2 四次同步，代价高，禁入内层循环）；细粒度：`vec_sync_block_arrive/wait`（模式 0 全 AIV 间）、`cube/vec_sync_intra_*`（模式 4） | synchronization.md「核间同步」 |
+| `CAP_SYNC_ALL` | ✅ `global_sync_all()`（等价 模式2→0→0→2 四次同步，代价高，禁入内层循环；0.8 新增 `flag_ids` 参数——默认占 flag id 0/1/2，与手写 block 同步协议共存时须避开或显式指定）；细粒度：`vec_sync_block_arrive/wait`（模式 0 全 AIV 间）、`cube/vec_sync_intra_*`（模式 4） | synchronization.md「核间同步」 |
 | `CAP_SYNC_SCHEDULE_MODE` | ✅（语义变化）DSL 无 `SetScheduleMode` 概念：`global_sync_all()` 无需 host 开关即生效；**替代惯用法是同 stream 顺序 launch 两次 kernel（stream 排序天然有序，免栅栏）** | synchronization.md；scatter_elements 两段 launch 实测 |
 | `CAP_SIMT_THREAD_MAX` | 1024（纯 SIMT：`kernel[dim3(block), dim3(thread)]`，`thread.x*y*z ∈ [1,1024]`）；block 上限 65535（scatter_elements MAX_CORE_NUM 口径）；混合 SIMD+SIMT：`vf(mode="simt", thread=N)` 由 VF 参数定，host 不传 thread 维 | compute.md「Host 启动规则」 |
 | `CAP_STACK_PER_THREAD` | **待验证**——已知约束：SIMT 寄存器文件总容量固定，线程数翻倍、每线程寄存器减半，溢出到 GM 栈性能劣化；每线程栈字节数未登记。验证义务：首个行级状态类算子实测 | compute.md「两个代价」 |
@@ -33,7 +33,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 - **launch 形态二选一且编译器校验**：纯 SIMT `kernel[dim3(block), dim3(thread)]`（device 侧禁写死 `vf(mode="simt", thread=N)`）；混合 `kernel[block_count]`（thread 在 VF 参数）。混用即编译失败
 - **原子 dtype 双轨**：离散散射点加用 `cb.simt.atomic_add`（int64 原生支持，AscendC 需专用接口）；UB 内整块累积用 `mem_copy(..., atomic_add=True)`（fp16/bf16 走此轨，标量原子不支持）
-- **DMA 初始化惯用法**：大块连续零初始化/拷贝经 `Channel(MemLoc.UB, ...)` + `mem_copy`（MTE2/MTE3），尾部不足整 tile 段用 SIMT 标量循环补（scatter_elements ScatterDmaCopyKernel 先例：tile 4096B、`min(DMA_COPY_MIN_BYTES)` 分档）
+- **DMA 初始化惯用法**：大块连续零初始化/拷贝经 `Buffer(MemLoc.UB, ...)` + `mem_copy`（MTE2/MTE3），尾部不足整 tile 段用 SIMT 标量循环补（scatter_elements ScatterDmaCopyKernel 先例：tile 4096B、`min(DMA_COPY_MIN_BYTES)` 分档）
 - **DCache 陷阱**：Scalar 单元经 DCache 访 GM，多核各持独立缓存——核 A Scalar 写、核 B 读同地址须显式 dcci 类操作；SIMT VF 的 GM 写由框架保证一致性
 - **分核调度依赖张量内容时**：host（构图期）不可读，走 `@aicpu_kernel`（运行期 AI CPU 读 GM 出计划，stream 排序先于 AI Core kernel）——稀疏候选块筛选/变长前缀和的DSL 正解
 

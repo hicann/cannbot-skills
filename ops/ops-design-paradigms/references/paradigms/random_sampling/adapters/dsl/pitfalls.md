@@ -66,5 +66,5 @@ See LICENSE in the root of the software repository for the full text of the Lice
 - **launch 形态校验**：纯 SIMT `dim3(block), dim3(thread)` 与混合 `block_count` + `vf(thread=N)` 不可互换——整算子统一
 - **`Constexpr` 泛滥**：缓存键乘积爆炸（每维度进键）；只编码影响代码生成的量（VL、block_loops、轮数）
 - **流基准对拍缺失**：DSL 无仓内 golden——首例未做 [prng-implementation.md](prng-implementation.md) §6 五项对拍即合入，后续算子全部失去参照（对拍结果是本路线唯一的"实测基准"来源）
-- **CANN 版本**：SIMT 需 ≥ 9.2.0；混合 SIMD+SIMT 同受此限
+- **CANN 版本**：SIMT 需 ≥ 9.2.0（cannbot-dsl 仓配套 9.2.1）；混合 SIMD+SIMT 同受此限
 - **`cbd.print` 覆盖内建**：`from cannbotdsl import *` 会覆盖 `print`——设备打印写 `cbd.print`，构图期打印用内建

@@ -29,7 +29,8 @@ kernel-entrance.md §2/§4/§5 · compute.md「SIMT 模式」
 
 import cannbotdsl as cb
 from cannbotdsl import Tensor, dtypes
-from cannbotdsl.lang.kernel import kernel, host
+from cannbotdsl.lang.host import host
+from cannbotdsl.lang.kernel import kernel
 
 THREADS = 256  # 计算类（原子/分支）线程档；具体值按目标核数/形状重核定
 CORES = 8  # 示意值；按 splitting.md grid-stride 映射核定

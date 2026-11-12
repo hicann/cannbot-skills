@@ -12,7 +12,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 > **层级**：CANNBotDSL 语言适配层（adapters/dsl/）。语言中立的算法与模型见 [../../generic/index.md](../../generic/index.md)；范式入口与语言路由见 [../../patterns.md](../../patterns.md)。
 >
-> 与 AscendC 适配层的根本差异：**cannbot-dsl 仓无随机算子样例、无公共底座**（AscendC 侧有 `ops-math/random/random_common/`）。本适配层提供 PRNG 的 DSL 自研实现知识（API 已核对齐备），首例接入须履行流基准对拍义务。权威依据：cannbot-dsl 仓 docs/（开源：https://gitcode.com/cann/cannbot-dsl ；DSL 0.7.0，Ascend 950PR/950DT，SIMT 需 CANN ≥ 9.2.0）。
+> 与 AscendC 适配层的根本差异：**cannbot-dsl 仓无随机算子样例、无公共底座**（AscendC 侧有 `ops-math/random/random_common/`）。本适配层提供 PRNG 的 DSL 自研实现知识（API 已核对齐备），首例接入须履行流基准对拍义务。权威依据：cannbot-dsl 仓 docs/（开源：https://gitcode.com/cann/cannbot-dsl ；DSL 0.8.0，Ascend 950PR/950DT，SIMT 需 CANN ≥ 9.2.0（cannbot-dsl 仓配套 9.2.1））。
 
 ## 1 定位
 
@@ -36,7 +36,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 | 任务阶段 | 入口 | 内容 |
 |------|------|------|
 | PRNG 落地（首选） | [prng-implementation.md](prng-implementation.md) | Philox4x32-10 轮函数的 DSL 表达（SIMD 寄存器算子清单 / SIMT 标量数学）、u 构造口径、常数池、快除 ★ |
-| TF 对标 SIMD 路线 | [simd-path.md](simd-path.md) | `vf(mode="simd")` 流水、Channel/掩码、Hardware Loop 纪律、混合形态（串接 SIMT VF） |
+| TF 对标 SIMD 路线 | [simd-path.md](simd-path.md) | `vf(mode="simd")` 流水、Buffer/掩码、Hardware Loop 纪律、混合形态（串接 SIMT VF） |
 | torch 对标 SIMT 路线 | [simt-path.md](simt-path.md) | 纯 SIMT launch、grid-stride 映射、seed/offset 读取与回写、变长消耗、多段 launch 块协议 |
 | 陷阱与定位 | [pitfalls.md](pitfalls.md) | VF 不可嵌套、Hardware Loop 退化、寄存器/线程权衡、UB 双口径等错题集 |
 
@@ -48,7 +48,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 | 条件 | DSL 路线 | 理由 | 禁止项（R20） |
 |------|---------|------|--------------|
-| TF 对标接口（seed/seed2 属性或 stateless key/counter 张量；A/C 族） | **SIMD VF**（`vf(mode="simd")` + Channel 流水） | 寄存器级批量流推进吞吐高；vmull/vbitwise/vshift 算子齐备 | 禁按 torch 族接口套本路线形态 |
+| TF 对标接口（seed/seed2 属性或 stateless key/counter 张量；A/C 族） | **SIMD VF**（`vf(mode="simd")` + Buffer 流水） | 寄存器级批量流推进吞吐高；vmull/vbitwise/vshift 算子齐备 | 禁按 torch 族接口套本路线形态 |
 | torch 对标接口（seed/offset 张量、self 填充；B/D 族） | **纯 SIMT**（`vf(mode="simt")` + `dim3` launch） | 每线程独立 key/counter 状态、GM 直写灵活 | 禁按 TF 族接口套本路线形态；流协议事实（轮数/布局）仍可参照 |
 | 随机 + 逐元素复合（路由 b） | 按接口族选（同上两行），复合只改编排不改执行体 | 同 ascendc 版 R20 | 禁按复合结构像 elementwise 而套 SIMD 流水 |
 | 变换含分支/标量数学（Box-Muller、rejection） | 主路线 + 串接 SIMT VF（混合） | 同一 `@kernel` 内 SIMD VF 与 SIMT VF 串接，UB 交接 | 混合是叠加项，不得以混合为由改主路线 |

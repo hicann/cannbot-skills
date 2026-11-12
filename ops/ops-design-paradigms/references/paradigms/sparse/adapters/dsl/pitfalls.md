@@ -42,7 +42,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 ### 1.6 DCache 跨核脏读
 - **现象**：核 A 写的元数据/累加值，核 B 读到旧值
 - **根因**：Scalar 侧 Tensor 下标读写经 DCache（多核独立缓存），框架不自动插 dcci
-- **规避**：跨核标量交接显式 Cache 操作 + 核间同步；SIMT VF 的 GM 写由框架保证一致性；跨核数据量大改 `Channel(kind=ChannelKind.CrossCore)`
+- **规避**：跨核标量交接显式 Cache 操作 + 核间同步；SIMT VF 的 GM 写由框架保证一致性；跨核数据量大改普通 `RingBuffer`（跨核属性由编译器按实际 Tensor 访问自动推导，无需 kind）
 
 ## 2 性能类
 
@@ -53,7 +53,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 
 ### 2.2 VF 作用域纪律违例
 - **现象**：寄存器溢出 / VF 融合被阻断
-- **根因**：VF 区域内调 `Channel.produce()/consume()`、或访问 `self._xxx` 成员变量
+- **根因**：VF 区域内调 `RingBuffer.next_write()/next_read()`、或访问 `self._xxx` 成员变量
 - **规避**：进 VF 前选好槽位取成局部变量；搬运/交接在 VF 外完成
 
 ### 2.3 线程数与寄存器错配
@@ -71,5 +71,5 @@ See LICENSE in the root of the software repository for the full text of the Lice
 - **`Constexpr` 泛滥**：每个 Constexpr 进缓存键，变体数 = 各维度乘积——只编码"影响代码生成"的量
 - **空输入 launch**：`dim3(0)` 非法；`N=0` 时 host 直接不 launch 或短路路径（对照 generic 短路口径）
 - **核数写死**：经 `get_platform_info()` / `torch.npu.get_device_properties` 查询；分档出货（32/28 核等）硬编码必错
-- **CANN 版本**：SIMT（含混合）需 CANN ≥ 9.2.0；目标环境低于此版本时仅 SIMD 路线可用，设计须声明
+- **CANN 版本**：SIMT（含混合）需 CANN ≥ 9.2.0（cannbot-dsl 仓配套 9.2.1）；目标环境低于此版本时仅 SIMD 路线可用，设计须声明
 - **AOT 登记漏文件**：Native 打包时 metadata/AI CPU 侧 `.py` 须与主算子一并列入 `operator_groups.toml`，漏了 wheel 缺模块

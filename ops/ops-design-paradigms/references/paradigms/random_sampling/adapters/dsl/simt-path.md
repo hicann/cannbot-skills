@@ -20,7 +20,7 @@ See LICENSE in the root of the software repository for the full text of the Lice
 |------|------|
 | 执行体 | 纯 SIMT：`@kernel` 内 `vf(mode="simt")`，host `kernel[dim3(block), dim3(thread)]` 启动 |
 | 随机数生成 | 每线程本地 key/counter 状态 + `cb.simt` 标量数学轮链（自研） |
-| 数据通路 | GM 直写（Tensor 下标赋值），变换即写；无 Channel 流水 |
+| 数据通路 | GM 直写（Tensor 下标赋值），变换即写；无 RingBuffer 流水 |
 | 线程几何 | thread ≤ 1024/block、block ≤ 65535；512 线程/核惯例起步（寄存器档位权衡） |
 | UB 口径 | 216 KB（SIMT Data Cache 扣减后） |
 
@@ -82,5 +82,5 @@ def run(seed: Tensor, offset: Tensor, out: Tensor, ...) -> None:
 
 1. `@host` 函数体内直接 `kernel[dim3(block), dim3(thread)](...)`——**纯 SIMT 形态**，禁与混合形态（`kernel[block_count]` + `vf(thread=N)`）混用（编译器校验）
 2. `cb.compile` + `lru_cache` 缓存键含（shape、dtype、core 数、thread 数、全部 Constexpr）——thread 数进键（AscendC 侧线程随 TilingKey 分档的等价物）
-3. `N=0` 不 launch；核数经平台 API 查询（`vector_core_num`），有用核数截断同 Sparse 范式 DSL 适配层 kernel-entrance §6（**该范式尚未合入本仓**，合入前按 cannbot-dsl `docs/zh/guide/compute.md`「Host 启动规则」口径执行）
-4. CANN ≥ 9.2.0（SIMT 前提）；目标环境低于此版本时 B/D 族无可用路线，设计须声明
+3. `N=0` 不 launch；核数经平台 API 查询（`vector_core_num`），有用核数截断同 Sparse 范式 DSL 适配层 [kernel-entrance.md](../../../sparse/adapters/dsl/kernel-entrance.md) §6
+4. CANN ≥ 9.2.0（SIMT 前提，cannbot-dsl 仓配套 9.2.1）；目标环境低于此版本时 B/D 族无可用路线，设计须声明

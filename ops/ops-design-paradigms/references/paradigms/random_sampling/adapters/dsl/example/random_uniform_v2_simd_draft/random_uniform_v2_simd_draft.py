@@ -32,7 +32,8 @@ from cannbotdsl import Tensor, dtypes, MemLoc
 from cannbotdsl.buffer import Buffer
 from cannbotdsl.lang.vf import vf
 from cannbotdsl.lang.jit import jit
-from cannbotdsl.lang.kernel import kernel, host
+from cannbotdsl.lang.host import host
+from cannbotdsl.lang.kernel import kernel
 from cannbotdsl.tensor import tile_slice
 from cannbotdsl.ops.reg import (
     full_mask,
