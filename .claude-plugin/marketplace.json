@@ -665,24 +665,6 @@
       ]
     },
     {
-      "name": "autoresearch",
-      "source": "./plugins-community/autoresearch",
-      "description": "AutoResearch 算子自动优化工作流，支持 Triton Ascend、AscendC、AscendC CATLASS、KernelVerifier 和远端 Ascend worker。",
-      "version": "1.0.1",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "autoresearch",
-        "operator",
-        "optimization",
-        "worker",
-        "kernel-verifier"
-      ],
-      "category": "development",
-      "dependencies": []
-    },
-    {
       "name": "shmem-ops-skills",
       "description": "SHMEM 自定义通信算子开发 Skills（10 个）。覆盖设计、代码生成、编译调试、正确性评估、HCCL 对比评测、性能优化、代码审查和 PyTorch 绑定。",
       "source": "./community/ops",

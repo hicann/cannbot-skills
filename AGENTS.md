@@ -119,6 +119,8 @@ cannbot-skills/
 
 > PyPTO 算子开发插件 `pypto-op-orchestrator` 已从本仓迁出，入口与安装说明见 [cannbot 应用仓](https://gitcode.com/cann/cannbot/tree/master/plugins-official/pypto-op-orchestrator)。
 
+> AutoResearch 算子自动优化插件 `autoresearch` 已迁至 [cannbot 应用仓](https://atomgit.com/cann/cannbot/tree/master/plugins-community/autoresearch)，由 cannbot 统一安装器提供。
+
 ## Skills 分类
 
 项目 skills 目录按功能分类，包括：
