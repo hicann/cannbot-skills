@@ -1,6 +1,6 @@
 # 翻译标准（docs-translation）
 
-> 本文件为 docs-translation skill 的翻译标准全文，基于 Google 开发者文档风格指南（<https://developers.google.com/style>）整理。翻译前必须完整阅读并逐条遵守；SKILL.md 仅保留核心红线摘要。
+> 本文件为 docs-translation skill 的翻译标准全文，基于 Google 开发者文档风格指南（<https://developers.google.com/style>）整理，并融合算子库翻译规范中适用于文档翻译的条目（术语、标点、frontmatter、数值符号占位符、语义保真、行内标签等）。翻译前必须完整阅读并逐条遵守；SKILL.md 仅保留核心红线摘要。
 
 ## 语态规范
 
@@ -154,7 +154,14 @@
 | 算子 | operator | - |
 | 固件 | firmware | - |
 | 驱动 | driver | - |
+| 磁盘 | disk | 不使用drive（drive为"驱动器"） |
 | 通信域 | communicator | - |
+| 单算子比对 | single-operator comparison | 精度比对工具中Tensor比对的一种方式 |
+| 整网比对 | network-wide comparison | 精度比对工具中Tensor比对的一种方式 |
+| 邻接表 | adjacency list | 表示图的数据结构，每个顶点存储其相邻顶点的列表 |
+| 片上内存 | on-chip memory | 集成在微处理器芯片上的存储器 |
+| 管理面 | management plane | 健康状态信息接口所处的平面 |
+| 业务面 | service plane | 推理等业务接口所处的平面 |
 | 接口 | API | **绝对禁用 interface**，见下“禁用词” |
 | 系列产品 | products | 不使用 series products 或 product series，译文中不体现 series |
 | 尾轴 | last axis | 不使用 tail axis 或 tailing axis |
@@ -176,6 +183,7 @@
 - 术语首次出现即确定译法并记录，全文后续一律沿用；发现更优译法时，回改前文后统一。
 - 若上述术语表未收录某术语，按"行业标准 → 上下文最贴切译法"确定，并在全文保持一致。
 - 同一中文术语全文英文译法唯一，禁止同义混用。
+- 避免形近词与臆造词（如复杂度为 complexity，非 complicity）；对不确定的术语必须查证，不得凭印象拼写。
 
 **产品名称对照表：**
 
@@ -220,6 +228,12 @@
 - 增量更新已有翻译文件时，编辑后同样保证文件末尾保留一行空行，不因编辑丢失。
 - 源中文文档末尾缺少空行时，译文仍须补齐末尾空行。本条为 md 文件级规范，优先于[格式镜像规则](#格式镜像规则)（格式镜像仅约束文内格式标记，不约束文件末尾空行）。
 
+**标点符号规范：**
+
+- 译稿中不得残留中文全角标点（，。；：？！（）《》【】等），必须使用对应的英文半角标点（, . ; : ? ! ( ) " "）。
+- 中文破折号（——）改写为英文 em dash（—），中文省略号（……）改写为英文省略号（...）。
+- 例外：引用中文书籍、文档或栏目名称时，优先使用确定的英文名称（如官方英文版标题）并去除书名号；仅当查无确定英文名称时保留中文原名，此时书名号等全角标点一并保留。须原样保留的中文内容（如中文路径、中文文件名），其中的标点保持原样。
+
 ## 格式镜像规则
 
 > ⚠️ 警告：中文源文是什么格式，英文就是什么格式，逐处一致、一字不差。译文中每一个加粗（`**`）、code（`` ` ``）、转义符（`\_`）都必须能在中文源文对应位置找到依据，找不到即为格式错误，须立即删除。
@@ -248,6 +262,12 @@
 | aclmdlExecute函数        | **aclmdlExecute** function          | aclmdlExecute function          |
 | unroll_list参数          | **unroll_list** parameter           | unroll_list parameter           |
 | 接口成功返回HCCL_SUCCESS | Returns **HCCL_SUCCESS** on success | Returns HCCL_SUCCESS on success |
+
+**行内标签与结构保真：**
+
+- `<term>` 等行内标签必须与源文件一一对应（数量与位置不变）；源文件中未加标签的名称不得补加标签，按纯文本翻译。
+- `<!-- npu="..." idN -->`、`<!-- end idN -->` 等标记注释原样保留，不得增删或改写；含中文说明文字的普通 HTML 注释须翻译内部文字、保留注释形式。
+- 表格行、列表项、标题层级的数量不得增减；代码块数量与顺序保持不变。
 
 ## 标题固定译法
 
@@ -278,8 +298,10 @@ API Reference 类文档的章节标题使用固定映射，命中即替换，不
 - 代码块整体保持原样，仅翻译其中的**注释**部分；无注释的代码块原样保留。
 - 代码样式（缩进、语言标识、变量名、常量名）与中文原文完全一致，字符不可改动。
 - 译文核心用词与代码本身（函数名、参数名）保持一致。
+- 注释符号保持源代码注释语法，不得擅改（Python/Shell 用 `#`，C/C++ 用 `//`；禁止把 `# 注释` 改为 `// 注释`）；注释翻译后仍以原注释符号开头，与代码保持原有分行与缩进，不得混在同一行。
 - 注释风格：简洁英文，操作类以动词原形开头，句末统一加句号。
 - 源文为中英双语注释时，译文仅保留英文部分。
+- YAML frontmatter（文件头部 `---` 之间）： `title`、`description` 等描述性字段的内容需翻译为英文；键名、布尔值、路径/文件名类字段值保持原样。
 
 | 注释样式 | 规则 |
 | -------- | ---- |
@@ -287,113 +309,30 @@ API Reference 类文档的章节标题使用固定映射，命中即替换，不
 | `//` | 保留 `//` 不变，不在两个 `/` 中间添加空格 |
 | `/* */` | 译文与 `/*` 和 `*/` 之间各留一个空格 |
 
-## 翻译质量检查清单（必须执行）
+## 数值、符号与占位符规范（原样保留，禁止改动）
 
-> **⚠️ 重要：翻译完成后必须执行以下检查，确保翻译质量！**
+- 数学符号必须完整保留，向上/向下取整符号、上下标等不得省略：❌ `[k/16]` 译为 `k/16` ✅ 保留 `[k/16]`
+- 图片尺寸、数字、版本号必须与原文完全一致：❌ `[201*101]` 译为 `[201 * 100]` ✅ 保留 `[201*101]`
+- 参数、变量、宏、环境变量的大小写严格保持原样：❌ `SIP` 译为 `sip` ✅ 保持 `SIP`
+- 占位符保持原有语法格式：❌ `{arch}` 译为 `<arch>` ✅ 保持 `{arch}`
+- 计量单位大小写严格保留（B=字节，b=比特，含义不同）：❌ `GB/s` 译为 `Gb/s` ✅ 保持 `GB/s`
+- 数学记法与语义词必须与原文精确一致：
+  - 元组尾逗号不得省略：❌ `(C,)` 译为 `(C)` ✅ 保留 `(C,)`
+  - 整除/可整除译为 integer-divide/divisible：❌ "整除64" 译为 "divided by 64" ✅ "integer-divided by 64"
+  - 正规数 = normal number，非正规数/次正规数 = subnormal number，不得混用
 
-1. **语法完整性检查**
-   - [ ] 每个句子是否有明确主语（you、the system、this guide等）
-   - [ ] 每个句子是否有明确动词
-   - [ ] 条件句是否完整（If you...而非If need...）
-   - [ ] 并列句是否正确连接（使用分号或拆分为独立句子）
-   - [ ] "请参考"句型是否使用"For..."引导
+## 语义保真规范（否定、范围与限定词）
 
-2. **词汇与文风检查**
-   - [ ] 是否无违禁外来语（via, e.g., i.e., etc.）
-   - [ ] 是否无缩写（can't, it's）
-   - [ ] 是否无口语词汇（figure out）
-   - [ ] 是否无冗余表达（去掉多余的please）
+- 否定词（非、不、无、未、除…之外）必须完整保留，译后回读核对语义方向与原文一致：
 
-3. **语态检查**
-   - [ ] 操作指引是否使用祈使句（Select...而非You can select...）
-   - [ ] 功能描述是否使用主动语态（WebIDE provides...而非WebIDE can provide...）
-   - [ ] 避免过度被动语态
-   - [ ] 条件说明是否使用you为主语
+  ❌ "非root用户" 译为 "the root user" ✅ "a non-root user"
 
-4. **冠词检查**
-   - [ ] 单数可数名词前是否有冠词（the/a/an）
-   - [ ] 特指名词前是否用the（the host machine、the root user）
-   - [ ] 泛指名词前是否用a/an（an Ascend environment）
+- 包含/排除范围必须逐项与原文一致，不得替换、增删所列产品或对象：
 
-5. **术语一致性检查**
-   - [ ] 关键术语是否统一翻译（sample而非example）
-   - [ ] 是否使用标准术语表（见[术语与产品名称规范](#术语与产品名称规范)）
-   - [ ] 名词/动词形式是否正确（installation vs install）
-   - [ ] 中文“接口”是否全部翻译为API
+  ❌ "不包含A5" 译为 "except A3" ✅ "excluding A5"
 
-6. **句子结构检查**
-   - [ ] 长句是否合理拆分或使用"For..."引导
-   - [ ] 是否无"名词+please refer to"错误结构
-   - [ ] 是否无中文式句子结构（如"Host machine...operations please refer to..."）
+- 限定词必须逐一保留，不得省略或弱化，固定译法：
 
-7. **表格检查**
-   - [ ] 表格字段是否使用标准翻译（Precautions而非Note）
-   - [ ] 每个单元格是否为完整句子或短语
-   - [ ] 是否无语法错误的片段
+  - 默认→by default、必须→must、仅→only、当前→currently、暂→not yet；
 
-8. **格式检查**
-   - [ ] Markdown格式是否正确
-   - [ ] 表格结构是否完整
-   - [ ] 链接是否有效
-   - [ ] 代码块格式是否正确
-   - [ ] 段落边界与空行位置同源文基本对应（行数允许浮动，按第 9 项 ±30% 判定）
-   - [ ] 正文、标题无残留中文字符
-   - [ ] 文件必须以单个换行符结尾（最后一行内容后紧跟换行符，不得缺失，也不得堆积空行）
-
-9. **行数比对检查（翻译完成度校验）**
-   - [ ] 翻译完成后，比对中文原文与英文翻译的行数是否大体相等
-   - [ ] 若行数差异超过30%，说明英文存在漏翻译，需重新检查并补充缺失内容
-   - [ ] 代码块、空白行、仅含标记符号的行可不计入比对基数，重点关注实质性文本行
-
-   **检查方法：**
-
-   ```bash
-   # 统计中文原文行数
-   zh_lines=$(wc -l < zh_file.md)
-   # 统计英文翻译行数
-   en_lines=$(wc -l < en_file.md)
-   # 计算差异比例
-   diff_ratio=$(( (zh_lines - en_lines) * 100 / zh_lines ))
-   # 若差异超过30%，需要检查是否漏翻译
-   ```
-
-   **处理方式：**
-   - 英文行数明显少于中文：逐段对照检查，找出未翻译段落并补充
-   - 行数基本相等（±30%以内）：检查通过
-   - 对于表格密集型文档，英文因换行展开导致行数偏多属于正常现象
-
-10. **格式镜像检查（必须执行）**
-
-    - [ ] 译文中每个 `**`/`` ` ``/`\_` 都能在中文源文对应位置找到依据
-    - [ ] 无任何自行加粗或自行加 code，纯文本未被升级为加粗/code
-    - [ ] 中文加粗/code/转义符在译文中逐处一致保留，无增、删、改、移
-
-11. **标题与固定句式检查**
-    - [ ] API文档标题命中映射表即替换（Applicable Products/Description/Prototype/Parameters/Examples 等）
-    - [ ] Examples/Parameters/Constraints/Related Constants/Implementation Principles 均为复数，无单数形态
-    - [ ] "是否XXX"译为 Whether XXX，无 Indicates/Specifies 冗余引导词
-    - [ ] 返回值套用固定句式（Returns XXX. / Returns XXX on success; otherwise, returns a failure value.）
-    - [ ] 源文"无"统一译为 None 且不加句号；列举清单最后一项前已加 and
-    - [ ] 代码块内仅注释被翻译，代码本体、缩进、语言标识、变量名未被改动
-
-12. **禁用词扫描**
-    - [ ] 除源文自身为 interface（编程语言接口概念）和代码块原样内容外，所有中文"接口"（含各种形态）均已译为 API
-    - [ ] 术语禁用译法未出现：series products、tail axis、calculate/calculation、pass in 等
-
-**检查示例对比：**
-
-| 问题类型 | ❌ 错误示例 | ✅ 正确示例 | 检查项 |
-| --------- | ----------- | ----------- | -------- |
-| 缺少主语 | "can directly use..." | "you can directly use..." | 语法完整性-主语 |
-| 缺少动词 | "Software installation method selection..." | "Select a software installation method..." | 语法完整性-动词 |
-| 条件句不完整 | "If need to run samples..." | "If you need to run samples..." | 语法完整性-条件句 |
-| 句子结构混乱 | "Host machine...operations please refer to..." | "For downloading and installing..., refer to..." | 句子结构 |
-| 冗余表达 | "please refer to..." | "refer to..." | 词汇与文风-冗余 |
-| 表格字段 | "Note" | "Precautions" | 表格检查 |
-| 缺少冠词 | "WebIDE development platform" | "the WebIDE development platform" | 冠词检查 |
-| 术语不一致 | "example" | "sample" | 术语一致性 |
-| 漏翻译 | 原文100行，翻译仅60行 | 逐段对照补充缺失章节 | 行数比对检查 |
-| 自行加粗 | "Returns **HCCL_SUCCESS** on success" | "Returns HCCL_SUCCESS on success" | 格式镜像 |
-| 禁用词 | "This interface returns..." | "This API returns..." | 禁用词扫描 |
-| 标题单数 | "## Example" | "## Examples" | 标题固定译法 |
-| 冗余引导词 | "Indicates whether to enable..." | "Whether to enable..." | 固定句式 |
+  - "建议"用 It is recommended（❌ "建议提交" 译为祈使句 "Submit" ✅ "It is recommended that you submit"）

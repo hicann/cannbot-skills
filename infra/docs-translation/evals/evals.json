@@ -71,6 +71,76 @@
       "expected_output": "回复应说明会先检查英文翻译文件是否存在，存在时再检查中文文档是否有变更；有变更时执行增量翻译：获取中文文档的 diff、分析变更点、将变更点翻译为英文并用 edit 工具更新对应英文文档，而不是重写整个文件；无变更则跳过该文件。",
       "files": [],
       "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "算子仓判定（可确认时不提问）",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "帮我翻译 D:\\WorkSpace\\ops-nn 仓库的文档。",
+      "expected_output": "回复应说明根据仓库名 ops-nn 可确认是算子仓（ops- 开头），直接按算子仓要求执行翻译，不提问；算子仓不读取 exclude_docs.json，使用固定排除规则（一级 docs/、experimental/ 目录整体排除，文件名匹配 aclnn*.md、torchapi_*.md、*Pass.md 排除，.git 目录排除，已有译稿不重复翻译）；翻译前会先同步远端仓库。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "无法确定仓库类型时交互式提问",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "帮我翻译 D:\\WorkSpace\\my_repo 仓库的文档。",
+      "expected_output": "回复应说明 my_repo 无法确认是否为算子仓（不匹配 ops- 开头等算子仓特征，也不属于 metadef、ge、pypto 等已知非算子仓），应使用交互式提问工具（question）向用户确认仓库类型后，再按对应翻译线执行。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "译稿存放规则（zh-CN模板、zh目录、其余三种情况）",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": ".gitcode/PULL_REQUEST_TEMPLATE.zh-CN.md 翻译后放在哪里、叫什么名字？docs/zh/design/overview.md 和根目录 CONTRIBUTING.md 又分别译到哪里？",
+      "expected_output": "回复应说明按译稿存放规则顺序判断、命中即止：PULL_REQUEST_TEMPLATE.zh-CN.md 同目录将 zh-CN 替换为 en-US，即 .gitcode/PULL_REQUEST_TEMPLATE.en-US.md（不加 _en）；位于 zh 文件夹下的 docs/zh/design/overview.md 译至该 zh 同级的 en 目录相同层级，文件名不变不加 _en，即 docs/en/design/overview.md；其余情况（CONTRIBUTING.md）与源文件同目录命名 CONTRIBUTING_en.md。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "整体验证与源文件零改动",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "docs-translation 翻译完成后会做哪些验证？会改动我的源文件吗？",
+      "expected_output": "回复应说明全部译稿写完后统一执行两层验证：先机械验收（脚本化核查译稿齐全、残留中文、全角标点、语言切换行、行数比对、链接有效、结构对齐、数值一致），后语义审查（逐篇对照源文件检查错翻、漏翻、多翻，只做最小必要修复），问题修复后回归复检直至全部通过；翻译、验证、修复各环节一律只允许新增/修改译稿文件，源文件保持零改动（最终以 git status 复核）。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "默认不提交与单PR单提交约束",
+      "config": {
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "翻译完成后会自动提交到远程仓库吗？PR 提了之后又要补充修改怎么办？",
+      "expected_output": "回复应说明默认不提交远程仓库，仅在用户明确要求时提交；提交时新建分支并将全部译稿变更以单个提交推送（无推送权限时通过平台API创建个人fork再创建PR）。PR创建后如需补充修改：git reset --soft HEAD~N（N为分支上的提交数）将多个提交合并，git add -A 将补充修改（含图片等非md文件）一并暂存，git commit -m \"docs: update English translations for markdown files\" 重新提交，推送前用 git log --oneline -3 确认分支上只剩一个提交，再 git push -f 强制推送更新PR；不得让PR分支上出现多个提交。同时会在仓库同级目录生成翻译报告（不覆盖历史报告，仅备查不参与提交）。",
+      "files": [],
+      "expectations": []
     }
   ]
 }
