@@ -929,7 +929,14 @@ def check_one(repo, cc_path, strict_new=False, explicit_only=False):
             rid="R-IFACE-003",
         )
 
-    if re.search(r"const\s+OpParam&\s*\w+,\s*const\s+u32\s+\w+", hh, re.S):
+    ctor_signature = (
+        r"\b%s\s*\(\s*"
+        r"const\s+OpParam\s*&\s*\w+\s*,\s*"
+        r"const\s+u32\s+\w+\s*,\s*"
+        r"const\s+std::vector\s*<\s*std::vector\s*<\s*u32\s*>\s*>\s*"
+        r"&\s*\w+\s*\)" % re.escape(cls)
+    )
+    if re.search(ctor_signature, strip_comments_and_strings(hh), re.S):
         rep.add(
             OK,
             "带参构造签名匹配 (const OpParam&, const u32, const std::vector<std::vector<u32>>&)",

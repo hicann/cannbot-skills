@@ -14,6 +14,7 @@ import contextlib
 import hashlib
 import io
 from pathlib import Path
+import re
 import subprocess
 import shutil
 import sys
@@ -208,6 +209,64 @@ class TemplateTests(unittest.TestCase):
         self.assertGreater(
             check_template.check_one("/tmp", "/tmp/absent-hccl-probe.cc").errors, 0
         )
+
+    def test_constructor_signature_checks_third_parameter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            out = repo / "src/ops/all_reduce/algorithm/template/aicpu"
+            out.mkdir(parents=True)
+            (repo / "src/common").mkdir()
+            (repo / "src/common/alg_parse.h").write_text(
+                "enum class AlgoType { UNKNOWN };\n"
+            )
+            (out / "CMakeLists.txt").write_text("set(src_list\n)\n")
+            (repo / "src/scatter_aicpu_kernel.cmake").write_text(
+                "add_library(scatter_aicpu_kernel SHARED\n)\n"
+            )
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "-B",
+                    str(SKILL / "scripts/new_template.py"),
+                    "--repo",
+                    str(repo),
+                    "--op",
+                    "all_reduce",
+                    "--class",
+                    "InsTempProbe",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            source = out / "ins_temp_probe.cc"
+            valid = check_template.check_one(str(repo), str(source), strict_new=True)
+            self.assertEqual(
+                [level for level, rid, _, _ in valid.items if rid == "R-IFACE-002"],
+                ["OK"],
+            )
+            paths = (out / "ins_temp_probe.h", source)
+            original = {path: path.read_text() for path in paths}
+            for invalid_type in ("int", "std::vector<u32>"):
+                for path in paths:
+                    path.write_text(
+                        re.sub(
+                            r"std::vector\s*<\s*std::vector\s*<\s*u32\s*>\s*>",
+                            invalid_type,
+                            original[path],
+                        )
+                    )
+                invalid = check_template.check_one(
+                    str(repo), str(source), strict_new=True
+                )
+                self.assertEqual(
+                    [
+                        level
+                        for level, rid, _, _ in invalid.items
+                        if rid == "R-IFACE-002"
+                    ],
+                    ["ERROR"],
+                )
 
     def test_named_cost_penalty_is_not_a_validator_escape(self):
         report = check_template.Report("probe")
