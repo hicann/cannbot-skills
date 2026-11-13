@@ -149,6 +149,7 @@ constraints:
 
 **约束设计原则**：
 - `calculate` 是通用计算约束，等值场景使用 `expression: "sources[0]"`
+- `expression` 仅允许受限安全语法：下标/切片、列表构造、算术/比较/布尔运算、`get_broadcast_result` 调用（仅位置参数）；结构性违规（属性访问、lambda、推导式、`eval`/`open` 等任意函数调用）将导致 `generate_factor_values.py` 报错终止，语法错误/标识符或运算符笔误/超资源上限将告警并跳过该约束（运行继续），详见 [dependency-yaml-spec.md](references/dependency-yaml-spec.md) 的「expression 安全语法白名单」
 - `match` 是**双向约束**，`calculate` 是**单向计算**，语义不同不应合并
 - `broadcast_shape` **不支持** `source_shape_expr` 字段；如需表达"广播到派生形状"，使用两步约束模式（见 [constraint-examples.md §4](references/constraint-examples.md)）
 - 固定取值范围已在 `04_测试因子.yaml` 中定义，无需添加约束

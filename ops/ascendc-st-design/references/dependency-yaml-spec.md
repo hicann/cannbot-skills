@@ -6,7 +6,7 @@
 
 ## 设计原则
 
-1. **可计算性**：所有约束表达式必须是可执行的 Python 表达式
+1. **可计算性**：所有约束表达式必须符合本规范定义的安全语法白名单（见「计算约束」章节）；结构性违规将被 `generate_factor_values.py` 报错终止，语法错误/笔误/超资源上限等以告警软失败（跳过该约束）
 2. **可解析性**：约束结构清晰，易于 YAML 解析和图结构构建
 3. **可推导性**：支持正向推导（从输入计算输出）和反向验证（检查输出是否满足约束）
 4. **可组合性**：约束可以组合、嵌套，支持复杂依赖场景
@@ -250,6 +250,23 @@ constraints:
 - **公式计算**：`expression: "sources[0][1] * sources[1][2]"`
 - **固定维度**：`expression: "sources[0][:3] + [2]"`（自引用修改某一维度）
 - **多shape广播结果**：`expression: "get_broadcast_result(sources[0], sources[1])"`（计算两个shape广播后的结果shape）
+
+**expression 安全语法白名单**（由 `generate_factor_values.py` 强制执行，失败语义分两级）：
+
+| 语法类别 | 允许形式 | 示例 |
+|---------|---------|------|
+| 因子引用 | `sources` | `sources[0]` |
+| 下标/切片 | `sources[i]`、`sources[0][:3]` | `sources[0][1]` |
+| 列表构造 | `[...]`、`(...)` | `[sources[0][1], sources[1][2]]` |
+| 算术运算 | `+ - * / // % **`、一元 `- +` | `sources[0][1] * sources[1][2]` |
+| 比较与布尔 | `== != < <= > >=`、`and / or / not` | `sources[0][0] > 0` |
+| 函数调用 | 仅 `get_broadcast_result`（仅位置参数） | `get_broadcast_result(sources[0], sources[1])` |
+
+> **安全限制与失败语义**：约束定义可能来自外部提交或自动化生成，属不可信输入，表达式在受限白名单内求值以阻断命令执行风险。
+> - **硬阻断（报 `UnsafeExpressionError` 并非零退出）**：结构性危险语法——属性访问（`.`）、lambda、推导式、字典/集合字面量、命名表达式、f-string、三元表达式、`eval`/`open`/`__import__` 等任何白名单外函数调用；
+> - **软失败（stderr 告警并跳过该约束，运行继续）**：语法错误（含空 `expression`）、白名单外标识符/运算符笔误（如 `source[0]`、`in`/`@`）、幂指数超过 1000、序列重复次数超过 10000、索引越界等运行期错误。
+>
+> `derive_*` 前缀的隐式推导表达式由生成器内部机制分派处理，无需用户编写。
 
 ```yaml
 # 等值计算
@@ -590,14 +607,14 @@ factors:
   self.format: {type: format, param: self, io_type: input}
   self.exist: {type: exist, param: self, io_type: input}
   self.dimensions: {type: dimensions, param: self, io_type: input}
-  
+
   # 输出Tensor
   out.dtype: {type: dtype, param: out, io_type: output}
   out.shape: {type: shape, param: out, io_type: output}
   out.format: {type: format, param: out, io_type: output}
   out.exist: {type: exist, param: out, io_type: output}
   out.dimensions: {type: dimensions, param: out, io_type: output}
-  
+
   # 非标量参数
   beta.dtype: {type: dtype, param: beta, io_type: input}
   beta.exist: {type: exist, param: beta, io_type: input}
@@ -615,7 +632,7 @@ constraints:
     target: "batch2.shape"
     target_index: 1
     description: "K维度匹配: batch1[2] == batch2[1]"
-  
+
   - id: "SHAPE-002"
     type: calculate
     sources: ["batch1.shape", "batch2.shape"]
