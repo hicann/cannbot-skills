@@ -715,11 +715,30 @@
           "minProperties": 1,
           "additionalProperties": {
             "type": "object",
-            "required": ["rtol", "atol", "metric"],
+            "required": ["metric"],
             "properties": {
               "rtol": {"type": "number", "minimum": 0},
               "atol": {"type": "number", "minimum": 0},
               "metric": {"$ref": "#/$defs/tolerance_metric"}
+            },
+            "if": {"properties": {"metric": {"const": "staged_relative"}}},
+            "then": {
+              "required": ["rtol", "max_relative_rtol"],
+              "additionalProperties": false,
+              "properties": {
+                "metric": {"const": "staged_relative"},
+                "rtol": {"type": "number", "exclusiveMinimum": 0},
+                "max_relative_rtol": {"type": "number", "exclusiveMinimum": 0},
+                "atol": {"const": 0},
+                "epsilon": {"type": "number", "exclusiveMinimum": 0},
+                "backend": {"const": "native"},
+                "fallback": {"$ref": "#/$defs/staged_fallback"}
+              }
+            },
+            "else": {
+              "if": {"properties": {"metric": {"const": "bitwise_equal"}}},
+              "then": {},
+              "else": {"required": ["rtol", "atol"]}
             }
           }
         }
@@ -935,7 +954,19 @@
       "enum": ["NCHW","NHWC","ND","NC1HWC0","FRACTAL_Z","NC1C0HWPAD","NHWC1C0","FSR_NCHW","FRACTAL_DECONV","C1HWNC0","FRACTAL_DECONV_TRANSPOSE","FRACTAL_DECONV_SP_STRIDE_TRANS","NC1HWC0_C04","FRACTAL_Z_C04","CHWN","FRACTAL_DECONV_SP_STRIDE8_TRANS","HWCN","NC1KHKWHWC0","BN_WEIGHT","FILTER_HWCK","HASHTABLE_LOOKUP_LOOKUPS","HASHTABLE_LOOKUP_KEYS","HASHTABLE_LOOKUP_VALUE","HASHTABLE_LOOKUP_OUTPUT","HASHTABLE_LOOKUP_HITS","C1HWNCoC0","MD","NDHWC","FRACTAL_ZZ","FRACTAL_NZ","NCDHW","DHWCN","NDC1HWC0","FRACTAL_Z_3D","CN","NC","DHWNC","FRACTAL_Z_3D_TRANSPOSE","FRACTAL_ZN_LSTM","FRACTAL_Z_G","RESERVED","ALL","NULL","ND_RNN_BIAS","FRACTAL_ZN_RNN","NYUV","NYUV_A","NCL","FRACTAL_Z_WINO","C1HWC0","FRACTAL_NZ_C0_16","FRACTAL_NZ_C0_32","FRACTAL_NZ_C0_2","FRACTAL_NZ_C0_4","FRACTAL_NZ_C0_8","END","MAX","NZ","CSR","COO","BSR"]
     },
     "tolerance_metric": {
-      "enum": ["max_relative", "max_absolute", "mean_relative", "cosine_similarity", "bitwise_equal"]
+      "enum": ["max_relative", "max_absolute", "mean_relative", "staged_relative", "cosine_similarity", "bitwise_equal"]
+    },
+    "staged_fallback": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "small_value_threshold": {"type": "number", "exclusiveMinimum": 0},
+        "small_value_error": {"type": "number", "exclusiveMinimum": 0},
+        "cancel_boundary": {"type": "number", "exclusiveMinimum": 0},
+        "cancel_zero_threshold": {"type": "number", "exclusiveMinimum": 0},
+        "error_ratio_limit": {"type": "number", "exclusiveMinimum": 0},
+        "reference_mode": {"enum": ["native", "truncated", "native_or_truncated"]}
+      }
     },
     "case_with_check": {
       "type": "object",
@@ -945,7 +976,7 @@
         "tags": {
           "type": "array",
           "items": {"type": "string"},
-          "description": "声明该 case 满足 boundary_min_cases.yaml 中的哪些 requirement.id；stage 6 用 tag 优先匹配，子串匹配作为兜底"
+          "description": "声明该 case 满足 boundary_min_cases.yaml 中的哪些 requirement.id；stage 5 用 tag 优先匹配，子串匹配作为兜底"
         },
         "synthesize": {"type": "object"},
         "machine_check": {

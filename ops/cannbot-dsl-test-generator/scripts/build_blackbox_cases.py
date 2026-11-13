@@ -131,13 +131,13 @@ def validate_literal_synthesis(case_id, ref, item, inputs):
         validate_pattern(case_id, name, pattern, inputs)
 
 
-def validate_case(raw, spec, refs, seen):
+def validate_case(raw, spec, refs, seen, *, id_pattern=CASE_ID):
     if not isinstance(raw, dict):
         fail("each blackbox case must be a mapping")
     case_id = raw.get("id")
     if (
         not isinstance(case_id, str)
-        or not CASE_ID.fullmatch(case_id)
+        or not id_pattern.fullmatch(case_id)
         or case_id in seen
     ):
         fail(f"invalid or duplicate blackbox case ID: {case_id}")
@@ -521,7 +521,8 @@ def validate_input_names(case_id, inputs, spec, error_code):
     return input_meta
 
 
-def validate_input_recipes(case_id, inputs, input_meta, error_code, attribute_types):
+def validate_input_recipes(case_id, inputs, input_meta, error_code, attribute_types=None):
+    attribute_types = attribute_types or {}
     for name, value in inputs.items():
         if name in input_meta and input_meta[name].get("role", "tensor") == "tensor":
             if value is None and error_code == "null_input":
@@ -529,9 +530,15 @@ def validate_input_recipes(case_id, inputs, input_meta, error_code, attribute_ty
             validate_tensor(case_id, name, value, input_meta[name], error_code)
         elif name in input_meta and input_meta[name].get("role") == "tensor_list":
             validate_tensor_list(case_id, name, value, input_meta[name], error_code)
+        elif attribute_types.get(name) == "list[int64]":
+            if not isinstance(value, list) or any(
+                type(item) is not int or not -(2**63) <= item < 2**63
+                for item in value
+            ):
+                fail(f"{case_id}.{name}: list[int64] requires a JSON list of signed 64-bit integers")
         elif isinstance(value, (dict, list)):
             spec_type = attribute_types.get(name)
-            if isinstance(value, list) and spec_type and spec_type.startswith("list["):
+            if isinstance(value, list) and spec_type in {"list[float32]", "list[bool]", "list[string]"}:
                 if any(isinstance(item, (dict, list)) for item in value):
                     fail(
                         f"{case_id}.{name}: list attribute elements must be JSON scalars"

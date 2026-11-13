@@ -12,8 +12,8 @@ description: "生成或校验算子 spec.yaml（算子的 L0 数学约束唯一�
 - **stage 2** category_paradigm_consistency — category↔paradigm 一致性 + paradigm_groups + paradigm 内部约束
 - **stage 3** shape_closure — numpy_expr 求值 `outputs[].shape_rule`（含 `data_dependent` 分流）
 - **stage 4** dtype_closure — dtype DSL 推导 vs supported_combinations 显式表交叉验证
-- **stage 5** broadcast_legality — 算子计算的 broadcast 语义校验（numpy / none / explicit）
-- **stage 6** boundary_min_set — 按 paradigms 检查 boundary/extreme case 是否覆盖最低集
+- **stage 5** broadcast_legality — 独立校验数据广播契约（none / numpy / explicit）
+- **stage 6** boundary_min_set — 按 paradigms 提示候选边界，适用性由来源和支持域决定
 - **stage 7** tolerance_coverage — `numerical_tolerance.per_dtype` 覆盖输出 dtype + 紧度启发式
 - **stage 8** formula_smoke_eval — 把 formula 在小 shape (`[2,3]`) 上跑通，沙箱 numpy 执行
 - **stage 9** oracle_reachable — 真 import framework + getattr 链找 api + 占位符校验
@@ -157,9 +157,11 @@ stage 1 检查枚举、必填项及重复值；stage 2 拒绝遗漏、重叠、�
 - `math_semantics.formula` — numpy 可 eval 的表达式
 - `math_semantics.reference_oracle.api` — 真实的 torch/numpy/scipy API 全限定名
 - `dtype_policy.supported_combinations` — 显式枚举 (input dtypes) → output dtypes
-- `numerical_tolerance.per_dtype` — 覆盖 supported_combinations 中所有 output dtype
+- `numerical_tolerance.per_dtype` — 覆盖 supported_combinations 中所有 output dtype。生成器或示例填入的是初始默认值，不构成用户已确认的精度要求；调用方有明确默认策略时，在冻结前以其实际参数替换并记录来源，用户或目标规格已有明确标准时保留。资料仅列误差阈值或基础通过条件不代表排除后续判定，须核对完整标准；DSL 调用方默认使用完整两阶段及独立同精度参考，只有明确要求其他标准才覆盖，不将摘要固化为单阶段。schema 接受 staged_relative 的正值 rtol/max_relative_rtol 与可选 fallback；bitwise_equal 不要求无意义的容差。完整策略的可执行性仍由调用方测试工具校验，不以 schema 通过代替。
+- 生成 spec 时，为所有数值/枚举断言建立“支持域声明表”（写入调用方的 spec 执行记录）：`shape_constraints.symbols.*.range` 的下界/上界分别成行（缺失写“未声明”）、`kind=const` 的 value、`kind=rank` 的无数值声明、`attributes.*` 的数值/枚举与默认值、`outputs.*.shape_bounds`、`dtype_policy.supported_combinations`、`numerical_tolerance.*`、`reduction.fixed_value`、`boundary_conditions`/`extreme_inputs` 的数值阈值、`global_constraints` 的跨字段关系；缺失的界不得补数。
+- 每行标注 `specified`/`derived`/`implicit`/`platform`/`implementation`/`not_applicable`；无来源不得写 `specified`；`platform`/`implementation` 作为限制记录，不得作为需求界。
 
-按需补充（生成器已自动注入按 paradigm 必含的最低 case，stage 6 通过；下面这些是把生成器的占位描述改成项目语境下的真值）：
+按已确认来源补充。生成器只输出范式边界候选注释，不自动声明报错、结果或错误码；骨架的空列表不是完整规格。stage 6 候选提示为 info，--strict 也不将其升级为失败。执行、自检及独立验收统一核对：域内适用边界和明确要求的域外行为必须保留；域外且未规定行为时，在既有执行记录说明不适用，不新增执行义务。适用性未决时先澄清，不通过改为 raises_error 消除提示。工具通过或标签命中不替代语义及来源审查。
 - `boundary_conditions` — 校核 / 补全自动注入的退化 case 描述（详见 cheatsheet §B6）
 - `extreme_inputs` — 校核 / 补全 NaN / Inf / 全零三类
 - `math_semantics.format_variants` — 若算子支持多种数据排布（NCHW/NHWC/NCDHW 等）且计算因格式而异，校核每种格式的 reduction_axes 和 oracle_kwargs
@@ -181,8 +183,8 @@ python3 scripts/validate_spec.py path/to/spec.yaml --stage 1 --stage 2  # 仅跑
 | 2 | category_paradigm_consistency | category↔paradigm 必含映射 + paradigm_groups + paradigm 内部约束 + 白名单 + TensorList/semantic_cases/layout_contract 跨字段约束 |
 | 3 | shape_closure | `outputs[].shape_rule` numpy_expr 求值 + data_dependent 分流 |
 | 4 | dtype_closure | `outputs[].dtype_rule` 推导 vs supported_combinations 交叉验证 |
-| 5 | broadcast_legality | broadcast 语义校验（numpy / none / explicit） |
-| 6 | boundary_min_set | 按 paradigms 检查 boundary/extreme case 最低覆盖 |
+| 5 | broadcast_legality | 独立数据广播契约校验 |
+| 6 | boundary_min_set | 按 paradigms 提示候选边界（info），人工核对适用性 |
 | 7 | tolerance_coverage | per_dtype 容差覆盖输出 dtype + 紧度启发式 |
 | 8 | formula_smoke_eval | formula 小 shape 沙箱 numpy 执行 |
 | 9 | oracle_reachable | 真 import framework + getattr 链 + 占位符校验 |
@@ -224,7 +226,7 @@ ops/ops-spec-gen/
 │   ├── machine_check_kind_registry.yaml  #   boundary/extreme.machine_check.kind
 │   ├── synthesize_pattern_registry.yaml  #   extreme_inputs.synthesize.patterns[].pattern
 │   ├── error_code_enum.yaml              #   raises_error.error_type
-│   ├── boundary_min_cases.yaml           #   各 paradigm 必含的 boundary/extreme case（stage 6 数据源）
+│   ├── boundary_min_cases.yaml           #   各 paradigm 的候选 boundary/extreme case（stage 6 数据源）
 │   ├── framework_oracle_registry.yaml    #   stage 9 已知 framework 列表
 │   ├── tolerance_defaults.yaml           #   per_dtype 默认容差 + stage 7 紧度阈值
 │   ├── chip_registry.yaml                #   芯片白名单
@@ -233,25 +235,24 @@ ops/ops-spec-gen/
 ├── templates/spec.yaml.tmpl              # spec.yaml 起手模板
 ├── scripts/
 │   ├── generate_spec.py                  # 生成器（交互/非交互）
-│   ├── validate_spec.py                  # 校验器主入口（完整 12 stage）
+│   ├── validate_spec.py                  # 校验器主入口（完整 11 stage）
 │   ├── check_registry_schema_sync.py     # registry↔schema 同步检查
 │   ├── dump_rule_ids.py                  # rule_id 全表生成
-│   └── evaluators/                       # numpy 子集 AST 求值器（stage 3-5/8/9/10 实现）
+│   └── evaluators/                       # numpy 子集 AST 求值器（stage 3/4/7/8/9 实现）
 │       ├── _ast_sandbox.py               #   AST 白名单 / dunder 拒绝 / timeout
 │       ├── types.py                      #   Dim / SymbolicShape / DslError
 │       ├── parser.py                     #   parse_shape_literal
-│       ├── shape_eval.py                 #   stage 3 SymbolicShapeEvaluator
+│       ├── shape_eval.py                 #   stage 3 形状求值（含 numpy 广播形状运算）
 │       ├── dtype_eval.py                 #   stage 4 DtypeEvaluator
 │       ├── promote.py                    #   numpy 类型提升表
-│       ├── broadcast.py                  #   numpy / none / explicit 广播模拟
-│       ├── stages.py                     #   stage_3 / stage_4 / stage_5 入口
+│       ├── stages.py                     #   stage_3 / stage_4 入口
 │       ├── formula_eval.py               #   stage_8 numpy 沙箱
 │       ├── oracle_check.py               #   stage_9 真 import + 占位符校验
 │       └── formula_oracle_equiv.py       #   stage_10 formula vs oracle 值等价
 └── tests/                                # 14 个测试文件
     ├── conftest.py
     ├── test_examples.py                  # pytest：所有 examples 必须 PASS
-    ├── test_broadcast.py
+    ├── test_shape_broadcast.py
     ├── test_doc_drift.py
     ├── test_dtype_eval.py
     ├── test_formula_eval.py
@@ -279,7 +280,7 @@ ops/ops-spec-gen/
 | 增减 invariants.kind | `registries/invariant_kind_registry.yaml` + JSON Schema |
 | 增减 machine_check.kind | `registries/machine_check_kind_registry.yaml` + JSON Schema |
 | 增减 synthesize patterns | `registries/synthesize_pattern_registry.yaml` |
-| 增减 paradigm 必含 boundary/extreme case（stage 6 数据） | `registries/boundary_min_cases.yaml` |
+| 增减 paradigm 候选 boundary/extreme case（stage 6 数据） | `registries/boundary_min_cases.yaml` |
 | 调整容差紧度阈值（stage 7 启发式）/ 默认容差 | `registries/tolerance_defaults.yaml` |
 | 扩展 shape_eval / dtype_eval 支持的 numpy API | `scripts/evaluators/shape_eval.py` / `dtype_eval.py` |
 | 调整 numpy 类型提升规则 | `scripts/evaluators/promote.py` |
@@ -325,6 +326,8 @@ pip install torch  # 或 jax / scipy / tensorflow
 
 以下字段以 `spec.yaml` 为唯一真值源，禁止从 `REQUIREMENTS.md` 正文重新推导、覆盖或自行扩展：
 
+其中 dtype、shape、数学语义（`math_semantics.formula`，以及 oracle、invariants、composition）、边界行为和数值容差均属于 L0 契约。下游 skill / agent 必须直接消费 spec.yaml，不得从 REQUIREMENTS.md 重新推导或覆盖数学语义及上述字段；发现缺失、冲突或需变更时，返回 spec 生成与评审流程修订并重新校验后再继续。
+
 | # | 字段 | 说明 | spec 生成 | 测试 |
 |---|------|------|:---------:|:----:|
 | 1 | `op.category` | 算子主分类（26 类单选） | ✓ | |
@@ -338,7 +341,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 | 9 | `outputs[].dtype_rule` / `outputs[].dtype_rule_kind` | 输出 dtype 推导规则 | ✓ | ✓ |
 | 10 | `shape_constraints` | 符号表 + 全局约束（`global_constraints` 为咨询性 notes） | ✓ | |
 | 11 | `dtype_policy` | promotion + supported_combinations | ✓ | ✓ |
-| 12 | `broadcast` | 算子计算的 broadcast 语义（数据复制/扩展） | ✓ | ✓ |
+| 12 | `broadcast` | 计算中的数据广播契约（none / numpy / explicit），不是仅描述 shape 变换 | ✓ | ✓ |
 | 13 | `math_semantics` | formula + oracle + invariants + composition | ✓ | ✓ |
 | 14 | `numerical_tolerance` | per_dtype 容差 | ✓ | ✓ |
 | 15 | `boundary_conditions` | 合法但退化的输入 case | ✓ | ✓ |
@@ -346,6 +349,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 | 17 | `determinism` | 确定性保证 | ✓ | ✓ |
 | 18 | `numerical_stability` | 数值稳定性技术 | ✓ | ✓ |
 | 19 | `inputs[].data_distribution` | 输入数据分布策略（累加类 Reduction/ReductionComposite/Recurrence/AtomicUpdate/Histogram 必须 normal，非累加类不填；stage 2 强校验） | ✓ | ✓ |
+
 
 #### 字段职责分层
 
@@ -373,7 +377,6 @@ pip install torch  # 或 jax / scipy / tensorflow
 ## 9. 已知限制
 
 - stage 3 numpy_expr 求值器暴露的 `np` 命名空间仅含 `broadcast_shapes` / `reduce_shape`；如需更多形状变换语义，需在 `scripts/evaluators/shape_eval.py` 扩展
-- stage 5 v1 仅 2 输入广播；`explicit` rules 仅支持 `trailing + leading` 组合（matmul 形式）
 - stage 6 用关键词子串匹配判 case 是否覆盖；spec 作者用罕见措辞时可能漏匹配
 - stage 8 用 `[2,3]` 作为默认小 shape；`bfloat16` 用 `float32` 模拟
 - stage 9 不真跑 oracle —— 只确认 callable 存在
@@ -386,3 +389,7 @@ pip install torch  # 或 jax / scipy / tensorflow
 | spec 独立评审 | 17 条 SPEC-\* 条款逐项对照 spec ↔ REQUIREMENTS，输出评审报告 |
 
 详见 [references/usage-scenarios.md](references/usage-scenarios.md)。
+
+### 支持域声明与排除项
+
+普通生成模式只保留明确声明的 unsupported_dtypes / unsupported_layouts，不从未列入支持集推导排除项。只有调用方明确确认支持清单完整时，才使用 `--complete-support-contract`，按固定 support_universe 生成完整补集并接受完整分区校验。

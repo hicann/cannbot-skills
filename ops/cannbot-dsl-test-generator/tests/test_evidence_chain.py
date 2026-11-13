@@ -26,7 +26,7 @@ from test_skills import fixture, run_script, write_rows
 
 ASSETS = Path(__file__).resolve().parents[1] / "assets"
 sys.path.insert(0, str(ASSETS))
-from case_contract import validate_assertions
+from case_contract import validate_assertions, validate_checks, check_inputs
 import case_cache
 import case_contract
 
@@ -56,6 +56,118 @@ class EvidenceChainTests(unittest.TestCase):
             text=True,
             capture_output=True,
         )
+
+    def test_multiple_of_and_membership_share_prepare_and_runtime_semantics(self):
+        for relation, value in (("multiple_of", 4), ("in", [4, 8])):
+            with self.subTest(relation=relation), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                rows, tdd, path, native = self.setup_case(work)
+                check = {"input": "x", "metric": "dimension", "axis": 1,
+                         "relation": relation, "value": value}
+                native["unit"]["verification_obligations"][0]["input_conditions"] = [check]
+                path.write_text(json.dumps(native))
+                tdd["assertions_json"] = json.dumps(
+                    [{"kind": "input_conditions", "checks": [check]}])
+                write_rows(work, rows)
+                prepared = run_script("build_tdd_cases.py", work)
+                self.assertEqual(prepared.returncode, 0, prepared.stderr)
+                passed = self.run_target(work, "def run(x, y):\n    return x+y\n")
+                self.assertEqual(passed.returncode, 0, passed.stderr)
+                recipes = {name: {"shape": [2, 10], "dtype": "float32", "fill": "zeros"}
+                           for name in ("x", "y")}
+                tdd["inputs_json"] = json.dumps(recipes)
+                write_rows(work, rows)
+                rejected = run_script("build_tdd_cases.py", work)
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertIn("input condition not triggered", rejected.stderr)
+                runtime = self.run_target(
+                    work, 'def run(x, y):\n    raise RuntimeError("target must not run")\n')
+                self.assertNotEqual(runtime.returncode, 0)
+                result = (work / "operators/add/test/testcase_output/tdd/"
+                          "verify_result_tdd.csv").read_text()
+                self.assertIn("input condition not triggered", result)
+                self.assertNotIn("target must not run", result)
+
+    def test_predicate_configuration_rejects_invalid_divisors_and_lists(self):
+        invalid = [("multiple_of", v) for v in (0, -1, True, 4.0, None, "4", [4])]
+        invalid += [("in", v) for v in
+                    ([], 8, "8", None, [True], ["8"], [[8]], [None],
+                     [float("nan")], [float("inf")])]
+        invalid += [("not_in", [8]), (["in"], [8])]
+        for relation, value in invalid:
+            with self.subTest(relation=relation, value=value):
+                with self.assertRaises(ValueError):
+                    validate_checks([{"input": "x", "metric": "numel",
+                                      "relation": relation, "value": value}])
+        validate_checks([{"input": "x", "metric": "numel",
+                          "relation": "in", "value": [0, 8, 8.0]}])
+
+    def test_new_predicates_preserve_zero_counts_and_large_integer_divisors(self):
+        import torch
+        for metric in ("dimension", "numel", "count", "unique_count"):
+            for relation, value in (("multiple_of", 2 ** 2000), ("in", [0, 8])):
+                with self.subTest(metric=metric, relation=relation):
+                    check = {"input": "x", "metric": metric,
+                             "relation": relation, "value": value}
+                    if metric == "dimension":
+                        check["axis"] = 1
+                    records = check_inputs({"x": torch.empty(2, 0)}, [check])
+                    self.assertEqual(records[0]["observed"], [0])
+        for metric in ("count", "unique_count"):
+            records = check_inputs({"x": torch.tensor([[1, 1, 2], [1, 2, 2]])},
+                                   [{"input": "x", "metric": metric, "axis": 1,
+                                     "relation": "in", "value": [2, 3]}])
+            self.assertEqual(len(records[0]["observed"]), 2)
+
+    def test_unit_preflight_needs_only_units_and_uses_the_formal_validator(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            _, _, _, native = self.setup_case(work)
+            isolated = work / "isolated"
+            units = isolated / "units"
+            units.mkdir(parents=True)
+            checks = [{"input": "x", "metric": "dimension", "axis": 1,
+                       "relation": "multiple_of", "value": 4},
+                      {"input": "x", "metric": "dimension", "axis": 1,
+                       "relation": "in", "value": [4, 8]}]
+            native["unit"]["verification_obligations"][0]["input_conditions"] = checks
+            path = units / "U01.yaml"
+            path.write_text(json.dumps(native))
+            command = [sys.executable, str(ASSETS.parent / "scripts/build_tdd_cases.py"),
+                       "--check-unit-contracts", "--units-dir", str(units)]
+            snapshot = path.read_bytes()
+            passed = subprocess.run(command, cwd=isolated, text=True, capture_output=True)
+            self.assertEqual(passed.returncode, 0, passed.stderr)
+            self.assertEqual(path.read_bytes(), snapshot)
+            self.assertEqual(sorted(p.relative_to(isolated).as_posix()
+                                    for p in isolated.rglob("*")),
+                             ["units", "units/U01.yaml"])
+            for relation, value in (("multiple_of", 0), ("in", []), ("not_in", [8])):
+                with self.subTest(relation=relation):
+                    checks[0].update(relation=relation, value=value)
+                    path.write_text(json.dumps(native))
+                    preflight = subprocess.run(command, cwd=isolated, text=True,
+                                               capture_output=True)
+                    formal_native = json.loads(path.read_text())
+                    (work / "design/units/U01.yaml").write_text(json.dumps(formal_native))
+                    formal = run_script("build_tdd_cases.py", work)
+                    self.assertNotEqual(preflight.returncode, 0)
+                    self.assertNotEqual(formal.returncode, 0)
+                    self.assertIn("U01/VO-U01", preflight.stderr)
+                    self.assertIn("U01/VO-U01", formal.stderr)
+
+    def test_new_predicate_must_be_bound_not_just_satisfied_by_shape(self):
+        for relation, value in (("multiple_of", 4), ("in", [4, 8])):
+            with self.subTest(relation=relation), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                _, _, path, native = self.setup_case(work)
+                native["unit"]["verification_obligations"][0]["input_conditions"] = [
+                    {"input": "x", "metric": "dimension", "axis": 1,
+                     "relation": relation, "value": value}]
+                path.write_text(json.dumps(native))
+                failed = run_script("build_tdd_cases.py", work)
+                self.assertNotEqual(failed.returncode, 0)
+                self.assertIn("input conditions not bound", failed.stderr)
 
     def test_effective_count_is_materialized_not_shape(self):
         with tempfile.TemporaryDirectory() as tmp:

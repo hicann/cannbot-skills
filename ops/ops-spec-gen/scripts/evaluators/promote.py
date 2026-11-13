@@ -35,7 +35,7 @@ from .types import DslError
 
 
 _FLOAT_FP_RANK = {
-    # 窄浮点（rank 0）：FP4 / FP8 系列。numpy 都没有原生类型，stage 8 走 fp16 stand-in。
+    # 窄浮点（rank 0）：FP4 / FP8 系列。numpy 都没有原生类型，stage 7 走 fp16 stand-in。
     # 排名上比 fp16/bf16 窄一档；任意 narrow + 非 narrow → 至少升 fp16；
     # narrow1 + narrow2（不同名）→ fp16（混合窄浮点不安全，统一升 fp16）。
     "float4_e2m1":    0,    # 4-bit float (1 符号 + 2 指数 + 1 尾数)；Atlas 950 极致量化

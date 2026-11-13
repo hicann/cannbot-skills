@@ -98,7 +98,7 @@
         "eval_mode": "text"
       },
       "prompt": "注册调用模式的自定义算子工程是什么样的目录结构？算子是怎么通过 aclnn 接入的？",
-      "expected_output": "回复应覆盖以下要点：\n1. 标准算子仓结构 operators/{op}/：op_host（算子定义/infershape/REG_OP 图模式注册）与 op_kernel（Kernel 实现）分离，含 CMakeLists.txt 与 tests（ut/st）\n2. 通过 aclnn 两段式接口（GetWorkspaceSize + Execute）接入\n3. 与 Kernel 直调工程（单文件独立工程）的结构差异",
+      "expected_output": "回复应覆盖以下要点：\n1. 标准算子仓结构 operators/{op}/：op_host（算子定义/infershape/tiling）、op_kernel（Kernel 实现）与 op_graph（REG_OP 图模式注册，按目标仓模板）职责分离，含 CMakeLists.txt 与 tests（ut/st）\n2. 通过 aclnn 两段式接口（GetWorkspaceSize + Execute）接入\n3. 与 Kernel 直调工程（单文件独立工程）的结构差异",
       "files": [],
       "expectations": []
     },

@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 10 — formula-oracle value equivalence.
+"""Stage 9 — formula-oracle value equivalence.
 
 When both the spec formula (numpy_expr) and the reference oracle (reachable)
 are available, run both on the same inputs — including special values (NaN,
@@ -72,7 +72,7 @@ def _gen_special_tensors(np, spec: dict, in_dtypes: dict, seed: int) -> list[dic
     """
     input_names = [inp.get("name") for inp in (spec.get("inputs") or [])]
 
-    # Build the base tensors (same as stage 8)
+    # Build the base tensors (same as stage 7)
     base: dict[str, Any] = {}
     for inp in spec.get("inputs") or []:
         name = inp.get("name")
@@ -99,7 +99,7 @@ def _gen_special_tensors(np, spec: dict, in_dtypes: dict, seed: int) -> list[dic
     if first_arr.size == 0:
         return [normal_set]
 
-    flat = first_arr.flatten()
+    _flat = first_arr.flatten()
     pos = 0  # inject at first element
 
     test_sets: list[dict[str, Any]] = [normal_set]
@@ -154,7 +154,7 @@ def _gen_special_tensors(np, spec: dict, in_dtypes: dict, seed: int) -> list[dic
 def _resolve_kwargs(spec: dict, oracle: dict, input_tensors: dict[str, Any]) -> dict[str, Any]:
     """Resolve oracle kwargs placeholders to actual values."""
     attr_names = {a.get("name"): a for a in (spec.get("attributes") or [])}
-    input_names = {i.get("name") for i in (spec.get("inputs") or [])}
+    _input_names = {i.get("name") for i in (spec.get("inputs") or [])}
 
     kwargs: dict[str, Any] = {}
     for kw_name, kw_val in (oracle.get("kwargs") or {}).items():
@@ -392,8 +392,8 @@ def _compare_outputs(formula_out: dict[str, Any], oracle_out, np, output_name: s
     return findings
 
 
-def stage_10(spec: dict) -> tuple[str, list[dict]]:
-    """Stage 10 — formula-oracle value equivalence on special-value inputs.
+def stage_9(spec: dict) -> tuple[str, list[dict]]:
+    """Stage 9 — formula-oracle value equivalence on special-value inputs.
 
     Runs both the spec formula and the reference oracle on the same inputs
     (including NaN, inf, large values, signed zeros +0/-0) and compares
@@ -417,7 +417,7 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_oracle_equiv.skipped_non_numpy",
             "field_path": "math_semantics.formula_kind",
-            "message": f"formula_kind={formula_kind!r}，stage 10 仅在 numpy_expr 下运行",
+            "message": f"formula_kind={formula_kind!r}，stage 9 仅在 numpy_expr 下运行",
             "suggested_fix": None,
         }]
 
@@ -428,7 +428,7 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_oracle_equiv.absent",
             "field_path": "math_semantics.reference_oracle.absent",
-            "message": "oracle 显式声明缺失，stage 10 跳过",
+            "message": "oracle 显式声明缺失，stage 9 跳过",
             "suggested_fix": None,
         }]
 
@@ -438,7 +438,7 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_oracle_equiv.composition_not_supported",
             "field_path": "math_semantics.reference_oracle.composition",
-            "message": "oracle 使用 composition (DAG) 模式，stage 10 值等价校验暂不支持",
+            "message": "oracle 使用 composition (DAG) 模式，stage 9 值等价校验暂不支持",
             "suggested_fix": None,
         }]
 
@@ -449,7 +449,7 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_oracle_equiv.numpy_not_installed",
             "field_path": "<env>",
-            "message": "numpy 未安装；stage 10 跳过",
+            "message": "numpy 未安装；stage 9 跳过",
             "suggested_fix": "pip install numpy",
         }]
 
@@ -460,11 +460,11 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_oracle_equiv.incomplete_oracle",
             "field_path": "math_semantics.reference_oracle",
-            "message": "oracle framework 或 api 缺失，stage 10 跳过",
+            "message": "oracle framework 或 api 缺失，stage 9 跳过",
             "suggested_fix": None,
         }]
 
-    # Resolve oracle API (reuse stage 9 logic)
+    # Resolve oracle API (reuse stage 8 logic)
     try:
         api_ok, oracle_api = _resolve_api_callable(
             framework, api_path,
@@ -479,29 +479,29 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "rule_id": "formula_oracle_equiv.framework_import_error",
             "field_path": "math_semantics.reference_oracle.framework",
             "message": (
-                f"framework={framework!r} 导入失败（{type(ex).__name__}）；stage 10 跳过。"
+                f"framework={framework!r} 导入失败（{type(ex).__name__}）；stage 9 跳过。"
                 f"如需值等价校验，请修复框架安装或设置 TORCH_DEVICE_BACKEND_AUTOLOAD=0"
             ),
             "suggested_fix": f"修复 {framework} 安装或换用 numpy oracle",
         })
         return "SKIP", findings
     if not api_ok:
-        # If framework not installed → SKIP; if API not found → SKIP (stage 9 already reports)
+        # If framework not installed → SKIP; if API not found → SKIP (stage 8 already reports)
         if any(f["rule_id"] == "oracle_reachable.framework_not_installed" for f in findings):
             findings.append({
                 "severity": "info",
                 "rule_id": "formula_oracle_equiv.framework_not_installed",
                 "field_path": "math_semantics.reference_oracle.framework",
-                "message": f"framework={framework!r} 未安装；stage 10 跳过",
+                "message": f"framework={framework!r} 未安装；stage 9 跳过",
                 "suggested_fix": f"pip install {framework}",
             })
             return "SKIP", findings
-        # API errors already reported by stage 9; don't duplicate
+        # API errors already reported by stage 8; don't duplicate
         return "SKIP", [{
             "severity": "info",
             "rule_id": "formula_oracle_equiv.api_unreachable",
             "field_path": "math_semantics.reference_oracle.api",
-            "message": "oracle API 不可达，stage 10 跳过（stage 9 已报错）",
+            "message": "oracle API 不可达，stage 9 跳过（stage 8 已报错）",
             "suggested_fix": None,
         }]
 
@@ -513,7 +513,7 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_oracle_equiv.no_combination",
             "field_path": "dtype_policy.supported_combinations",
-            "message": "缺 supported_combinations，stage 10 跳过",
+            "message": "缺 supported_combinations，stage 9 跳过",
             "suggested_fix": None,
         }]
     in_dtypes = combos[0].get("inputs") or {}
@@ -525,7 +525,7 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_oracle_equiv.no_test_inputs",
             "field_path": "<internal>",
-            "message": "无法生成测试输入，stage 10 跳过",
+            "message": "无法生成测试输入，stage 9 跳过",
             "suggested_fix": None,
         }]
 
@@ -538,7 +538,7 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_oracle_equiv.framework_not_installed",
             "field_path": "math_semantics.reference_oracle.framework",
-            "message": f"framework={framework!r} 未安装或导入失败；stage 10 跳过",
+            "message": f"framework={framework!r} 未安装或导入失败；stage 9 跳过",
             "suggested_fix": f"pip install {framework} 或修复框架安装",
         }]
 
@@ -580,7 +580,7 @@ def stage_10(spec: dict) -> tuple[str, list[dict]]:
             "field_path": "math_semantics.reference_oracle",
             "message": (
                 "无法在测试输入上成功调用 oracle API"
-                "（可能因 API 签名差异）；stage 10 值等价校验跳过"
+                "（可能因 API 签名差异）；stage 9 值等价校验跳过"
             ),
             "suggested_fix": (
                 "检查 oracle.kwargs 中的占位符是否与 API 签名匹配，"

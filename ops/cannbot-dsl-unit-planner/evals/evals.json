@@ -14,7 +14,7 @@
         "eval_mode": "file_based"
       },
       "prompt": "使用 cannbot-dsl-unit-planner。规格：一维同形状 float32 张量加法 z=x+y，长度 1..512，形状不符应拒绝，独立 CPU Golden 可提供数值参考。设计资料：按 128 元素块处理，先支持长度 128 的连续输入，再覆盖尾块和多块；公开入口需完成校验、真实计算与写回，不允许占位输出；目标实现文件为 operators/add/add.py，其他能力暂无已确认需求。请在 units/ 按本 skill 的 Unit 格式产出有依据的 U*.yaml，不实现算子、不编写测试 Case。",
-      "expected_output": "首个 minimal_operator 应在明确合法子域内贯通入口、校验、真实计算与写回，带独立数值检验义务；后继按尾块、多块等故障面递增，保留前序行为，能力依赖与实际写集分开记录。不能横向拆成搬入/计算/写回，不预分配 Case ID；单一 unit 对象、ID/文件名及 provides/requires/义务引用一致。",
+      "expected_output": "首个 minimal_operator 应在明确合法子域内贯通入口、校验、真实计算与写回，带独立数值检验义务；后继按尾块、多块等故障面递增，保留前序行为，能力依赖与实际写集分开记录。不能横向拆成搬入/计算/写回，不预分配 Case ID；单一 unit 对象、ID/文件名及 provides/requires/义务引用一致。 最小输入按对应设计路径理解：首闭环可从设计明确的对齐子域起步，尾块与多块分别给出自身最小场景，不能要求所有 Unit 共用同一数值；形状拒绝承诺用既有黑盒入口和 review_evidence 承接，非异常数值义务仍真实、非空。",
       "files": [],
       "expectations": [
         {
@@ -56,6 +56,38 @@
       },
       "prompt": "使用 cannbot-dsl-unit-planner 处理已有规划：U02 首次引入跨核生产/消费同步，设计将该结构列为强制承诺；最小组合探针已失败，但普通数值用例偶然通过，U03 需要消费 U02 提供的能力。当前有人建议在 YAML 写一句实现期再定就放行。请说明规划应该如何修订，不运行探针、不修改实现。",
       "expected_output": "不能把偶然数值通过当作结构或补证成功，不能放行 U03 消费未成立的 provides。U02 需明确 feasibility_checks、适用输入、可区分成功证据、obligation_ids 或 review_evidence 关联及失败返回点；失败应返回设计修订或调整相关闭环，不能把强制同步承诺降为可选性能优化。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "阶段最小输入不等于所有 Unit 共用全局样例",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 600,
+        "eval_mode": "text"
+      },
+      "prompt": "使用 cannbot-dsl-unit-planner，只审查规划，不生成文件。规格要求连续 float32 向量加法，长度 1..512。已确认设计允许先交付长度 128 的对齐数值闭环，再由尾块能力覆盖长度 1..127、多块能力覆盖长度 129..512，后继保留前序行为。有人要求每个 Unit 的 domain_constraints 都必须同时包含长度 1 和 128，否则称最小输入不合法。请按现有格式判断各阶段最小场景、依据和覆盖责任，并说明设计未授权如此分阶段时如何处理。",
+      "expected_output": "拒绝将同一全局数值机械套入所有 Unit；按已确认设计起始路径核对 128，对尾块和多块分别核对适用条件下的最小场景及依据。完整规格支持域由 Unit 集合承接，阶段域不新增公开限制，前序行为须保留并按影响回归。不得为规避失败改选形状；设计未授权或来源不足时报告缺口，不虚构允许演进。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "负向拒绝保留责任但不伪造异常 TDD",
+      "config": {
+        "max_tokens": 100000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "timeout": 600,
+        "eval_mode": "text"
+      },
+      "prompt": "使用 cannbot-dsl-unit-planner，只说明契约安排，不执行测试。规格明确同形状张量加法，形状不符须抛指定错误。当前测试契约的 TDD expected 只有 match_golden/assertions，错误码用黑盒 raises_error；调用方实现节点只运行 TDD，黑盒由精度阶段执行。设计安排当前 Unit 审查 Host 校验代码，正式异常实跑在精度阶段。如何保留拒绝承诺、安排证据并避免未覆盖义务？再判断：若设计改为首次发布前必须实际执行拒绝用例，而调用方权限不变，应如何处理？",
+      "expected_output": "正常计算义务仍有真实非空 TDD。拒绝输入不因不在正常合法域而被判不可达，但错误码不写成不可执行的 TDD verification_obligations；沿规格黑盒入口取证，在现有 review_evidence 写明来源、入口、责任、时机及真实目标版本结果，源码审查不冒充实跑，不能包装异常成输出断言或仅挂 ID 宣称通过。首次发布前实跑与权限冲突时报告具体能力/时机缺口，不能擅自后移、扩权限或编造结果；不改 schema/runner、不新增设备实验。",
       "files": [],
       "expectations": []
     }

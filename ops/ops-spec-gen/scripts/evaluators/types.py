@@ -9,7 +9,9 @@
 """Data types for shape / dtype DSL.
 
 Design:
-  * `Dim` — a single dimension. Three kinds:
+  * `Dim` — a single dimension. Literal dimensions retain their three kinds;
+    shape-rule arithmetic also carries an immutable expression:
+      - 'expr': multiplication / floor division without invented constant values
       - 'const':  fixed integer (e.g. literal `2`, `4`)
       - 'symbol': named explicit dim (e.g. `M`, `K`, `N`); requires registration in
                   spec.yaml's shape_constraints.symbols
@@ -32,34 +34,78 @@ from typing import Optional
 
 @dataclass(frozen=True)
 class Dim:
-    kind: str                # 'const' | 'symbol' | 'folded'
+    kind: str                # 'const' | 'symbol' | 'folded' | 'expr'
     name: Optional[str] = None
     value: Optional[int] = None
+    expression: Optional[tuple[str, "Dim", int]] = None
 
     def __post_init__(self):
         if self.kind == "const":
             assert self.value is not None and self.name is None
         elif self.kind in ("symbol", "folded"):
             assert self.name is not None and self.value is None
+        elif self.kind == "expr":
+            assert self.name is None and self.value is None and self.expression is not None
+            op, left, right = self.expression
+            assert op in ("*", "//") and isinstance(left, Dim) and type(right) is int
+            assert left.kind != "folded" and right >= (1 if op == "//" else 0)
         else:
-            raise ValueError(f"Dim.kind must be const/symbol/folded, got {self.kind!r}")
+            raise ValueError(f"Dim.kind must be const/symbol/folded/expr, got {self.kind!r}")
+
+    def _integer_operation(self, op, other):
+        if type(other) is not int:
+            return NotImplemented
+        if self.kind == "folded":
+            raise DslError("folded_dim_misuse", "不能对未知数量的折叠维做整数运算")
+        if other < (1 if op == "//" else 0):
+            raise DslError("incompatible_dims", "维度乘数须非负，整除除数须为正整数")
+        if self.kind == "const":
+            value = self.value * other if op == "*" else self.value // other
+            return Dim(kind="const", value=value)
+        if other == 1:
+            return self
+        if op == "*" and other == 0:
+            return Dim(kind="const", value=0)
+        return Dim(kind="expr", expression=(op, self, other))
 
     def __mul__(self, other):
-        if isinstance(other, bool) or not isinstance(other, int):
-            return NotImplemented
-        if other < 0:
-            raise ValueError(f"Cannot multiply Dim by negative integer: {other}")
-        if self.kind == "const":
-            return Dim(kind="const", value=self.value * other)
-        # symbol * int → const (the resulting dim value is symbolic × known int)
-        return Dim(kind="const", value=other)  # placeholder; true value unknown at spec time
+        return self._integer_operation("*", other)
 
     def __rmul__(self, other):
         return self.__mul__(other)
 
+    def __floordiv__(self, other):
+        return self._integer_operation("//", other)
+
+    @property
+    def symbols(self) -> frozenset[str]:
+        if self.kind == "symbol":
+            return frozenset([self.name])
+        if self.kind == "expr":
+            return self.expression[1].symbols
+        return frozenset()
+
+    def resolve(self, values: dict[str, int]) -> int:
+        """Evaluate preserved arithmetic only after the caller binds symbols."""
+        if self.kind == "const":
+            return self.value
+        if self.kind == "symbol":
+            value = values[self.name]
+            if type(value) is not int or value < 0:
+                raise DslError("incompatible_dims", "符号维度须绑定非负整数")
+            return value
+        if self.kind == "expr":
+            op, left, right = self.expression
+            value = left.resolve(values)
+            return value * right if op == "*" else value // right
+        raise DslError("folded_dim_misuse", "未知数量的折叠维不能绑定成单一维度")
+
     def __str__(self) -> str:
         if self.kind == "const":
             return str(self.value)
+        if self.kind == "expr":
+            op, left, right = self.expression
+            return f"({left} {op} {right})"
         if self.kind == "folded":
             return f"...{self.name}"
         return self.name  # type: ignore[return-value]
@@ -118,6 +164,7 @@ class BroadcastTrace:
 
     def add_note(self, msg: str) -> None:
         self.notes.append(msg)
+
 
 
 class DslError(Exception):

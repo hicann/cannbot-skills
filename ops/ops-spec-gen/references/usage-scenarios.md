@@ -97,7 +97,7 @@ python3 ops/ops-spec-gen/scripts/generate_spec.py \
 - `math_semantics.reference_oracle` — 单 callable api，或填 absent=true + governance 签字
 - `math_semantics.invariants` — **≥1 条值级、formula 无关**的语义不变量（保范/单位元/对称/代数恒等/极限退化，源自 REQUIREMENTS 数学；**非** shape 结构断言、**非** formula 自反重述）。**SPEC-ORACLE-1 硬性要求**，`reference_oracle.absent=true` 时强制
 - `dtype_policy.supported_combinations` — 显式枚举 (input dtypes) → output dtypes
-- `numerical_tolerance.per_dtype` — 覆盖输出 dtype（默认值见 `registries/tolerance_defaults.yaml`）
+- `numerical_tolerance.per_dtype` — 覆盖输出 dtype（生成器初始默认值见 `registries/tolerance_defaults.yaml`，不代表已确认标准；冻结前承接调用方策略，保留明确要求）
 - **`op.platform_constraints.supported_chips`** — 来自 REQUIREMENTS §2，与 `registries/chip_registry.yaml` 对齐
 - **`op.paradigm_groups[].switch` / `when`** — 当使用 `--paradigm-groups combination` 时，需手填每组的 `switch`（属性名）和 `when`（属性值），将属性值映射到对应的范式子集
 - _v1 暂缓_：`interface_binding` / `performance_budget` / `performance_baseline` 尚未纳入 schema（顶层 `additionalProperties: false`），不要写入；待 schema 扩展后启用
@@ -128,7 +128,7 @@ outputs:
       y0.shape = list(x.shape); y0.shape[dim] = split_size[0]
 ```
 
-- `output_count_determined_by: attribute` 会**豁免** `data_dependent_shape: true` 强制要求，以及 VariableOutput 默认必含的 nonzero 类 boundary case（empty_output / full_output / normal_sparse）——这些是为"数据决定输出个数"设计的，不适用于属性决定。
+- `output_count_determined_by: attribute` 会**豁免** `data_dependent_shape: true` 强制要求，以及 VariableOutput 默认提示的 nonzero 类 boundary case（empty_output / full_output / normal_sparse）——这些是为"数据决定输出个数"设计的，不适用于属性决定。
 - **list 属性**（如 `split_size: list[int64]`）在 `boundary_conditions` / `extreme_inputs` 的 synthesize 里书写时，加引号或不加均可：`attr.split_size: "[2,2]"` 或 `attr.split_size: [2,2]`（框架会按字面量解析注入 formula/shape_rule 沙箱，仅采纳 list/tuple，不会误转字符串属性）。
 - 完整范例见 `examples/split/spec.yaml`。
 
@@ -242,7 +242,7 @@ agent 独立评审无法判但必须由人 review 的项：
    → 来自 ops-precision-standard 默认；是否需要按业务收紧？
 
 ✓ **boundary case 业务覆盖**：含 reduce 轴=1 / rank=0 / 空 Tensor / fp16 上溢边界 共 4 条
-   → 自动覆盖 Reduction + NumericalStable 范式必含 case；业务关键路径请人工确认
+   → 输出 Reduction + NumericalStable 候选注释；按来源确认适用性并填写正式条目
 
 ⚠ **范式选择正确性**：spec.paradigms=[Reduction, FusedComposite]
    → 人工确认：是否存在某些属性值使算子退化为完全独立的计算模式（如 reduction=none→逐元素）？

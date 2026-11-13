@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 10 formula_oracle_equiv 单测。
+"""Stage 9 formula_oracle_equiv 单测。
 
 覆盖：
   * SKIP 路径：formula_kind 非 numpy_expr / oracle absent / composition 模式 / framework 未装
@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from evaluators.formula_oracle_equiv import stage_10
+from evaluators.formula_oracle_equiv import stage_9
 
 
 def _spec(
@@ -63,16 +63,16 @@ def _spec(
     }
 
 
-class TestStage10Skip:
+class TestStage9Skip:
     def test_skip_non_numpy_formula_kind(self):
         s = _spec(formula_kind="textual_only")
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "SKIP"
         assert any("skipped_non_numpy" in f["rule_id"] for f in findings)
 
     def test_skip_oracle_absent(self):
         s = _spec(absent=True)
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "SKIP"
         assert any("absent" in f["rule_id"] for f in findings)
 
@@ -83,18 +83,18 @@ class TestStage10Skip:
             ],
             output_id="n",
         )
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "SKIP"
         assert any("composition_not_supported" in f["rule_id"] for f in findings)
 
     def test_skip_framework_not_installed(self):
         s = _spec(framework="nonexistent_framework", api="nonexistent_framework.add")
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "SKIP"
         assert any("framework_not_installed" in f["rule_id"] or "api_unreachable" in f["rule_id"] for f in findings)
 
 
-class TestStage10Pass:
+class TestStage9Pass:
     def test_numpy_exp_equivalent(self):
         """formula y = np.exp(x) should match numpy.exp(x)."""
         s = _spec(
@@ -102,7 +102,7 @@ class TestStage10Pass:
             framework="numpy",
             api="numpy.exp",
         )
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "PASS", findings
 
     def test_numpy_square_equivalent(self):
@@ -113,7 +113,7 @@ class TestStage10Pass:
             framework="numpy",
             api="numpy.square",
         )
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "PASS", findings
 
     def test_numpy_negative_equivalent(self):
@@ -123,7 +123,7 @@ class TestStage10Pass:
             framework="numpy",
             api="numpy.negative",
         )
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "PASS", findings
 
     def test_zero_sign_no_false_positive_on_neg(self):
@@ -137,12 +137,12 @@ class TestStage10Pass:
             framework="numpy",
             api="numpy.negative",
         )
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "PASS", findings
         assert not any("zero_sign_divergence" in f["rule_id"] for f in findings)
 
 
-class TestStage10Fail:
+class TestStage9Fail:
     def test_value_divergence_detected(self):
         """Formula computes exp(x) but oracle computes sin(x) → value divergence on normal inputs."""
         s = _spec(
@@ -150,7 +150,7 @@ class TestStage10Fail:
             framework="numpy",
             api="numpy.sin",
         )
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "FAIL"
         assert any(
             "value_divergence" in f["rule_id"]
@@ -169,7 +169,7 @@ class TestStage10Fail:
           textbook: beta*inf + (1-beta)*grad = inf  (no NaN)
           incremental: inf + (1-beta)*(grad - inf) = inf + (1-beta)*(-inf) = inf + (-inf) = NaN
 
-        This test verifies stage 10 catches the NaN pattern difference.
+        This test verifies stage 9 catches the NaN pattern difference.
         """
         # We need a 2-input operator: m and grad
         spec = {
@@ -203,7 +203,7 @@ class TestStage10Fail:
             "test_matrix": {"random": {"seed": 42}},
         }
         # composition mode → SKIP currently
-        status, findings = stage_10(spec)
+        status, findings = stage_9(spec)
         assert status == "SKIP"
         assert any("composition_not_supported" in f["rule_id"] for f in findings)
 
@@ -218,7 +218,7 @@ class TestStage10Fail:
             framework="numpy",
             api="numpy.negative",
         )
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         # On inf input: formula → NaN, oracle → -inf → NaN pattern divergence
         # On normal input: formula → 0, oracle → -x → value divergence
         assert status == "FAIL"
@@ -234,7 +234,7 @@ class TestStage10Fail:
         oracle:  numpy.negative(x)  (neg(+0) = -0)
 
         These agree on every finite non-zero value, NaN and inf patterns, but
-        diverge on the sign of zero. Stage 10 must catch this via the
+        diverge on the sign of zero. Stage 9 must catch this via the
         zero_sign_divergence rule when fed the pos_zero / neg_zero inputs.
         """
         s = _spec(
@@ -242,7 +242,7 @@ class TestStage10Fail:
             framework="numpy",
             api="numpy.negative",
         )
-        status, findings = stage_10(s)
+        status, findings = stage_9(s)
         assert status == "FAIL"
         assert any("zero_sign_divergence" in f["rule_id"] for f in findings), findings
 
@@ -250,7 +250,7 @@ class TestStage10Fail:
 def test_gen_special_tensors_empty_shape_returns_labelled_sets():
     """空输入（first_arr.size==0）早退路径须返回 _label-keyed 结构（PR review #5 回归锁）。
 
-    此前返回 [{"normal": dict(base)}]——结构与正常路径不一致，stage10 formula 沙箱拿到的是名为
+    此前返回 [{"normal": dict(base)}]——结构与正常路径不一致，stage9 formula 沙箱拿到的是名为
     "normal" 的变量（值=dict）而非输入张量 x，导致 formula 因缺输入而失败。
     """
     import numpy as np

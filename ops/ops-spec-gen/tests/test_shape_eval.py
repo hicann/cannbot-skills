@@ -218,3 +218,189 @@ class TestSlicing:
         # 切片含起点（key.start is None）→ 保留 folded
         assert out.folded_name == "batch"
         assert out.explicit == []
+
+
+class TestIntegerShapeExpressions:
+    def evaluate(self, rule, shape=None, attrs=None):
+        return evaluate_shape_rule(rule, output_name="y",
+                                   inputs={"x": _sh(shape or ["M", "N"])},
+                                   attr_values=attrs or {})
+
+    @pytest.mark.parametrize("factor", [2, 4, 16, 32])
+    def test_split_and_pack_preserve_symbols(self, factor):
+        out = self.evaluate(f"y.shape = (x.shape[0], x.shape[1] // {factor}, {factor} * x.shape[1])")
+        half, packed = out.explicit[1:]
+        assert half.kind == packed.kind == "expr"
+        assert half.symbols == packed.symbols == frozenset(["N"])
+        for n in [0, 1, factor, factor * 3, factor * 3 + 1, 2048]:
+            assert half.resolve({"N": n}) == n // factor
+            assert packed.resolve({"N": n}) == factor * n
+        assert str(half) != str(packed)
+
+    def test_expressions_are_distinct_and_can_be_composed(self):
+        out = self.evaluate("y.shape = (x.shape[1] // 2, x.shape[1] // 4, (x.shape[1] * 3) // 2)")
+        assert out.explicit[0] != out.explicit[1]
+        assert out.explicit[2].resolve({"N": 7}) == 10
+        assert out.explicit[0].value is None
+
+    def test_constant_and_identity_arithmetic(self):
+        out = self.evaluate("y.shape = (x.shape[1] // 2, 2 * x.shape[1])", [3, 128])
+        assert [d.value for d in out.explicit] == [64, 256]
+        out = self.evaluate("y.shape = (x.shape[1] // 1, x.shape[1] * 1, x.shape[1] * 0)")
+        assert out.explicit[:2] == [_sh(["N"]).explicit[0]] * 2
+        assert out.explicit[2].value == 0
+
+    @pytest.mark.parametrize("operation", ["// 0", "// -1", "// 2.0", "// True", "* -1", "* True"])
+    def test_illegal_integer_arithmetic_is_rejected(self, operation):
+        with pytest.raises(DslError):
+            self.evaluate(f"y.shape = (x.shape[1] {operation},)")
+
+    def test_missing_attributes_do_not_get_invented_defaults(self):
+        with pytest.raises(DslError, match="unresolved_symbol"):
+            self.evaluate("y.shape = (x.shape[1] // factor,)")
+        assert self.evaluate("y.shape = (x.shape[1] // factor,)",
+                             attrs={"factor": 4}).explicit[0].resolve({"N": 128}) == 32
+
+    def test_same_expression_can_be_broadcast_without_losing_it(self):
+        out = self.evaluate("y.shape = np.broadcast_shapes((x.shape[1] // 2,), (x.shape[1] // 2,))")
+        assert out.explicit[0].resolve({"N": 128}) == 64
+
+    def test_folded_dimension_arithmetic_is_not_guessed(self):
+        from evaluators.types import Dim
+        for op in [lambda d: d // 2, lambda d: d * 2]:
+            with pytest.raises(DslError, match="folded_dim_misuse"):
+                op(Dim(kind="folded", name="batch"))
+
+
+class TestConcreteSampleDomain:
+    @staticmethod
+    def _spec():
+        return {
+            "inputs": [{"name": "x", "role": "tensor", "rank_range": [2, 2],
+                        "shape": {"symbolic": ["M", "N"]}}],
+            "shape_constraints": {"symbols": {"M": {"kind": "dim", "range": [2, 8]},
+                                              "N": {"kind": "dim", "range": [16, 128]}}},
+        }
+
+    @staticmethod
+    def _check(spec, shape, kind="matches_oracle", **synth):
+        from evaluators.stages import check_concrete_sample_domain
+        return check_concrete_sample_domain(spec, {
+            "case": "negative-looking name must not bypass normal validation",
+            "synthesize": {"shapes": {"x": shape}, **synth},
+            "machine_check": {"kind": kind},
+        }, "boundary_conditions[0]")
+
+    @pytest.mark.parametrize("shape", [[2, 16], [8, 128], "[4, 32]"])
+    def test_inclusive_bounds(self, shape):
+        assert not self._check(self._spec(), shape)
+
+    @pytest.mark.parametrize("shape", [[1, 16], [9, 16], [2, 8], [2, 129]])
+    def test_outside_range(self, shape):
+        findings = self._check(self._spec(), shape)
+        assert any(f["rule_id"] == "shape_closure.sample_dimension" for f in findings)
+        assert all(f["field_path"] == "boundary_conditions[0].synthesize" for f in findings)
+
+    @pytest.mark.parametrize("shape", [[2], [2, 16, 1]])
+    def test_rank(self, shape):
+        assert any(f["rule_id"] == "shape_closure.sample_rank"
+                   for f in self._check(self._spec(), shape))
+
+    @pytest.mark.parametrize("shape", [[True, 16], [-1, 16], "[M, 16]", [2.0, 16]])
+    def test_malformed_explicit_shape(self, shape):
+        findings = self._check(self._spec(), shape)
+        assert findings[0]["rule_id"] == "shape_closure.sample_shape_unverified"
+        assert findings[0]["severity"] == "info"
+
+    def test_explicit_error_case_not_forced_into_positive_domain(self):
+        assert not self._check(self._spec(), [-1, 16], "raises_error")
+
+    def test_empty_is_legal_only_when_declared(self):
+        spec = self._spec()
+        assert self._check(spec, [0, 16], "returns_empty")
+        spec["shape_constraints"]["symbols"]["M"]["range"][0] = 0
+        assert not self._check(spec, [0, 16], "returns_empty")
+
+    def test_scalar_and_constant_dimensions(self):
+        spec = self._spec()
+        spec["inputs"][0].update(rank_range=[0, 0], shape={"symbolic": []})
+        assert not self._check(spec, [])
+        spec["inputs"][0].update(rank_range=[2, 2], shape={"symbolic": [2, "N"]})
+        assert self._check(spec, [3, 32])
+
+    def test_folded_prefix_and_suffix(self):
+        spec = self._spec()
+        spec["inputs"][0].update(rank_range=[1, 8], shape={"symbolic": ["...batch", "N"]})
+        assert not self._check(spec, [999, 999, 16])
+        assert self._check(spec, [999, 999, 8])
+        assert self._check(spec, [])
+
+    def test_no_guessed_missing_shapes_or_text_constraint_interpretation(self):
+        from evaluators.stages import check_concrete_sample_domain
+        spec = self._spec()
+        spec["shape_constraints"]["global_constraints"] = ["M must be a prime number"]
+        assert not check_concrete_sample_domain(spec, {"synthesize": {}, "machine_check": {}}, "case")
+        assert not self._check(spec, [4, 32])
+
+    def test_layout_variant_and_missing_required_attr(self):
+        spec = self._spec()
+        spec["attributes"] = [{"name": "layout", "default": "MN"}]
+        spec["layout_contract"] = {"variants": [
+            {"when": "attr.layout == 'MN'", "tensors": [{"ref": "input.x", "logical_axes": ["M", "N"]}]},
+            {"when": "attr.layout in ['NM']", "tensors": [{"ref": "input.x", "logical_axes": ["N", "M"]}]},
+        ]}
+        assert not self._check(spec, [2, 16])
+        assert not self._check(spec, [16, 2], attrs={"layout": "NM"})
+        assert self._check(spec, [8, 2], attrs={"layout": "NM"})
+        del spec["attributes"][0]["default"]
+        findings = self._check(spec, [16, 2])
+        assert findings and all(f["severity"] == "info" for f in findings)
+        assert any(f["severity"] == "error" for f in self._check(spec, [2]))
+
+    @pytest.mark.parametrize("guard", ["input.x.dtype == 'float32'", "__import__('os').system('false')",
+                                       "attr.missing == 1", "True and (attr.missing == 1)"])
+    def test_unknown_guards_do_not_select_default_axes(self, guard):
+        spec = self._spec()
+        spec["layout_contract"] = {"variants": [{"when": guard, "tensors": [
+            {"ref": "input.x", "logical_axes": ["N", "M"]}]}]}
+        findings = self._check(spec, [16, 2])
+        assert findings and all(f["severity"] == "info" for f in findings)
+
+    def test_tensor_list_and_missing_optional_inputs_not_ndarrays(self):
+        spec = self._spec()
+        spec["inputs"][0]["role"] = "tensor_list"
+        assert not self._check(spec, [99, 99])
+        spec["inputs"][0].update(role="tensor", optional=True)
+        from evaluators.stages import check_concrete_sample_domain
+        assert not check_concrete_sample_domain(spec, {"synthesize": {}}, "case")
+
+    def test_large_shape_is_metadata_only(self):
+        spec = self._spec()
+        spec["shape_constraints"]["symbols"]["M"]["range"][1] = 10**18
+        assert not self._check(spec, [10**18, 32])
+
+    def test_rejected_boundary_not_run_as_formula_shape_oracle(self):
+        from evaluators.stages import _iter_concrete_shape_cases
+        spec = self._spec()
+        spec["boundary_conditions"] = [{"synthesize": {"x.shape": "[2, 8]"},
+                                        "machine_check": {"kind": "matches_oracle"}}]
+        assert list(_iter_concrete_shape_cases(spec)) == []
+
+    def test_rejected_extreme_not_allocated(self, monkeypatch):
+        from evaluators import extreme_inputs_check as ext
+
+        def no_allocation(*args):
+            raise AssertionError("invalid sample must not allocate")
+        monkeypatch.setattr(ext, "_synthesize_inputs", no_allocation)
+        checked, findings = ext._run_entry_check({"spec": self._spec()}, {
+            "synthesize": {"shapes": {"x": [2, 8]}}, "machine_check": {"kind": "produces_nan"},
+        }, 0, 0)
+        assert not checked
+        assert any(f["rule_id"] == "shape_closure.sample_dimension" for f in findings)
+
+    def test_variable_rank_does_not_invent_axis_mapping(self):
+        spec = self._spec()
+        spec["inputs"][0]["rank_range"] = [1, 4]
+        findings = self._check(spec, [3])
+        assert findings and all(f["severity"] == "info" for f in findings)
+        assert self._check(spec, [1, 16])[0]["severity"] == "error"

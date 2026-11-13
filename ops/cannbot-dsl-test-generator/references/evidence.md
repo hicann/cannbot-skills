@@ -1,12 +1,20 @@
 # TDD 输入、触发条件、设计证据与调用生命周期
 
-TDD 需要有效工作量、结构关系或连续调用时阅读本文件。CSV 列不变；扩展只写入 `assertions_json`。脚本校验可执行契约，设计语义和采集来源须另行核对。
+TDD 选例及核对有效工作量、结构关系或连续调用时阅读本文件。CSV 列不变；扩展只写入 `assertions_json`。脚本校验可执行契约，设计语义和采集来源须另行核对。
 
 ## 调用方提供的检验义务
 
 每份 `U*.yaml` 含一个 unit 对象；unit_id 与文件名一致，verification_obligations 为非空列表，每项有全局唯一的 id 和 kind（numerical、semantic、device）。可选 title、depends_on 用于展示边界和阅读顺序；依赖若填写，须引用现有单元且无环。仅这些字段与义务内容参与用例校验，不要求特定产物生成方式。
 
 义务的 behavior、must_distinguish、observable_result、coverage_axes 和设计引用用于确定可区分的输入与判定。可选 input_conditions 描述必须实际满足的触发条件，格式见下文。其他实现规划字段不参与测试生成；本 Skill 不据此判断实现方案是否可行或是否满足源码、编译产物、设备证据要求。
+
+## 选例与成本
+
+先满足冻结规格、当前 Unit 阶段域、全部适用义务与必要子条件，再优先选择计算规模较小且有判别力的输入。不只按 shape 大小判断：按具体义务核对真实触发、数据分布、公开断言与冻结容差的判别力；需要非退化输入才能暴露错误时采用相应构造，保留原义务要求的零值、合法空张量及特殊值。较小输入不能覆盖时保留必要规模、多块、复用代次和调用顺序，不把本节当作缩减覆盖、性能或结构承诺的依据。
+
+初始选例时，同一 Unit 内触发条件和断言兼容的一行可关联多项义务，不机械地为每项义务另造一例；互斥条件或不同故障面分别覆盖，不强制合并。前序回归复用已有用例，不在每个后继 Unit 重复制一套；当前新增义务仍须有本 Unit 的真实绑定与判别依据，不能借前序用例冒充完成，也不改写义务归属。需要整理尚未冻结的草稿时保留原覆盖与来源，不自动删并已提交用例。
+
+选例取舍沿用已有输入、触发与断言依据，必要说明留在原证据中；不为本节另设成本表、固定用例数、统一规模上限、机械组合穷举或全局最优性证明。验收检查必要覆盖、判别力和取舍依据，不因用例不是理论最少或最小而单独拒收。不得为换取通过删除、排除用例、缩小已有失败输入、放宽断言或修改用户性能 case；不要求新增故障注入或设备实验。
 
 ## 确定性数据
 
@@ -19,6 +27,8 @@ TDD 需要有效工作量、结构关系或连续调用时阅读本文件。CSV 
 
 ## 实际触发条件
 
+规划或草拟前可执行公开只读预检：`scripts/build_tdd_cases.py --check-unit-contracts --units-dir UNITS`，仅检查原生 Unit 测试契约，复用正式入口的同一校验，不需要 spec、DESIGN、CSV、Golden 或设备，不写文件。通过不证明具体用例绑定或真实触发，正式准备和 runner 仍各自校验；发现不支持的条件须当前阻断并交回责任阶段，不因“只是草稿”放行。
+
 Unit 义务可写 `input_conditions`，CSV 对应行必须用 `kind=input_conditions` 的 checks 承接。至少一个绑定用例完整包含该义务的所有条件；校验器物化当前 seed 的真实输入并检查，runner 在调用目标实现前再次检查。失败表示用例未触发目标行为，不是算子数值失败。
 
 ```json
@@ -29,7 +39,7 @@ Unit 义务可写 `input_conditions`，CSV 对应行必须用 `kind=input_condit
 ]}]
 ```
 
-metric 支持 dimension（须有 axis）、numel、count、unique_count。count/unique_count 没有 axis 时检查全张量，有 axis 时逐行检查该轴，每行均须满足。where 的 min 为包含下界，max 为排除上界，eq 为等值；边界为有限数或 `{input, dimension}` 引用另一张量维度。relation 为 eq/ne/ge/gt/le/lt。无法由这些谓词表达的关系返回具体缺口，不编造“已覆盖”。自然语言 coverage_axes 仍须与实际输入和判定逐项核对。
+metric 支持 dimension（须有 axis）、numel、count、unique_count。count/unique_count 没有 axis 时检查全张量，有 axis 时逐行检查该轴，每行均须满足。where 的 min 为包含下界，max 为排除上界，eq 为等值；边界为有限数或 `{input, dimension}` 引用另一张量维度。relation 的 eq/ne/ge/gt/le/lt 使用有限数值；multiple_of 的 value 必须是正整数，按整数统计量整除判断（0 是正整数的倍数，是否允许空输入仍由规格决定）；in 的 value 是非空有限数值列表，检查统计值属于该列表。列表不接受布尔、字符串、嵌套值或 NaN/Inf，不支持 not_in；原比较关系不改语义。相同校验与执行逻辑用于准备和正式 runner，输入不满足时在目标调用前失败。不得将 scope.domain_constraints 的键直接搬作此处 relation，也不以输入碰巧满足代替义务条件的实际绑定。无法由这些谓词表达的关系返回具体缺口并阻断当前草稿，不编造“已覆盖”或只记为下游问题。自然语言 coverage_axes 仍须与实际输入和判定逐项核对。
 
 输入条件不能单独承担 semantic 或 device 义务；还须验证实际输出或输入调用后的状态。
 

@@ -7,7 +7,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""spec.yaml validator — full 12-stage L0 校验.
+"""spec.yaml validator — full 11-stage L0 校验.
 
 Stage 1: jsonschema validation against schemas/op-spec.json.
 Stage 2: category ↔ paradigm consistency, mutual exclusion,
@@ -1167,8 +1167,9 @@ def _check_category_paradigm_consistency(cat, paradigms, registries, findings):
 
 
 def _check_broadcast_paradigm_hint(spec, paradigms, findings):
-    """G. broadcast.kind=numpy 时 paradigms 应含 Broadcast（交叉校验：shape_rule 含 broadcast_shapes）。"""
-    broadcast_kind = (spec.get("broadcast") or {}).get("kind", "none")
+    """Check the paradigm declared by actual broadcast shape expressions."""
+    bspec = spec.get("broadcast")
+    broadcast_kind = bspec.get("kind") if isinstance(bspec, dict) else None
     has_broadcast_shape_rule = any(
         "broadcast_shapes" in (out.get("shape_rule") or "")
         for out in (spec.get("outputs") or [])
@@ -1735,15 +1736,13 @@ def _check_machine_check(spec, registries, findings):
             elif kind == "raises_error":
                 etype = mc.get("error_type")
                 if etype not in error_codes:
-                    findings.append(
-                        Finding(
-                            severity="error",
-                            rule_id="error_type_unknown",
-                            field_path=f"{sect}[{i}].machine_check.error_type",
-                            message=f"未知 error_type: {etype!r}",
-                            suggested_fix="使用 registries/error_code_enum.yaml 中的枚举值",
-                        )
-                    )
+                    findings.append(Finding(
+                        severity="error",
+                        rule_id="error_type_unknown",
+                        field_path=f"{sect}[{i}].machine_check.error_type",
+                        message=f"未知 error_type: {etype!r}",
+                        suggested_fix="使用 registries/error_code_enum.yaml 中的枚举值",
+                    ))
 
 
 _PATTERN_RE = re.compile(r"^(?P<name>[a-z_]+)(\([^()]*\))?$")
@@ -1773,20 +1772,15 @@ def _check_synthesize_patterns(spec, registries, findings):
                 continue
             m = _PATTERN_RE.match(pname)
             if not m or m.group("name") not in pattern_names:
-                fp = (
-                    f"extreme_inputs[{i}].synthesize.patterns[{idx}].pattern"
-                    if idx is not None
-                    else f"extreme_inputs[{i}].synthesize.pattern"
-                )
-                findings.append(
-                    Finding(
-                        severity="error",
-                        rule_id="synthesize_pattern_unknown",
-                        field_path=fp,
-                        message=f"未知 pattern: {pname!r}",
-                        suggested_fix="使用 registries/synthesize_pattern_registry.yaml 中的 name",
-                    )
-                )
+                fp = (f"extreme_inputs[{i}].synthesize.patterns[{idx}].pattern"
+                      if idx is not None else f"extreme_inputs[{i}].synthesize.pattern")
+                findings.append(Finding(
+                    severity="error",
+                    rule_id="synthesize_pattern_unknown",
+                    field_path=fp,
+                    message=f"未知 pattern: {pname!r}",
+                    suggested_fix="使用 registries/synthesize_pattern_registry.yaml 中的 name",
+                ))
 
 
 def _check_supported_chips(spec, registries, findings):
@@ -2113,14 +2107,14 @@ def _check_data_distribution(spec, cat, paradigms, findings):
 
 
 def stage_6(spec: dict, registries: dict) -> StageResult:
-    """boundary_min_set — 按 paradigms 检查 spec 是否覆盖各范式必含的最低 case 集。
+    """boundary_min_set — 按 paradigms 检查 spec 是否覆盖各范式的候选边界（仅提示，适用性由支持域及来源决定）。
 
     数据源：registries/boundary_min_cases.yaml
     匹配方式（双轨）：
       1. 显式 tag 优先：spec 的 case 可声明 `tags: [<requirement.id>, ...]`，命中
          即覆盖。新写 spec 推荐做法，避免子串歧义。
       2. 关键词子串兜底：req.match_any 任一关键词出现在 case 描述里也算覆盖。保留兼容。
-    结构性约束（如 DynamicShape 的 shape_set ≥ 3）走 special_check。
+    未命中仅产生 info（包括 --strict），不决定支持域或域外行为。
     """
     res = StageResult(stage_id=6, status="PASS")
     paradigms = set(_get(spec, "op", "paradigms", default=[]) or [])
@@ -2140,13 +2134,11 @@ def stage_6(spec: dict, registries: dict) -> StageResult:
                 tags.add(str(t))
         return text, tags
 
-    broadcast_kind = (spec.get("broadcast") or {}).get("kind", "none")
 
     _attr_determined_output = _output_count_attr_determined(spec)
     for paradigm in sorted(paradigms):
-        # Broadcast paradigm 的 boundary cases 仅适用于输入间广播（kind != none）；
-        # 单输入或内部计算广播（kind=none）不需要这些 case。
-        if paradigm == "Broadcast" and broadcast_kind == "none":
+        # A single input has no cross-input broadcast boundary candidates.
+        if paradigm == "Broadcast" and len(spec.get("inputs") or []) < 2:
             continue
         # 属性决定输出个数（split 类）：VariableOutput 的 empty/full/sparse case
         # 是为 nonzero/where 这类数据决定输出个数的算子设计的，不适用于属性决定。
@@ -2171,18 +2163,16 @@ def stage_6(spec: dict, registries: dict) -> StageResult:
             if any(kw in text for kw in keywords):
                 continue  # 子串兜底命中
 
-            res.findings.append(
-                Finding(
-                    severity="error",
-                    rule_id="boundary_min_set.missing_required_case",
-                    field_path=f"{section}",
-                    message=f"paradigm={paradigm} 缺必含 case: {summary} (id={req_id})",
-                    suggested_fix=(
-                        f"在 {section} 中添加一条 case，加 `tags: [{req_id}]` "
-                        f"或描述包含以下任一关键词：{keywords}"
-                    ),
-                )
-            )
+            res.findings.append(Finding(
+                severity="info",
+                rule_id="boundary_min_set.candidate_not_documented",
+                field_path=f"{section}",
+                message=f"paradigm={paradigm} 候选边界待核对适用性: {summary} (id={req_id})",
+                suggested_fix=(
+                    "对照已确认支持域和来源核对；域内适用或明确要求域外行为时补齐语义，"
+                    "域外且未规定行为时在执行记录说明不适用；不得为消除提示新增报错或结果承诺。"
+                ),
+            ))
 
     if any(f.severity == "error" for f in res.findings):
         res.status = "FAIL"
@@ -2218,15 +2208,13 @@ def stage_7(spec: dict) -> StageResult:
 
     uncovered = declared_output_dtypes - declared_tol_dtypes
     for d in sorted(uncovered):
-        res.findings.append(
-            Finding(
-                severity="error",
-                rule_id="tolerance_coverage.uncovered_output_dtype",
-                field_path=f"numerical_tolerance.per_dtype.{d}",
-                message=f"输出 dtype {d!r} 未在 numerical_tolerance.per_dtype 中声明容差",
-                suggested_fix=f"为 {d} 补充 {{rtol, atol, metric}}",
-            )
-        )
+        res.findings.append(Finding(
+            severity="error",
+            rule_id="tolerance_coverage.uncovered_output_dtype",
+            field_path=f"numerical_tolerance.per_dtype.{d}",
+            message=f"输出 dtype {d!r} 未在 numerical_tolerance.per_dtype 中声明容差",
+            suggested_fix=f"为 {d} 补充 metric 及该指标必需的参数",
+        ))
 
     # 紧度提示（启发式 WARN）
     thresholds = _tolerance_tight_threshold()
@@ -2326,8 +2314,8 @@ def _load_chip_registry() -> dict:
 def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
     """Lazily import the evaluators package; if it fails, return SKIP stages.
 
-    Returns eight StageResult objects in order: stage 3, 4, 5, 8, 9, 10, 11, 12.
-    Stage 8 / 9 / 10 / 11 / 12 may individually SKIP based on env (numpy/framework not
+    Returns seven StageResult objects in order: stage 3, 4, 7, 8, 9, 10, 11.
+    Stage 7 / 8 / 9 / 10 / 11 may individually SKIP based on env (numpy/framework not
     installed) even when the evaluators package itself imports fine.
     """
     try:
@@ -2344,7 +2332,7 @@ def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
             severity="info",
             rule_id="stage_skipped",
             field_path="<evaluators import>",
-            message=f"evaluators 子包不可用，stage 3-5/8/9/10/11/12 跳过：{e}",
+            message=f"evaluators 子包不可用，stage 3/4/7/8/9/10/11 跳过：{e}",
             suggested_fix="确认 scripts/evaluators/ 子包文件齐全",
         )
         return tuple(
@@ -2356,11 +2344,11 @@ def _run_eval_stages(spec: dict) -> tuple[StageResult, ...]:
         (3, eval_stages.stage_3),
         (4, eval_stages.stage_4),
         (5, eval_stages.stage_5),
-        (8, formula_eval.stage_8),
-        (9, oracle_check.stage_9),
-        (10, formula_oracle_equiv.stage_10),
-        (11, invariant_exec.stage_11),
-        (12, extreme_inputs_check.stage_12),
+        (8, formula_eval.stage_7),
+        (9, oracle_check.stage_8),
+        (10, formula_oracle_equiv.stage_9),
+        (11, invariant_exec.stage_10),
+        (12, extreme_inputs_check.stage_11),
     )
     results: list[StageResult] = []
     for stage_id, fn in pipeline:
@@ -2436,7 +2424,7 @@ def render_text(stages: list[StageResult], *, quiet: bool = False) -> str:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Validate spec.yaml (full 12-stage).")
+    ap = argparse.ArgumentParser(description="Validate spec.yaml (full 11-stage).")
     ap.add_argument("spec_path")
     ap.add_argument("--json", action="store_true", help="Emit JSON instead of text")
     ap.add_argument(
@@ -2482,7 +2470,7 @@ def main() -> int:
         stages.append(stage_1(spec))
     if selected is None or 2 in selected:
         stages.append(stage_2(spec, registries))
-    # stage 3/4/5/8/9/10/11 共享 DSL 子包 lazy import；选中其一即触发
+    # stage 3/4/7/8/9/10 共享 DSL 子包 lazy import；选中其一即触发
     dsl_needed = selected is None or selected & {3, 4, 5, 8, 9, 10, 11, 12}
     if dsl_needed:
         eval_srs = _run_eval_stages(spec)

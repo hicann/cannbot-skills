@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 3 / 4 / 5 — semantic validation driven by numpy_expr evaluators.
+"""Stage 3 / 4 — semantic validation driven by numpy_expr evaluators.
 
 Each stage_* function takes (spec_dict) and returns a tuple (status, findings)
 where findings is a list of dicts ready for the parent's Finding dataclass.
@@ -18,7 +18,6 @@ Stage 3 — shape_closure：按 outputs[].shape_rule_kind 分流：
 
 Stage 4 — dtype_closure：通过 dtype_eval 在 supported_combinations 各行上求值。
 
-Stage 5 — broadcast_legality：data_dependent 的 outputs 不参与广播闭合验证。
 """
 
 from __future__ import annotations
@@ -214,7 +213,7 @@ def _compile_shape_consistency_formula(formula: str):
         _validate_formula_ast_for_shape_consistency(formula_tree)
         return compile(formula_tree, "<shape_consistency_formula>", "exec")
     except (SyntaxError, formula_eval.FormulaError):
-        # Stage 8 owns formula syntax/runtime smoke diagnostics. Stage 3 keeps its
+        # Stage 7 owns formula syntax/runtime smoke diagnostics. Stage 3 keeps its
         # focus on shape_rule unless the formula can actually serve as an oracle.
         return None
 
@@ -322,12 +321,180 @@ def _validate_formula_ast_for_shape_consistency(tree: ast.AST) -> None:
         raise formula_eval.FormulaError(f"formula_{e.code}", e.message) from None
 
 
+def _sample_layout_guard(expression: str, attrs: dict) -> bool | None:
+    """Resolve attribute-only layout guards without executing spec code.
+
+    Unsupported or missing facts stay unknown; they must not select the default
+    axis order. This is deliberately not a solver for global_constraints text.
+    """
+    unknown = object()
+
+    def visit(node):
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, (ast.List, ast.Tuple)):
+            values = [visit(n) for n in node.elts]
+            return unknown if any(v is unknown for v in values) else values
+        if isinstance(node, ast.Name) and node.id in {"true", "false"}:
+            return node.id == "true"
+        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                and node.value.id == "attr"):
+            return attrs.get(node.attr, unknown)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            value = visit(node.operand)
+            return not value if type(value) is bool else unknown
+        if isinstance(node, ast.BoolOp):
+            values = [visit(n) for n in node.values]
+            if isinstance(node.op, ast.And) and any(v is False for v in values):
+                return False
+            if isinstance(node.op, ast.Or) and any(v is True for v in values):
+                return True
+            if all(type(v) is bool for v in values):
+                return all(values) if isinstance(node.op, ast.And) else any(values)
+            return unknown
+        if isinstance(node, ast.Compare):
+            values = [visit(node.left), *(visit(n) for n in node.comparators)]
+            if any(v is unknown for v in values):
+                return unknown
+            result = True
+            for left, op, right in zip(values, node.ops, values[1:]):
+                if isinstance(op, ast.Eq):
+                    result = result and left == right
+                elif isinstance(op, ast.NotEq):
+                    result = result and left != right
+                elif isinstance(op, (ast.In, ast.NotIn)):
+                    matched = left in right
+                    result = result and (not matched if isinstance(op, ast.NotIn) else matched)
+                else:
+                    return unknown
+            return result
+        return unknown
+
+    try:
+        tree = ast.parse(expression, mode="eval")
+        if sum(1 for _ in ast.walk(tree)) > 128:
+            return None
+        value = visit(tree.body)
+        return value if type(value) is bool else None
+    except (SyntaxError, TypeError, ValueError, RecursionError):
+        return None
+
+
+def check_concrete_sample_domain(spec: dict, entry: dict, path: str) -> list[dict]:
+    """Metadata-only check of explicitly supplied normal sample shapes.
+
+    Error examples intentionally exercise invalid inputs. Empty-result examples
+    are normal samples and still obey the declared domain. Missing shapes and
+    unsupported layout guards are not filled in with guessed values.
+    """
+    if (entry.get("machine_check") or {}).get("kind") == "raises_error":
+        return []
+    findings = []
+    rules = {
+        "shape_unverified": dict(rule_id="shape_closure.sample_shape_unverified"),
+        "rank": dict(rule_id="shape_closure.sample_rank"),
+        "dimension": dict(rule_id="shape_closure.sample_dimension"),
+        "layout_unverified": dict(rule_id="shape_closure.sample_layout_unverified"),
+    }
+
+    def report(code, message, severity="error"):
+        findings.append({
+            "severity": severity, **rules[code],
+            "field_path": f"{path}.synthesize", "message": message,
+            "suggested_fix": (
+                "按已有支持域修正正常样例；负向样例须有明确错误行为依据，"
+                "不能仅为通过校验扩大支持域或改成 raises_error。"
+                if severity == "error" else "补核未确认的具体形状或轴映射；未检查不代表已证明合法。"
+            ),
+        })
+
+    attrs = {
+        a["name"]: a["default"]
+        for a in spec.get("attributes", []) or []
+        if "name" in a and "default" in a
+    }
+    try:
+        shapes, overrides = _extract_synthesize_shapes_attrs(
+            entry.get("synthesize") or {}, {a.get("name") for a in spec.get("attributes", []) or []})
+    except DslError as exc:
+        report("shape_unverified", exc.message, "info")
+        return findings
+    attrs.update(overrides)
+    symbols = (spec.get("shape_constraints") or {}).get("symbols") or {}
+    variants = (spec.get("layout_contract") or {}).get("variants") or []
+    for inp in spec.get("inputs", []) or []:
+        name = inp.get("name")
+        # TensorList shapes are not the shape of a single ndarray.
+        if inp.get("role", "tensor") != "tensor" or name not in shapes:
+            continue
+        shape = shapes[name]
+        rr = inp.get("rank_range")
+        if isinstance(rr, list) and len(rr) == 2 and not rr[0] <= len(shape) <= rr[1]:
+            report("rank", f"输入 {name!r} 的样例 rank={len(shape)} 不在声明范围 {rr} 内")
+        axes = (inp.get("shape") or {}).get("symbolic", [])
+        choices = []
+        unresolved = False
+        has_mapping = False
+        for variant in variants:
+            mappings = [
+                t
+                for t in variant.get("tensors", []) or []
+                if t.get("ref") == f"input.{name}"
+            ]
+            if not mappings:
+                continue
+            has_mapping = True
+            matched = _sample_layout_guard(variant.get("when", ""), attrs)
+            if matched is None:
+                unresolved = True
+            elif matched:
+                choices.extend(t.get("logical_axes", []) for t in mappings)
+        if has_mapping:
+            if unresolved or len(choices) != 1:
+                report("layout_unverified", f"输入 {name!r} 的样例布局不能唯一确定；"
+                       "已检查显式 rank，未按默认轴序推定维度范围", "info")
+                continue
+            axes = choices[0]
+        try:
+            declared = parse_shape_literal(axes)
+        except DslError:
+            report("layout_unverified", f"输入 {name!r} 的声明轴不能用于具体样例映射", "info")
+            continue
+        explicit = declared.explicit
+        if ((declared.folded_name is None and len(shape) != len(explicit))
+                or len(shape) < len(explicit)):
+            # For variable-rank declarations, symbolic axes can describe a
+            # representative rank rather than every rank in rank_range.
+            if (not has_mapping and isinstance(rr, list) and len(rr) == 2
+                    and rr[0] != rr[1] and rr[0] <= len(shape) <= rr[1]):
+                report("layout_unverified", f"输入 {name!r} 的样例 rank={len(shape)} 在支持范围内，"
+                       f"但不能唯一对应示例轴 {axes}；未推定符号维度范围", "info")
+            else:
+                report("rank", f"输入 {name!r} 的样例 shape={shape} 与声明轴 {axes} 不匹配")
+            continue
+        # Folded dimensions are a leading variable-length prefix; no range is
+        # invented for them. Explicit dimensions align with the suffix.
+        values = shape[len(shape) - len(explicit):] if explicit else ()
+        for dim, value in zip(explicit, values):
+            if dim.kind == "const" and value != dim.value:
+                report("dimension", f"输入 {name!r} 的样例维度 {value} 不等于声明常量 {dim.value}")
+            if dim.kind == "symbol":
+                bounds = (symbols.get(dim.name) or {}).get("range")
+                if isinstance(bounds, list) and len(bounds) == 2 and not bounds[0] <= value <= bounds[1]:
+                    report("dimension", f"输入 {name!r} 的样例 {dim.name}={value} "
+                           f"不在声明范围 {bounds} 内")
+    return findings
+
+
 def _iter_concrete_shape_cases(spec: dict, findings: list[dict] | None = None):
     attr_names = {a.get("name") for a in (spec.get("attributes") or [])}
     input_names = {inp.get("name") for inp in (spec.get("inputs") or [])}
     for index, case in enumerate(spec.get("boundary_conditions") or []):
         machine_check = case.get("machine_check") or {}
         if machine_check.get("kind") in _SKIP_MACHINE_CHECK_KINDS:
+            continue
+        if any(f["severity"] == "error" for f in check_concrete_sample_domain(
+                spec, case, f"boundary_conditions[{index}]")):
             continue
         synth = case.get("synthesize") or {}
         try:
@@ -675,6 +842,9 @@ def _can_suppress_symbolic_shape_error(
 def stage_3(spec: dict) -> tuple[str, list[dict]]:
     """Resolve every output's shape; verify symbol registration / data-dependent metadata."""
     findings: list[dict] = []
+    for section in ("boundary_conditions", "extreme_inputs"):
+        for index, entry in enumerate(spec.get(section) or []):
+            findings.extend(check_concrete_sample_domain(spec, entry, f"{section}[{index}]"))
     inputs = _input_shapes(spec)
     attrs = _attr_defaults(spec)
     registered_symbols = _registered_symbols(spec)
@@ -705,7 +875,7 @@ def stage_3(spec: dict) -> tuple[str, list[dict]]:
                     "message": f"显式维 {d.name!r} 出现在 input {name!r}.shape "
                                f"但未在 shape_constraints.symbols 登记",
                     "suggested_fix": f"在 shape_constraints.symbols 中添加 "
-                                     f"{d.name}: {{kind: dim, range: [0, INT64_MAX]}}",
+                    f"{d.name}: {{kind: dim, range: [0, INT64_MAX]}}",
                 })
 
     # Solve each output
@@ -727,7 +897,12 @@ def stage_3(spec: dict) -> tuple[str, list[dict]]:
         if kind == "data_dependent":
             paradigms = set((spec.get("op") or {}).get("paradigms") or [])
             category = (spec.get("op") or {}).get("category", "")
-            _data_dependent_allowed_categories = {"VariableOutput", "Reduction", "ReductionComposite", "ArgReduce", "IndexGather"}
+            _data_dependent_allowed_categories = {
+                "VariableOutput",
+                "Reduction",
+                "ReductionComposite",
+                "ArgReduce",
+                "IndexGather"}
             if ("VariableOutput" not in paradigms
                     and "DynamicShape" not in paradigms
                     and category not in _data_dependent_allowed_categories):
@@ -936,9 +1111,6 @@ def stage_4(spec: dict) -> tuple[str, list[dict]]:
 
     status = "FAIL" if any(f["severity"] == "error" for f in findings) else "PASS"
     return status, findings
-
-
-# ---------- stage 5 — broadcast_legality -----------------------------------
 
 
 def stage_5(spec: dict) -> tuple[str, list[dict]]:

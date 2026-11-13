@@ -2,20 +2,20 @@
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 11 — invariant value execution.
+"""Stage 10 — invariant value execution.
 
 Run each ``math_semantics.invariants[]`` against the formula output on generated
-inputs. Unlike stage 10 (formula vs framework oracle), stage 11 needs **no
+inputs. Unlike stage 9 (formula vs framework oracle), stage 10 needs **no
 external oracle** — it verifies the formula against its own declared
 mathematical properties (softmax sum-to-one, relu non-negativity, add
 commutativity, matmul/reduce zero-absorption...).
 
 This is the key machine check for the **no-oracle case** (oracle absent /
-composition DAG / oracle_call_failed), where stage 10 SKIPs. The paradox —
+composition DAG / oracle_call_failed), where stage 9 SKIPs. The paradox —
 "the cases most needing form verification are exactly those with no oracle" —
 is resolved because a wrong-form formula typically violates a declared
 invariant on normal inputs (e.g. a non-normalizing "softmax" form yields
@@ -147,7 +147,7 @@ def _is_index_input(spec: dict, name: str) -> bool:
     """True if `name` is an index/metadata input (integer axis/indices tensor).
 
     These must NOT be zeroed by algebraic invariants — zeroing `axis` is
-    meaningless and produces false violations (mirrors stage 5 broadcast logic).
+    meaningless and produces false violations.
     """
     if name not in _INDEX_INPUT_NAMES:
         return False
@@ -428,10 +428,10 @@ def _check_equals_when_input_is_zero(np_mod, spec, inv, inputs, out_name,
     return findings
 
 
-# ---------- stage 11 --------------------------------------------------------
+# ---------- stage 10 --------------------------------------------------------
 
 
-def stage_11(spec: dict) -> tuple[str, list[dict]]:
+def stage_10(spec: dict) -> tuple[str, list[dict]]:
     """Execute math_semantics.invariants[] against the formula output.
 
     See module docstring for the no-oracle rationale and the executable/skipped
@@ -447,7 +447,7 @@ def stage_11(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "invariant_exec.skipped_non_numpy",
             "field_path": "math_semantics.formula_kind",
-            "message": f"formula_kind={formula_kind!r}，stage 11 仅在 numpy_expr 下运行",
+            "message": f"formula_kind={formula_kind!r}，stage 10 仅在 numpy_expr 下运行",
             "suggested_fix": None,
         }]
 
@@ -457,7 +457,7 @@ def stage_11(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "invariant_exec.no_invariants",
             "field_path": "math_semantics.invariants",
-            "message": "spec 未声明任何 invariant，stage 11 跳过",
+            "message": "spec 未声明任何 invariant，stage 10 跳过",
             "suggested_fix": None,
         }]
 
@@ -468,7 +468,7 @@ def stage_11(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "invariant_exec.numpy_not_installed",
             "field_path": "<env>",
-            "message": "numpy 未安装；stage 11 跳过",
+            "message": "numpy 未安装；stage 10 跳过",
             "suggested_fix": "pip install numpy",
         }]
 
@@ -478,7 +478,7 @@ def stage_11(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "invariant_exec.no_combination",
             "field_path": "dtype_policy.supported_combinations",
-            "message": "缺 supported_combinations，stage 11 跳过",
+            "message": "缺 supported_combinations，stage 10 跳过",
             "suggested_fix": None,
         }]
     in_dtypes = combos[0].get("inputs") or {}
@@ -491,7 +491,7 @@ def stage_11(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "invariant_exec.no_inputs",
             "field_path": "<internal>",
-            "message": "无法生成测试输入，stage 11 跳过",
+            "message": "无法生成测试输入，stage 10 跳过",
             "suggested_fix": None,
         }]
 

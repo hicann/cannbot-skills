@@ -15,7 +15,7 @@ stage 2 报名字未知，或反过来。本脚本批量检查所有已对应 en
 
 不在本脚本范围（这些 registry 的语义不是简单 enum）：
   * category_paradigm_map.yaml — 映射，不是单一 enum
-  * boundary_min_cases.yaml    — 数据驱动 stage 6
+  * boundary_min_cases.yaml    — 数据驱动 stage 5
   * tolerance_defaults.yaml    — 默认值，不是 enum
 """
 

@@ -28,7 +28,7 @@
    - `reduce_sum_fixed`: 固定归约轴（axis_source=fixed，无 dim attribute）
    - `reduce_sum_all`: 隐式全轴归约（axis_source=implicit_all，输出标量）
 4. **cumsum** / **dropout** — Recurrence、RandomSampling 范式骨架
-5. **matmul** — contraction 类的 shape 表达（folded + IfExp + explicit broadcast.rules）
+5. **matmul** — contraction 类的 shape 表达（folded + IfExp）
 6. **complex** — 多 input 不同 dtype + IfExp dtype_rule
 7. **nonzero** — data_dependent shape_rule 的范式（输出形状由输入值决定）
 8. **fused_quant_matmul** — FusedComposite 的真实落地（量化 + matmul + bias + 激活的 composition DAG）

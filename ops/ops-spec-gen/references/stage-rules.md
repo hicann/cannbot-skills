@@ -161,12 +161,20 @@ outputs:
 
 ### 子规则表
 
+Stage 3 在分配样例 Tensor 前，对 `boundary_conditions` / `extreme_inputs` 中显式提供的正常单 Tensor shape 做元数据检查：rank、常量维及 `shape_constraints.symbols[].range`。兼容 `shapes: {x: [...]}` 与 `x.shape`；有布局变体时，按默认属性及样例覆盖选择 `logical_axes`。变秩声明的代表轴无法映射到当前 rank、缺失事实或不支持的 guard 记为未核验，不猜形状或改用默认轴序。该检查不解析 `global_constraints` 自然语言，也不证明全部语义约束。
+
+`raises_error` 为显式负向样例，不要求落入正常支持域；`returns_empty` 仍是正常返回，只有支持域允许空维时才合法。不得仅为通过预检改成错误样例或放宽支持域；负向行为仍须有规格来源依据。非法正常样例不进入边界 shape 对照或极值样例张量生成。未提供具体 shape 的样例、TensorList 和可选缺席输入不伪装成单 Tensor 检查；合法已有结果的复用要求不变。
+
 | 子规则 | 检查内容 |
 |---|---|
 | `shape_closure.shape_rule_kind_missing` | outputs[].shape_rule_kind 未声明 |
 | `shape_closure.shape_rule_kind_unknown` | 不是 numpy_expr / data_dependent / textual_only；后两类仍需满足各自的额外约束 |
 | `shape_closure.shape_rule_placeholder` | shape_rule 含 TODO / 占位 / 简化说明 |
 | `shape_closure.reduction_shape_identity_suspicious` | 纯 Reduction 的 shape_rule 直接写成 input.shape |
+| `shape_closure.sample_shape_unverified` | INFO — 未取得可解析的具体 shape；原有 synthesize 解析告警仍保留 |
+| `shape_closure.sample_rank` | ERR — 正常样例 rank 超出声明范围，或与固定/折叠轴数量不匹配 |
+| `shape_closure.sample_dimension` | ERR — 正常样例维度违反声明常量或符号闭区间 |
+| `shape_closure.sample_layout_unverified` | INFO — 现有属性事实无法唯一选择布局轴映射，不按默认轴序推断合法性 |
 | `shape_closure.synthesize_parse_error` | WARN — boundary synthesize 中 shape / attr 字面量无法解析，不能用于 shape oracle |
 | `shape_closure.numpy_expr_shape_mismatch` | 正常边界样例下 shape_rule 形状与 formula 实际输出形状不一致 |
 | `shape_closure.numpy_expr_formula_eval_error` | 正常边界样例下 formula 不能作为 shape oracle 执行 |
@@ -236,37 +244,15 @@ Promotion 表覆盖 fp16 / fp32 / fp64 / bf16 / int8 / int16 / int32 / int64 / u
 
 ---
 
-## stage 5 — broadcast_legality
-
-校验算子计算中的 broadcast 语义是否合法。`broadcast` 字段描述的是**算子计算是否需要对数据进行 broadcast（数据复制/扩展）**，而非仅描述多输入 shape 是否需要对齐。
-
-| kind | 语义 | 适用场景 |
-|---|---|---|
-| `numpy` | 计算涉及数据广播 | 多输入 elementwise（add/mul） |
-| `none` | 计算不涉及任何 broadcast | 输入 shape 严格一致、无需数据扩展的算子 |
-| `explicit` | 部分维度 broadcast + 部分维度不 broadcast | matmul（batch dims broadcast，M/K/N 不 broadcast） |
-
-### 子规则表
-
-| 子规则 | 检查内容 |
-|---|---|
-| `broadcast_legality.numpy_violation` | `kind: none` 但算子计算实际需要 broadcast 数据 |
-| `broadcast_legality.incompatible_dims` | `kind: numpy` 下显式维冲突（不可右对齐） |
-| `broadcast_legality.explicit_rules_uncovered` | `kind: explicit` 的 rules 未覆盖输入全部维度 |
-
-v1 已实现：`numpy`（含折叠维）/ `none` / `explicit`（`broadcast.rules` 必须**恰好**一条 `scope: trailing` + 一条 `scope: leading`，policy 各支持 `numpy` / `no_broadcast`，覆盖 matmul 形式）。explicit 的高阶组合（多于 2 个 input、`scope: axis`）留待扩展。
-
----
-
 ## stage 6 — boundary_min_set
 
-按 `op.paradigms` 检查 `boundary_conditions[]` / `extreme_inputs[]` 是否覆盖该范式必含的最低 case 集。数据源：`registries/boundary_min_cases.yaml`。
+按 op.paradigms 提示尚未登记的候选边界。数据源：registries/boundary_min_cases.yaml。
 
 | 子规则 | 检查内容 |
 |---|---|
-| `boundary_min_set.missing_required_case` | 例如 Reduction ⇒ 必含"reduce 轴长=1 / rank=0 / 空 Tensor"；NumericalStable ⇒ 必含 fp16 上溢 extreme case |
+| boundary_min_set.candidate_not_documented | info：候选未登记，须核对适用性，不直接导致失败，--strict 亦如此 |
 
-匹配方式：每条 requirement 用 `match_any` 关键词列表与 case 描述做子串包含；任一命中即算覆盖。结构性约束走 `special_check` 直接检查。
+tag 或关键词命中仅说明存在条目，不证明适用性或语义正确。执行、自检和独立验收必须核对：域内适用边界及明确要求的域外行为已覆盖；域外且未规定行为时在既有记录说明不适用，不新增报错或结果承诺。适用性未决先澄清。其他阶段对已声明条目的 schema、支持域和错误类型仍严格检查。
 
 覆盖的 paradigms 见 `registries/boundary_min_cases.yaml`（当前覆盖 Reduction / NumericalStable / SlidingWindow / Padding / IndexGather / ScatterUpdate / AtomicUpdate / MaskPredicate / SortSelect / ArgReduce / Histogram / Spectral / DynamicShape / RandomSampling / Quantization / Stateful / VariableOutput / Sparse / Contraction / Elementwise / Broadcast）。
 
@@ -345,7 +331,7 @@ v1 已实现：`numpy`（含折叠维）/ `none` / `explicit`（`broadcast.rules
 
 当 formula（numpy_expr）和 oracle（reachable）同时可用时，在**含特殊值（NaN / inf / 大数 / 带符号零 +0/-0）的输入**上同时执行 formula 和 oracle，比对输出。捕获 formula 使用了与框架实际实现**数学等价但计算不等价**形式的错误（如教科书合并形式 `m_new = β1·m + (1-β1)·grad` vs TF 增量形式 `m = m + (1-β1)·(grad-m)`，两者在 NaN/inf 传播、末位舍入、零符号上不一致）。
 
-stage 10 会实际调用 oracle，但它不是唯一的调用路径：stage 12 的 `matches_oracle` 条目在条件满足时也会调用 oracle；stage 9 仅检查可达性，stage 11 仅校验公式的不变量。
+stage 11 会实际调用 oracle，但它不是唯一的调用路径：stage 12 的 `matches_oracle` 条目在条件满足时也会调用 oracle；stage 10 仅检查可达性，stage 12 仅校验公式的不变量。
 
 ### 子规则表
 
@@ -443,7 +429,7 @@ stage 10 会实际调用 oracle，但它不是唯一的调用路径：stage 12 �
 1. 生成正常随机输入（**每个输入用派生 seed**，避免多输入相同数据掩盖非交换性）
 2. 编译 formula（复用 stage 8 的 AST 沙箱），跑出输出
 3. 逐 invariant 按 kind 校验输出；algebraic 类按需多次跑 formula（交换/置零）
-4. **索引输入保护**：`axis`/`axes`/`dim`/`indices` 等整数张量不被置零（与 stage 5 broadcast 逻辑一致）
+4. **索引输入保护**：`axis`/`axes`/`dim`/`indices` 等整数张量不被置零
 5. **空输出保护**：IndexGather 类零输入→空输出时跳过值比较
 6. **容差**：`tolerance_inherit: true` 用 `numerical_tolerance.per_dtype`，否则用紧容差 1e-6
 
@@ -460,8 +446,8 @@ stage 10 会实际调用 oracle，但它不是唯一的调用路径：stage 12 �
 在 numpy 和声明的 reference framework 可用、公式为 `numpy_expr`、条目输入可合成且 formula 可执行、
 oracle API 可调用，并且条目级 `attrs` 不影响 oracle kwargs 时，stage 12 会实际调用 oracle，
 在同一组输入上比对 formula 与 oracle 的 NaN、±inf、带符号零及有限值输出。
-实现路径为 `_check_matches_oracle()` → `_call_oracle_single_api()` → 输出比较；stage 10 也会实际调用 oracle，不能概括为“只有 stage 10 执行 oracle”。
-`produces_nan` / `nan_propagates` 分支仅检查 formula 输出，不调用 oracle；stage 11 同样无需 oracle。
+实现路径为 `_check_matches_oracle()` → `_call_oracle_single_api()` → 输出比较；stage 11 也会实际调用 oracle，不能概括为“只有 stage 11 执行 oracle”。
+`produces_nan` / `nan_propagates` 分支仅检查 formula 输出，不调用 oracle；stage 12 同样无需 oracle。
 
 **解决的问题**：stage 2 仅做 `machine_check.kind` / pattern 白名单静态校验，
 不检查"声明的期望"与"formula 在该 pattern 输入下的实际输出"是否一致。典型逃逸缺陷：
@@ -495,7 +481,7 @@ oracle API 可调用，并且条目级 `attrs` 不影响 oracle kwargs 时，sta
 
 **缺少依赖时**：无 numpy 时 stage 12 返回 SKIP；仅缺 reference framework 时，`matches_oracle` 条目跳过 oracle 对拍，其他无需 oracle 的条目仍可能执行。
 当前实现可能在对拍被 INFO 跳过时仍返回阶段级 PASS，因此还须查看条目级 findings；stage 12 PASS 本身不是 oracle 已实际执行的证据。
-只有 pyyaml + jsonschema 的环境也不能宣称已执行 oracle：stage 9 不调用 oracle，stage 10 与 stage 12 的相关路径因缺少依赖而跳过。记录原因并补齐依赖、满足条件后重跑，不能将 SKIP 计作实际通过。
+只有 pyyaml + jsonschema 的环境也不能宣称已执行 oracle：stage 10 不调用 oracle，stage 11 与 stage 12 的相关路径因缺少依赖而跳过。记录原因并补齐依赖、满足条件后重跑，不能将 SKIP 计作实际通过。
 
 **作者侧要求**：特殊值条目必须（a）显式固定影响输出的全部自由输入（含属性与标量输入，
 用 `attrs:` + `all_same(v)`）；（b）期望按 IEEE 754 语义与 formula 真实传播路径推导，

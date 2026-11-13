@@ -8,7 +8,7 @@
 
 """Main pipeline 反向集成单测——端到端跑 scripts/validate_spec.py 子进程。
 
-* TestStage6Tags：双轨匹配（tag 优先 + 子串兜底）
+* TestStage5Tags：双轨匹配（tag 优先 + 子串兜底）
 * TestNegativeIntegration：故意构造错误 spec，验证错误码完整传到 exit 1
 """
 from __future__ import annotations
@@ -25,8 +25,8 @@ SKILL_ROOT = Path(__file__).resolve().parent.parent
 VALIDATOR = SKILL_ROOT / "scripts" / "validate_spec.py"
 
 
-class TestStage6Tags:
-    """stage 6 双轨匹配：tag 命中 / 子串兜底 / 都不命中报缺失。"""
+class TestStage5Tags:
+    """stage 5 双轨匹配：tag 命中 / 子串兜底 / 都不命中提示适用性。"""
 
     def _run(self, spec_yaml: str, tmp_path: Path) -> subprocess.CompletedProcess:
         path = tmp_path / "spec.yaml"
@@ -38,7 +38,7 @@ class TestStage6Tags:
 
     def test_explicit_tag_covers_requirement_with_unrelated_description(self, tmp_path):
         # 改 softmax example 的"reduce 轴长度为 1" case 描述为完全不含子串关键词的措辞，
-        # 但保留 tags: [reduce_axis_size_1] —— stage 6 应通过 tag 匹配认可。
+        # 但保留 tags: [reduce_axis_size_1] —— stage 5 应通过 tag 匹配认可。
         good = (SKILL_ROOT / "examples" / "softmax" / "spec.yaml").read_text(encoding="utf-8")
         modified = good.replace(
             '- case: "reduce 轴长度为 1"',
@@ -46,12 +46,12 @@ class TestStage6Tags:
         )
         result = self._run(modified, tmp_path)
         out = json.loads(result.stdout)
-        stage_6 = next(s for s in out["stages"] if s["stage_id"] == 6)
+        stage_5 = next(s for s in out["stages"] if s["stage_id"] == 6)
         # tags 仍带着 reduce_axis_size_1，要求被覆盖
-        assert stage_6["status"] == "PASS", stage_6["findings"]
+        assert stage_5["status"] == "PASS", stage_5["findings"]
 
-    def test_no_tag_no_keyword_fails(self, tmp_path):
-        # 同时移除 tag 和关键词，stage 6 必须 FAIL
+    def test_no_tag_no_keyword_is_advisory(self, tmp_path):
+        # 同时移除 tag 和关键词，只提示候选适用性，不强制扩充契约
         good = (SKILL_ROOT / "examples" / "softmax" / "spec.yaml").read_text(encoding="utf-8")
         modified = good.replace(
             '- case: "reduce 轴长度为 1"\n    tags: [reduce_axis_size_1]\n',
@@ -59,10 +59,12 @@ class TestStage6Tags:
         )
         result = self._run(modified, tmp_path)
         out = json.loads(result.stdout)
-        stage_6 = next(s for s in out["stages"] if s["stage_id"] == 6)
-        assert stage_6["status"] == "FAIL"
+        stage_5 = next(s for s in out["stages"] if s["stage_id"] == 6)
+        assert result.returncode == 0, result.stderr
+        assert stage_5["status"] == "PASS"
+        assert all(f["severity"] == "info" for f in stage_5["findings"])
         assert any("reduce_axis_size_1" in (f.get("message") or "")
-                   for f in stage_6["findings"])
+                   for f in stage_5["findings"])
 
 
 class TestNegativeIntegration:
@@ -263,7 +265,6 @@ dtype_policy:
   supported_combinations:
     - {inputs: {x: float32}, outputs: {y: float32}}
 
-broadcast: {kind: none}
 
 math_semantics:
   formula_kind: numpy_expr
@@ -348,7 +349,6 @@ dtype_policy:
   supported_combinations:
     - {inputs: {x: float32}, outputs: {y: float32}}
 
-broadcast: {kind: none}
 
 math_semantics:
   formula_kind: numpy_expr
@@ -417,3 +417,166 @@ class TestOutputCountDeterminedBySchema:
         s1 = next(s for s in out["stages"] if s["stage_id"] == 1)
         assert s1["status"] == "FAIL"
         assert any("output_count_determined_by" in f.get("field_path", "") for f in s1["findings"])
+
+
+class TestToleranceSchema:
+    @pytest.mark.parametrize("policy", [
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01},
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01,
+         "atol": 0, "epsilon": 1e-7, "fallback": {"reference_mode": "native", "error_ratio_limit": 2}},
+        {"metric": "staged_relative", "backend": "native", "rtol": .001,
+         "max_relative_rtol": .01, "atol": 0, "epsilon": 1e-7,
+         "fallback": {"small_value_threshold": .0001, "small_value_error": 1e-5,
+                      "cancel_boundary": .01, "cancel_zero_threshold": .01,
+                      "error_ratio_limit": 2, "reference_mode": "native_or_truncated"}},
+        {"metric": "max_relative", "rtol": .001, "atol": .001, "legacy_metadata": "kept"},
+        {"metric": "bitwise_equal"},
+        {"metric": "bitwise_equal", "rtol": 0, "atol": 0},
+        {"metric": "max_relative", "rtol": .001, "atol": .001},
+    ])
+    def test_supported_precision_policies_pass_without_irrelevant_fields(self, policy):
+        import yaml
+        from validate_spec import stage_1
+        spec = yaml.safe_load((SKILL_ROOT / "examples/add/spec.yaml").read_text())
+        spec["numerical_tolerance"]["per_dtype"]["float16"] = policy
+        result = stage_1(spec)
+        assert result.status == "PASS", result.findings
+
+    @pytest.mark.parametrize("policy", [
+        {"metric": "staged_relative", "rtol": .001},
+        {"metric": "staged_relative", "rtol": 0, "max_relative_rtol": .01},
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01, "atol": .01},
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01, "fallback": {"unknown": 1}},
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01, "fallback": {"reference_mode": "other"}},
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01, "fallback": {"error_ratio_limit": 0}},
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01, "reference_mode": "native"},
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01, "error_ratio_limit": .5},
+        {"metric": "staged_relative", "rtol": .001, "max_relative_rtol": .01, "unknown": True},
+        {"metric": "max_relative", "rtol": .001},
+    ])
+    def test_incomplete_and_invalid_policies_still_fail(self, policy):
+        import yaml
+        from validate_spec import stage_1
+        spec = yaml.safe_load((SKILL_ROOT / "examples/add/spec.yaml").read_text())
+        spec["numerical_tolerance"]["per_dtype"]["float16"] = policy
+        assert stage_1(spec).status == "FAIL"
+
+
+class TestArithmeticAndBroadcastIntegration:
+    def _run(self, spec, tmp_path):
+        import yaml
+        path = tmp_path / "spec.yaml"
+        path.write_text(yaml.safe_dump(spec, sort_keys=False))
+        result = subprocess.run([sys.executable, str(VALIDATOR), str(path), "--json"],
+                                capture_output=True, text=True, timeout=30)
+        return result.returncode, json.loads(result.stdout)
+
+    def test_packed_output_with_heterogeneous_inputs_uses_full_pipeline(self, tmp_path):
+        import yaml
+        spec = yaml.safe_load((SKILL_ROOT / "examples/fused_quant_matmul/spec.yaml").read_text())
+        spec["inputs"][0]["shape"]["symbolic"] = ["M", "K"]
+        spec["inputs"][1]["shape"]["symbolic"] = ["G", "K", "N"]
+        spec["shape_constraints"]["symbols"]["G"] = {"kind": "dim", "range": [1, 8]}
+        spec["outputs"][0]["shape_rule"] = "y.shape = (x1.shape[0], x2.shape[-1] // 2)"
+        spec["math_semantics"]["formula_kind"] = "python_block"
+        code, out = self._run(spec, tmp_path)
+        assert code == 0, out
+        assert all(s["status"] != "FAIL" for s in out["stages"])
+
+    def test_arithmetic_failure_still_exits_nonzero(self, tmp_path):
+        import yaml
+        spec = yaml.safe_load((SKILL_ROOT / "examples/add/spec.yaml").read_text())
+        spec["outputs"][0]["shape_rule"] = "z.shape = (x.shape[-1] // 0,)"
+        code, out = self._run(spec, tmp_path)
+        assert code == 1
+        assert next(s for s in out["stages"] if s["stage_id"] == 3)["status"] == "FAIL"
+
+
+@pytest.mark.parametrize("section", ["boundary_conditions", "extreme_inputs"])
+@pytest.mark.parametrize("formula_kind", ["numpy_expr", "python_block"])
+def test_concrete_sample_outside_declared_domain_fails_cli(tmp_path, section, formula_kind):
+    import yaml
+    spec = yaml.safe_load((SKILL_ROOT / "examples/add/spec.yaml").read_text())
+    for inp in spec["inputs"]:
+        inp["shape"]["symbolic"] = ["N"]
+    spec["shape_constraints"]["symbols"] = {"N": {"kind": "dim", "range": [32, 128]}}
+    spec["math_semantics"]["formula_kind"] = formula_kind
+    spec["boundary_conditions"] = []
+    spec["extreme_inputs"] = []
+    spec[section] = [{"case": "normal sample", "synthesize": {"x.shape": "[8]", "y.shape": "[8]"},
+                      "machine_check": {"kind": "matches_oracle"}}]
+    path = tmp_path / "spec.yaml"
+    path.write_text(yaml.safe_dump(spec))
+    result = subprocess.run([sys.executable, str(VALIDATOR), str(path), "--json", "--stage", "3"],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 1, result.stderr
+    stage = json.loads(result.stdout)["stages"][0]
+    assert stage["status"] == "FAIL"
+    assert any(f["rule_id"] == "shape_closure.sample_dimension" and section in f["field_path"]
+               for f in stage["findings"])
+
+
+@pytest.mark.parametrize("paradigm,case_id", [
+    ("Contraction", "k_zero_empty_inner_product"),
+    ("Reduction", "empty_tensor"),
+])
+def test_unconfirmed_paradigm_boundary_does_not_force_contract(tmp_path, paradigm, case_id):
+    # 只验证候选门禁；K=0 不在已声明支持域内，不能据范式强制补造报错。
+    import yaml
+    spec = {
+        "op": {"paradigms": [paradigm]},
+        "shape_constraints": {"symbols": {"K": {"range": [64, 8192]}}},
+        "boundary_conditions": [],
+        "extreme_inputs": [],
+    }
+    path = tmp_path / "spec.yaml"
+    path.write_text(yaml.safe_dump(spec))
+    result = subprocess.run(
+        [sys.executable, str(VALIDATOR), str(path), "--json", "--stage", "6", "--strict"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    stage = json.loads(result.stdout)["stages"][0]
+    assert stage["status"] == "PASS"
+    assert any(case_id in f["message"] for f in stage["findings"])
+    assert all(f["severity"] == "info" for f in stage["findings"])
+
+
+def test_declared_negative_behavior_still_validates_error_type(tmp_path):
+    import yaml
+    spec = yaml.safe_load((SKILL_ROOT / "examples/softmax/spec.yaml").read_text())
+    spec["boundary_conditions"].append({
+        "case": "来源明确要求的拒绝行为",
+        "synthesize": {"shapes": {"x": "[2, 3]"}},
+        "machine_check": {"kind": "raises_error", "error_type": "not_a_real_error"},
+    })
+    path = tmp_path / "spec.yaml"
+    path.write_text(yaml.safe_dump(spec))
+    result = subprocess.run(
+        [sys.executable, str(VALIDATOR), str(path), "--json", "--stage", "2"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 1
+    findings = json.loads(result.stdout)["stages"][0]["findings"]
+    assert any(f["rule_id"] == "error_type_unknown" and f["severity"] == "error" for f in findings)
+
+
+@pytest.mark.parametrize("lower,kind,expect_error", [
+    (0, "matches_oracle", False),       # 来源允许空内积，合法边界仍可声明。
+    (64, "matches_oracle", True),       # 已声明普通样例超出支持域，仍须拒绝。
+    (64, "raises_error", False),        # 来源明确要求拒绝时，域外负向条目仍合法。
+])
+def test_declared_boundary_domain_checks_remain_strict(lower, kind, expect_error):
+    import yaml
+    from evaluators.stages import check_concrete_sample_domain
+    spec = yaml.safe_load((SKILL_ROOT / "examples/matmul/spec.yaml").read_text())
+    spec["shape_constraints"]["symbols"]["K"]["range"][0] = lower
+    case = {
+        "case": "已确认的空内积契约",
+        "synthesize": {"shapes": {"a": "[2, 0]", "b": "[0, 3]"}},
+        "machine_check": {"kind": kind},
+    }
+    if kind == "raises_error":
+        case["machine_check"]["error_type"] = "shape_mismatch"
+    findings = check_concrete_sample_domain(spec, case, "boundary_conditions[0]")
+    assert any(f["severity"] == "error" for f in findings) == expect_error, findings

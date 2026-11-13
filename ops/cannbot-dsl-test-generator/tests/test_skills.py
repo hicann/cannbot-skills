@@ -218,7 +218,7 @@ def run_script(name, work, *extra):
         "--test-dir",
         str(work / "operators/add/test"),
     ]
-    if name != "build_blackbox_cases.py":
+    if name not in ("build_blackbox_cases.py", "build_performance_cases.py"):
         args += ["--design", str(work / "design/doc/DESIGN.md")]
     if name == "build_tdd_cases.py":
         args += ["--units-dir", str(work / "design/units")]
@@ -484,7 +484,7 @@ class CpuCaseCacheTests(unittest.TestCase):
         self.target = ModuleType("cache_target")
         self.target.run = lambda x, y: x + y
         self.counts = {"inputs": 0, "golden": 0}
-        make_inputs, simulate = self.golden.make_inputs, self.golden.simulate
+        make_inputs, primary = self.golden.make_inputs, self.golden.GOLDEN_FUNCTION
 
         def counted_inputs(*args, **kwargs):
             self.counts["inputs"] += 1
@@ -492,10 +492,10 @@ class CpuCaseCacheTests(unittest.TestCase):
 
         def counted_golden(*args, **kwargs):
             self.counts["golden"] += 1
-            return simulate(*args, **kwargs)
+            return primary(*args, **kwargs)
 
         self.golden.make_inputs = counted_inputs
-        self.golden.simulate = counted_golden
+        self.golden.GOLDEN_FUNCTION = counted_golden
 
     @staticmethod
     def load_module(name, path):
@@ -544,9 +544,9 @@ class CpuCaseCacheTests(unittest.TestCase):
 
     def test_hit_skips_input_generation_and_golden(self):
         first = self.cache.get(self.case, self.call(), 0)
-        self.assertEqual(self.counts, {"inputs": 2, "golden": 1})
+        self.assertEqual(self.counts, {"inputs": 1, "golden": 1})
         second = self.cache.get(self.case, self.call(), 0)
-        self.assertEqual(self.counts, {"inputs": 2, "golden": 1})
+        self.assertEqual(self.counts, {"inputs": 1, "golden": 1})
         self.cache_module.torch.testing.assert_close(first["inputs"], second["inputs"])
         self.cache_module.torch.testing.assert_close(
             first["expected"], second["expected"]
@@ -632,7 +632,7 @@ class CpuCaseCacheTests(unittest.TestCase):
         self.assertEqual(first["status"], "passed", first["detail"])
         self.assertEqual(first, second)
         self.assertEqual(len(calls), 12)
-        self.assertEqual(self.counts, {"inputs": 4, "golden": 2})
+        self.assertEqual(self.counts, {"inputs": 2, "golden": 2})
         self.assertEqual(len(list(self.cache.root.glob("*.pt"))), 2)
 
     def test_implementation_changes_and_input_mutation_are_not_cached_as_success(self):
@@ -647,11 +647,19 @@ class CpuCaseCacheTests(unittest.TestCase):
         self.assertIn("input_unchanged failed", failed["detail"])
         self.target.run = lambda x, y: x + y
         self.assertEqual(self.run_case(), first)
-        self.assertEqual(self.counts, {"inputs": 2, "golden": 1})
+        self.assertEqual(self.counts, {"inputs": 1, "golden": 1})
 
     def test_dst_args_and_multiple_outputs_get_fresh_zero_buffers(self):
         self.golden.OUTPUT_NAMES = ["out_add", "out_sub"]
-        self.golden.GOLDEN_FUNCTION = lambda x, y: (x + y, x - y)
+
+        def primary(x, y):
+            self.counts["golden"] += 1
+            return x + y, x - y
+
+        self.golden.GOLDEN_FUNCTION = primary
+        self.cache = self.cache_module.CaseCache(self.test_dir, self.golden, spec={
+            "outputs": [{"name": name} for name in self.golden.OUTPUT_NAMES],
+        })
         self.case["output_json"] = json.dumps(
             {name: PAIR["x"] for name in self.golden.OUTPUT_NAMES}
         )
@@ -670,7 +678,7 @@ class CpuCaseCacheTests(unittest.TestCase):
         first = self.run_case()
         self.assertEqual(first["status"], "passed", first["detail"])
         self.assertEqual(self.run_case(), first)
-        self.assertEqual(self.counts, {"inputs": 3, "golden": 1})
+        self.assertEqual(self.counts, {"inputs": 2, "golden": 1})
 
     def test_nan_result_detail_preserved_on_hit(self):
         inputs = copy.deepcopy(PAIR)
@@ -680,7 +688,7 @@ class CpuCaseCacheTests(unittest.TestCase):
         first = self.run_case()
         self.assertEqual(first["status"], "passed", first["detail"])
         self.assertEqual(self.run_case(), first)
-        self.assertEqual(self.counts, {"inputs": 2, "golden": 1})
+        self.assertEqual(self.counts, {"inputs": 1, "golden": 1})
 
     def test_behavior_and_expected_error_do_not_compute_golden(self):
         self.case["expected"] = "assertions"

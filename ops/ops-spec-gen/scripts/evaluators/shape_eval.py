@@ -24,7 +24,7 @@
 实现方式：
   在受限 AST 沙箱里求值表达式，把每个输入 input 暴露为 _ShapeProxy，其 .shape
   返回一个支持切片 / 负索引 / `+` 拼接的 _ShapeTuple。numpy namespace 只暴露
-  broadcast_shapes（复用 broadcast.py 的 numpy_broadcast_n）。
+  broadcast_shapes 和 reduce_shape。形状运算与算子级声明校验相互独立。
 """
 
 from __future__ import annotations
@@ -36,10 +36,126 @@ from typing import Any
 from . import _ast_sandbox
 from ._ast_sandbox import SandboxError
 from .types import Dim, SymbolicShape, DslError
-from . import broadcast as bcast_mod
 
 
 _TIMEOUT_S = 5
+
+
+# ---------- symbolic broadcast shapes --------------------------------------
+
+
+def _dims_broadcastable(a: Dim, b: Dim) -> tuple[bool, Dim]:
+    """Return (compatible, resulting_dim).
+
+    Rules:
+      - const k == const k → const k
+      - const 1, X        → X (X is broadcast over)
+      - X, const 1        → X
+      - symbol N, symbol N → symbol N
+      - symbol N, const k → symbol N (assume symbol can take k; downstream may refine)
+      - symbol N, symbol M (different names) → not directly compatible
+    """
+    if a == b:
+        return True, a
+    if a.kind == "const" and b.kind == "const":
+        if a.value == b.value:
+            return True, a
+        if a.value == 1:
+            return True, b
+        if b.value == 1:
+            return True, a
+        return False, a
+    if a.kind == "const" and a.value == 1:
+        return True, b
+    if b.kind == "const" and b.value == 1:
+        return True, a
+    if a.kind == "symbol" and b.kind == "symbol":
+        if a.name == b.name:
+            return True, a
+        # different symbol names — cannot prove compatibility statically
+        return False, a
+    if a.kind in ("symbol", "expr") and b.kind == "const":
+        return True, a
+    if b.kind in ("symbol", "expr") and a.kind == "const":
+        return True, b
+    return False, a
+
+
+def numpy_broadcast_two(a: SymbolicShape, b: SymbolicShape) -> SymbolicShape:
+    """Right-align two shapes per numpy ellipsis rule.
+
+    If either side has a folded prefix of unknown length, the result also has a
+    folded prefix (we cannot resolve it statically without per-case shape).
+    """
+    # Right-align explicit tails
+    a_exp = a.explicit
+    b_exp = b.explicit
+
+    out_explicit_rev: list[Dim] = []
+    n = max(len(a_exp), len(b_exp))
+    for i in range(1, n + 1):
+        ai = a_exp[-i] if i <= len(a_exp) else None
+        bi = b_exp[-i] if i <= len(b_exp) else None
+        if ai is None:
+            out_explicit_rev.append(bi)  # type: ignore[arg-type]
+            continue
+        if bi is None:
+            out_explicit_rev.append(ai)
+            continue
+        ok, dim = _dims_broadcastable(ai, bi)
+        if not ok:
+            raise DslError(
+                "incompatible_dims",
+                f"无法广播：{ai} ↔ {bi}（位置末尾第 {i} 维）",
+            )
+        out_explicit_rev.append(dim)
+    out_explicit = list(reversed(out_explicit_rev))
+
+    # Folded prefix:
+    # - if both sides have folded → output also folded (cannot resolve without case shapes)
+    # - if exactly one side has folded → output folded (the other side's missing
+    #   prefix dims are absorbed)
+    # - if neither side has folded → output fully explicit
+    if a.folded_name is not None and b.folded_name is not None:
+        out_folded = f"bcast_{a.folded_name}_{b.folded_name}"
+    elif a.folded_name is not None:
+        out_folded = a.folded_name
+    elif b.folded_name is not None:
+        out_folded = b.folded_name
+    else:
+        out_folded = None
+
+    return SymbolicShape(folded_name=out_folded, explicit=out_explicit)
+
+
+def _constant_axis_conflict(shapes):
+    """Do not lose concrete constraints when a symbolic operand is merged."""
+    rank = max((len(s.explicit) for s in shapes), default=0)
+    for axis in range(1, rank + 1):
+        constants = {
+            s.explicit[-axis].value
+            for s in shapes
+            if (len(s.explicit) >= axis and s.explicit[-axis].kind == "const"
+                and s.explicit[-axis].value != 1)
+        }
+        if len(constants) > 1:
+            return axis, sorted(constants)
+    return None
+
+
+def numpy_broadcast_n(shapes: list[SymbolicShape]) -> SymbolicShape:
+    if not shapes:
+        raise DslError("dsl_eval_error", "broadcast 至少需要 1 个输入")
+    if len(shapes) == 1:
+        return shapes[0]
+    conflict = _constant_axis_conflict(shapes)
+    if conflict:
+        axis, values = conflict
+        raise DslError("incompatible_dims", f"无法广播：末尾第 {axis} 维存在冲突常量 {values}")
+    out = shapes[0]
+    for s in shapes[1:]:
+        out = numpy_broadcast_two(out, s)
+    return out
 
 
 # ---------- shape proxy / shape tuple --------------------------------------
@@ -173,7 +289,7 @@ def _np_broadcast_shapes(*shapes) -> _ShapeTuple:
                 "dsl_eval_error",
                 f"np.broadcast_shapes 参数必须是 shape，得到 {type(s).__name__}",
             )
-    out_sh = bcast_mod.numpy_broadcast_n(converted)
+    out_sh = numpy_broadcast_n(converted)
     return _ShapeTuple.from_symbolic(out_sh)
 
 

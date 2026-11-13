@@ -16,7 +16,7 @@ import csv
 
 from generator_support import ArtifactPaths, test_dir
 
-SHEETS = ("blackbox", "whitebox", "tdd")
+SHEETS = ("blackbox", "whitebox", "tdd", "performance")
 COLUMNS = (
     "sheet",
     "case_id",
@@ -46,6 +46,11 @@ def read_casebook(work: ArtifactPaths, op: str) -> list[dict]:
         if tuple(reader.fieldnames or ()) != COLUMNS:
             raise ValueError(f"invalid testcase.csv columns: expected {COLUMNS}")
         rows = list(reader)
+    return validate_rows(rows)
+
+
+def validate_rows(rows):
+    """Validate the shared format without imposing group-specific coverage."""
     keys = [(row["sheet"], row["case_id"]) for row in rows]
     if len(keys) != len(set(keys)) or any(not case_id for _, case_id in keys):
         raise ValueError("duplicate or empty sheet/case_id in testcase.csv")

@@ -10,7 +10,7 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 # ----------------------------------------------------------------------------------------------------------
 
-"""Fixed CANNBotDSL runner for testcase.csv blackbox/whitebox/TDD rows."""
+"""Fixed CANNBotDSL correctness runner for active testcase.csv rows."""
 
 import argparse
 import copy
@@ -26,8 +26,11 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 import torch
-from cannbotdsl_case_cache import CaseCache, load_golden
-from cannbotdsl_case_contract import case_calls, check_inputs, validate_assertions
+from cannbotdsl_case_cache import CaseCache, canonical_output, load_golden, zero_buffers
+from cannbotdsl_case_contract import (
+    case_calls, check_inputs, validate_assertions,
+    validate_tolerance, staged_policy,
+)
 
 TEST_DIR = Path(__file__).resolve().parent
 OP_NAME = "__CANNBOTDSL_OP_NAME__"  # Bound from spec.op.name by prepare_golden.py.
@@ -44,7 +47,16 @@ def _result_path(sheet, case_id, grep=None):
 
 
 def _golden():
-    return load_golden(TEST_DIR / f"{OP_NAME}_golden.py")
+    golden = load_golden(TEST_DIR / f"{OP_NAME}_golden.py")
+    staged = {
+        dtype: limits
+        for dtype, limits in getattr(golden, "TOLERANCE", {}).items()
+        if isinstance(limits, dict) and limits.get("metric") == "staged_relative"
+    }
+    if staged:
+        # Validate even when selected cases only check behavior or empty outputs.
+        validate_tolerance(staged)
+    return golden
 
 
 def _rows(sheet, case_id, grep=None):
@@ -59,11 +71,11 @@ def _rows(sheet, case_id, grep=None):
         if "sheet" not in (reader.fieldnames or []):
             raise ValueError("testcase.csv has no sheet column")
         all_rows = list(reader)
-    if any(row.get("sheet") not in ("blackbox", "whitebox", "tdd") for row in all_rows):
+    if any(row.get("sheet") not in ("blackbox", "whitebox", "tdd", "performance") for row in all_rows):
         raise ValueError("testcase.csv contains an unsupported logical sheet")
     found = []
     for row in all_rows:
-        if row.get("sheet") != sheet or row.get("status") != "active":
+        if (sheet is not None and row.get("sheet") != sheet) or row.get("status") != "active":
             continue
         if case_id is not None and row.get("case_id") != case_id:
             continue
@@ -127,28 +139,73 @@ def _assert_nonnumeric(actual, inputs, assertions, device):
     return records
 
 
-def _compare(actual, expected, tolerance, path="output", equal_nan=False):
+def _compare(actual, expected, tolerance, path="output", equal_nan=False, native=None):
     if isinstance(expected, dict):
+        if not expected:
+            raise AssertionError(f"{path}: no outputs to compare")
         if not isinstance(actual, dict) or set(actual) != set(expected):
             raise AssertionError(f"{path}: output structure mismatch")
         measurements = []
         for key in expected:
             measurements.extend(
-                _compare(
-                    actual[key], expected[key], tolerance, f"{path}.{key}", equal_nan
-                )
+                _compare(actual[key], expected[key], tolerance, f"{path}.{key}", equal_nan,
+                         None if native is None else lambda key=key: native()[key])
             )
         return measurements
     if isinstance(expected, (tuple, list)):
+        if not expected:
+            raise AssertionError(f"{path}: no outputs to compare")
         if not isinstance(actual, (tuple, list)) or len(actual) != len(expected):
             raise AssertionError(f"{path}: output count mismatch")
         measurements = []
         for index, (a, e) in enumerate(zip(actual, expected)):
             measurements.extend(
-                _compare(a, e, tolerance, f"{path}[{index}]", equal_nan)
+                _compare(a, e, tolerance, f"{path}[{index}]", equal_nan,
+                         None if native is None else lambda index=index: native()[index])
             )
         return measurements
-    return _compare_tensor(actual, expected, tolerance, path, equal_nan)
+    return _compare_tensor(actual, expected, tolerance, path, equal_nan, native)
+
+
+def _compare_outputs(actual, expected, cache, inputs, output_map, equal_nan=False):
+    expected = cache.validate_output(expected, inputs, output_map)
+    actual = cache.validate_output(actual, inputs, output_map)
+    records = []
+    native_result = []
+
+    def get_native():
+        if not native_result:
+            callback = getattr(cache.golden, "NATIVE_REFERENCE_FUNCTION", None)
+            if not callable(callback):
+                raise ValueError("NATIVE_REFERENCE_FUNCTION must bind an independent CPU reference")
+            kwargs = {name: inputs[name] for name in cache.golden.INPUT_NAMES if name in inputs}
+            kwargs.update(cache.golden.ATTR_DEFAULTS)
+            for name in list(cache.golden.ATTR_DEFAULTS) + cache.golden.REQUIRED_ATTR_NAMES:
+                if name in inputs:
+                    kwargs[name] = inputs[name]
+            result = callback(**copy.deepcopy(kwargs))
+            checked = cache.validate_output(result, inputs, output_map)
+            _assert_device(checked, "cpu")
+            native_result.append(checked)
+        return native_result[0]
+    has_native = getattr(cache.golden, "NATIVE_REFERENCE_FUNCTION", None) is not None
+    for name, reference in expected.items():
+        value = actual[name]
+        path = f"output.{name}"
+        if reference is None:
+            if value is not None:
+                raise AssertionError(f"{path}: optional output presence mismatch")
+            records.append({"path": path, "metric": "output_presence", "equal": True})
+        elif isinstance(reference, (tuple, list)) and not reference:
+            if not isinstance(value, (tuple, list)) or value:
+                raise AssertionError(f"{path}: empty TensorList mismatch")
+            records.append({"path": path, "metric": "output_list_length", "equal": True})
+        else:
+            records.extend(_compare(value, reference, cache.golden.TOLERANCE, path, equal_nan,
+                                    (lambda name=name: get_native()[name]) if has_native else None))
+    if not records:
+        raise AssertionError("no output checks performed")
+    return records
 
 
 def _has_nan(value):
@@ -184,6 +241,8 @@ def _invoke(
     expected_error_code=None,
     unchanged=(),
     prepared_outputs=None,
+    output_spec=None,
+    dst_args=False,
 ):
     run, golden, device = invocation
     inputs = _to_device(inputs, device)
@@ -198,20 +257,24 @@ def _invoke(
             raise TypeError(f"input_unchanged requires Tensor input: {name}")
         snapshots[name] = (_clone_cpu(value), value.device, value.stride())
     outputs = {}
-    if output_map:
-        if not isinstance(output_map, dict) or set(output_map) != set(
-            golden.OUTPUT_NAMES
-        ):
-            raise ValueError("output_json must contain exactly the spec outputs")
+    dst_args = dst_args or bool(output_map)
+    if dst_args:
+        declared = (output_spec or {}).get("outputs") or [{"name": name} for name in golden.OUTPUT_NAMES]
+        required = {item["name"] for item in declared if not item.get("optional", False)}
+        if not isinstance(output_map, dict) or set(output_map) - set(golden.OUTPUT_NAMES):
+            raise ValueError("output_json must use declared output names")
+        supplied = {name: value for name, value in output_map.items() if value is not None}
+        if required - set(supplied):
+            raise ValueError("destination buffers missing required outputs")
         outputs = _to_device(
             prepared_outputs
             if prepared_outputs is not None
-            else golden.make_inputs(output_map, seed=0),
+            else golden.make_inputs(supplied, seed=0) if supplied else {},
             device,
         )
-        for tensor in outputs.values():
-            if isinstance(tensor, torch.Tensor):
-                tensor.zero_()
+        if set(outputs) != set(supplied):
+            raise ValueError("destination buffers disagree with output_json")
+        zero_buffers(outputs)
     try:
         result = run(**inputs, **outputs)
     except Exception as target_error:
@@ -235,12 +298,12 @@ def _invoke(
         raise AssertionError(
             f"target accepted an input that should raise {expected_error_code}"
         )
-    if not outputs:
+    if not dst_args:
         return result
     return (
-        outputs[golden.OUTPUT_NAMES[0]]
-        if len(outputs) == 1
-        else tuple(outputs[name] for name in golden.OUTPUT_NAMES)
+        outputs.get(golden.OUTPUT_NAMES[0])
+        if len(golden.OUTPUT_NAMES) == 1
+        else tuple(outputs.get(name) for name in golden.OUTPUT_NAMES)
     )
 
 
@@ -279,33 +342,7 @@ def _run_rows(rows, golden, device):
     return [_case_result(row, device, invocation, load_error, cache) for row in rows]
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--sheet", required=True, choices=("blackbox", "whitebox", "tdd")
-    )
-    selection = parser.add_mutually_exclusive_group()
-    selection.add_argument("--case-id")
-    selection.add_argument(
-        "--grep", help="regular expression matching case_id within the sheet"
-    )
-    parser.add_argument("--device", required=True)
-    parser.add_argument("--require-accelerator", action="store_true")
-    args = parser.parse_args()
-    result_path = _result_path(args.sheet, args.case_id, args.grep)
-    result_path.unlink(missing_ok=True)
-    if args.require_accelerator and torch.device(args.device).type == "cpu":
-        print(
-            "precision verification requires a non-CPU target device", file=sys.stderr
-        )
-        return 2
-    try:
-        rows = _rows(args.sheet, args.case_id, args.grep)
-        golden = _golden()
-    except (RuntimeError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-    results = _run_rows(rows, golden, args.device)
+def _write_results(result_path, results):
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -330,10 +367,50 @@ def main():
     print(
         f"wrote {result_path} total={len(results)} failed={sum(row['status'] != 'passed' for row in results)}"
     )
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    sheets = ("blackbox", "whitebox", "tdd", "performance")
+    scope = parser.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--sheet", choices=sheets)
+    scope.add_argument("--all", action="store_true", help="run all active cases across sheets")
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--case-id")
+    selection.add_argument(
+        "--grep", help="regular expression matching case_id within the sheet"
+    )
+    parser.add_argument("--device", required=True)
+    parser.add_argument("--require-accelerator", action="store_true")
+    args = parser.parse_args()
+    if args.all and (args.case_id is not None or args.grep is not None):
+        parser.error("--all cannot be combined with --case-id or --grep")
+    selected_sheets = sheets if args.all else (args.sheet,)
+    result_paths = {sheet: _result_path(sheet, args.case_id, args.grep) for sheet in selected_sheets}
+    for result_path in result_paths.values():
+        result_path.unlink(missing_ok=True)
+    if args.require_accelerator and torch.device(args.device).type == "cpu":
+        print(
+            "precision verification requires a non-CPU target device", file=sys.stderr
+        )
+        return 2
+    try:
+        rows = _rows(args.sheet, args.case_id, args.grep)
+        golden = _golden()
+    except (RuntimeError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    results = _run_rows(rows, golden, args.device)
+    for sheet, result_path in result_paths.items():
+        sheet_results = [row for row in results if row["sheet"] == sheet]
+        if sheet_results:
+            _write_results(result_path, sheet_results)
+        else:
+            print(f"skipped {sheet}: no active cases")
     return 1 if any(row["status"] != "passed" for row in results) else 0
 
 
-def _compare_tensor(actual, expected, tolerance, path, equal_nan):
+def _compare_tensor(actual, expected, tolerance, path, equal_nan, native=None):
     if not isinstance(actual, torch.Tensor) or not isinstance(expected, torch.Tensor):
         raise AssertionError(f"{path}: expected tensor output")
     if actual.shape != expected.shape or actual.dtype != expected.dtype:
@@ -344,11 +421,12 @@ def _compare_tensor(actual, expected, tolerance, path, equal_nan):
     limits = tolerance.get(dtype)
     if not isinstance(limits, dict):
         raise AssertionError(f"{path}: no tolerance for {dtype}")
-    metric = limits.get("metric")
-    if metric not in ("max_relative", "bitwise_equal"):
-        raise AssertionError(
-            f"{path}: unsupported metric {metric}; do not substitute assert_close"
-        )
+    validate_tolerance({dtype: limits})
+    metric = limits["metric"]
+    if metric == "staged_relative":
+        return _compare_staged_relative(actual, expected, limits, path, equal_nan, native)
+    if metric == "mean_relative":
+        return _compare_mean_relative(actual, expected, limits, path, equal_nan)
     if metric == "bitwise_equal":
         # Numeric equality would treat +0.0 and -0.0 as equal; compare storage bits.
         passed = torch.equal(
@@ -401,6 +479,135 @@ def _compare_tensor(actual, expected, tolerance, path, equal_nan):
     return [detail]
 
 
+def _compare_mean_relative(actual, expected, limits, path, equal_nan):
+    """Joint strict mean and maximum relative errors from the confirmed policy."""
+    dtype = str(expected.dtype).removeprefix("torch.")
+    detail = {
+        "path": path, "dtype": dtype, "metric": "mean_relative",
+        "backend": limits.get("backend", "native"),
+        "rtol": limits["rtol"], "max_relative_rtol": limits["max_relative_rtol"],
+        "epsilon": limits.get("epsilon", 1e-7),
+    }
+    # Matching infinities are exact; NaNs only match for explicit NaN cases.
+    actual, expected = actual.double(), expected.double()
+    finite = torch.isfinite(actual) & torch.isfinite(expected)
+    matching = (actual == expected) | (
+        torch.isnan(actual) & torch.isnan(expected) & equal_nan
+    )
+    if not bool((finite | matching).all()):
+        detail.update(passed=False, reason="NaN/Inf positions or signs mismatch")
+        raise AssertionError(json.dumps(detail, ensure_ascii=False))
+    if bool(finite.any()):
+        errors = (actual[finite] - expected[finite]).abs() / (
+            expected[finite].abs() + detail["epsilon"]
+        )
+        mere, mare = float(errors.mean()), float(errors.max())
+    else:
+        mere = mare = 0.0
+    detail.update(mere=mere, mare=mare, finite_count=int(finite.sum()))
+    detail["passed"] = mere < limits["rtol"] and mare < limits["max_relative_rtol"]
+    if not detail["passed"]:
+        raise AssertionError(json.dumps(detail, ensure_ascii=False))
+    return [detail]
+
+
+def _staged_relative_errors(actual, expected, epsilon):
+    """Preserve ordinary arithmetic; rescale intermediate fp64 overflows only."""
+    difference = (actual - expected).abs()
+    denominator = expected.abs() + epsilon
+    errors = difference / denominator
+    overflow = (torch.isfinite(actual) & torch.isfinite(expected)
+                & (~torch.isfinite(difference) | ~torch.isfinite(denominator)))
+    if bool(overflow.any()):
+        a, g = actual[overflow], expected[overflow]
+        scale = torch.maximum(g.abs(), torch.full_like(g, epsilon))
+        finite_difference = difference[overflow]
+        numerator = finite_difference / scale
+        lost_difference = ~torch.isfinite(finite_difference)
+        if bool(lost_difference.any()):
+            # Only reconstruct a difference when the original subtraction overflowed.
+            # A finite difference retains more precision than subtracting a/scale and g/scale.
+            numerator[lost_difference] = (
+                a[lost_difference] / scale[lost_difference]
+                - g[lost_difference] / scale[lost_difference]
+            ).abs()
+        errors[overflow] = numerator / (g.abs() / scale + epsilon / scale)
+    return errors
+
+
+def _compare_staged_relative(actual, expected, limits, path, equal_nan, native=None):
+    """Complete staged decision, used by all fixed-runner execution modes."""
+    dtype = str(expected.dtype).removeprefix("torch.")
+    policy = staged_policy(dtype, limits)
+    a, g = actual.double().clone(), expected.double().clone()
+    if not torch.equal(torch.isnan(a), torch.isnan(g)):
+        raise AssertionError(f"{path}: NaN positions or policy mismatch")
+    both_inf = torch.isinf(a) & torch.isinf(g)
+    if bool((both_inf & (torch.sign(a) != torch.sign(g))).any()):
+        raise AssertionError(f"{path}: Inf signs mismatch")
+    one_inf = torch.isinf(a) ^ torch.isinf(g)
+    maximum = torch.finfo(expected.dtype).max
+    a[one_inf & torch.isinf(a)] = torch.sign(a[one_inf & torch.isinf(a)]) * maximum
+    g[one_inf & torch.isinf(g)] = torch.sign(g[one_inf & torch.isinf(g)]) * maximum
+    valid = ~(torch.isnan(a) | torch.isnan(g) | both_inf)
+    diff = (a - g).abs()
+    errors = _staged_relative_errors(a, g, limits.get("epsilon", 1e-7))
+    if bool(torch.isnan(errors[valid]).any()):
+        raise ValueError(f"{path}: relative error computation produced NaN")
+    error = errors[valid]
+    mere = float(error.mean()) if error.numel() else 0.0
+    mare = float(error.max()) if error.numel() else 0.0
+    detail = dict(path=path, dtype=dtype, metric="staged_relative", mere=mere, mare=mare,
+                  finite_count=int(valid.sum()), stage=1, passed=True, policy=policy)
+    if mere < limits["rtol"] and mare < limits["max_relative_rtol"]:
+        return [detail]
+    mode = policy["reference_mode"]
+    if mode == "native" and native is None:
+        raise ValueError("staged_relative requires NATIVE_REFERENCE_FUNCTION")
+    if mode != "truncated" and native is not None:
+        reference = native()
+        if not isinstance(
+                reference, torch.Tensor) or reference.shape != expected.shape or reference.dtype != expected.dtype:
+            raise ValueError(f"{path}: native reference shape/dtype mismatch")
+        n = reference.to(device=g.device, dtype=torch.float64)
+        if not torch.equal(torch.isnan(n), torch.isnan(expected)):
+            raise ValueError(f"{path}: native reference NaN positions mismatch")
+        detail["reference"] = "native"
+    else:
+        # Preserve the original Golden for the explicit truncated-reference path,
+        # including one-sided Inf saturation semantics.
+        n = expected.double()
+        detail["reference"] = "truncated"
+    native_diff = (n - g).abs()
+    native_error = _staged_relative_errors(n, g, limits.get("epsilon", 1e-7))
+    small = valid & (g.abs() < policy["small_value_threshold"])
+    cancel = valid & (
+        a.abs() < policy["cancel_zero_threshold"]) & (
+        g.abs() >= policy["small_value_threshold"]) & (
+            g.abs() < policy["cancel_boundary"])
+    normal = valid & ~small & ~cancel
+    candidate_bad = errors > limits["max_relative_rtol"]
+    native_bad = native_error > limits["max_relative_rtol"]
+    detail.update(stage=2, passed=True)
+    for name, mask, bad, refbad in (
+        ("small_value", small, diff > policy["small_value_error"], native_diff > policy["small_value_error"]),
+        ("cancel", cancel, candidate_bad, native_bad),
+        ("normal", normal, candidate_bad, native_bad),
+    ):
+        count, refcount = int((mask & bad).sum()), int((mask & refbad).sum())
+        passed = (
+            (count == 0 or (refcount > 0 and count / refcount <= policy["error_ratio_limit"]))
+            if name == "normal"
+            else count / max(refcount, 1) <= policy["error_ratio_limit"]
+        )
+        detail.update({name + "_error_count": count, name + "_reference_error_count": refcount,
+                       name + "_total_count": int(mask.sum()), name + "_passed": passed})
+        detail["passed"] = detail["passed"] and passed
+    if not detail["passed"]:
+        raise AssertionError(json.dumps(detail, ensure_ascii=False))
+    return [detail]
+
+
 def _run_case(row, invocation, cache):
     _, golden, device = invocation
     spec_map = json.loads(row["inputs_json"])
@@ -436,6 +643,7 @@ def _run_case(row, invocation, cache):
             expected_error_code=code,
             unchanged=_unchanged_names(assertions),
             prepared_outputs=copy.deepcopy(data["outputs"]),
+            output_spec=cache.spec, dst_args=row.get("note") == "dst_args",
         )
         return "passed", json.dumps({"expected_error_code": code}, ensure_ascii=False)
     if expectation not in ("match_golden", "match_golden_nan", "assertions"):
@@ -470,16 +678,22 @@ def _run_case(row, invocation, cache):
                 output_map,
                 unchanged=_unchanged_names(call["assertions"]),
                 prepared_outputs=copy.deepcopy(data["outputs"]),
+                output_spec=cache.spec, dst_args=row.get("note") == "dst_args",
             )
             _assert_device(actual, device)
+            # All successful calls obey the same public output contract, even
+            # when this case requests behavioral assertions without a Golden.
+            named_actual = canonical_output(
+                cache.validate_output(actual, data["inputs"], output_map)
+            )
             if bitwise:
                 _synchronize(device)
             if numeric:
                 records.extend(
-                    _compare(
-                        _to_device(actual, "cpu"),
+                    _compare_outputs(
+                        _to_device(named_actual, "cpu"),
                         expected,
-                        golden.TOLERANCE,
+                        cache, data["inputs"], output_map,
                         equal_nan=expectation == "match_golden_nan",
                     )
                 )
@@ -491,7 +705,7 @@ def _run_case(row, invocation, cache):
             elif not numeric:
                 raise ValueError("assertions case lacks observable behavior")
             if bitwise:
-                snapshot = _clone_cpu(actual)
+                snapshot = _clone_cpu(named_actual)
                 if repetition == 0:
                     baselines[index] = snapshot
                 else:
@@ -503,6 +717,8 @@ def _run_case(row, invocation, cache):
 
 
 def _clone_cpu(value):
+    if value is None:
+        return None
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().clone()
     if isinstance(value, dict):
@@ -513,7 +729,10 @@ def _clone_cpu(value):
 
 
 def _bitwise_equal(actual, expected):
-    if isinstance(expected, torch.Tensor):
+    if expected is None:
+        if actual is not None:
+            raise AssertionError("repeated call output presence changed")
+    elif isinstance(expected, torch.Tensor):
         if (
             not isinstance(actual, torch.Tensor)
             or actual.shape != expected.shape

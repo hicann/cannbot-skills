@@ -32,7 +32,7 @@ inputs:
   - name: x
     role: tensor
     dtype_set: [float16, float32, bfloat16]
-    rank_range: [1, 8]
+    rank_range: [0, 8]  # 本例已有 rank=0 正向样例，numpy/torch sum 均支持标量
     layout: ND
     data_distribution: normal
     shape:

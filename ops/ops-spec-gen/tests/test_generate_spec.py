@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import yaml
+import pytest
 
 from evaluators.stages import stage_3
 import generate_spec
@@ -31,8 +32,11 @@ def test_pure_reduction_render_uses_reduce_shape_template():
     assert 'symbolic: ["...x", "R"]' in spec
     assert "  - name: keep_dims\n" in spec
     assert "y.shape = np.reduce_shape(x.shape, axis=tuple(dim), keepdims=keep_dims)" in spec
-    assert 'case: "rank=0 标量输入 → 归约轴越界"' in spec
-    assert "machine_check: {kind: raises_error, error_type: attribute_value_out_of_range}" in spec
+    parsed = yaml.safe_load(spec)
+    assert parsed["boundary_conditions"] == []
+    assert parsed["extreme_inputs"] == []
+    assert parsed["op"].get("error_codes", []) == []
+    assert "待核对适用性" in spec
     assert "y.shape = x.shape" not in spec
 
 
@@ -99,3 +103,22 @@ def test_stateful_first_input_defaults_to_state():
     assert generate_spec._default_input_role(None, ["Stateful"], 0) == "state"
     assert generate_spec._default_input_role(None, ["Stateful"], 1) == "tensor"
     assert generate_spec._default_input_role("tensor", ["Stateful"], 0) == "tensor"
+
+
+@pytest.mark.parametrize("paradigms", [
+    ["Contraction"], ["Reduction"], ["IndexGather"],
+    ["Reduction", "NumericalStable", "FusedComposite"],
+])
+def test_generated_candidates_are_not_executable_guarantees(paradigms):
+    spec = render(GenInput(
+        op_name="example", description="No confirmed boundary behavior",
+        category="Reduction" if paradigms == ["Reduction"] else "Other",
+        paradigms=paradigms,
+        inputs=[TensorSpec(name="x", dtype_set=["float32"])],
+        outputs=["y"], supported_chips=["Ascend910B"],
+    ))
+    data = yaml.safe_load(spec)
+    assert data["boundary_conditions"] == []
+    assert data["extreme_inputs"] == []
+    assert data["op"].get("error_codes", []) == []
+    assert "raises_error" not in spec

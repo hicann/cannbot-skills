@@ -2,11 +2,11 @@
 # This program is free software, you can redistribute it and/or modify it under the terms and conditions of
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
-# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 11 invariant_exec 单测。
+"""Stage 10 invariant_exec 单测。
 
 覆盖：
   * SKIP 路径：formula_kind 非 numpy_expr / 无 invariants
@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import pytest
 
-from evaluators.invariant_exec import stage_11
+from evaluators.invariant_exec import stage_10
 
 
 def _spec(
@@ -55,28 +55,28 @@ _DUAL_INPUTS = [
 ]
 
 
-class TestStage11Skip:
+class TestStage10Skip:
     def test_skip_non_numpy_formula_kind(self):
         s = _spec(formula_kind="textual_only", invariants=[{"kind": "elementwise_ge", "value": 0.0}])
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "SKIP"
         assert any("skipped_non_numpy" in f["rule_id"] for f in findings)
 
     def test_skip_no_invariants(self):
         s = _spec(invariants=[])
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "SKIP"
         assert any("no_invariants" in f["rule_id"] for f in findings)
 
 
-class TestStage11ValuePass:
+class TestStage10ValuePass:
     def test_elementwise_ge_pass(self):
         """y = abs(x) satisfies out >= 0."""
         s = _spec(
             formula="y = np.abs(x)",
             invariants=[{"name": "nonneg", "kind": "elementwise_ge", "value": 0.0}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "PASS", findings
 
     def test_range_in_pass(self):
@@ -85,7 +85,7 @@ class TestStage11ValuePass:
             formula="y = 1.0 / (1.0 + np.exp(-x))",
             invariants=[{"name": "unit_interval", "kind": "range_in", "range": [0.0, 1.0]}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "PASS", findings
 
     def test_reduce_equals_pass(self):
@@ -95,7 +95,7 @@ class TestStage11ValuePass:
             invariants=[{"name": "sum_to_one", "kind": "reduce_equals",
                          "reducer": "sum", "axis": 1, "value": 1.0, "tolerance_inherit": True}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "PASS", findings
 
     def test_reduce_equals_axis_from_attr(self):
@@ -106,11 +106,11 @@ class TestStage11ValuePass:
                          "reducer": "sum", "axis": "${attr.dim}", "value": 1.0, "tolerance_inherit": True}],
             attributes=[{"name": "dim", "default": 1}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "PASS", findings
 
 
-class TestStage11AlgebraicPass:
+class TestStage10AlgebraicPass:
     def test_equals_under_swap_pass(self):
         """z = x + y is commutative."""
         s = _spec(
@@ -119,7 +119,7 @@ class TestStage11AlgebraicPass:
             outputs=[{"name": "z"}],
             invariants=[{"name": "commutative", "kind": "equals_under_swap", "swap": ["x", "y"]}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "PASS", findings
 
     def test_identity_when_other_zero_pass(self):
@@ -131,7 +131,7 @@ class TestStage11AlgebraicPass:
             invariants=[{"name": "id_zero", "kind": "equals_input_when_other_is_zero",
                          "identity_input": "x", "zero_input": "y"}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "PASS", findings
 
     def test_equals_when_input_is_zero_pass(self):
@@ -140,18 +140,18 @@ class TestStage11AlgebraicPass:
             formula="y = x * 2",
             invariants=[{"name": "zero_absorb", "kind": "equals_when_input_is_zero", "value": 0.0}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "PASS", findings
 
 
-class TestStage11Fail:
+class TestStage10Fail:
     def test_elementwise_ge_violated(self):
         """y = x with x drawn from normal has negative values → violates out >= 0."""
         s = _spec(
             formula="y = x",
             invariants=[{"name": "nonneg", "kind": "elementwise_ge", "value": 0.0}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "FAIL"
         assert any("elementwise_ge_violated" in f["rule_id"] for f in findings)
 
@@ -162,7 +162,7 @@ class TestStage11Fail:
             invariants=[{"name": "sum_to_one", "kind": "reduce_equals",
                          "reducer": "sum", "axis": 1, "value": 1.0, "tolerance_inherit": True}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "FAIL"
         assert any("reduce_equals_violated" in f["rule_id"] for f in findings)
 
@@ -174,7 +174,7 @@ class TestStage11Fail:
             outputs=[{"name": "z"}],
             invariants=[{"name": "commutative", "kind": "equals_under_swap", "swap": ["x", "y"]}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "FAIL"
         assert any("equals_under_swap_violated" in f["rule_id"] for f in findings)
 
@@ -187,19 +187,19 @@ class TestStage11Fail:
             invariants=[{"name": "id_zero", "kind": "equals_input_when_other_is_zero",
                          "identity_input": "x", "zero_input": "y"}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "FAIL"
         assert any("equals_input_when_other_is_zero_violated" in f["rule_id"] for f in findings)
 
 
-class TestStage11Edge:
+class TestStage10Edge:
     def test_kind_not_executable_emits_info(self):
         """Structural kinds (no_leak_intermediates) are info-skipped, not errors."""
         s = _spec(
             formula="y = x",
             invariants=[{"name": "no_leak", "kind": "no_leak_intermediates"}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status == "PASS"
         assert any("kind_not_executable" in f["rule_id"] for f in findings)
 
@@ -217,7 +217,7 @@ class TestStage11Edge:
             ],
             invariants=[{"name": "zero_in_zero_out", "kind": "equals_when_input_is_zero", "value": 0.0}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         # No false violation from zeroing the axis index tensor.
         assert status == "PASS", findings
 
@@ -230,6 +230,6 @@ class TestStage11Edge:
             formula="y = x[x != 0]",  # all-zero input → empty output
             invariants=[{"name": "zero_empty", "kind": "equals_when_input_is_zero", "value": 0.0}],
         )
-        status, findings = stage_11(s)
+        status, findings = stage_10(s)
         assert status in ("PASS", "SKIP")
         assert not any(f["severity"] == "error" for f in findings)

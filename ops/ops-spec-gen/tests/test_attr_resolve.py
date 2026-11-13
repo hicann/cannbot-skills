@@ -1,6 +1,12 @@
 # Copyright (c) 2026 Huawei Technologies Co., Ltd.
-# Licensed under CANN Open Software License Agreement Version 2.0.
-"""属性值解析单测：_resolve_kwargs（stage10 oracle kwargs）+ _coerce_attr_value（synthesize 属性字面量）。
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+
+"""属性值解析单测：_resolve_kwargs（stage9 oracle kwargs）+ _coerce_attr_value（synthesize 属性字面量）。
 
 锁定两条新逻辑：
   * _resolve_kwargs：单个 attr 占位符保留原生类型（int/float），复合串仍 stringify

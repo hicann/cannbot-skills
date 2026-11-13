@@ -28,8 +28,8 @@ from build_whitebox_cases import validated_branches
 from case_cache import CaseCache, load_golden
 from case_contract import case_calls, check_inputs, validate_assertions, validate_checks
 from casebook import read_casebook
+from build_performance_cases import validate_performance
 from generator_support import (
-    add_io_arguments,
     artifact_paths,
     golden_path,
     load_yaml_mapping,
@@ -117,7 +117,10 @@ def validate_test_contracts(native):
                 )
             conditions = item.get("input_conditions", [])
             if conditions != []:
-                validate_checks(conditions)
+                try:
+                    validate_checks(conditions)
+                except ValueError as exc:
+                    fail(f"{uid}/{ref}: invalid input_conditions: {exc}")
     validate_dependency_graph(
         [
             {"id": uid, "depends_on": unit.get("depends_on", [])}
@@ -167,8 +170,23 @@ def validate_materialized_conditions(work, units, op):
 def main():
     logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout)
     parser = argparse.ArgumentParser(description=__doc__)
-    add_io_arguments(parser, design=True, units=True)
+    parser.add_argument("--check-unit-contracts", action="store_true",
+                        help="read-only Unit contract preflight; no cases or Golden required")
+    parser.add_argument("--units-dir", type=Path, required=True,
+                        help="directory containing U*.yaml")
+    parser.add_argument("--spec", type=Path, help="operator specification YAML")
+    parser.add_argument("--design", type=Path, help="operator design Markdown")
+    parser.add_argument("--test-dir", type=Path, help="operator test assets")
     args = parser.parse_args()
+    if args.check_unit_contracts:
+        if any(getattr(args, name) is not None for name in ("spec", "design", "test_dir")):
+            parser.error("--check-unit-contracts accepts only --units-dir")
+        native = load_native_units(argparse.Namespace(units=args.units_dir.resolve()))
+        validate_test_contracts(native)
+        print(f"validated {len(native)} native Unit test contracts (no cases or Golden)")
+        return
+    if any(getattr(args, name) is None for name in ("spec", "design", "test_dir")):
+        parser.error("normal mode requires --spec, --design and --test-dir")
     work = artifact_paths(args)
     spec = load_yaml_mapping(input_spec_path(work))
     op = (spec.get("op") or {}).get("name")
@@ -183,6 +201,16 @@ def main():
         if draft
         else {}
     )
+    all_rows = read_casebook(work, op)
+    if draft and draft.get("call_style") == "dst_args":
+        for row in all_rows:
+            if row["sheet"] != "tdd" or row["status"] != "active":
+                continue
+            if not json.loads(row["output_json"] or "{}") and row.get("note") != "dst_args":
+                fail(
+                    f"{row['case_id']}: final CSV needs output_json destination recipes or note=dst_args "
+                    "for absent optional outputs; branch_ids do not supply call arguments"
+                )
     input_names = {
         item["name"] for item in spec.get("inputs") or [] if not item.get("optional")
     }
@@ -216,14 +244,17 @@ def main():
         ):
             fail(f"invalid or duplicate unit id: {unit_id}")
         seen.add(unit_id)
-        cases.extend(validate_unit_cases(unit, context))
+        cases.extend(validate_unit_cases(unit, context, allow_empty_dst=all(
+            item.get("optional", False) for item in spec.get("outputs") or []
+        )))
     validate_dependency_graph(units)
     validate_materialized_conditions(work, units, op)
     if len({case["case_id"] for case in cases}) != len(cases):
         fail("duplicate TDD case ID")
     LOGGER.info(f"validated {len(cases)} TDD rows")
-    cache = CaseCache(work.test, load_golden(golden))
-    report = cache.prepare(read_casebook(work, op), case_calls)
+    cache = CaseCache(work.test, load_golden(golden), spec=spec)
+    validate_performance(all_rows, load_yaml_mapping(work.spec))
+    report = cache.prepare(all_rows, case_calls)
     LOGGER.info(
         f"prepared CPU case cache: built={report['built']} hits={report['hits']}"
     )
@@ -379,7 +410,7 @@ def validate_unit_row(row, uid, obligations, runnable):
     return case, refs
 
 
-def validate_unit_cases(unit, context):
+def validate_unit_cases(unit, context, allow_empty_dst=False):
     unit_id = unit["id"]
     draft, branches = context.draft, context.branches
     cases = []
@@ -403,11 +434,11 @@ def validate_unit_cases(unit, context):
     if not isinstance(examples, list) or not examples:
         fail(f"{unit_id}: cases must be nonempty")
     for index, item in enumerate(examples, start=1):
-        cases.append(validate_execution_case(item, index, unit, context))
+        cases.append(validate_execution_case(item, index, unit, context, allow_empty_dst))
     return cases
 
 
-def validate_execution_case(item, index, unit, context):
+def validate_execution_case(item, index, unit, context, allow_empty_dst=False):
     unit_id = unit["id"]
     branch_ids = unit.get("branch_ids") or []
     draft, branches = context.draft, context.branches
@@ -439,9 +470,11 @@ def validate_execution_case(item, index, unit, context):
             fail(f"{case_id}: sequence assertion call lacks observable evidence")
     outputs = item.get("output_tensors") or {}
     if draft and draft.get("call_style") == "dst_args" and not outputs:
-        if not case_branches:
-            fail(f"{case_id}: dst_args requires output_tensors or a branch")
-        outputs = branches[case_branches[0]].get("output_tensors") or {}
+        if not allow_empty_dst:
+            fail(
+                f"{case_id}: final CSV output_json must supply required destination recipes; "
+                "branch_ids are traceability only"
+            )
     return {
         "case_id": case_id,
         "unit_id": unit_id,

@@ -92,7 +92,7 @@ math_semantics:
   # 用 absent + 签字，下游测试以 spec.formula 作 ground truth + invariant 兜底。
   reference_oracle:
     framework: torch
-    api: torch.nn.functional.dropout      # 占位（absent=true 时 stage 9 早 SKIP）
+    api: torch.nn.functional.dropout      # 占位（absent=true 时 stage 8 早 SKIP）
     kwargs: {}
     available_for_dtype: [float16, bfloat16, float32]
     absent: true

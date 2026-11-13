@@ -14,7 +14,88 @@
 
 import math
 
-RELATIONS = {"eq", "ne", "ge", "gt", "le", "lt"}
+
+def validate_tolerance(tolerance):
+    """Validate the exact comparison policy shared by preflight and runner."""
+    if not isinstance(tolerance, dict) or not tolerance:
+        raise ValueError("numerical_tolerance.per_dtype must be a nonempty mapping")
+    for dtype, limits in tolerance.items():
+        prefix = f"numerical_tolerance.per_dtype.{dtype}"
+        if not isinstance(limits, dict):
+            raise ValueError(f"{prefix}: expected a mapping")
+        metric = limits.get("metric")
+        if metric not in ("max_relative", "bitwise_equal", "mean_relative", "staged_relative"):
+            raise ValueError(f"{prefix}: unsupported metric {metric!r}")
+        if metric == "staged_relative":
+            allowed = {"metric", "backend", "rtol", "max_relative_rtol", "atol", "epsilon", "fallback"}
+            unknown = set(limits) - allowed
+            if unknown:
+                raise ValueError(
+                    f"{prefix}: unsupported staged_relative fields {sorted(map(str, unknown))}; "
+                    "place stage-two domain/reference options under fallback"
+                )
+        backend = limits.get("backend", "native")
+        if backend != "native":
+            raise ValueError(f"{prefix}: unsupported backend {backend!r}")
+        if "fallback" in limits and metric != "staged_relative":
+            raise ValueError(f"{prefix}: fallback requires staged_relative")
+        if metric == "bitwise_equal":
+            continue
+        fields = ("rtol", "atol") if metric == "max_relative" else (
+            "rtol", "max_relative_rtol"
+        )
+        for key in fields:
+            value = limits.get(key)
+            if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"{prefix}.{key}: expected a finite nonnegative number")
+            if metric in ("mean_relative", "staged_relative") and value == 0:
+                raise ValueError(f"{prefix}.{key}: strict relative limits must be positive")
+        if metric not in ("mean_relative", "staged_relative"):
+            continue
+        if dtype not in ("float16", "bfloat16", "float32", "float64"):
+            raise ValueError(f"{prefix}: relative policy requires a supported floating dtype")
+        epsilon = limits.get("epsilon", 1e-7)
+        if type(epsilon) not in (int, float) or not math.isfinite(epsilon) or epsilon <= 0:
+            raise ValueError(f"{prefix}.epsilon: expected a finite positive number")
+        if type(limits.get("atol", 0)) not in (int, float) or limits.get("atol", 0) != 0:
+            raise ValueError(f"{prefix}: relative policy does not use an additive atol")
+
+        if metric == "staged_relative":
+            staged_policy(dtype, limits)
+
+
+# Built-in numerical policy, independent of any benchmark package.
+_STAGED_DOMAINS = {
+    "float16": (2**-11, 2**-16, 2**-5),
+    "bfloat16": (2**-8, 2**-16, 2**-3),
+    "float32": (2**-14, 2**-30, 2**-8),
+    "float64": (2**-14, 2**-30, 2**-8),
+}
+
+
+def staged_policy(dtype, limits):
+    small, error, cancel = _STAGED_DOMAINS[dtype]
+    policy = dict(small_value_threshold=small, small_value_error=error,
+                  cancel_boundary=cancel, cancel_zero_threshold=cancel,
+                  error_ratio_limit=2, reference_mode="native")
+    if not isinstance(limits.get("fallback", {}), dict):
+        raise ValueError("staged_relative fallback must be a mapping")
+    unknown = set(limits.get("fallback", {})) - set(policy)
+    if unknown:
+        raise ValueError("invalid staged_relative fallback fields")
+    policy.update(limits.get("fallback", {}))
+    for name, value in policy.items():
+        if name == "reference_mode":
+            if value not in ("native", "truncated", "native_or_truncated"):
+                raise ValueError("invalid staged_relative reference_mode")
+        elif type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
+            raise ValueError(f"staged_relative {name} must be finite and positive")
+    if policy["cancel_boundary"] < policy["small_value_threshold"]:
+        raise ValueError("cancel_boundary must not be below small_value_threshold")
+    return policy
+
+
+RELATIONS = {"eq", "ne", "ge", "gt", "le", "lt", "multiple_of", "in"}
 RUNTIME_KINDS = {
     "output_shape",
     "output_dtype",
@@ -33,6 +114,8 @@ def compare(left, relation, right):
         "gt": lambda: left > right,
         "le": lambda: left <= right,
         "lt": lambda: left < right,
+        "multiple_of": lambda: left % right == 0,
+        "in": lambda: left in right,
     }[relation]()
 
 
@@ -67,11 +150,20 @@ def validate_checks(checks):
                     raise ValueError("filter bound must reference an input dimension")
             elif not isinstance(bound, (int, float)) or not math.isfinite(bound):
                 raise ValueError("filter bound must be finite")
-        if (
-            check.get("relation") not in RELATIONS
-            or not isinstance(check.get("value"), (int, float))
-            or not math.isfinite(check["value"])
-        ):
+        relation, value = check.get("relation"), check.get("value")
+        if not isinstance(relation, str) or relation not in RELATIONS:
+            raise ValueError("predicate requires a supported comparison relation")
+        if relation == "multiple_of":
+            if type(value) is not int or value <= 0:
+                raise ValueError("multiple_of requires a positive integer divisor")
+        elif relation == "in":
+            if not isinstance(value, list) or not value or any(
+                type(item) not in (int, float)
+                or (type(item) is float and not math.isfinite(item))
+                for item in value
+            ):
+                raise ValueError("in requires a nonempty list of finite numbers")
+        elif not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(
                 "predicate requires a finite value and comparison relation"
             )

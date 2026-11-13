@@ -6,30 +6,13 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# Boundary minimum cases —— 各 paradigm 必须在 spec.yaml 中覆盖的最低 case 集
-#
-# 作用：
-#   光让算子开发者随便写几条 boundary_conditions / extreme_inputs 不够 —— 不同范式
-#   有自己的"必测退化点"。比如 Reduction 必须测"轴长=1 / rank=0 / 空 Tensor"，
-#   NumericalStable 必须测"fp16 上溢边界"。本文件是这张需求清单。stage 6 据此检查
-#   spec.yaml 是否覆盖到了 paradigms 对应的全部最低 case。
-#
-# 使用方法：
-#   每条 requirement 形如：
-#     - id: reduce_axis_size_1                # 内部唯一 id（用于 finding 引用）
-#       summary: "reduce 轴长度为 1（退化为常数输出）"
-#       section: boundary_conditions          # 在 spec.yaml 的哪个段查找
-#       match_any:                            # 任一关键词出现在 case 描述中即算覆盖
-#         - "reduce 轴长"
-#         - "归约轴.*1"
-#   或：
-#     - id: shape_set_min_three
-#       special_check: dynamic_shape_set_size_min_3   # 结构性检查（见 stage_6 实现）
-#
-# 匹配是子串包含（不是正则）—— 简单、宽容、跨语言友好。
-# 算子作者只要 case 描述里写了任一关键词就过；命中不了说明 case 真的没写。
-#
-# 维护：新增 paradigm 或调整 paradigm 必含 case 时，改本文件即可，stage 6 自动应用。
+# 范式边界候选清单，不决定算子的支持域或域外行为。
+# stage 5 通过 tags 或描述关键词提示尚未登记的候选（info，非失败）。
+# 执行、自检与独立验收须依据已确认来源判断：
+# 域内适用边界及明确要求的域外行为必须保留；域外未定义行为不新增承诺。
+# 不适用理由记入既有执行记录，不添加虚构可执行 case 来消除提示。
+# match_any 是子串匹配而非正则；命中不证明语义完整。
+# id / section / match_any 为内部检索信息；special_check 历史项由 stage 5 忽略。
 
 schema_version: 1
 

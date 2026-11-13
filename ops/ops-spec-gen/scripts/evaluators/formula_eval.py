@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 8 — formula smoke eval.
+"""Stage 7 — formula smoke eval.
 
 Run the spec.math_semantics.formula on tiny tensors (default [2,3]) under a
 restricted-AST sandbox. Catches:
@@ -82,7 +82,7 @@ def _resolve_shape(symbolic: list, default_dim: int = 3) -> tuple:
 
     Strategy:
       * folded prefix `...x` → 替换为 1 个 default_dim（保证不退化为 0-D，
-        让 stage 8 上 `np.nonzero` / `np.fft` 等不接受 scalar 的 API 也能跑）
+        让 stage 7 上 `np.nonzero` / `np.fft` 等不接受 scalar 的 API 也能跑）
       * explicit symbol     → default_dim (e.g. M, K, N → 3)
       * integer literal     → use as-is
     Yields a small shape (rank ≤ original rank + 0..1, all dims ≤ default_dim).
@@ -115,7 +115,7 @@ def _gen_tensor(np, shape: tuple, dtype: str, seed: int):
       * int4 → int8 容器，clamp [-8, 7]
       * uint4 → uint8 容器，clamp [0, 15]
       * uint1 → uint8 容器，clamp [0, 1]
-    见 _is_dtype_standin_match 处理 stage 8 dtype mismatch 比对。
+    见 _is_dtype_standin_match 处理 stage 7 dtype mismatch 比对。
     """
     rng = np.random.default_rng(seed)
     # 窄浮点 stand-in（fp16 容器；具体 dtype 真实表示由后端处理）
@@ -143,7 +143,7 @@ def _gen_tensor(np, shape: tuple, dtype: str, seed: int):
         return rng.integers(-8, 8, size=shape).astype(dtype)
     raise FormulaError(
         "formula_unsupported_dtype",
-        f"stage 8 暂不支持 dtype: {dtype!r}",
+        f"stage 7 暂不支持 dtype: {dtype!r}",
     )
 
 
@@ -176,8 +176,8 @@ def run_formula(np_mod, spec: dict, input_tensors: dict[str, Any],
     """Run the spec formula in the AST sandbox; return {output_name: ndarray}.
 
     Returns None on any compile / runtime error. Shared by stages that sample
-    the formula output: stage 10 (formula vs oracle), stage 11 (invariants)
-    and stage 12 (extreme_inputs joint check).
+    the formula output: stage 9 (formula vs oracle), stage 10 (invariants)
+    and stage 11 (extreme_inputs joint check).
 
     attr_overrides：条目级属性覆盖（如 extreme_inputs[].synthesize.attrs），
     在 attributes[].default 之上合并，供同一 formula 按不同属性取值求值。
@@ -239,7 +239,7 @@ def _collect_outputs(np_mod, spec: dict, locals_dict: dict[str, Any]) -> dict[st
 # ---------- main entry -----------------------------------------------------
 
 
-def stage_8(spec: dict) -> tuple[str, list[dict]]:
+def stage_7(spec: dict) -> tuple[str, list[dict]]:
     """Run formula on tiny inputs; report runtime / dtype / NaN issues."""
     findings: list[dict] = []
 
@@ -249,7 +249,7 @@ def stage_8(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_smoke_eval.skipped_non_numpy",
             "field_path": "math_semantics.formula_kind",
-            "message": f"formula_kind={formula_kind!r}，stage 8 仅在 numpy_expr 下运行",
+            "message": f"formula_kind={formula_kind!r}，stage 7 仅在 numpy_expr 下运行",
             "suggested_fix": None,
         }]
 
@@ -260,7 +260,7 @@ def stage_8(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "formula_smoke_eval.numpy_not_installed",
             "field_path": "<env>",
-            "message": "numpy 未安装；stage 8 跳过",
+            "message": "numpy 未安装；stage 7 跳过",
             "suggested_fix": "pip install numpy",
         }]
 
@@ -306,7 +306,7 @@ def stage_8(spec: dict) -> tuple[str, list[dict]]:
             "severity": "error",
             "rule_id": "formula_smoke_eval.no_combination",
             "field_path": "dtype_policy.supported_combinations",
-            "message": "缺 supported_combinations，stage 8 无法选择 dtype 跑 formula",
+            "message": "缺 supported_combinations，stage 7 无法选择 dtype 跑 formula",
             "suggested_fix": "至少声明一条 supported_combinations",
         })
         return "FAIL", findings
@@ -329,7 +329,7 @@ def stage_8(spec: dict) -> tuple[str, list[dict]]:
                 "rule_id": f"formula_smoke_eval.{e.code}",
                 "field_path": f"inputs[{name}].dtype_set",
                 "message": e.message,
-                "suggested_fix": "确认 dtype 在 stage 8 支持范围",
+                "suggested_fix": "确认 dtype 在 stage 7 支持范围",
             })
 
     # Build attribute defaults
@@ -407,7 +407,7 @@ def stage_8(spec: dict) -> tuple[str, list[dict]]:
                 "field_path": f"outputs[{name}]",
                 "message": (
                     f"运行时 dtype={runtime_dtype} 与 supported_combinations[0] "
-                    f"声明的 {expected} 不一致（stage 4 是逻辑校验，stage 8 是运行验证）"
+                    f"声明的 {expected} 不一致（stage 4 是逻辑校验，stage 7 是运行验证）"
                 ),
                 "suggested_fix": "检查 formula 是否漏了 dtype cast，或修正 supported_combinations",
             })

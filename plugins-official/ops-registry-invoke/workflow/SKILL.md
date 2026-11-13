@@ -3,6 +3,26 @@ name: ops-registry-invoke-workflow
 description: 此技能默认不触发。
 ---
 
+## 注册调用工程与接入
+
+本工作流使用算子仓中的 `operators/{op}/` 目录，按目标仓实际布局组织；不要将独立样例的 `{op}_project/` 当作统一上库目录：
+
+```text
+operators/{op}/
+├── CMakeLists.txt
+├── op_host/       # 算子定义、InferShape、Tiling 等宿主侧实现
+├── op_kernel/     # 设备侧 Kernel
+├── op_graph/      # 图模式原型与 REG_OP 输入、输出和属性注册
+├── op_api/        # 按选定 ACLNN 生成路径提供，自动生成时不要求手写
+└── tests/
+    ├── ut/
+    └── st/
+```
+
+图模式 `REG_OP` 的位置以目标仓模板为准；本插件设计模板与开发 Agent 使用 `op_graph/{op}_proto.h`，不将其强制放入 `op_host`。注册调用经安装后的 ACLNN 接口接入：先调用 `aclnn{Op}GetWorkspaceSize` 获取 workspace 大小和 executor，再分配 workspace，调用 `aclnn{Op}(workspace, workspaceSize, executor, stream)` 执行并同步、释放资源。
+
+Kernel 直调可用单文件独立工程验证 Kernel，通过直调入口启动设备代码，不需要完整的算子注册、图模式适配和 ACLNN 封装；注册调用则需要上述宿主侧、Kernel、接口及测试的分层工程。两者不能只替换工程根目录名称后视为同一结构。
+
 ## 核心原则
 
 1. **测试驱动** - 验收标准先行，功能实现在后

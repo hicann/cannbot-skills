@@ -22,6 +22,7 @@ import ast
 import re
 from pathlib import Path
 
+from check_tolerance import check_spec_tolerance
 from generator_support import (
     add_io_arguments,
     artifact_paths,
@@ -231,6 +232,10 @@ def main():
     spec = yaml.safe_load(spec_path.read_text(encoding="utf-8"))
     if not isinstance(spec, dict):
         fail("spec.yaml must be a mapping")
+    try:
+        check_spec_tolerance(spec)
+    except (ValueError, RuntimeError, TypeError) as exc:
+        fail(f"precision-policy preflight failed: {exc}")
     op = (spec.get("op") or {}).get("name")
     if not isinstance(op, str) or not NAME.fullmatch(op):
         fail("spec.op.name must be a Python identifier")
@@ -254,14 +259,6 @@ def main():
         source, ReferenceContract(op, inputs, attrs, optional_inputs), design
     )
     tolerance = (spec.get("numerical_tolerance") or {}).get("per_dtype") or {}
-    unsupported = {
-        dtype: limits.get("metric") if isinstance(limits, dict) else limits
-        for dtype, limits in tolerance.items()
-        if not isinstance(limits, dict)
-        or limits.get("metric") not in ("max_relative", "bitwise_equal")
-    }
-    if unsupported:
-        fail(f"fixed runner cannot execute these tolerance metrics: {unsupported}")
     required = {
         "OP_NAME": op,
         "INPUT_NAMES": inputs,
@@ -281,8 +278,21 @@ def main():
     helper = (ROOT / "assets" / "case_contract.py").read_text(encoding="utf-8")
     (tests / "cannbotdsl_case_contract.py").write_text(helper, encoding="utf-8")
     cache = (ROOT / "assets" / "case_cache.py").read_text(encoding="utf-8")
+    output_spec = {
+        key: spec.get(key) or default
+        for key, default in (
+            ("inputs", []), ("outputs", []), ("attributes", []),
+            ("dtype_policy", {}), ("semantic_cases", []),
+        )
+    }
+    if cache.count("spec = {}  # __CANNBOTDSL_OUTPUT_SPEC__") != 1:
+        fail("fixed cache template needs exactly one output contract binding")
+    cache = cache.replace(
+        "spec = {}  # __CANNBOTDSL_OUTPUT_SPEC__",
+        f"spec = {output_spec!r}  # Bound from the existing spec contract.",
+    )
     (tests / "cannbotdsl_case_cache.py").write_text(cache, encoding="utf-8")
-    for sheet in ("tdd", "whitebox", "blackbox"):
+    for sheet in ("tdd", "whitebox", "blackbox", "performance"):
         (tests / "testcase_output" / sheet).mkdir(parents=True, exist_ok=True)
     LOGGER.info(f"validated {reference_path}")
     LOGGER.info(f"wrote {tests / f'test_{op}.py'}")
@@ -349,6 +359,23 @@ def validate_reference_metadata(source, op, required):
     if golden_binding != f"{op}_golden":
         fail("GOLDEN_FUNCTION must bind the named Golden")
     functions = {node.name for node in tree.body if isinstance(node, ast.FunctionDef)}
+    native_bindings = [
+        node.value.id
+        for node in tree.body
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "NATIVE_REFERENCE_FUNCTION"
+            and isinstance(node.value, ast.Name))
+    ]
+    requires_native = any(limits.get("metric") == "staged_relative" and
+                          limits.get("fallback", {}).get("reference_mode", "native") == "native"
+                          for limits in required["TOLERANCE"].values())
+    declared_native = any(isinstance(node, ast.Assign) and any(
+        isinstance(target, ast.Name) and target.id == "NATIVE_REFERENCE_FUNCTION"
+        for target in node.targets) for node in tree.body)
+    if requires_native or declared_native:
+        if len(native_bindings) != 1 or native_bindings[0] not in functions or native_bindings[0] == golden_binding:
+            fail("NATIVE_REFERENCE_FUNCTION must bind a separate named CPU reference")
     if not {"make_inputs", "simulate"} <= functions:
         fail("final Golden needs make_inputs and simulate for the fixed runner")
 

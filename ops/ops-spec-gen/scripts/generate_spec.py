@@ -1410,7 +1410,7 @@ def build_supported_combinations_block(
 
 
 # Per-dtype 容差默认值从 registries/tolerance_defaults.yaml 加载
-# 这样 generator 与 stage 7 校验器共享同一份数据，避免漂移
+# 这样 generator 与 stage 6 校验器共享同一份数据，避免漂移
 def _format_tol_value(v) -> str:
     """Format a numeric value for inline yaml output (preserve scientific notation)."""
     if isinstance(v, (int, bool)) and not isinstance(v, bool) or v == 0:
@@ -1499,9 +1499,7 @@ def build_composition_block(
         - [prim1, prim2]"""
 
 
-# stage 6 要求 — 按 op.paradigms 注入对应必含 case 的占位
-# 关键词必须能命中 registries/boundary_min_cases.yaml 中对应 paradigm 的 match_any
-# 字段，否则生成的骨架会在 stage 6 直接 FAIL（违背"骨架可用"承诺）。
+# 范式示例仅供候选提示；实际语义必须依据已确认支持域及来源。
 
 _PARADIGM_BOUNDARY_TEMPLATES = {
     "Reduction": [
@@ -1620,13 +1618,9 @@ def build_default_boundary_case(
     )
 
 
-def build_extra_boundary_cases(
-    category: str,
-    paradigms: list[str],
-    first_input: str,
-    axis_source: str = "attribute",
-) -> str:
-    """生成 paradigm 必含的 boundary case 占位，避免 stage 6 FAIL。"""
+def build_extra_boundary_cases(category: str, paradigms: list[str], first_input: str,
+                               axis_source: str = "attribute") -> str:
+    """构造 boundary 候选示例，渲染时仅保留为注释。"""
     lines: list[str] = []
     for p in paradigms:
         if p == "Reduction" and _is_pure_reduction(category, paradigms):
@@ -1647,7 +1641,7 @@ def build_extra_boundary_cases(
 
 
 def build_extra_extreme_cases(paradigms: list[str], first_input: str) -> str:
-    """生成 paradigm 必含的 extreme case 占位，避免 stage 6 FAIL。"""
+    """构造 extreme 候选示例，渲染时仅保留为注释。"""
     lines: list[str] = []
     for p in paradigms:
         for tmpl in _PARADIGM_EXTREME_TEMPLATES.get(p, []):
@@ -1814,17 +1808,19 @@ def render(gi: GenInput) -> str:
             "      anti_pattern_id: AP-004"
         )
 
-    # 范式驱动的 boundary/extreme 占位 case
-    # 让生成器产出的骨架自身就过 stage 6（不需要用户额外想关键词）
-    default_boundary_case = build_default_boundary_case(
-        gi.category, gi.paradigms, first_input, gi.axis_source
-    )
-    extra_boundary_cases = build_extra_boundary_cases(
-        gi.category, gi.paradigms, first_input, gi.axis_source
-    )
-    extra_extreme_cases = build_extra_extreme_cases(gi.paradigms, first_input)
+    # GenInput 未携带已确认支持域/域外行为，不能据范式生成公开保证。
+    # 候选只保留描述注释，不注入结果断言、拒绝义务或推断错误码。
+    def candidate_comments(block: str) -> str:
+        return "\n".join(
+            "  # 待核对适用性：" + line.strip()[len("- case: "):]
+            for line in block.splitlines() if line.strip().startswith("- case: ")
+        )
 
-    # 推断错误码集合并补一条 raises_error 占位 case，让 stage 2 J 规则有可校验对象
+    default_boundary_case = candidate_comments(
+        build_default_boundary_case(gi.category, gi.paradigms, first_input, gi.axis_source))
+    extra_boundary_cases = candidate_comments(
+        build_extra_boundary_cases(gi.category, gi.paradigms, first_input, gi.axis_source))
+    extra_extreme_cases = candidate_comments(build_extra_extreme_cases(gi.paradigms, first_input))
     attributes_block = build_attributes_block(
         gi.category,
         gi.paradigms,
@@ -1832,13 +1828,7 @@ def render(gi: GenInput) -> str:
         gi.axis_source,
         gi.attributes,
     )
-    error_codes = infer_error_codes(gi.paradigms, attributes_block)
-    raises_error_case = build_raises_error_boundary_case(error_codes, first_input)
-    extra_boundary_cases = (
-        extra_boundary_cases + "\n" + raises_error_case
-        if extra_boundary_cases.strip()
-        else raises_error_case
-    )
+    error_codes: list[str] = []
 
     replacements = {
         "{{support_universe_block}}": f"support_universe: {gi.support_universe}"
@@ -1937,8 +1927,12 @@ def main() -> int:
         default=None,
         help="算子一句话描述；省略时生成 'TODO: describe <op_name>'",
     )
+    ap.add_argument(
+        "--complete-support-contract", action="store_true",
+        help="Declare supplied support sets exhaustive and derive exclusions from the pinned universe",
+    )
+    ap.add_argument("--broadcast-kind", choices=["none", "numpy", "explicit"], default="numpy")
     ap.add_argument("--promotion", default="same_as_first_input")
-    ap.add_argument("--broadcast-kind", dest="broadcast_kind", default="numpy")
     ap.add_argument("--accumulation-order", dest="accumulation_order", default="none")
     ap.add_argument(
         "--chips",
@@ -2080,7 +2074,9 @@ def main() -> int:
                 break
 
     gi.outputs = _normalize_outputs(gi.outputs)
-    gi.support_universe = load_catalog()["id"]
+    # Only explicitly requested full-universe contracts infer a complement.
+    # Ordinary requirements retain only confirmed exclusions.
+    gi.support_universe = load_catalog()["id"] if args.complete_support_contract else ""
     try:
         # Normalize official enum symbols and historical NZ before computing complements.
         for tensor in gi.inputs:

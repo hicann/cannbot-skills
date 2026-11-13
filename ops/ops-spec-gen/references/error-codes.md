@@ -78,6 +78,10 @@
 - `shape_closure.numpy_expr_shape_mismatch`
 - `shape_closure.rank_overflow`
 - `shape_closure.reduction_shape_identity_suspicious`
+- `shape_closure.sample_dimension`
+- `shape_closure.sample_layout_unverified`
+- `shape_closure.sample_rank`
+- `shape_closure.sample_shape_unverified`
 - `shape_closure.shape_rule_kind_missing`
 - `shape_closure.shape_rule_kind_unknown`
 - `shape_closure.shape_rule_placeholder`
@@ -94,7 +98,7 @@
 
 ## Stage 6 boundary_min_set
 
-- `boundary_min_set.missing_required_case`
+- `boundary_min_set.candidate_not_documented`
 
 ## Stage 7 tolerance_coverage
 

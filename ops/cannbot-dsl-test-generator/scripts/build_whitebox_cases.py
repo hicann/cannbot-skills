@@ -24,7 +24,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "assets"))
 from case_contract import case_calls
 from casebook import read_casebook
-from recipe_validation import validate_tensor, validate_tensor_list
+from recipe_validation import CPU_DTYPES, validate_tensor, validate_tensor_list
 from generator_support import (
     add_io_arguments,
     artifact_paths,
@@ -172,7 +172,7 @@ def validate_branch_inputs(branch_id, suggested, outputs, spec, call_style):
     required_attrs = {
         item["name"] for item in spec.get("attributes") or [] if "default" not in item
     }
-    output_names = {item["name"] for item in spec.get("outputs") or []}
+    output_meta = {item["name"]: item for item in spec.get("outputs") or []}
     if (
         not isinstance(suggested, dict)
         or not suggested
@@ -191,12 +191,29 @@ def validate_branch_inputs(branch_id, suggested, outputs, spec, call_style):
         elif name in input_meta and input_meta[name].get("role") == "tensor_list":
             validate_tensor_list(branch_id, name, item, input_meta[name], None)
     if call_style == "dst_args":
-        if set(outputs) != output_names:
-            fail(f"{branch_id}: output_tensors must cover spec outputs")
+        if not isinstance(outputs, dict) or set(outputs) - set(output_meta):
+            fail(f"{branch_id}: output_tensors must use spec output names")
+        required = {name for name, meta in output_meta.items() if not meta.get("optional", False)}
+        supplied = {name for name, recipe in outputs.items() if recipe is not None}
+        if required - supplied:
+            fail(f"{branch_id}: output_tensors must cover required spec outputs")
         for name, item in outputs.items():
-            validate_tensor(
-                branch_id, name, item, {"dtype_set": [item.get("dtype")]}, None
-            )
+            if item is None:
+                continue  # Only optional outputs can reach this point absent.
+            meta = dict(output_meta[name])
+            allowed = {
+                combo["outputs"][name]
+                for combo in (spec.get("dtype_policy") or {}).get("supported_combinations") or []
+                if name in (combo.get("outputs") or {})
+            }
+            meta["dtype_set"] = meta.get("dtype_set") or sorted(allowed or CPU_DTYPES)
+            if meta.get("role", "tensor") == "tensor_list":
+                if (meta.get("list_length") or {}).get("kind") in ("same_as", "expression"):
+                    # Materialized CPU/cache checks resolve the existing rule.
+                    meta["list_length"] = {"kind": "unconstrained"}
+                validate_tensor_list(branch_id, name, item, meta, None)
+            else:
+                validate_tensor(branch_id, name, item, meta, None)
     elif outputs:
         fail(f"{branch_id}: output_tensors only applies to dst_args")
 

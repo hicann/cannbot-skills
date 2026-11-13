@@ -31,8 +31,8 @@ semantic_cases: []         # 可选输入/输出的条件存在性；when 只允
 layout_contract: {}        # 可选逻辑布局变体：selector + 已声明 Tensor 的 logical_axes；不替代各 I/O 的 layout
 reduction: {}              # 可选归约轴来源及固定轴配置
 shape_constraints: {}      # 全局符号表 + global_constraints（咨询性字段，当前不参与 12-stage 机器校验，见 §D.8）+ notes
+broadcast: {kind: none}     # 数据广播契约
 dtype_policy: {}           # promotion + supported_combinations 显式枚举 + accumulator_dtype
-broadcast: {}              # 算子计算的 broadcast 语义（数据复制/扩展）。kind: numpy | none | explicit (+rules)
 math_semantics: {}         # formula + reference_oracle + invariants + composition (FusedComposite 必填)
 numerical_stability: {}    # required + techniques (含 anti_pattern_id)
 numerical_tolerance: {}    # per_dtype: {rtol, atol, metric}
@@ -120,6 +120,8 @@ VariableOutput · Spectral · Histogram · AtomicUpdate · Broadcast
 
 > **`symbolic` 名字仅为 owner 自留命名，不参与跨 input 绑定**：两个 input 都写 `"K"` 或都写 `"...batch"` 不会被 evaluator 视为"必相等"。跨 input 形状关系应通过 `outputs.shape_rule` 表达并由 stage 3 求值；适用且有 numpy 时，该阶段还比较 shape_rule 与公式实际输出 shape。stage 5 校验广播语义，stage 8 试执行公式，均不能替代完整的输出 shape 规则。
 
+形状规则支持维度乘以非负整数、除以正整数并向下取整，例如 `weight.shape[-1] // 2`。符号结果保留表达式（`N * 2` 不会变成常量 `2`），常量维度直接计算；未知数量的折叠维、除零和非法除数明确失败。`//` 是取整，不自动推定整除性；输入必须为偶数等约束仍由原规格声明。该能力不代表完整符号代数证明。
+
 ### B5. dtype_rule (numpy_expr)
 
 `outputs[].dtype_rule` 同样是 numpy 子集表达式。常见形态：
@@ -139,7 +141,7 @@ VariableOutput · Spectral · Histogram · AtomicUpdate · Broadcast
 | 组 | dtype | 来源 / 备注 |
 |---|---|---|
 | 标准浮点 | `float16` · `float32` · `float64` · `bfloat16` | numpy 原生 |
-| 窄浮点（ascend 私有） | `float4_e2m1` · `float4_e1m2` · `float8_e4m3fn` · `float8_e5m2` · `float8_e8m0` · `hifloat8` | Atlas A3 / 950；stage 8 走 fp16 stand-in。`e4m3fn` 的 FN = Finite-Numbers-only（无 Inf）；`e8m0` 仅作 OCP MX 缩放因子 |
+| 窄浮点（ascend 私有） | `float4_e2m1` · `float4_e1m2` · `float8_e4m3fn` · `float8_e5m2` · `float8_e8m0` · `hifloat8` | Atlas A3 / 950；stage 7 走 fp16 stand-in。`e4m3fn` 的 FN = Finite-Numbers-only（无 Inf）；`e8m0` 仅作 OCP MX 缩放因子 |
 | 复数 | `complex32` · `complex64` · `complex128` | complex32 来自 PyTorch 实验类型；ascend 暂未广泛部署 |
 | 有符号整 | `int4` · `int8` · `int16` · `int32` · `int64` | int4 为 ascend 量化扩展 |
 | 无符号整 | `uint1` · `uint4` · `uint8` · `uint16` · `uint32` · `uint64` | uint1 / uint4 为 ascend 量化扩展。uint1 与 bool 语义不同：uint1 是 1-bit 数值（可算术），bool 是逻辑布尔（True/False） |
@@ -289,16 +291,16 @@ math_semantics:
 
 **formula 与 format_variants 的引用约定**：
 
-当计算因格式而异时，`formula_kind` 应为 `textual_only`（stage 8 SKIP）。formula 中用
+当计算因格式而异时，`formula_kind` 应为 `textual_only`（stage 7 SKIP）。formula 中用
 `${format_variants[].<field>}` 占位符引用 format_variants 中的字段值（如
 `${format_variants[].reduction_axes}`），并在 formula 注释中列出每种格式的查表结果。
 这与 `${attr.dim}` / `${input.axis}` 等跨字段占位符语法一致。
 
 与 `inputs[].layout` 的关系：`layout` 声明输入支持的格式（metadata），`format_variants` 细化每种格式的具体计算参数。
 
-### B6. 范式必含 boundary / extreme case（与 `registries/boundary_min_cases.yaml` 同步）
+### B6. 范式候选 boundary / extreme case（与 `registries/boundary_min_cases.yaml` 同步）
 
-| paradigms 含 | 必含 case | 检查段 |
+| paradigms 含 | 候选 case（依支持域和来源核对） | 检查段 |
 |---|---|---|
 | Reduction | "reduce 轴长=1"、"rank=0 标量"、"空 Tensor" | boundary |
 | NumericalStable | "fp16 上溢" 类边界 | extreme |
@@ -371,7 +373,7 @@ outputs:
 
 ---
 
-## C. 12-stage L0 校验器（全景）
+## C. 11-stage L0 校验器（全景）
 
 | stage | 名称 | 范围 |
 |---|---|---|
@@ -380,7 +382,7 @@ outputs:
 | 3 | shape_closure | 求值 outputs[].shape_rule、检查 data_dependent 声明及适用时的公式输出 shape |
 | 4 | dtype_closure | dtype_rule 推导与 supported_combinations 交叉验证 |
 | 5 | broadcast_legality | numpy / none / explicit 广播语义 |
-| 6 | boundary_min_set | 各范式所需的最低 boundary/extreme case 覆盖 |
+| 6 | boundary_min_set | 范式候选边界提示，结合已确认支持域核对适用性 |
 | 7 | tolerance_coverage | 输出 dtype 容差覆盖与紧度启发式 |
 | 8 | formula_smoke_eval | 在 numpy 沙箱运行小 shape formula；缺依赖或不适用时 SKIP |
 | 9 | oracle_reachable | 检查 framework/API 可达性和占位符；不调用 oracle |

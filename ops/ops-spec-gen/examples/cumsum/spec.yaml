@@ -82,7 +82,7 @@ broadcast:
 math_semantics:
   formula_kind: numpy_expr
   formula: |
-    # +0.0 规整 -0.0 → +0.0，对齐 torch.cumsum 的零符号约定（避免 stage 10 zero_sign_divergence）
+    # +0.0 规整 -0.0 → +0.0，对齐 torch.cumsum 的零符号约定（避免 stage 9 zero_sign_divergence）
     y = np.cumsum(x, axis=dim) + 0.0
 
   reference_oracle:

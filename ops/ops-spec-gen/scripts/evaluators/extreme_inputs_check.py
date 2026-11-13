@@ -3,10 +3,10 @@
 # CANN Open Software License Agreement Version 2.0 (the "License").
 # Please refer to the License for details. You may not use this file except in compliance with the License.
 # THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
-# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 12 — extreme_inputs × formula × machine_check 联合校验。
+"""Stage 11 — extreme_inputs × formula × machine_check 联合校验。
 
 背景（特殊值断言与公式矛盾的典型缺陷）：stage 2 只做 machine_check.kind / pattern 的白名单校验，
 不检查"声明的期望"与"formula 在该 pattern 输入下的实际输出"是否一致。
@@ -298,6 +298,11 @@ def _run_entry_check(ctx, entry, idx, seed):
                              ctx["where"] + ".machine_check.kind",
                              "kind=%r 暂不支持机器复核，条目 %r 跳过"
                              % (kind, ctx["case"]))]
+    # Use the same metadata gate as stage 3 before allocating any tensors.
+    from .stages import check_concrete_sample_domain
+    domain_findings = check_concrete_sample_domain(ctx["spec"], entry, ctx["where"])
+    if any(f["severity"] == "error" for f in domain_findings):
+        return False, domain_findings
     input_names = [i.get("name") for i in (ctx["spec"].get("inputs") or [])]
     tensors, err = _synthesize_inputs(ctx["np"], entry, input_names, seed + idx)
     if tensors is None:
@@ -321,23 +326,23 @@ def _run_entry_check(ctx, entry, idx, seed):
     return True, _check_matches_oracle(ctx, tensors, formula_out, attrs_override)
 
 
-def stage_12(spec):
+def stage_11(spec):
     """Entry point — 见模块 docstring。返回 (status, findings)。"""
     entries = spec.get("extreme_inputs") or []
     if not entries:
         return "SKIP", [_info("extreme_check.no_entries", "extreme_inputs",
-                              "spec 未声明 extreme_inputs，stage 12 跳过")]
+                              "spec 未声明 extreme_inputs，stage 11 跳过")]
     ms = spec.get("math_semantics") or {}
     if ms.get("formula_kind") != "numpy_expr":
         return "SKIP", [_info("extreme_check.skipped_non_numpy",
                               "math_semantics.formula_kind",
-                              "formula_kind=%r，stage 12 仅在 numpy_expr 下运行"
+                              "formula_kind=%r，stage 11 仅在 numpy_expr 下运行"
                               % (ms.get("formula_kind"),))]
     try:
         import numpy as np
     except ImportError:
         return "SKIP", [_info("extreme_check.numpy_not_installed", "<env>",
-                              "numpy 未安装；stage 12 跳过")]
+                              "numpy 未安装；stage 11 跳过")]
 
     ctx = {"np": np, "spec": spec, "oracle": ms.get("reference_oracle") or {}}
     seed = (spec.get("test_matrix") or {}).get("random", {}).get("seed", 42)

@@ -260,6 +260,7 @@ def test_cli_preserves_same_special_dtype_and_covers_tolerance(tmp_path, dtype):
             "-X",
             "utf8",
             str(ROOT / "scripts/generate_spec.py"),
+            "--complete-support-contract",
             "--op-name",
             "add",
             "--category",
@@ -288,7 +289,7 @@ def test_cli_preserves_same_special_dtype_and_covers_tolerance(tmp_path, dtype):
     assert stage_7(spec).status == "PASS"
 
 
-def test_cli_partial_exclusion_assertions_still_write_complete_complements(tmp_path):
+def test_cli_partial_exclusions_preserve_only_confirmed_assertions(tmp_path):
     result = subprocess.run(
         [
             sys.executable,
@@ -326,7 +327,8 @@ def test_cli_partial_exclusion_assertions_still_write_complete_complements(tmp_p
             ("dtypes", "dtype_set", "unsupported_dtypes"),
             ("formats", "supported_layouts", "unsupported_layouts"),
         ):
-            assert set(tensor[negative]) == set(universe(kind)) - set(tensor[positive])
+            expected = ["int8"] if kind == "dtypes" else ["NCHW"] if tensor is spec["inputs"][0] else ["NHWC"]
+            assert tensor[negative] == expected
     assert stage_1(spec).status == "PASS"
     assert findings(spec).status == "PASS"
 
@@ -856,6 +858,7 @@ def test_cli_normalizes_official_symbols_and_defaults_to_full_contract(tmp_path)
             "-X",
             "utf8",
             str(ROOT / "scripts/generate_spec.py"),
+            "--complete-support-contract",
             "--op-name",
             "neg",
             "--category",

@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 9 oracle_reachable 单测——单 callable 模式 + composition DAG 模式。
+"""Stage 8 oracle_reachable 单测——单 callable 模式 + composition DAG 模式。
 
 单 api 模式覆盖：reachable / api typo / framework mismatch / placeholder / absent 签字 /
                 严格占位符 regex；
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from evaluators.oracle_check import stage_9, _check_placeholders  # noqa: E402
+from evaluators.oracle_check import stage_8, _check_placeholders  # noqa: E402
 
 
 def _oracle_spec(framework="numpy", api="numpy.add", absent=False, kwargs=None) -> dict:
@@ -43,22 +43,22 @@ def _oracle_spec(framework="numpy", api="numpy.add", absent=False, kwargs=None) 
     }
 
 
-class TestStage9:
+class TestStage8:
     def test_numpy_add_reachable(self):
         # numpy is always installed in our test env
         s = _oracle_spec(framework="numpy", api="numpy.add")
-        status, findings = stage_9(s)
+        status, findings = stage_8(s)
         assert status == "PASS", findings
 
     def test_api_typo(self):
         s = _oracle_spec(framework="numpy", api="numpy.adds")  # typo
-        status, findings = stage_9(s)
+        status, findings = stage_8(s)
         assert status == "FAIL"
         assert any("api_not_found" in f["rule_id"] for f in findings)
 
     def test_framework_mismatch(self):
         s = _oracle_spec(framework="torch", api="numpy.add")  # head mismatch
-        status, findings = stage_9(s)
+        status, findings = stage_8(s)
         assert status == "FAIL"
         assert any("api_framework_mismatch" in f["rule_id"] for f in findings)
 
@@ -67,7 +67,7 @@ class TestStage9:
             framework="numpy", api="numpy.add",
             kwargs={"axis": "${attr.nonexistent}"},
         )
-        status, findings = stage_9(s)
+        status, findings = stage_8(s)
         assert status == "FAIL"
         assert any("placeholder_unresolved" in f["rule_id"] for f in findings)
 
@@ -76,19 +76,19 @@ class TestStage9:
             framework="numpy", api="numpy.add",
             kwargs={"axis": "${attr.dim}"},  # 'dim' exists in attributes
         )
-        status, findings = stage_9(s)
+        status, findings = stage_8(s)
         assert status == "PASS", findings
 
     def test_absent_acknowledged_skip(self):
         s = _oracle_spec(absent=True)
-        status, findings = stage_9(s)
+        status, findings = stage_8(s)
         assert status == "SKIP"
         assert any("oracle_reachable.absent" in f["rule_id"] for f in findings)
 
     def test_absent_not_required_to_ack(self):
         # absent=true 自身即视为 spec 作者显式声明，无需额外签字。
         s = _oracle_spec(absent=True)
-        status, _ = stage_9(s)
+        status, _ = stage_8(s)
         assert status == "SKIP"
 
     def test_placeholder_subscript_rejected(self):
@@ -97,13 +97,13 @@ class TestStage9:
             framework="numpy", api="numpy.add",
             kwargs={"axis": "${attr.foo[0]}"},   # malformed placeholder syntax
         )
-        status, _ = stage_9(s)
+        status, _ = stage_8(s)
         # Strict regex → placeholder regex doesn't match → no placeholder check → PASS
         assert status == "PASS"
 
 
 def _composition_spec(composition: list[dict], output: str = "out") -> dict:
-    """构造一个最小化、能跑 stage 9 composition 路径的 spec。"""
+    """构造一个最小化、能跑 stage 8 composition 路径的 spec。"""
     return {
         "math_semantics": {
             "reference_oracle": {
@@ -125,7 +125,7 @@ def _composition_spec(composition: list[dict], output: str = "out") -> dict:
     }
 
 
-class TestStage9Composition:
+class TestStage8Composition:
     def test_simple_dag_passes(self):
         # numpy.subtract → numpy.multiply → numpy.matmul（裸 input + 前序节点 id 引用）
         spec = _composition_spec([
@@ -133,14 +133,14 @@ class TestStage9Composition:
             {"id": "w_scaled", "api": "numpy.multiply", "args": ["w_dq", "${attr.scale}"]},
             {"id": "out", "api": "numpy.matmul", "args": ["x", "w_scaled"]},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "PASS", findings
 
     def test_output_unresolved(self):
         spec = _composition_spec([
             {"id": "w_dq", "api": "numpy.subtract", "args": ["w", 0]},
         ], output="nope")
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("composition_output_unresolved" in f["rule_id"] for f in findings)
 
@@ -150,7 +150,7 @@ class TestStage9Composition:
             {"id": "n1", "api": "numpy.multiply", "args": ["w", 1]},
             {"id": "out", "api": "numpy.matmul", "args": ["x", "n1"]},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("composition_id_collision" in f["rule_id"] for f in findings)
 
@@ -159,7 +159,7 @@ class TestStage9Composition:
             {"id": "x", "api": "numpy.subtract", "args": ["w", 0]},  # 撞 input 名
             {"id": "out", "api": "numpy.matmul", "args": ["x", "w"]},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("composition_id_shadows_input" in f["rule_id"] for f in findings)
 
@@ -169,7 +169,7 @@ class TestStage9Composition:
             {"id": "out", "api": "numpy.matmul", "args": ["x", "w_dq"]},
             {"id": "w_dq", "api": "numpy.subtract", "args": ["w", 0]},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("composition_arg_unresolved" in f["rule_id"] for f in findings)
 
@@ -177,7 +177,7 @@ class TestStage9Composition:
         spec = _composition_spec([
             {"id": "out", "api": "numpy.matmul", "args": ["x", "nonexistent_input"]},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("composition_arg_unresolved" in f["rule_id"] for f in findings)
 
@@ -185,7 +185,7 @@ class TestStage9Composition:
         spec = _composition_spec([
             {"id": "out", "api": "numpy.matmul", "args": ["x", "${attr.nonexistent}"]},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("placeholder_unresolved" in f["rule_id"] for f in findings)
 
@@ -194,7 +194,7 @@ class TestStage9Composition:
         spec = _composition_spec([
             {"id": "out", "api": "numpy.matmul", "args": ["x", "${output.y}"]},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("不允许" in (f.get("message") or "") for f in findings)
 
@@ -202,7 +202,7 @@ class TestStage9Composition:
         spec = _composition_spec([
             {"id": "out", "api": "numpy.matmuls", "args": ["x", "w"]},  # 拼错
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("api_not_found" in f["rule_id"] for f in findings)
 
@@ -211,7 +211,7 @@ class TestStage9Composition:
         spec = _composition_spec([
             {"id": "out", "api": "torch.matmul", "args": ["x", "w"]},  # torch ≠ numpy
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("api_framework_mismatch" in f["rule_id"] for f in findings)
 
@@ -221,7 +221,7 @@ class TestStage9Composition:
             {"id": "out", "api": "numpy.matmul", "args": ["x", "w"],
              "kwargs": {"axis": "${attr.nonexistent}"}},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("placeholder_unresolved" in f["rule_id"] for f in findings)
 
@@ -231,7 +231,7 @@ class TestStage9Composition:
             {"id": "out", "api": "numpy.matmul", "args": ["x", "w"],
              "kwargs": {"alpha": "${attr.scale}"}},   # scale 是 _composition_spec 中已声明的 attr
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "PASS", findings
 
     def test_kwargs_output_placeholder_rejected(self):
@@ -240,7 +240,7 @@ class TestStage9Composition:
             {"id": "out", "api": "numpy.matmul", "args": ["x", "w"],
              "kwargs": {"alpha": "${output.y}"}},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "FAIL"
         assert any("不允许" in (f.get("message") or "") for f in findings)
 
@@ -250,6 +250,5 @@ class TestStage9Composition:
             {"id": "out", "api": "numpy.matmul", "args": ["x", "w"],
              "kwargs": {"approximate": "tanh", "out": None}},
         ])
-        status, findings = stage_9(spec)
+        status, findings = stage_8(spec)
         assert status == "PASS", findings
-

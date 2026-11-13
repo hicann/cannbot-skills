@@ -95,7 +95,6 @@ dtype_policy:
     - {inputs: {a: bfloat16, b: float32},  outputs: {c: float32}}
   accumulator_dtype: float32
 
-# explicit 广播：batch dims 用 numpy，M/K/N 不广播
 broadcast:
   kind: explicit
   rules:

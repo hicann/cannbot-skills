@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Stage 9 — oracle reachability.
+"""Stage 8 — oracle reachability.
 
 Real-import based check: try to actually import the framework declared in
 spec.math_semantics.reference_oracle.framework, then walk the attribute chain
@@ -42,7 +42,7 @@ import yaml
 # - ns ∈ {attr, input, output}
 # - path = name[.subfield[.subfield]...]，每段必须是 [a-zA-Z_][a-zA-Z0-9_]*
 # - **不**支持下标 / 切片（例如 ${attr.foo[0]} 非法）—— 真要支持下标需要在 spec
-#   schema 与 stage 9 占位符求值层同时扩展，不是 regex 改一下就够
+#   schema 与 stage 8 占位符求值层同时扩展，不是 regex 改一下就够
 _PLACEHOLDER_RE = re.compile(
     r"\$\{(?P<ns>attr|input|output)\.(?P<path>[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\}"
 )
@@ -132,8 +132,8 @@ def _resolve_api_callable(framework: str, api_path: str, field_path: str,
             "severity": "info",
             "rule_id": "oracle_reachable.framework_not_installed",
             "field_path": "math_semantics.reference_oracle.framework",
-            "message": f"framework={framework!r} 未安装；stage 9 framework 部分跳过",
-            "suggested_fix": f"pip install {framework} 后重跑 stage 9（占位符仍已校验）",
+            "message": f"framework={framework!r} 未安装；stage 8 framework 部分跳过",
+            "suggested_fix": f"pip install {framework} 后重跑 stage 8（占位符仍已校验）",
         })
         return False, None
 
@@ -354,7 +354,7 @@ def _check_available_dtype(spec: dict, oracle: dict, findings: list[dict]) -> No
         })
 
 
-def stage_9(spec: dict) -> tuple[str, list[dict]]:
+def stage_8(spec: dict) -> tuple[str, list[dict]]:
     """Resolve the oracle by real import. Skip if framework not installed.
 
     两种 oracle 模式：单 callable（api 字段）/ DAG composition（composition + output 字段）。
@@ -370,7 +370,7 @@ def stage_9(spec: dict) -> tuple[str, list[dict]]:
             "severity": "info",
             "rule_id": "oracle_reachable.absent",
             "field_path": "math_semantics.reference_oracle.absent",
-            "message": "oracle 显式声明缺失，stage 9 跳过（语义由 invariants + boundary_conditions 覆盖）",
+            "message": "oracle 显式声明缺失，stage 8 跳过（语义由 invariants + boundary_conditions 覆盖）",
             "suggested_fix": None,
         }]
 

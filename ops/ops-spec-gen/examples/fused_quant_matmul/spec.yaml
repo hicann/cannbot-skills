@@ -17,13 +17,12 @@
 #
 # CANN 真实算子有 6 路分支（3 bias 模式 × 2 GeLU 类型）+ per-channel scale。
 # 本 spec 锁的是最简单一路：
-#   * INT8 / INT4 × INT8 / INT4（INT4 走 stage 8 stand-in：int8 容器 + 值域 [-8, 7]）
-#   * x1Scale / x2Scale / bias 走 attribute（per-tensor 标量；CANN 真实是 1D tensor，需要
-#     stage 5 支持 N 输入 explicit broadcast 之后才能升级）
+#   * INT8 / INT4 × INT8 / INT4（INT4 走 stage 7 stand-in：int8 容器 + 值域 [-8, 7]）
+#   * x1Scale / x2Scale / bias 走 attribute（per-tensor 标量；CANN 真实是 1D tensor）
 #   * fusedOpType 锁 gelu_tanh（gelu_erf 需要 scipy.special.erf；composition 也只能 pin 一路）
 #   * bias 走 FP 路径：qbmmout = x1@x2 * x2Scale * x1Scale + bias（CANN 公式 2）
 #
-# 完整算子需要：select 节点（v2，对 fusedOpType / bias_dtype 分派）+ stage 5 N 输入 +
+# 完整算子需要：select 节点（v2，对 fusedOpType / bias_dtype 分派）+
 #               op.platform_constraints.supported_chips first-class 字段
 # ============================================================
 schema_version: 1
@@ -124,7 +123,6 @@ dtype_policy:
     - {inputs: {x1: int4, x2: int8}, outputs: {y: float16}}    # 异型量化（W4A8 模式常见）
   accumulator_dtype: float32
 
-# explicit 广播：M/K/N 不广播，batch 维 numpy（沿用 matmul 范式）
 broadcast:
   kind: explicit
   rules:

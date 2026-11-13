@@ -75,26 +75,18 @@ numerical_stability:
   affects_invariants: false
 
 numerical_tolerance:
-  source: "ops-precision-standard/float_compute_community.md"
+  source: "generated initial defaults (registries/tolerance_defaults.yaml); confirm before freezing"
   per_dtype:
 {{per_dtype_tolerance_block}}
 
-boundary_conditions:
-  # TODO: 至少补充: shape 完全相同 / 空 Tensor / rank=0 / 参数越界 (raises_error)
+boundary_conditions: []
+  # 按已确认支持域及来源补齐；以下仅为候选，不是公开保证。
+  # 域外且未规定行为时，不新增结果或拒绝义务。
 {{default_boundary_case}}
 {{extra_boundary_cases}}
 
-extreme_inputs:
-  # TODO: 至少补充: 含 NaN / 含 +inf / 全零 / fp16 上溢边界（若涉及 fp16）
-  # 注意：期望按 formula 的 IEEE 754 实际传播路径推导，不得照搬其他算子模板；
-  # 单元素注入的位置传播用 nan_propagates；仅全量注入（如 inf-inf、inf*0、all_pos_inf）
-  # 才可声明 produces_nan + scope: "整张量"，且须显式固定影响输出的全部自由输入
-  - case: "含 NaN"
-    synthesize:
-      shapes: { {{first_input}}: "[8]" }
-      patterns:
-        - {pattern: inject_nan_one_element, target: {{first_input}}}
-    machine_check: {kind: nan_propagates}
+extreme_inputs: []
+  # 核对 dtype、值域及数值传播后补齐适用条目；不默认要求 NaN/Inf。
 {{extra_extreme_cases}}
 
 determinism:
