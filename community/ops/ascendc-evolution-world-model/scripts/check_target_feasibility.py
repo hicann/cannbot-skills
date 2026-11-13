@@ -21,7 +21,7 @@ check_target_feasibility.py — Init 阶段目标可达性预检（P6）
     python3 scripts/check_target_feasibility.py \
         --baseline-eval output/{op}_evo_{ts}/baseline_evaluation.json \
         --target-speedup 2.0 \
-        [--op-family attention] [--op-name NAME]
+        [--op-family attention] [--device-floor-us US]
 
 输出（stdout JSON）:
     {feasible, target_time_us, device_floor_us, alarm, notes}
