@@ -1,6 +1,8 @@
 # ArgReduce 范式 CANNBotDSL 语言适配层
 
 > **层级**：CANNBotDSL 语言适配层（adapters/dsl/）。语言中立的算法与模型见 [../../generic/index.md](../../generic/index.md)；范式入口与语言路由见 [../../patterns.md](../../patterns.md)。
+>
+> **版本锚**：CANNBotDSL **0.8.0**（Ascend 950PR/950DT，arch35）。0.7.x 的 `Channel`/`ChannelKind` 已移除，本适配层按 0.8 的 `Buffer`/`RingBuffer`/`mem_copy`/`global_sync_all(flag_ids=...)` 口径维护；其他 SoC/版本须重新核实，禁止外推。迁移差异见 [capability-mapping.md](capability-mapping.md) §5。
 
 ## 1 定位
 

@@ -10,7 +10,7 @@
 | [selection-semantics.md](selection-semantics.md) | 选择语义代数：(值, 位置) 二元组、主规则与平局规则、NaN 语义、可结合性不变量、主规则实例注册表、位置流生成与变换 | 确定胜负规则；平局/NaN 语义结论；跨块跨核合并正确性论证；衍生/泛化算子语义推导 | 二元组、主规则、平局、first-occurrence、last-occurrence、NaN、可结合性、结合律、位置流、索引偏移、实例注册 |
 | [capability-contract.md](capability-contract.md) | 能力谓词定义：通用层算法引用的语言/硬件能力参数 | 编写新语言适配层；理解算法中的能力依赖 | 谓词、能力、索引跟踪、向量比较、位置存储、通道宽度、栅栏、workspace |
 | [splitting.md](splitting.md) | UB 三通道预算（值流+位置流+输出/暂存）、FullLoad/Split 判定、A1/A0 多核切分、GroupReduce 触发与 workspace 模型、跨块索引偏移与位置精度 | 切分策略设计；tiling 推导；GroupReduce 触发判定；workspace 布局 | 三通道、值流、位置流、全载、分载、切块、切核、GroupReduce、workspace、基址偏移、位置精度 |
-| [sync-model.md](sync-model.md) | 同步模型：RAW/WAR 依赖的白话解释、核内同步点、跨核同步（仅 GroupReduce）、AscendC/DSL 同步原语分工 | 同步设计；判断哪里必须等；GroupReduce 两阶段衔接 | 同步、RAW、WAR、持有法则、双缓冲、全核栅栏、SyncAll、Channel、事件对 |
+| [sync-model.md](sync-model.md) | 同步模型：RAW/WAR 依赖的白话解释、核内同步点、跨核同步（仅 GroupReduce）、AscendC/DSL 同步原语分工 | 同步设计；判断哪里必须等；GroupReduce 两阶段衔接 | 同步、RAW、WAR、持有法则、双缓冲、全核栅栏、SyncAll、RingBuffer、事件对 |
 | [variants.md](variants.md) | 变体挂载：谓词首达（arg_first / find_index）、top-k 宽度扩展、多输出独立选择 | 泛化算子（非 extremum 主规则）语义与设计；多输出算子 | 谓词、首达、find_index、top-k、宽度 k、列表归并、多输出 |
 
 ## 使用规则

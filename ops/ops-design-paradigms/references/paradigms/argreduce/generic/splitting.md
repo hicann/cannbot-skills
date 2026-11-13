@@ -97,4 +97,4 @@ aTotalAlign 按 DATA_ALIGNMENT 对齐；总大小 = 2 × usedCore × aTotalAlign
 
 ## 6 同步（指向独立文档）
 
-切分只决定"数据切到哪里、每个核做什么"，不定义同步原语。同步的**依赖推导规则**（核内流水何时必须等、GroupReduce 何时必须全核对齐）见 [sync-model.md](sync-model.md)；具体语言用事件对还是 Channel 交接，见各适配层。
+切分只决定"数据切到哪里、每个核做什么"，不定义同步原语。同步的**依赖推导规则**（核内流水何时必须等、GroupReduce 何时必须全核对齐）见 [sync-model.md](sync-model.md)；具体语言用事件对还是 RingBuffer 交接，见各适配层。

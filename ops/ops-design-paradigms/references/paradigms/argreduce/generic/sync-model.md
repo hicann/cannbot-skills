@@ -54,14 +54,14 @@ Phase 2：聚合（读全部核的局部结果，逐对 select）
 
 | 层 | 写什么 | 不写什么 |
 |---|--------|---------|
-| **本文档（generic）** | 依赖怎么推导、哪里必须等、GroupReduce 的三段结构 | 具体 API 名、事件编号、Channel 语义 |
+| **本文档（generic）** | 依赖怎么推导、哪里必须等、GroupReduce 的三段结构 | 具体 API 名、事件编号、RingBuffer 语义 |
 | **adapters/ascendc** | 原语怎么用：核内用事件对（MTE2→V / V→MTE3 的等待与释放）、跨核用 `SyncAll()` + `SetScheduleMode(1)`；双缓冲用队列 `EnQue/DeQue` 的隐式同步 | 不重复推导规则 |
-| **adapters/dsl** | 原语怎么用：阶段内 Buffer 无需显式同步（编译框架管理）；跨阶段/跨角色用 Channel 的 `acquire/commit/wait/release` 交接；跨核用 `ops.sync` 类目（如 `global_sync_all`） | 同上 |
+| **adapters/dsl** | 原语怎么用：阶段内 Buffer 无需显式同步（编译框架管理）；跨阶段/跨角色用 RingBuffer 的 `next_write`/`next_read` 交接；跨核用 `global_sync_all(flag_ids=...)` / `*_sync_block_*` / `*_sync_intra_*` | 同上 |
 
-**为什么不能只写一份**：AscendC 的事件编号、队列语义与 DSL 的 Channel 交接是两套完全不同的机制（前者手动管理事件，后者用生产/消费契约）；写在通用层会污染语言中立性。但**推导规则只有一份**（本文档）——两套适配层都从同一套"哪里需要等"的结论出发，只是落地原语不同。
+**为什么不能只写一份**：AscendC 的事件编号、队列语义与 DSL 的 RingBuffer 交接是两套完全不同的机制（前者手动管理事件，后者用生产/消费契约）；写在通用层会污染语言中立性。但**推导规则只有一份**（本文档）——两套适配层都从同一套"哪里需要等"的结论出发，只是落地原语不同。
 
 ## 5 追溯
 
 - 公共同步与一致性规则：[../../common/sync-and-consistency.md](../../common/sync-and-consistency.md)
 - AscendC 落地：`adapters/ascendc/highlevel-api.md`（§5 聚合三要素）、`adapters/ascendc/capability-mapping.md`（`CROSS_CORE_SYNC`）
-- DSL 落地：`adapters/dsl/capability-mapping.md`（`CROSS_CORE_SYNC`）、`adapters/dsl/implementation-guide.md`（Buffer/Channel 规划）
+- DSL 落地：`adapters/dsl/capability-mapping.md`（`CROSS_CORE_SYNC`）、`adapters/dsl/implementation-guide.md`（Buffer/RingBuffer 规划）
