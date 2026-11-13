@@ -147,7 +147,7 @@
               "Histogram", "SlidingWindow", "ControlFlow", "Recurrence",
               "NumericalStable", "Spectral", "DynamicShape", "VariableOutput",
               "RandomSampling", "Stateful", "Sparse", "Quantization",
-              "CollectiveCommunication", "FusedComposite"
+              "CollectiveCommunication", "FusedComposite", "ConvBackward"
             ]
           }
         },

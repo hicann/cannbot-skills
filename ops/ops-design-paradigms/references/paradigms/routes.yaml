@@ -55,3 +55,5 @@ routes:
       - references/paradigms/sparse/patterns.md
     ControlFlow:
       - references/paradigms/control_flow/patterns.md
+    ConvBackward:
+      - references/paradigms/conv/backward/patterns.md

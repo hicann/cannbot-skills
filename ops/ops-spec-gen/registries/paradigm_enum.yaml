@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# 算子 spec.yaml — op.paradigms 受控集合（27 项 PascalCase）
+# 算子 spec.yaml — op.paradigms 受控集合（28 项 PascalCase）
 schema_version: 1
 paradigms:
   # 基础（6）
@@ -30,9 +30,11 @@ paradigms:
   - {name: SlidingWindow,            group: structural,   priority: P0}
   - {name: ControlFlow,              group: structural,   priority: P0}
   - {name: Recurrence,               group: structural,   priority: P0}
-  # 算法修饰（2）
+  # 算法修饰（3）
   - {name: NumericalStable,          group: algorithmic,  priority: P0}
   - {name: Spectral,                 group: algorithmic,  priority: P1}
+  # 卷积输入梯度、权重梯度与转置卷积
+  - {name: ConvBackward,             group: algorithmic,  priority: P0}
   # 形状状态修饰（4）
   - {name: DynamicShape,             group: shape_state,  priority: P0}
   - {name: VariableOutput,           group: shape_state,  priority: P1}

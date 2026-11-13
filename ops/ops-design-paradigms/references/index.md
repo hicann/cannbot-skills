@@ -23,6 +23,7 @@
 | Sparse 散射累积、稀疏行更新与索引重映射 | [Sparse 入口](paradigms/sparse/patterns.md) |
 | ControlFlow 数值健康状态、断言判定、时序控制与条件求值 | [ControlFlow 入口](paradigms/control_flow/patterns.md) |
 | Sort、Argsort、TopK、Kth 的排序与选择设计 | [SortSelect 入口](paradigms/sortselect/patterns.md) |
+| ConvBackward、ConvTranspose（三维卷积输入梯度 Conv3DBackpropInput / Conv3DDX、权重梯度 Conv3DBackpropFilter / Conv3DDW、转置卷积 Conv3DTranspose）的数学、布局、Tiling、设计步骤与调用适配 | [Conv Backward 入口](paradigms/conv/backward/patterns.md) |
 | Contraction、Reduction、Broadcast 组合 | [FA 组合范式](paradigms/fused_composite/fa/patterns.md) |
 | Ascend C regbase 开发方法 | [开发指导](knowledge/regbase_development_guide.md) |
 | API 约束与签名 | [API 索引](knowledge/api/index.md) |

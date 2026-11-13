@@ -43,3 +43,11 @@ routes:
     ScatterUpdate:
       ascendc:
         - references/paradigms/scatterupdate/adapters/ascendc/example/examples-tensor-scatter-nd-update-code
+    ConvBackward:
+      ascendc:
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddx_direct
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddx_aclnn
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3dtranspose_direct
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3dtranspose_aclnn
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddw_direct
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddw_aclnn
