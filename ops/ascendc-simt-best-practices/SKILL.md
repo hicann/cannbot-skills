@@ -37,8 +37,8 @@ description: "AscendC SIMT 最佳实践与 API 导航。提供 SIMT 算子开发
 | **函数调用** | VF_CALL 启动 | [vf-call.md](references/vf-call.md) | Dim3 线程数、Add 完整示例、参数传递 3 方式、GM_ADDR 直接转换 |
 | **线程排布** | 两种排布模式 | [thread-stride-pattern.md](references/thread-stride-pattern.md) | 模式一全局 grid-stride、模式二核内分块+线程步进、索引分解、3 种线程↔数据映射粒度（含每 warp 一输出/warp 协作） |
 | **索引计算** | API 与全局索引 | [index-calculation.md](references/index-calculation.md) | GetThreadIdx/GetBlockIdx 系列、全局索引与 stride、magic 快除与官方 magic/shift 公式、索引位宽 32/64 自适应 |
-| **数据搬运** | GM 直接 / UB 中转 | [data-transfer.md](references/data-transfer.md) | 选型决策流、GM 直读/UB 中转/缓存复用、细粒度随机访存机理|
-| **随机访存** | 写侧（散写）策略 | [random-access-patterns.md](references/random-access-patterns.md) | 同址写冲突（数据竞争）；按 dtype 原子能力与确定性选原子直写 / workspace 三段式 / 排序归并去重 / 按目标分区；**重复度高或需确定性 → 排序归并**|
+| **数据搬运** | GM 直接 / UB 中转 | [data-transfer.md](references/data-transfer.md) | 选型决策流、GM 直读/UB 中转/缓存复用；**首要判据是访存粒度而非是否逐元素**：连续 / 规则访问可直接 GM 直读（硬件合并），GM 经 Data Cache 以 **128B 扇区**为最小传输单位，读放大 = 128B/单元素字节（int8 128x、fp16/bf16 64x、int32 32x、int64 16x）；单次随机访问连续字节 `e≥128B` 可直读、`e<128B` 读放大 `128/e`，**不应默认逐元素 GM 直读；调线程数/迭代序/缓存提示不能改变放大倍数** |
+| **随机访存** | 写侧（散写）策略 | [random-access-patterns.md](references/random-access-patterns.md) | 同址写冲突（数据竞争，**无原子时可能丢更新**）；**写侧首要目标是减少同址写次数而非优化单次写**；按 **dtype 原子能力 + 确定性需求** 选原子直写 / **workspace 升位宽三段式（目标 dtype 无原子指令或低精度：cast→宽类型原子→cast 回）** / 排序归并单写（**需确定性或重复度高时，每唯一目标只写一次**） / 按目标分区（按核/槽位切分且无跨核同址）；**重复度高时不应裸用原子直写——原子在目标地址排队，重复度越高串行化越重**；可用**分层归约**（线程块私有 UB 局部归约 → 整块汇总 GM）进一步降竞争 |
 | **计算指令** | C++ 运算符映射 | [compute-operators.md](references/compute-operators.md) | 优先运算符写法、显式 API 仅特殊需求 |
 | **多核同步** | workspace + SyncAll | [multi-core-sync.md](references/multi-core-sync.md) | 多核 workspace 交换、VF 间同步、同步原语全景、event 依赖链、SetScheduleMode(1) |
 | **核内共享** | UB buffer 共享 | [intra-core-shared.md](references/intra-core-shared.md) | TBuf VECCALC、__ubuf__/__local_mem__ 指针、线程间竞争与原子、UB 使用约束 |
@@ -76,7 +76,17 @@ for (uint64_t i = AscendC::Simt::GetBlockIdx() * AscendC::Simt::GetThreadNum() +
 | **计算方式** | C++ 运算符（`y[i]=x[i]+1`） | 向量 API（`Add(xLocal, yLocal, zLocal)`） |
 | **核内共享** | UB buffer + `__ubuf__` 指针 | TQue 流水线 queue |
 | **多核同步** | `SyncAll()` + `SetScheduleMode(1)` | 流水线 set/wait flag |
-| **适用场景** | 逐元素、条件分支、不规则访问 | 规则向量、高吞吐归约 |
+| **适用场景** | 离散 / 不规则访存、**数据依赖的逐元素迭代**（循环轮数依赖元素自身值：GCD 收敛循环 / 位扫描 ctz·ffs 等——SIMD 无法提前确定向量指令循环轮数） | 规则向量、高吞吐归约（含单次数据依赖 Select / 掩码） |
+
+### SIMT 适用场景
+
+实现载体选型时按以下两个维度逐条评估，命中任一维度且目标芯片支持 SIMT（DAV_3510）时，建议推荐 SIMT：
+
+**SIMT 适用场景**：
+- **离散 / 不规则访存**：Gather/Scatter、Hash 插入、随机数、排序（含原子操作）
+- **数据依赖的逐元素迭代**：每个元素的迭代轮数或分支路径依赖该元素自身的值（GCD 的 Stein 收敛循环、位扫描 ctz / ffs 等）——SIMD 无法提前确定向量指令的循环次数，标量线程天然适配
+
+> 单次的数据依赖分支 / 选择（`?:`、除零特判 `Select` 等）SIMD 掩码即可表达，不构成命中；访存是否规则（连续 / 离散）本身也不构成排除 SIMT 的理由。
 
 ---
 
