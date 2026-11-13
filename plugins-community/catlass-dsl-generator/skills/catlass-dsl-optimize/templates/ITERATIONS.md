@@ -3,12 +3,15 @@
 ## Optimization Policy
 
 - mode: target | explore
-- metric: performance.candidate.mean_ms
+- metric: performance.candidate.mean_ms（end2end 口径，含 `run` 内 host 成本）
 - threshold: <value | none>
 - device: npu:<id>
 - dev workload: workload_dev.jsonl (<n> cases)
 
 ## Performance Rounds
+
+- Before/After 均为同一 `end2end_ms` 口径；host 侧改动需在 Evidence 中附 `device_ms` /
+  `host_gap_ms` 拆分。
 
 | Round | Axis | Bottleneck | Before (ms) | After (ms) | Decision | Evidence |
 |------:|------|------------|------------:|-----------:|----------|----------|

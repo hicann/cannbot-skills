@@ -172,10 +172,13 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
 
 ### 测试与性能口径
 
-- full test 使用完整 `workload.jsonl`，必须分 2~5 片并行执行；全部 required cases 逐例
+- full test 使用完整 `workload.jsonl`，必须分 2~5 片并行执行；每片一条命令、写独立
+  `--output`，分片命令用分片级超时，片内逐例 60s 硬超时。全部 required cases 逐例
   通过后才算通过。失败用例一次收集、批量修复、逐例复验后再重跑整轮。
 - benchmark 使用完整 `workload.jsonl`，逐例配对 candidate/reference；正确性已在 full test
   覆盖时可跳过逐例校验，但必须在结果中引用 full test 的证据路径。
+- 计时边界与 host/device 分层按 `catlass-dsl-bench` 的「算子耗时的边界与分层」执行：
+  `end2end_ms` 含 `run` 内 host 成本，`device_ms`/`host_gap_ms` 只用于归因。
 - optimize 使用 design 冻结的 `workload_dev.jsonl`（用户用例 ≥30 条时为 30~40 条；不足
   30 条时全选；无用户用例时按覆盖需要自定，总数 ≤40），
   所有轮次共用同一份样本。
@@ -197,11 +200,14 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
 > 也不用进展汇报代替继续执行。仅当缺少只有用户能提供的信息、或可行路径已穷尽时才提问。
 
 > **超时纪律**：编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块，
-> 一次只做一类动作，禁止串成一条长命令。编译独立 300s，单例运行 `timeout -k 5 60s`，
-> 批量按分片逐段执行，禁止整批套一次性超时，禁止裸跑。超时、无输出增长或卡住时立即终止
-> 命令，不得死等或加大超时。
+> 一次只做一类动作，禁止串成一条长命令。编译单独成块、不套 60s，但必须带明确上限（默认
+> `timeout 600s`）；单例运行一条命令只跑一个 case/shape，加 `timeout -k 5 60s`；批量按
+> 2~5 片拆分，分片命令用分片级超时（用例数 × 60s + 余量），片内逐例 60s 硬超时，禁止整批
+> 套一次性 60s 或裸跑。超时、无输出增长或卡住时立即终止命令，不得死等或加大超时。
 > **重要！本地生成、远端调试时**，不得用一条超时命令打包传输、编译与运行；传输、编译、
-> 单例运行各自独立，运行算子逐例拆成单条命令并加 `timeout -k 5 60s`。
+> 运行命令各自独立，单例调试时运行算子逐例拆成单条命令并加 `timeout -k 5 60s`；
+> full test / benchmark 的分片命令按分片级超时、片内逐例 60s。
+> `timeout` 必须写在最终执行环境的命令内（ssh 直连或 `docker exec` 均如此），外层只负责连接。
 > 终止后先做卡健康判定：在同一张卡跑一个 60s 内的小探针或官方算子；探针能过就判定为本
 > 算子实现的死锁，直接转 debug 定位；探针也失败才判定为设备问题，换卡重试一次。
 
@@ -267,7 +273,9 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
   样例分布在 `examples/python/tla_dsl/` 下的 `tla/kernel`、`experimental/kernel`、
   `dsl_tutorials`、`helpers` 四类目录，挑选参考前先全量浏览（例如
   `find <refs>/examples/python/tla_dsl -name '*.py' | sort`），避免只看顶层或单个子树
-  而漏掉 `experimental/kernel/matmul/...` 这类深层样例。按结构优先看：Cube-only →
+  而漏掉 `experimental/kernel/matmul/...` 这类深层样例。同一归档里还有官方 API 文档
+  `python/tla_dsl/docs/`（含 `zh/`、`en/`），查接口语义、数据搬运规则时先看这里，再回退
+  到样例。按结构优先看：Cube-only →
   `tla/kernel/matmul/basic_mmad/basic_matmul.py`；Cube-Vector →
   `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
   Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；

@@ -194,10 +194,12 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <阶段> --workspace <项�
 按以下口径实现：
 
 - 逐例生成输入、分别执行 reference 与 candidate，按 tolerance 比对；
-- 同步 warmup 1 次，配对采集 2 次（或 5 次取中位数）；
-- 用 `torch.npu.Event` 记录单例 `run` 到同步完成的耗时；
-- 结果写入 `result.json`，至少包含 `performance.candidate.mean_ms`、逐例
-  candidate/reference 耗时、`selection.paired` 和 profiling 路径。
+- 同步 warmup 1 次，配对采集 2 次（需要更稳时可到 5 次；`mean_ms` 取算术平均，
+  `median_ms`/`all_ms` 作噪声参考）；
+- 用 `torch.npu.Event` 记录每个用例的 `run` 到同步完成的耗时；
+- 计时边界与 `device_ms`/`host_gap_ms` 分层见 bench 的「算子耗时的边界与分层」；
+- 结果写入 `result.json`，至少包含 `performance.candidate.mean_ms`（end2end 口径）、
+  逐例 candidate/reference 耗时、`selection.paired` 和 profiling 路径。
 
 可参考 [`catlass-dsl-bench/SKILL.md`](skills/catlass-dsl-bench/SKILL.md) 中的脚本骨架与
 结果字段约定。

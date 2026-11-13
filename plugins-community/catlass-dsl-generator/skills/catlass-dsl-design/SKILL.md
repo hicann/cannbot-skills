@@ -16,7 +16,10 @@ description: Use when specifying a new CATLASS Python DSL operator and producing
 > 仅当缺少只有用户能提供的信息、或可行路径已穷尽时才提问。
 
 > **超时纪律**：编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块；
-> 编译独立 300s，单例运行 `timeout -k 5 60s`，批量分片，禁止整批套一次性超时，禁止裸跑。
+> 编译单独成块、不套 60s，但必须带明确上限（默认 `timeout 600s`）；单例运行一条命令只跑
+> 一个 case/shape，加 `timeout -k 5 60s`；批量按 2~5 片拆分，分片命令用分片级超时（用例数
+> × 60s + 余量），片内逐例 60s 硬超时，禁止整批套一次性 60s 或裸跑。
+> 远端/容器调试时，`timeout` 必须写在最终执行环境的命令内，外层只负责连接。
 > 超时或卡住立即终止，不得死等或加大超时。终止后先做卡健康判定：同一张卡的小探针或
 > 官方算子能过 → 判本算子死锁并转 debug；探针也失败 → 判设备问题并换卡重试一次。
 
@@ -203,6 +206,10 @@ case 规则：
    的浮点尾差，不能当作不对齐的理由。确实无法复现时（DSL 无等价表达，或成本不可接受），
    必须在 DESIGN 里单列 deviation：哪一项、不可复现的原因、量级估算或对照实验、影响的
    用例范围、high risk 标记和补偿计划，不得只写“容差内”。
+   **豁免**：中间量精度高于标杆（dtype/累加/舍入逐项不低于标杆，且至少一项更高）时，
+   视为满足对齐要求，在 DESIGN 的 deviation 项记录推导依据与预期偏差量级（实测值在
+   develop 补齐）；容差判定不过时豁免不成立，需按误差分析重新推导容差并记录，不得在
+   调试中放宽；重推后的容差仍不过按精度 bug 处理。
 5. 生成 `reference.py` 与 `definition.json`，把每个非 performance required case 写成
    `workload.jsonl` 一行，并按规则生成 `workload_dev.jsonl`。
 6. 按 L2 口径在真实环境运行 reference cases 并记录证据；全 shape 不可完成时先冒烟

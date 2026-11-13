@@ -28,18 +28,30 @@ skills:
 3. 在回复开头输出阶段卡，然后立即执行该阶段第一个动作，不等待用户确认。
 4. 涉及 design / develop 时，确认 `.catlass-dsl/references/catlass/examples/python/tla_dsl`
    已成功下载且能列出 `.py` 样例；下载失败即停止推进，不得用知识库或已安装包源码替代。
+   同批归档的 `python/tla_dsl/docs/`（`zh/`、`en/`）是官方 API 文档，查接口语义与数据
+   搬运规则时先看这里。
 
 未加载入口契约就开始设计、实现、调试、benchmark 或优化，视为流程违规：立即停止，
 回到入口重新执行。
 
 ## 上板运行固定动作
 
-1. 运行命令必须以 `timeout -k 5 60s` 开头，禁止 `long` / 默认超时 / 裸跑。
+1. 凡是会拉起 kernel 的**单例运行**，必须在**最终执行环境内**以 `timeout -k 5 60s` 包裹，
+   禁止 `long` / 默认超时 / 裸跑。只有编译、传输、输入生成这类纯 host 侧命令不在此列；
+   reference 在 NPU 上运行时按设备侧任务计，同样受 60s 约束，超长的参考计算按 shape 拆分。
 2. 跑完立刻在 `ITERATIONS.md` 的 Run Log 写 `Timeout / Wall / Exit` 三项。
-3. `Wall > 120s` 或 `Exit = killed by timeout` 时，下一条运行必须缩小 shape 或加中间打印，
-   不允许原样重试。
-4. 编译与运行分成两条命令，只重编改动过的 kernel。
-5. 单例超过 60s 按失败处理，不是“设备慢”。
+3. 单例命令 `Exit = killed by timeout`（`Wall` 已到 60s 量级）时，下一条运行必须缩小 shape
+   或加中间打印；分片命令被超时杀掉时缩小分片规模；均不允许原样重试。
+4. 编译与运行分成两条命令，只重编改动过的 kernel；编译不套 60s，但必须带明确上限
+   （默认 `timeout 600s`），不得裸跑。
+5. 单个执行单元（一个 case 或一个 shape）的一次运行超过 60s 按失败处理，不是“设备慢”。
+6. 单例运行一条命令只跑一个执行单元；批量（full test / benchmark）必须拆成 2~5 片，
+   每片一条命令、写独立 `--output`。分片命令不套 60s，使用分片级超时（按用例数 × 60s
+   + 余量，或用脚本内 `subprocess timeout`），片内每个 case 仍必须逐例执行 60s 硬超时；
+   禁止整批裸跑，也禁止通过加大单例超时绕过。
+7. 远端或容器调试时，`timeout` 必须写在最终执行环境的命令内（例如
+   `docker exec <容器> bash -lc '... && timeout -k 5 60s <cmd>'`）；只包外层 ssh 会留下
+   远端孤儿进程继续占卡。分片命令同样在最终执行环境内设置分片级超时。
 
 ## 阶段路由（简表）
 
@@ -118,6 +130,10 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
   标杆中间量作输入，下游通过不能证明上游正确。
 - **对齐优先于容差**：标杆定义的存储/累加 dtype、舍入位置与模式、归约顺序必须复现；
   不复现就是精度 bug，容差只吸收完全对齐后的浮点尾差，不能当作保留下来的理由。
+  **例外**：中间量精度高于标杆（dtype/累加/舍入逐项不低于标杆，且至少一项更高）时，
+  不按精度 bug 处理，直接按用例容差判定，并在 DESIGN 的 deviation 项记录推导依据与预期
+  偏差量级（实测值在 develop 补齐）。容差判定不过时本例外不成立，必须回到 design 按误差
+  分析重新推导容差并记录 deviation，不得在调试中放宽；重推后的容差仍不过按精度 bug 处理。
 - **按结构选参考样例**：Cube-only → `tla/kernel/matmul/basic_mmad/basic_matmul.py`；
   Cube-Vector → `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
   Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
@@ -149,12 +165,14 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
 执行细则见「上板运行固定动作」。补充三条：
 
 - 编译、算子运行、benchmark、profiling 与普通 shell 命令拆成独立命令块，一次只做一类动作，
-  禁止串成一条长命令；编译独立 300s，批量按分片逐段执行，禁止整批套一次性超时。
+  禁止串成一条长命令；编译单独成块、不套 60s（默认 `timeout 600s` 上限）；批量按 2~5 片
+  逐段执行，分片命令用分片级超时、片内逐例 60s，禁止整批套一次性 60s 或裸跑。
 - 超时、无输出增长或卡住时立即终止命令，不得死等或加大超时。
 - 终止后先做卡健康判定：在同一张卡跑一个 60s 内的小探针或官方算子；探针能过就判定为本
   算子实现的死锁，直接转 debug 定位；探针也失败才判定为设备问题，换卡重试一次。
 
-**重要！本地生成、远端调试时**，传输、编译、单例运行各自独立，不得用一条超时命令打包。
+**重要！本地生成、远端调试时**，传输、编译、运行命令各自独立，不得用一条超时命令
+打包；`timeout` 必须写在最终执行环境的命令内。
 
 ## 维护者通道（不参与算子流程）
 

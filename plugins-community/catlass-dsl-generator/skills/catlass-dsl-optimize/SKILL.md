@@ -16,7 +16,10 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 > 也不用进展汇报代替继续执行。仅当缺少只有用户能提供的信息、或可行路径已穷尽时才提问。
 
 > **超时纪律**：编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块；
-> 编译独立 300s，单例运行 `timeout -k 5 60s`，批量分片，禁止整批套一次性超时，禁止裸跑。
+> 编译单独成块、不套 60s，但必须带明确上限（默认 `timeout 600s`）；单例运行一条命令只跑
+> 一个 case/shape，加 `timeout -k 5 60s`；批量按 2~5 片拆分，分片命令用分片级超时（用例数
+> × 60s + 余量），片内逐例 60s 硬超时，禁止整批套一次性 60s 或裸跑。
+> 远端/容器调试时，`timeout` 必须写在最终执行环境的命令内，外层只负责连接。
 > 超时或卡住立即终止，不得死等或加大超时。终止后先做卡健康判定：同一张卡的小探针或
 > 官方算子能过 → 判本算子死锁并转 debug；探针也失败 → 判设备问题并换卡重试一次。
 
@@ -79,7 +82,7 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 ```markdown
 ## Optimization Policy
 - mode: target | explore
-- metric: performance.candidate.mean_ms (lower is better)
+- metric: performance.candidate.mean_ms (end2end 口径, lower is better)
 - threshold: <value | none>
 - device: npu:<id>
 - dev workload: workload_dev.jsonl (<n> cases)
@@ -94,8 +97,9 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 
 - `Axis`：本轮唯一改动轴；
 - `Bottleneck`：从本轮 fresh profile 指出主导 pipe、占比、搬运还是计算受限、理论下限；
-- `Before (ms)`：进入本轮时 best 的 candidate mean；
-- `After (ms)`：本轮正确性通过且完成计时后的 candidate mean，未通过写 `null`；
+- `Before (ms)`：进入本轮时 best 的 candidate `end2end_ms`；
+- `After (ms)`：本轮正确性通过且完成计时后的 candidate `end2end_ms`，未通过写 `null`；
+  本轮改动涉及 host 侧或分配/缓存时，Evidence 需附 `device_ms`/`host_gap_ms` 拆分；
 - `Decision`：越过噪声门禁为 `adopted`，否则 `rejected`；
 - `Evidence`：本轮结果 JSON 与 profile 目录的项目相对路径。
 
@@ -108,10 +112,15 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 - 逐例配对：同一用例先跑 candidate 再跑 reference，在同一张卡相邻时间完成，抵消温度
   漂移；有对标实现时不得只跑 candidate。测量契约见
   [`catlass-dsl-bench`](../catlass-dsl-bench/SKILL.md)。
+- Before/After 统一为 `end2end_ms`（结果中的 `performance.candidate.mean_ms`，含 `run`
+  内的 host 侧成本），reference 使用同一 warmup 与采样口径；不得通过改变入口契约把成本
+  移到 `run` 外。
+- host 侧关键路径（首 kernel 前的大块分配、padding 拷贝、wrapper 构造）是合法优化轴，
+  但必须用 `host_gap_ms` 的 host/device 拆分或 `step_trace_time` 证明它确实落在关键路径上。
 - 控温：同用例内各实现温差 ≤3℃；执行前校验 AICore 频率为 1650 MHz；温度超过 85℃ 停机，
   降温后重新配对测量该例。full test 与 benchmark 不控温。
-- 单例 60 秒硬超时；超时判定卡死，换卡重试一次，二次仍超时判定 kernel 问题，不得加大
-  超时绕过。
+- 单例 60 秒硬超时；分片命令按分片级超时、片内逐例 60 秒。超时判定卡死，换卡重试一次，
+  二次仍超时判定 kernel 问题，不得加大超时绕过。
 
 ## Setup and baseline
 
@@ -124,8 +133,11 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    `solution.source_sha256` 与当前 kernel SHA-256 一致。
 4. 在 `ITERATIONS.md` 写入 `## Optimization Policy` 与第 0 行 baseline。
 5. **MFU 收口判定（仅 `性能要求：none`）**：baseline 完成后，只用 **`workload_dev.jsonl`
-   中 `origin=user` 的行**计算平均 MFU（逐例 MFU = 实际 FLOPs ÷ (mean_ms × 峰值算力)，
-   FLOPs 算式与峰值来源写入账本）。口径是"子集内筛选出的用户用例"，不是
+   中 `origin=user` 的行**计算平均 MFU（逐例 MFU = 实际 FLOPs ÷ (device_ms × 峰值算力)；
+   同一判定内所有用例使用同一分母，参与判定的用例必须逐例具备 `device_ms` 且
+   `host_gap_ms / end2end_ms ≤ 5%`；任一用例缺 `device_ms` 或超过该阈值时，本例外不成立，
+   按模式 B 执行，不得用 `mean_ms` 代替 device 口径计算 MFU；FLOPs 算式与峰值来源写入账本）。
+   口径是"子集内筛选出的用户用例"，不是
    `workload.jsonl` 里全部用户用例：不得为判定额外采集子集外用例的性能（用户用例总数
    远超子集规模时，只算子集内选中的那些，禁止先跑全量）。子集内没有 `origin=user`
    用例时该例外不适用，按模式 B 执行。平均 MFU ≥ 90% 时不再进入三轮优化：
@@ -141,6 +153,11 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    瓶颈。不要盲目调参；先形成可用于检索的 operator family、瓶颈类型、相关 DSL API、
    shape/dtype/layout 和架构关键词。
 
+   有 kernel 级产物时，若 `device_ms / end2end_ms < 0.5`（小 shape）或
+   `host_gap_ms / end2end_ms > 0.05`（大 shape），先按 host 关键路径归因：首 kernel 前的
+   大块分配、padding 拷贝、wrapper 构造、launch 间隙。不得直接归因为 kernel 慢，也不得
+   把这些成本移出计时窗口。
+
    若 fresh profile 中 `mac` 或 `mte2` 单项达到墙钟的 0.7 以上，本轮轴按
    `knowledge/dsl/pattern-gemm-optimization-ladder` 的阶梯顺序选取（波次量化 → L1 双缓冲
    → L0 双侧双缓冲），不要在同一阶段反复微调参数。
@@ -152,8 +169,9 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    `BK > SK` 或同步协议修复，禁止选铺放、减流量类改动。`cube_utilization` 接近 100%
    不能推翻这个判断。
 
-   若 `kernel_details.csv` 缺失、目标 kernel 行 task duration 为 0，或该时长与配对计时
-   相差一个数量级，先按 `knowledge/profiler/torch-npu-profiler-dsl-kernels.md` 的
+   若 `kernel_details.csv` 缺失、目标 kernel 行 task duration 为 0，或在
+   `device_ms / end2end_ms ≥ 0.5` 的用例上该时长与配对计时相差一个数量级，先按
+   `knowledge/profiler/torch-npu-profiler-dsl-kernels.md` 的
    Level1 + AiCMetrics 配置重采（上限 2 次）；仍不可用时，在账本写明「profiling 不可用」
    及原因，本轮允许用 makespan 算术与单变量消融归因。benchmark 交付前仍须有 kernel 级
    产物，或写明「profiling 不可用」。
@@ -174,8 +192,9 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 6. **Correctness.** 运行全部 required correctness 命令。失败时立即停止本轮，不得
    benchmark；记录 `After ms = null`、`Decision = rejected`。
 7. **Benchmark.** 正确后使用同一 device、`workload_dev.jsonl`、环境和采样配置测量，逐例
-   配对。默认 warmup 1 次、采集 2 次；需要更稳时取 5 次中位数。不得为得到更好数字临时
-   改变配置。
+   配对。默认 warmup 1 次、采集 2 次；需要更稳时可加到 5，统计口径（`mean_ms` 算术平均、
+   `median_ms`/`all_ms` 作噪声参考）按 `catlass-dsl-bench`。不得为得到更好数字临时改变
+   配置。
 8. **Record immediately.** benchmark 返回后立即补齐本轮行与 `evidence/round-NNN/result.json`；
    在关闭本轮前不得 profile、读新资料、修改 kernel 或规划下一轮。failed/partial 轮也必须
    记录。
@@ -279,6 +298,9 @@ correctness/benchmark，profiling 通过时附 CSV 路径。结束前一次性�
 ## Gotchas
 
 - 追求真实 latency 降低，不做 reward hacking：不得跳过计算、返回未初始化输出或规避计时。
+- host 侧 workspace/wrapper 缓存是允许的优化面，但必须每次调用完整重写有效区并清零尾部、
+  形状切换不累积常驻显存，并记录多轮迭代的 mem_alloc 曲线。
+- 只报 warm 态数字、或把一次性成本移出计时窗口，不算性能提升。
 - 不得为了调参方便把 tile、dtype、shape、params 或开关移到模块级，也不得用可变全局状态
   或 closure 生成隐式编译期特化。
 - 异常大幅提升先核对 correctness、kernel hash、workload 和 profiler CSV，再下结论。
