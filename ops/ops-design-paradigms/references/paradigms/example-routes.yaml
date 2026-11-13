@@ -40,6 +40,9 @@ routes:
     IndexGather:
       ascendc:
         - references/paradigms/indexgather/adapters/ascendc/example/examples-custom-gather-code
+    SlidingWindow:
+      ascendc:
+        - references/paradigms/conv/forward/adapters/ascendc/example/conv2d
     ScatterUpdate:
       ascendc:
         - references/paradigms/scatterupdate/adapters/ascendc/example/examples-tensor-scatter-nd-update-code

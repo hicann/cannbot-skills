@@ -25,6 +25,7 @@
 | Sort、Argsort、TopK、Kth 的排序与选择设计 | [SortSelect 入口](paradigms/sortselect/patterns.md) |
 | ConvBackward、ConvTranspose（三维卷积输入梯度 Conv3DBackpropInput / Conv3DDX、权重梯度 Conv3DBackpropFilter / Conv3DDW、转置卷积 Conv3DTranspose）的数学、布局、Tiling、设计步骤与调用适配 | [Conv Backward 入口](paradigms/conv/backward/patterns.md) |
 | Contraction、Reduction、Broadcast 组合 | [FA 组合范式](paradigms/fused_composite/fa/patterns.md) |
+| Conv1D/Conv2D/Conv3D 前向卷积（标准/空洞/带步长/非对称 pad，滑窗乘累加、im2col M/N/K、Cube 主通路）的数学、数据流、Tiling 与验证 | [Convolution 入口](paradigms/conv/forward/patterns.md) |
 | Ascend C regbase 开发方法 | [开发指导](knowledge/regbase_development_guide.md) |
 | API 约束与签名 | [API 索引](knowledge/api/index.md) |
 | Kernel、VF 与 Reg-MicroAPI 组织 | [实现模式](knowledge/patterns/index.md) |
