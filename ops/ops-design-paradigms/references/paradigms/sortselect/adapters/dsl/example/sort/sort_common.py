@@ -84,13 +84,13 @@ def ordered_key(value, dtype: cb.Constexpr, descending: cb.Constexpr[bool]):
         )
         magnitude = bits % result_type(sign)
         # ±0 使用同一个键，稳定排序因此保留两种零的输入次序。
-        if magnitude == 0:
+        if magnitude == result_type(0):
             key = result_type(sign)
         # 正负 NaN 及不同 payload 均放到升序末端；这里只归一键，不改原值。
-        elif magnitude > infinity:
+        elif magnitude > result_type(infinity):
             key = result_type(maximum)
         # 负浮点的位序与数值序相反：逐位反转；非负数翻转符号位接在其后。
-        elif bits >= sign:
+        elif bits >= result_type(sign):
             key = result_type(maximum) - bits
         else:
             key = bits ^ result_type(sign)
@@ -105,16 +105,11 @@ def ordered_key(value, dtype: cb.Constexpr, descending: cb.Constexpr[bool]):
 
 @cb.jit
 def radix_digit(key, storage: cb.Constexpr, byte: cb.Constexpr[int]):
-    # DSL 定宽 int64 整除向零截断（SDK types/_integer.py）。
-    # 有符号键为负且低 32 位非零时减一，修正为向下取整，再取无符号高 32 位。
-    # tests/test_device.py 覆盖全部八字节及完整排序，包括 0xFFFFFFFF00000000。
+    # 高低字都在无符号域提取，不依赖有符号整除的舍入规则。
+    # 避免将最高位为 1 的键转为负数后，再对高字做额外的舍入修正。
     word = cb.dtypes.uint32(key)
     if storage == cb.dtypes.uint64 and byte >= WORD_BYTES:
-        signed = cb.dtypes.int64(key)
-        high = signed // cb.dtypes.int64(WORD_BASE)
-        if signed < 0 and word != 0:
-            high = high - 1
-        word = cb.dtypes.uint32(high)
+        word = cb.dtypes.uint32(key // cb.dtypes.uint64(WORD_BASE))
     return (
         word // cb.dtypes.uint32(1 << ((byte % WORD_BYTES) * BITS_PER_BYTE))
     ) % cb.dtypes.uint32(RADIX_BINS)

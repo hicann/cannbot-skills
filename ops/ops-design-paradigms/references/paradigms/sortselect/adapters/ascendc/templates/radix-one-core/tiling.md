@@ -8,6 +8,8 @@
 
 ## 2 容量推导与双缓冲
 
+本模板的排序、恢复及最终区间选择保持 Vector/Reg，经输出 Queue 由 MTE3 写回，`R_run=0`、`U_work=U`。先按[完整调用链预算](../../output-mapping.md#scratch-与-ub-由-host-规划)计入新增压紧区等 `adaptBytes`，再选择单双缓冲。
+
 ```text
 X = A(ND)
 I32 = A(4N)
@@ -18,7 +20,7 @@ tmp = 查询原 dtype、N 项、隐式源索引 Radix Sort 的 scratch
 Qbytes = 2X+Y                  # 输入值、输出值、输出索引
 ```
 
-先检查 `Qbytes+Z+tmp≤U`，不满足则尝试多核路线。满足后检查 `2Qbytes+Z+tmp≤U`，可行时 bufferNum=2，否则为 1。剩余 UB 按 block 向下对齐后与 tmp 比较；Z 和 tmp 不随队列份数倍增。
+先检查 `Qbytes+Z+tmp+adaptBytes≤U_work`，不满足则尝试多核路线。满足后检查 `2Qbytes+Z+tmp+adaptBytes≤U_work`，可行时 bufferNum=2，否则为 1。剩余 UB 从 U_work 中扣除已计物理区后按 block 向下对齐，再与 tmp 比较；Z 和 tmp 不随队列份数倍增。区间压紧新增物理区时，可驻留轴长与 bufferNum 由同一组不等式重新求得。
 
 ## 3 多核分配
 
@@ -47,6 +49,6 @@ outputOffset = row×L
 
 ## 5 容量演算
 
-取 N=513、float32/int64、a=32，X=2080、I32=2080、Y=4160、Z=2080，Qbytes=8320。单缓冲需求 `10400+tmp`，双缓冲需求 `18720+tmp`。若假设查询结果 tmp=4096，则为 14496 / 22816 字节；此 tmp 仅为演算输入，不替代 SDK 查询。
+取 N=513、float32/int64、a=32，X=2080、I32=2080、Y=4160、Z=2080，Qbytes=8320。单缓冲物理区需求 `10400+tmp`，双缓冲需求 `18720+tmp`。若假设查询结果 tmp=4096、adaptBytes=0，Vector 路线为 14496 / 22816 字节，R_run=0；新增区间压紧区按 adaptBytes 另加。此 tmp 仅为演算输入，不替代 SDK 查询。
 
 来源：[Sort Host](../../example/sort/op_host/arch35/sort_tiling_arch35.cpp) 的 `IsRadixSortOneCore/SetSortTmpSize/SetRadixOneCoreTiling`。索引半区及恢复见 [Kernel](kernel-template.md)，完整峰值见 [Buffer](dag-buffers.md)。

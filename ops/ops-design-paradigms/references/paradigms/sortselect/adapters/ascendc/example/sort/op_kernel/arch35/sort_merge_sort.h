@@ -12,6 +12,7 @@
 #define SORT_MERGE_SORT_H
 
 #include <cmath>
+#include <cstdint>
 #include "kernel_operator.h"
 #include "simt_api/asc_simt.h"
 #include "op_kernel/platform_util.h"
@@ -53,10 +54,10 @@ public:
 
 private:
     __aicore__ inline void ParseTilingData();
-    __aicore__ inline uint32_t GetRowCount(uint32_t sortLoopRound) const;
+    __aicore__ inline uint32_t GetRowCount(int64_t rowStart) const;
     __aicore__ inline void ProcessCurrentBlock(LocalTensor<T1> xLocal, uint32_t rowCount);
-    __aicore__ inline void CopyOutCurrentBlock(uint32_t sortLoopRound, uint32_t rowCount);
-    __aicore__ inline void ProcessSingleBlock(GlobalTensor<T1> inputX, int32_t sortLoopRound);
+    __aicore__ inline void CopyOutCurrentBlock(uint64_t gmOffset, uint32_t rowCount);
+    __aicore__ inline void ProcessSingleBlock(uint64_t gmOffset, int64_t rowStart);
     __aicore__ inline void CopyIn(GlobalTensor<T1> inputX, uint64_t tileOffset, uint32_t rowCount);
     __aicore__ inline void CopyOut(uint64_t gmOffset, uint64_t tileOffset, uint32_t rowCount);
     __aicore__ inline void SortRows(LocalTensor<T1> xLocal, LocalTensor<T1> valueLocal,
@@ -90,7 +91,10 @@ private:
     uint32_t rowsPerBatch_ = 0;
     uint32_t axisLength_ = 0;
     int64_t totalRows_ = 0;
-    uint32_t parallelRows_ = 0;
+    int64_t coreRowStart_ = 0;
+    int64_t rowStride_ = 0;
+    uint64_t coreGmOffset_ = 0;
+    uint64_t gmStride_ = 0;
     uint32_t loopCount_ = 0;
     uint32_t alignedAxis_ = 0;
     bool batchMerge_ = false;
@@ -145,10 +149,14 @@ __aicore__ inline void MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::ParseTilingDa
     rowsPerBatch_ = tilingData_->keyParams0;
     axisLength_ = tilingData_->numTileDataSize;
     totalRows_ = tilingData_->unsortedDimNum;
-    parallelRows_ = tilingData_->unsortedDimParallel;
     loopCount_ = tilingData_->sortLoopTimes;
     alignedAxis_ = tilingData_->keyParams3;
     batchMerge_ = tilingData_->keyParams5 != 0U;
+    // Tiling 计数可用 uint32，但行号及元素偏移的乘积须在运算前提升到 64 位。
+    coreRowStart_ = static_cast<int64_t>(blockIdx_) * rowsPerBatch_;
+    rowStride_ = static_cast<int64_t>(tilingData_->unsortedDimParallel) * rowsPerBatch_;
+    coreGmOffset_ = static_cast<uint64_t>(coreRowStart_) * axisLength_;
+    gmStride_ = static_cast<uint64_t>(rowStride_) * axisLength_;
 }
 
 // Sort32/MrgSort 生成降序提案。升序时先把浮点值 x 变为 -x，降序排列 -x 后再恢复符号，
@@ -333,9 +341,8 @@ __aicore__ inline void MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::CopyOut(uint6
 }
 
 template <typename T1, typename T2, typename CONVERT_TYPE, uint64_t IsDescend>
-__aicore__ inline uint32_t MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::GetRowCount(uint32_t sortLoopRound) const
+__aicore__ inline uint32_t MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::GetRowCount(int64_t rowStart) const
 {
-    int64_t rowStart = (blockIdx_ + sortLoopRound * parallelRows_) * rowsPerBatch_;
     if (rowStart >= totalRows_) {
         return 0U;
     }
@@ -381,28 +388,25 @@ __aicore__ inline void MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::ProcessCurren
 }
 
 template <typename T1, typename T2, typename CONVERT_TYPE, uint64_t IsDescend>
-__aicore__ inline void MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::CopyOutCurrentBlock(uint32_t sortLoopRound,
+__aicore__ inline void MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::CopyOutCurrentBlock(uint64_t gmOffset,
                                                                                        uint32_t rowCount)
 {
-    uint64_t gmOffset = sortLoopRound * parallelRows_ * axisLength_ * rowsPerBatch_;
-    uint64_t outputTileOffset = blockIdx_ * axisLength_ * rowsPerBatch_;
-    CopyOut(gmOffset, outputTileOffset, rowCount);
+    CopyOut(gmOffset, coreGmOffset_, rowCount);
 }
 
 template <typename T1, typename T2, typename CONVERT_TYPE, uint64_t IsDescend>
-__aicore__ inline void MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::ProcessSingleBlock(GlobalTensor<T1> inputX,
-                                                                                      int32_t sortLoopRound)
+__aicore__ inline void MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::ProcessSingleBlock(uint64_t gmOffset,
+                                                                                      int64_t rowStart)
 {
-    uint32_t rowCount = GetRowCount(static_cast<uint32_t>(sortLoopRound));
+    uint32_t rowCount = GetRowCount(rowStart);
     if (rowCount == 0U) {
         return;
     }
 
-    uint64_t inputTileOffset = blockIdx_ * axisLength_ * rowsPerBatch_;
-    CopyIn(inputX, inputTileOffset, rowCount);
+    CopyIn(inputGm_, gmOffset + coreGmOffset_, rowCount);
     LocalTensor<T1> xLocal = inputQueue_.DeQue<T1>();
     ProcessCurrentBlock(xLocal, rowCount);
-    CopyOutCurrentBlock(static_cast<uint32_t>(sortLoopRound), rowCount);
+    CopyOutCurrentBlock(gmOffset, rowCount);
 }
 
 template <typename T1, typename T2, typename CONVERT_TYPE, uint64_t IsDescend>
@@ -412,9 +416,12 @@ __aicore__ inline void MergeSort<T1, T2, CONVERT_TYPE, IsDescend>::Process()
         return;
     }
 
+    int64_t rowStart = coreRowStart_;
+    uint64_t gmOffset = 0;
     for (uint32_t loop = 0; loop < loopCount_; ++loop) {
-        uint64_t loopOffset = loop * parallelRows_ * rowsPerBatch_ * axisLength_;
-        ProcessSingleBlock(inputGm_[loopOffset], static_cast<int32_t>(loop));
+        ProcessSingleBlock(gmOffset, rowStart);
+        rowStart += rowStride_;
+        gmOffset += gmStride_;
     }
 }
 

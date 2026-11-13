@@ -34,8 +34,10 @@
 | `entry.py` | `PreparedSort`、`two_stage_batch` | 公开接口、选路、批次和缓冲分配 |
 | `sort_host.py` | `sort_entry` | Host 模板分派与启动 |
 | `radix.py` | `radix_permutation`、`sort_local_keys` | 字节直方图、稳定分组、局部排列与 LSD 排序 |
-| `sort_small_axis_insertion.py`、`sort_small_axis_two_stage.py`、`sort_radix_one_core.py` | `InsertionSort`、`SmallAxisTwoStage`、`RadixOneCore` 的 `__call__` | 插入、两阶段恢复和单核 Radix |
-| `sort_radix_more_core.py` | `histogram`、`prefix`、`scatter` | 多核 Radix 阶段、前缀交换、散射与同步 |
+| `sort_small_axis_insertion.py` | `InsertionSort.__call__`、`contiguous`、`strided` | 连续路径 DMA 输入、每线程行内排序、合作写回；跨步路径协作加载与三次 barrier |
+| `sort_small_axis_two_stage.py` | `SmallAxisTwoStage.__call__` | 合批键/索引 LSD、inverse 计秩或稳定行号分组（公开单字节，低层 B>256 为两字节）、SIMT 原值回读 |
+| `sort_radix_one_core.py` | `RadixOneCore.__call__`、`NarrowRadixOneCore.__call__` | 32/64 位键/索引双缓冲，以及 1/2 字节局部排列与原值恢复 |
+| `sort_radix_more_core.py` | `clear_states`、`prepare_digits`、`load_value_tile`、`extract_value_digit`、`load_digit_word`、`histogram`、`scatter` | DMA/SIMD 构键、统计、无等待 lookback、稳定散射与同步 |
 | `sort_transpose.py` | `SortTranspose`、`transpose_entry` | 调用层输入布局规范化和输出还原 |
 
 模板组织见 [实现指南](adapters/dsl/implementation-guide.md)，dtype 档位、恢复策略与容量公式见 [Tiling](adapters/dsl/tiling.md)。Sort、Argsort、TopK、KthValue 按 [统一输出映射](generic/output-mapping.md) 配置输出字段和名次区间。

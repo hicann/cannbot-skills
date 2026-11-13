@@ -11,17 +11,18 @@
 
 import cannbotdsl as cb
 from sort_radix_more_core import RadixMoreCore
-from sort_radix_one_core import RadixOneCore
+from sort_radix_one_core import NarrowRadixOneCore, RadixOneCore
+from sort_common import dtype_bytes
 from sort_small_axis_insertion import InsertionSort
 from sort_small_axis_two_stage import SmallAxisTwoStage
 
 
-# 固定编号用于编译特化与导出，修改名称时保持编号兼容。
+# 路由编号用于编译特化与导出。
 ROUTE_INSERTION = 1
 ROUTE_RADIX_ONE_CORE = 2
 ROUTE_RADIX_MORE_CORE = 3
 ROUTE_TWO_STAGE_INVERSE = 4
-ROUTE_TWO_STAGE_PACKED = 5
+ROUTE_TWO_STAGE_GROUPED = 5
 
 
 def validate_route(route, groups):
@@ -31,9 +32,11 @@ def validate_route(route, groups):
         ROUTE_RADIX_ONE_CORE,
         ROUTE_RADIX_MORE_CORE,
         ROUTE_TWO_STAGE_INVERSE,
-        ROUTE_TWO_STAGE_PACKED,
+        ROUTE_TWO_STAGE_GROUPED,
     ):
         raise ValueError(f"unknown Sort route: {route}")
+    if route == ROUTE_RADIX_MORE_CORE and groups < 0:
+        raise ValueError("active row capacity must be nonnegative")
     if route == ROUTE_RADIX_ONE_CORE and groups != 1:
         raise ValueError("single-core Radix requires groups == 1")
 
@@ -48,8 +51,7 @@ def sort_entry(
     pong: cb.Tensor,
     pong_ids: cb.Tensor,
     hist: cb.Tensor,
-    offsets: cb.Tensor,
-    ranks: cb.Tensor,
+    states: cb.Tensor,
     rows: cb.dtypes.int64,
     length: cb.dtypes.int64,
     inner: cb.dtypes.int64,
@@ -64,16 +66,21 @@ def sort_entry(
         InsertionSort(x.dtype, width, groups, descending)[blocks](
             x, values, indices, rows, length, inner, blocks
         )
-    elif route == ROUTE_TWO_STAGE_INVERSE or route == ROUTE_TWO_STAGE_PACKED:
+    elif route == ROUTE_TWO_STAGE_INVERSE or route == ROUTE_TWO_STAGE_GROUPED:
         SmallAxisTwoStage(
             x.dtype, width, groups, descending, route == ROUTE_TWO_STAGE_INVERSE
         )[blocks](x, values, indices, rows, length, inner, blocks)
     elif route == ROUTE_RADIX_ONE_CORE:
-        RadixOneCore(x.dtype, width, groups, descending)[blocks](
-            x, values, indices, rows, length, inner, blocks
-        )
+        if dtype_bytes(x.dtype) <= 2:
+            NarrowRadixOneCore(x.dtype, width, groups, descending)[blocks](
+                x, values, indices, rows, length, inner, blocks
+            )
+        else:
+            RadixOneCore(x.dtype, width, groups, descending)[blocks](
+                x, values, indices, rows, length, inner, blocks
+            )
     elif route == ROUTE_RADIX_MORE_CORE:
-        RadixMoreCore(x.dtype, descending, width)[blocks](
+        RadixMoreCore(x.dtype, descending, width, hist.dtype, groups)[blocks](
             x,
             values,
             indices,
@@ -82,8 +89,7 @@ def sort_entry(
             pong,
             pong_ids,
             hist,
-            offsets,
-            ranks,
+            states,
             rows,
             length,
             inner,

@@ -1,5 +1,7 @@
 # AscendC 单核 Radix Kernel
 
+输入契约：先实例化 [公共布局包装模板](../../layout-wrapper.md)，本模板接收连续 `[M,N]`、输出连续 `[M,L]`；输入 GM 按 `row*N+j` 寻址，原始轴与 stride 由调用层处理。白盒输入遵循同一交接。
+
 ## 1 执行骨架
 
 ```text
@@ -18,7 +20,7 @@ for round in [0,ceil(M/C_act)):
   若本行生成过零键：按 ids32 用 Vector 恢复 values 的原零符号
   输入最后读完后归还输入 Queue 槽
   J==8 时，对 N 项原轴索引做 Vector Cast；J==4 时使用 ids32
-  对 [first_rank,first_rank+L) 批量选择/压紧 values 与 indices
+  用Vector对 [first_rank,first_rank+L) 批量选择/压紧已恢复的 values 与 indices
   两输出各自入队、出队交给 MTE3，写 row*L 起的 L 项并归还槽
   scratch/sourceOrder 下次使用前，其本行最后消费者必须完成
 ```
@@ -52,6 +54,8 @@ signBit 为对应16/32位浮点的最高位，局部排序域须小于2^31以容
 ## 4 输出区间
 
 完整 Sort 连续写 N 项；派生接口从排序后的 UB 取 `rank=first_rank+t`，输出到 `row×L+t`，indices 仍取该 rank 对应的原轴索引。中间值/索引、scratch 和原生 Sort 参数保持 N。
+
+区间选择、索引宽化和压紧使用 Vector/Reg，消费已恢复的 UB 值/索引；输出 Queue 将紧凑结果交给 MTE3，不新增 SIMT 调用。源/目的别名和新增压紧区按 [Vector 区间写回](../../output-mapping.md#vector-路线ub-选择压紧与-dma)处理，本路线 `R_run=0`。
 
 不同方向分别配置比较关系；不能将稳定升序输出倒序生成稳定降序。若仅输出 indices，可省最终 values 写回，但原生排序和必要的恢复数据按实际消费者核对，不能仅按接口字段名删区。
 

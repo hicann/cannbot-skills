@@ -19,11 +19,12 @@ H 为对齐轴长，B 为每批行数，b 为队列份数，D/J 为值/输出索
 ## 2 峰值
 
 ```text
-UB_peak = b×(2p1+p2) + K×(4+8+8) + BF16_cast
+UB_data = b×(2p1+p2) + K×(4+8+8) + BF16_cast
 BF16_cast = 4HB 或 0
+UB_peak = UB_data + adaptBytes + R_run ≤ U
 ```
 
-这是真实分配的求和，不把多个阶段分别求最大后误删仍存活的 Queue。普通模式的 proposal 不随 B 倍增，合批模式才随 B 倍增；切换模式时 Host 与 Kernel 必须使用同一条件。
+`adaptBytes` 按[完整调用链预算](../../output-mapping.md#scratch-与-ub-由-host-规划)求值；本模板保留 Vector/Queue/MTE3，`R_run=0`。这是真实分配的求和，不把多个阶段分别求最大后误删仍存活的 Queue。普通模式的 proposal 不随 B 倍增，合批模式才随 B 倍增；切换模式时 Host 与 Kernel 必须使用同一条件。
 
 当前参考 Host 的基础行批次计划按固定规划尺度产生，合批分支另作 requiredUb 检查。生成设计仍须将基础计划的真实峰值与 U 对照，不能把经验轴长门槛或规划尺度当作所有 dtype/输出类型的完整容量证明。
 
@@ -40,7 +41,9 @@ BF16 转换输入在当前行最后一次被排序读取之后，可以被当前
 
 ## 4 输出适配
 
-L<N 时可在最后提取或压紧中生成 B×L 的输出；proposal 仍按 H 或 HB。L=1 时保留行间并行和合批搬运。若改成 SIMT 选择写回，额外扣除所需 SIMT 保留并重做选批/单双缓冲，不能沿用原纯 Vector 预算。
+L<N 时在最后提取或 Vector 压紧中生成 B×L 的输出；proposal 仍按 H 或 HB。L=1 时保留行间并行和合批搬运，输出 Queue 仍由 MTE3 消费。压紧区采用存活期安全的别名或计入 adaptBytes 的独立分配，纯 Vector 路线不占 SIMT 保留区。
+
+仅在目标合同需要时保留原始位模式、类别 mask/计数或区间选择临时区，并把真实对齐字节与最后读者计入峰值。优先保留排序携带的位模式；确需 UB 原值区时，它不能被构键、BF16 转换或 Extract 提前覆盖，恢复在该区按索引做 Vector Gather。类别信息必须在原值被转换/覆盖前生成，且不能从已经碰撞的 score 反推 NaN、+Inf 或 padding。B=1 也检查轴内分类/选择的临时区与同步，具体处理域见 [区间定位与原值恢复](kernel-template.md#区间定位与原值恢复)。
 
 算法不需要 GM proposal scratch；框架 workspace、最终 M×L 输出和实际转置区另计。来源：[MergeSort::Init](../../example/sort/op_kernel/arch35/sort_merge_sort.h)，完整批次推导见 [Tiling](tiling.md)。
 

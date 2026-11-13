@@ -10,7 +10,7 @@
 
 ## 2 UB 切分
 
-先扣除 SIMT 保留量 `R=32768` 字节，得到 `U_work=U−R`；U≤R 时该候选不可用。
+先按[运行保留预算](../../output-mapping.md#scratch-与-ub-由-host-规划)核对 R_simt，得到 `U_work=U−R_simt`；U≤R_simt 时该候选不可用。参考 Host 取 R_simt=32768 字节，下文算例沿用此值。
 
 普通类型每行预算：
 

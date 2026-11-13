@@ -17,7 +17,7 @@ N≤2^30−1：CounterT=uint32，S=4
 
 中间原轴索引实际位宽不超过最终输出索引宽度，但 Host 保守按 S 预算对应 UB/GM 区。局部桶计数仍为 uint16、局部排列仍为 uint32，不随 S 扩大。
 
-扣除 SIMT 保留：`U_work=U−32768`。单 tile 的每元素区系数为 `F=D+S+6`，固定桶区为 `Efix=256×(3S+4)`。对候选 T：
+按[运行保留预算](../../output-mapping.md#scratch-与-ub-由-host-规划)核对 R_simt（参考 Host 为 32768），扣除后 `U_work=U−R_simt`。单 tile 的每元素区系数为 `F=D+S+6`，固定桶区为 `Efix=256×(3S+4)`。对候选 T：
 
 ```text
 T 为 256 的倍数

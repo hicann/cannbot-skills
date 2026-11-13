@@ -1,5 +1,7 @@
 # AscendC 归并排序 Kernel
 
+输入契约：先实例化 [公共布局包装模板](../../layout-wrapper.md)，本模板接收连续 `[M,N]`、输出连续 `[M,L]`；输入 GM 按 `row*N+j` 寻址，原始轴与 stride 由调用层处理。白盒输入遵循同一交接。
+
 ## 1 计算流
 
 ```text
@@ -11,7 +13,25 @@
 
 ## 2 行批次及搬入
 
-`rowStart=(round×C_act+blockIdx)×B`，`v=min(B,M−rowStart)`。输入 GM 的第 b 行从 `(rowStart+b)×N` 读取 N 项，UB 第 b 行从 `b×H` 开始，补齐区不属于有效输出。
+`rowStart=(round×C_act+blockIdx)×B`；先判断 `rowStart≥M` 时跳过本批，否则 `v=min(B,M−rowStart)`。输入 GM 的第 b 行从 `(rowStart+b)×N` 读取 N 项，UB 第 b 行从 `b×H` 开始，补齐区不属于有效输出。
+
+行号使用 int64，GM 元素偏移使用 uint64。Tiling 的核数、批行数和轴长虽为 uint32，其乘积必须在乘法前提升；把 32 位乘积赋给 64 位变量无法避免回绕。参考实现预计算并递增：
+
+```text
+coreRowStart = int64(blockIdx) * B
+rowStride = int64(C_act) * B
+coreGmOffset = uint64(coreRowStart) * N
+gmStride = uint64(rowStride) * N
+rowStart = coreRowStart; gmOffset = uint64(0)
+每轮：
+  若rowStart<M：
+    v=min(B,M-rowStart)
+    从输入GM的gmOffset+coreGmOffset搬入v行，排序后向同一元素偏移写回values/indices
+  rowStart += rowStride
+  gmOffset += gmStride
+```
+
+`GetRowCount` 直接消费 int64 行号，搬入和搬出复用同一组 uint64 偏移，不再各自用轮号重算 32 位连乘。values/indices 的偏移以各自类型的元素数计。生成长度 L 的输出时，输入仍使用 N，输出核基址和轮间步长改按 L 计算，并保留 64 位运算。
 
 `CopyIn` 的升序 paddingValue 为 `NAN`，降序为 `-INFINITY`。MTE2 只完成字节对齐范围内的补齐；剩余 Sort32 尾部由 Vector 用同一 paddingValue 补齐。不能假设一次 DataCopyPad 自动完成任意 H−N 项 padding。
 
@@ -69,7 +89,7 @@ if BF16:
   每行Extract后本行转换输入已无读者，可存放提取值
   升序时一次恢复v*H项符号位
   一次Vector Cast将v*H项转回BF16
-else if Host已选择合批且本批符合合批条件:
+else if batchMerge==1 and v>=4:             # Host已按类型、E及完整调用链预算选定
   升序时一次翻转v*H项符号位；一次Sort32覆盖v*H项
   每个归并层处理完全部v行再换层；一次Extract覆盖v*H项
   按行向量化修正索引，整批恢复值
@@ -88,6 +108,34 @@ else:
 
 完整 Sort 合批搬出 v 行，每行只写 N 项。生成区间输出时，在最终提取/压紧阶段取 `[first_rank,first_rank+L)`，输出 GM 行距改为 L；Sort32、归并和必要的索引恢复仍处理完整排序域。
 
+### 区间定位与原值恢复
+
+归并已产生有序 proposal，Extract 后的索引就是名次到原轴位置的映射。其比较键、有效性及特殊值顺序已经满足目标合同时，收尾只处理 v×L 项：
+
+```text
+p 按 Reg lane 分配到 [0,v*L)
+b=p//L; t=p%L; rank=first_rank+t
+j=final_ids[b*indexPitch+rank]            # 合批偏移已恢复；0≤j<N
+indices[b*L+t]=widen(j)                  # 只宽化实际输出项
+若原值已随排序恢复：values[b*L+t]=sorted_values[b*valuePitch+rank]
+否则：values[b*L+t]=original_values[b*originalPitch+j]  # 安全保留的未排序原值区
+紧凑输出UB交给输出Queue，由MTE3合批搬出v*L项
+```
+
+rank 索引有序值区与有序索引区，j 索引未排序原值区；不能用 j 再读取已排序的 values。两种值来源按实际恢复链选定，所需原值区计入存活期与容量。上述选择/压紧按整个 v×L 域生成 Gather 偏移并批量执行；归并层内允许的逐行 proposal 处理不延伸为收尾逐行提交 `count=L` 的 Muls/Gather。
+
+这是截取，不需要再遍历全部有序索引来寻找第 k 项。L=1、v=1 时，少量有效 lane 完成这一次定位是合理的；若恢复中仍需遍历 N 或 H 项，该完整轴工作应另以连续轴位置分配 lane/线程，不能沿用“一行一个 lane”执行 H 次串行迭代。批内多行并行不能代替 B=1 时的轴内并行。
+
+本模板从构键、类型转换、排序、恢复到最终写回均保留 Vector/Reg 与 Queue/MTE3。原值恢复优先保留排序携带的位模式；构键覆盖输入 UB 时，在覆盖前保留目标合同确需的原值/类别区，按最终索引做 Vector Gather。输出选择与压紧按 [Vector 区间写回](../../output-mapping.md#vector-路线ub-选择压紧与-dma)执行。新增保留区及最后读者见 [Buffer 输出适配](dag-buffers.md#4-输出适配)。
+
+### 特殊值键碰撞
+
+直接按名次读取的前提是排序结果已表达目标顺序。例：升序用 −x 形成降序 score，又将 NaN 和 padding 都映射为 −Inf，会与合法 +Inf 碰撞；原语对相等 score 稳定也不能把混排的 +Inf/NaN 自动分成两个类别。不能丢弃 NaN、忽略合法无穷或直接取错误的 proposal 名次。
+
+对这个具体键布局，一种可推导的适配是：构键时沿轴并行分类，得到 `F=非NaN且非+Inf项数`、`P=+Inf项数`，保留原轴类别及原始索引。目标 rank<F 时直接取有序索引；`F≤rank<F+P` 时取原轴序中第 `rank−F` 个 +Inf；其余有效 rank 取第 `rank−F−P` 个 NaN。类别内按原轴顺序做并行 mask/前缀定位，padding 不参与计数。这样普通名次无需再过滤整行，特殊桶也不靠逐项串行计秩。这里是算法候选，不是 SDK 已有接口或已验证的完整 wrapper；实际 prefix/选择实现、稳定性、位模式及资源仍需按目标 SDK 核对。其他方向或 NaN 合同应重新推导类别顺序。
+
+完整轴的必要分类/计数尽量并入已有构键遍历；若仍需独立遍历，展开轴内分工和依赖，不能只写一个“恢复 VF”掩盖 O(H) 的串行依赖链。保留既有 Sort32/MrgSort 原语并不代表这类收尾机制与参考等价。
+
 输入 Queue 的 EnQue/DeQue 保护搬入→计算，输出 Queue 保护计算→MTE3；每层 proposal 写入可见后才能被下一层读取，旧输入最后读完前不能交换别名。保留批量构键、转换、索引初始化和搬出，详见[辅助处理并行度](../../kernel-helpers.md#辅助处理并行度)。
 
 ## 6 推演与来源
@@ -95,6 +143,8 @@ else:
 N=65、H=96 时，初始 runCount=3，归并一层后得到一条 run；输出仍只有 65 项。H=160 时先处理 4+1 个 run，再合并两条 run。分别检查最终 ping/pong 选择和尾组掩码。
 
 源码：[MergeSort](../../example/sort/op_kernel/arch35/sort_merge_sort.h) 的 `SortOneRow/SortBatchedRows/CopyIn/CopyOut`，以及 [proposal 公共归并](../../example/sort/op_kernel/arch35/common/ping_pong_merge_sort.h)。容量见 [Buffer](dag-buffers.md)。
+
+64 位行号与 GM 偏移递增方式同步自 `ops-math` 提交 `bcbaab4745aa08ef96f6e0439f849080b89a76e9` 的 `math/sort/op_kernel/arch35/sort_merge_sort.h`。
 
 ## 7 搬运行距与 Queue 交接
 

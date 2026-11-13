@@ -2,7 +2,9 @@
 
 ## 1 常驻 UB
 
-W=Ncap，B 为批次行数，D 为值字节数，S 为键存储字节数。所有区在同一批次同时存活。
+W=Ncap，B 为批次行数，D 为值字节数，S 为键存储字节数。所有区在同一排序批次同时存活。连续路径由 DMA 加载原值，行负责人生成键和索引，SIMT 合作写回；不按 AscendC 的 DMA 行距、BF16 转换区或 Queue 份数另作别名。
+
+各区按 `cb.Buffer(cb.MemLoc.UB, dtype, cb.make_layout((B * W,)))` 分配；values、keys、ids 分别使用原 dtype、无符号键 dtype、uint32。第二个参数是 dtype，第三个参数须为 Layout。
 
 | Buffer | 字节数 | 内容 |
 |---|---|---|
@@ -15,8 +17,10 @@ W=Ncap，B 为批次行数，D 为值字节数，S 为键存储字节数。所�
 ## 2 生命周期
 
 ```text
-合作写入 values/keys/ids → barrier → 行负责人插入
-→ barrier → 合作写出 values/ids → barrier → 下一批加载
+连续路径：DMA values → 行负责人生成 keys/ids 并插入
+→ barrier → 连续合作写出 values/ids → DSL 流水依赖 → 下一批 DMA
+跨步路径：合作加载 → barrier → 行负责人插入
+→ barrier → 合作写出 → barrier → 下一批加载
 ```
 
 keys 只控制比较，values 保留原始位模式，ids 一直随元素移动。写回结束前不能将 values 或 ids 改作下一批输入。
@@ -29,6 +33,6 @@ W 由 dtype 上限确定，N 由真实输入确定，L 由输出配置确定；�
 
 ## 4 尾批与输出裁剪
 
-尾批仍按 BW 静态分配三块 UB，只对 vN 项加载和排序。三个 barrier 分别保护完整行加载、排序结果可读以及写回读者结束；没有排序行的线程也参与同步。
+尾批仍按 BW 静态分配三块 UB。连续路径按 vN 紧凑 DMA 加载、SIMT 连续写回，UB 行距是实际 N；低层跨步路径按 BN 遍历并 guard 无效行，UB 行距为 W。连续路径保留排序至合作写回的 barrier，跨步路径保留三个 barrier；无排序行的线程仍参与。
 
 values 与 keys 同时存活，因为输出原值不能由归一化键恢复；ids 随键和值移动。L 仅改变最终写回范围，不缩减这些排序区。若改变模板以省去某字段，应按真实消费者重新核算，不能只从输出名称推断可删区。

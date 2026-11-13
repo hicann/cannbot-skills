@@ -15,15 +15,15 @@
 | 索引与行批 | `InitMergeIndicesVF` 使用 Reg；`SortBatchedRows` 保留其适用条件和批内行归属恢复 |
 | 零符号恢复 | [signed_zero_sort_utils.h](example/sort/op_kernel/arch35/common/signed_zero_sort_utils.h) 提供 Reg 检测、构键与按索引恢复；按实际 caller 核对，不能直接套用到未覆盖的路线 |
 
-已有路径不满足目标 NaN、padding 或原值位模式合同时，只适配对应步骤。独立转换、分类和 gather 按当前批次分配给 Vector/Reg lane 或多个 SIMT 线程；SIMT 使用 `p=threadIdx.x; p<total; p+=threads` 分工，不能启动多个线程后让除 thread 0 外的线程全部返回。常数规模标量控制和已有小轴插入的线程分段算法保留。
+已有路径不满足目标 NaN、padding 或原值位模式合同时，只适配对应步骤。独立转换、分类和 gather 沿用命中模板的执行方式：Merge、单核 Radix 和多核 Radix 构键采用 Vector/Reg lane 分工；原有 SIMT 插入、两阶段恢复/构键及多核散射沿用各自线程域。SIMT 使用 `p=threadIdx.x; p<total; p+=threads` 分工，不能启动多个线程后让除 thread 0 外的线程全部返回。常数规模标量控制和已有小轴插入的线程分段算法保留。
 
-构键时先用批量 `Cast` 完成必要的比较类型转换，再用位运算、比较 mask 和 Select 处理符号、零与目标 NaN 键；原值位模式保留在独立存活区或原输入。采用 Reg 时按后文使用具名 VF，SIMT 独立转换也按元素分工。已有原语输出满足合同则直接截取；确需回读原值时，按最终区间的 B×L 项并行 gather，不为输出值恢复再扫描完整 B×N。输出截取和索引宽化本身不要求收尾排序。
+构键时先用批量 `Cast` 完成必要的比较类型转换，再用位运算、比较 mask 和 Select 处理符号、零与目标 NaN 键；原值位模式按模板保留在独立存活区或原输入。Reg 按后文使用具名 VF，原有 SIMT 节点按元素分工。已有原语输出满足合同则直接截取；Merge、单核 Radix 的原值恢复和区间写回在 UB 内用 Vector 选择/压紧，再交给 Queue/MTE3；已有 SIMT 路线按自身输出机制处理 B×L 项。输出值恢复不再扫描完整 B×N，也不为这 L 项回读而第二次搬入整批原输入。输出截取和索引宽化本身不要求收尾排序。
 
 ### Merge 的 NaN 与 padding
 
-`MergeSort::CopyIn` 在升序时用 `NAN` 补尾、降序时用 `-INFINITY` 补尾。升序经 `FlipSignBit` 转换后执行 Sort32/MrgSort，再恢复符号；Extract 结果按 H 行距读取前 N 项。补齐只发生在 UB，原输入 GM 保持不变。
+`MergeSort::CopyIn` 在升序时用 `NAN` 补尾、降序时用 `-INFINITY` 补尾。升序经 `FlipSignBit` 转换后执行 Sort32/MrgSort，再恢复符号；Extract 结果按 H 行距读取前 N 项。这是参考 caller 的补齐方式，不自动证明任意目标 NaN 顺序及合法无穷与 padding 共存时均可直接截取。补齐只发生在 UB，原输入 GM 保持不变。
 
-L<N 时从排序结果取 `[first_rank,first_rank+L)`，恢复该区间的原轴索引并按需回读原值，输出工作域为 B×L。
+先确认有效数据在目标顺序中的名次映射，再从排序结果取 `[first_rank,first_rank+L)`，恢复该区间的原轴索引并按需回读原值，输出工作域为 B×L。特殊键存在碰撞时，在构键时保留必要类别信息，用目标类别的并行定位修复映射；不要统一退化为“一个 Reg lane 对应一行，串行扫描全部 H 项两遍”。B=1 时这种扫描仍只有一个有效 lane，虽使用 Reg/Gather 也失去轴内并行。最终取 L=1 的一次短 gather 可以保留；需要遍历 N/H 的分类、计数与过滤另按轴内 lane/线程分工。完整说明见 [Merge 区间定位与原值恢复](templates/merge/kernel-template.md#区间定位与原值恢复)。
 
 批次内独立步骤尽量合并为批量 VF，保留依赖所需的事件；不得未经依赖分析删除 barrier。改变处理方式时同步重算资源与 buffer 存活。
 

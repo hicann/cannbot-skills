@@ -30,7 +30,7 @@ TilingKey 为 `(schId,isInt32,isDescend)`；sch2 的 isInt32 在 N≤2^30−1 �
 
 ## 按模板阅读
 
-每行是一条完整实现路线，按当前问题读取对应模板的三份文档。Tiling 给出候选计算与下发参数，Buffer 给出真实峰值和复用条件，Kernel 给出地址、阶段及同步。
+先读取并实例化 [公共布局包装模板](layout-wrapper.md)。下表每行提供其中的排序主体，与公共包装组合成完整实现路线。Tiling 给出候选计算与下发参数，Buffer 给出真实峰值和复用条件，Kernel 给出地址、阶段及同步。
 
 | 模板 | Tiling | Buffer | Kernel |
 |---|---|---|---|

@@ -1,5 +1,7 @@
 # AscendC 多核 Radix Kernel
 
+输入契约：先实例化 [公共布局包装模板](../../layout-wrapper.md)，本模板接收连续 `[M,N]`、输出连续 `[M,L]`；输入 GM 按 `row*N+j` 寻址，原始轴与 stride 由调用层处理。白盒输入遵循同一交接，32/64 位计数路线共用此契约。
+
 ## 1 执行层次与不变量
 
 每批处理 P_act 行，每行 G 个核协作；slot=blockIdx//G、lane=blockIdx%G，全局行号为 batch×P_act+slot。Init 按 Host 参数建立六段 workspace 视图和单份 tile Queue。D 为值字节数，以下每轮处理一个 digit：
@@ -39,6 +41,28 @@ for batch in [0,R):
 - 本核各桶之前的计数总和，累加到全局独占桶区。
 
 32 位全局累加使用 DMA 原子加，64 位使用 SIMT 原子加。尾 tile 只统计 valid 个元素，不把补齐区算入桶频数。
+
+构键、digit 提取和局部统计采用 Vector/Reg 数据流；SIMT 在本模板中承担 64 位桶起点原子累加与排列后的散射。构键节点按实际 dtype 实例化为下列向量块，`Vector*` 表示算法操作，具体 overload 沿用对应类型 helper 的 SDK 绑定：
+
+```text
+W = 当前值位宽的Reg lane数
+for base=0; base<valid; base+=W:
+  mask = 按该位宽更新的有效lane掩码
+  rawBits = VectorLoad当前tile[base:base+W]，按原位宽无符号位模式解释
+  if dtype为浮点:
+    按目标比较合同Vector归一化零和NaN，Vector位运算生成保序key
+  else if dtype为有符号整型:
+    key = VectorXor(rawBits, signBit)
+  else:                                      # 无符号整型
+    key = rawBits
+  按目标方向形成key；Vector提取当前digit并写入B8的有效lane
+对valid项B8执行VectorHistogram256，产生uint16频数及局部包含式前缀
+Vector相减得到局部独占起点，再扩为CounterT累计本核桶偏移
+```
+
+窄值、B8 和桶计数使用各自位宽的 mask/有效长度；dtype 类别先区分浮点、有符号整型和无符号整型。值区可在统计阶段原位承接 key，因为该阶段的 raw 值最后一次读取已结束；排列阶段仍从当前 GM 值侧重载原值。原值与原轴索引沿 perm 一起散射，构键不改变它们的配对。
+
+对应 helper 为 `TwiddleInB8/B16/B32/B64`、`TwiddleInFp16/Fp32` 及当前 digit 的 `GlobalExclusive*`，见 [radix_sort_simd_utils.h](../../example/sort/op_kernel/arch35/common/radix_sort_simd_utils.h) 与 [radix_more_core_base.h](../../example/sort/op_kernel/arch35/common/radix_more_core_base.h)。这些节点的 Reg 分工与后续统计、发布节点组成一条执行链。
 
 统计的执行粒度与两类全局数据的用途如下：
 

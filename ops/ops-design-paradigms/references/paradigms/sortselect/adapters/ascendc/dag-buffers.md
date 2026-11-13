@@ -1,6 +1,6 @@
 # SortSelect AscendC Buffer 与依赖
 
-以下预算对应 AscendC Sort 的 Host 与 Kernel。令 U 为查询到的 UB 字节数，A(x) 为向上对齐 UB block 字节数，D 为输入元素字节数，J 为输出索引字节数，B 为批次行数。SIMT 保留量 R=32768 字节；仅使用 SIMT 的路线扣除 R，不对所有路线统一扣除。表中常量须按目标平台和实际实现核对。
+以下预算对应 AscendC Sort 的 Host 与 Kernel。令 U 为查询到的 UB 字节数，A(x) 为向上对齐 UB block 字节数，D 为输入元素字节数，J 为输出索引字节数，B 为批次行数。R 为按目标 SDK 和实际调用链核对的 SIMT 保留量，参考 Host 的 `SIMT_UB` 取 32768 字节；仅使用 SIMT 的路线扣除 R，Merge/单核 Radix 的 Vector 路线取 0。参考常量不作为所有 SDK 的固定保证。
 
 ## 按模板读取
 
@@ -47,4 +47,4 @@ SyncAll、事件和 GM 状态发布有不同作用，不能互相替代。通用
 
 所有配置按 [统一批次内存](../../generic/liveness-fusion.md#统一批次内存) 分开列出最终 M×L 输出、transpose 布局缓冲和排序 scratch。上述原语预算仍按完整 N 项计算；核内持有当前 UB 批次，多核外存按 P_act 活跃行复用。模板以最终输出兼作中间存储时，生成实现须将 scratch 基址与最终输出行偏移分离，两侧实际存活区均计入。
 
-仅在最后一个消费者结束后复用空间；末轮最终名次确定后才按输出区间写回。增加 SIMT 写回时，原本不含 SIMT 的 Merge/OneCore 也须重新扣除保留区并选单/双缓冲。实际表达见 [输出适配](output-mapping.md)。
+仅在最后一个消费者结束后复用空间；末轮最终名次确定后才按输出区间写回。Merge/单核 Radix 保持 Vector 选择、压紧和 Queue/MTE3 写回，新增 UB 区计入 adaptBytes 后重选容量；原有 SIMT 路线计入各自运行保留。实际表达见 [输出适配](output-mapping.md)。

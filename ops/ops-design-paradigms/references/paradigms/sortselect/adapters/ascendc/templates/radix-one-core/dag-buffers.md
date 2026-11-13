@@ -14,7 +14,7 @@
 
 ## 2 峰值与别名
 
-总 UB 为 `b×(2X+Y)+sourceOrder+tmp`。只有三个 Queue 随 b 倍增，sourceOrder 和 tmp 不倍增。本路线原有实现不使用 SIMT；生成写回若引入 SIMT，则必须加上相应保留并重做容量判断。
+总 UB 为 `b×(2X+Y)+sourceOrder+tmp+adaptBytes≤U`。本模板从排序、恢复到区间写回保持 Vector/Queue/MTE3，`R_run=0`；`adaptBytes` 按[完整调用链预算](../../output-mapping.md#scratch-与-ub-由-host-规划)求值，并参与 [Tiling 的单双缓冲选择](tiling.md#2-容量推导与双缓冲)。只有三个 Queue 随 b 倍增，sourceOrder 和 tmp 不倍增。
 
 int64 输出 Queue 的 uint32 后半区与最终 int64 视图共用存储，宽化依据参考调用的有效区和重叠语义完成。不要另造一个不计预算的 int64 临时数组，也不要将后半区偏移当字节数使用。
 

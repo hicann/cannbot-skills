@@ -1,48 +1,39 @@
 # DSL 多核 Radix Tiling
 
-## 1 输入与选路
+## 1 输入与计数域
 
-M 为独立行数，N 为轴长，C 为当前流有效向量核数，U 为扣除 SIMT 32768 字节后的 UB。S 是保序键存储宽度 4/8；全局计数、偏移和原轴索引固定 int64。
+小轴及单核局部 Radix 不可行时进入本模板。M 为行数，N 为轴长，C 为当前流有效 AIV 核数，U 为设备 UB 扣除 SIMT 32768 字节后的容量。D 是输入元素字节数。
 
-小轴及单核局部 Radix 不可行时选择本路线。全局计数和前缀固定使用 int64，阶段之间通过全核屏障同步。
+N<2^30 时中间 ids、hist、states、lookback 与 scatter bases 统一使用 int32，否则使用 int64。该范围依据单行 N，不依据 M×N；地址及最终原轴索引保持 int64。局部计数/桶起点使用 uint16，T≤8192；局部排列使用 uint32。
 
-## 2 块长与任务数
+## 2 块长与核数
 
-每 tile 的线性 UB 需求为 7T 字节，固定区及余量按 1024 字节预算。当前选择算法：
+F=6+D+H，H 为当前 CounterT/中间索引字节数。静态 Buffer 和固定桶区都计入 [UB 预算](dag-buffers.md#1-每核-ub)。
 
 ```text
-T = 1024
-for candidate in [1024,2048,4096,8192]：
-  Q = M×ceil(N/candidate)
-  若 7×candidate+1024≤U 且 Q≥2C：T=candidate
-若 7T+1024>U：在编译/完整 workspace 分配前报告容量不足
-K = ceil(N/T)
-tasks = M×K
-blocks = min(C,tasks)
+T=1024
+for candidate in [1024,2048,4096,8192]:
+  若 candidate×F+4096≤U 且 M×ceil(N/candidate)≥2C:
+    T=candidate
+若 T×F+4096>U：在编译和 workspace 分配前报告容量不足
+K=ceil(N/T)
+blocks=min(C,M×K)
 ```
 
-候选按升序覆盖，最终留下满足“两轮任务”性能偏好的最大块；若无候选满足该偏好，保留默认 1024，但仍检查其容量。两轮任务不是合法性的硬条件，也不是全局周期最优证明。
+采用两波任务偏好，候选升序覆盖；它不是正确性硬条件或最优性证明。无满足并发偏好的候选时使用默认 T，但仍核对容量。所有连续 dtype 均使用 DMA/SIMD 提取 digit，64 位按字节视图搬运；低层 strided 使用 SIMT L2 构键；该差异不改变路由或 LSD 轮数。
 
-## 3 三个阶段的任务分配
+## 3 活跃行与任务分配
 
-| 阶段 | 工作域 | 核 c 的遍历 |
-|---|---|---|
-| Histogram | M×K 个行/tile | task=c+k×blocks，row=task//K、tile=task%K |
-| Prefix | M 行 | row=c+k×blocks，每行 256 桶线程协作 |
-| Scatter | M×K 个行/tile | 与 Histogram 相同 |
+令每行 workspace 字节数 `R=N(2D+2H)+256H×[K+D(K+1)]`，q=blocks/gcd(blocks,K)。按 [统一活跃行策略](../../tiling.md#多核活跃行容量)取 `P=max(q,floor((64MiB/R)/q)×q)`；仅 M≥2P 时启用容量 P，否则 P_act=M。64 MiB 是软件目标，最小均衡批次可能超过它。
 
-所有行在一次 launch 内完成。当前实现按 M 行分配 GM scratch，`P_act=M`；尚未实现有界活跃行工作区复用。不能只缩小分配量而保留全行索引。
+一次 launch 内按 P_act 行分批，尾批 v≤P_act。Histogram 和 Scatter 均按 `task=core+k×blocks` 遍历 v×K；workspace 使用批内行号，输入/输出用 row_start+row。lookback 与局部排列、Scatter 在同一 tile 内执行，无独立逐行 Prefix 任务。所有核参加批首、跨 digit 及批间屏障。
 
-## 4 计数与编码范围
+route 3 的正 groups 表示活跃行容量，groups=0 表示全部 M 行。states 按 D×P_act×(K+1)×256 个 CounterT 分配。
 
-每 tile 的局部桶计数为 uint16，T≤8192 满足其范围。ranks 使用 uint32 编码 `originalLocal×T+withinBucket`，最大 T²−1；T=8192 时小于 2^26。
+## 4 范围与算例
 
-行数、块数、全局前缀、地址与 workspace 字节乘积均按 int64/足够宽整数检查。输出长度 L 不改变中间 M×N 键/索引和 M×K×256 计数域。
+行数、tile 数、地址与字节乘积按足够宽整数检查。状态使用负前缀编码，不占用计数字的状态高位；末轮才转换最终输出索引和应用名次区间。输出 L 不改变完整 N 的排序域及状态容量。
 
-## 5 演算
+M=2、N=16385、C=8、U=65536、float32 时，T=1024/2048 满足至少两波任务，T=4096/8192 不满足；选 T=2048，K=9、blocks=8，局部预算 32768 字节，尾 tile 仅 1 项。task17 对应第二行最后一个 tile：统计覆盖其全部 256 桶，仅一个有效元素参与排列与散射；无任务核仍参加屏障。
 
-取 M=2、N=16385、C=8、U=65536。T=1024/2048 的任务数分别为 34/18，均满足 Q≥16；T=4096/8192 的任务数为 10/6，不满足该性能偏好，因此选 T=2048，K=9、blocks=8，尾 tile 只有 1 项。其局部预算为 15360 字节。
-
-来源：[PreparedSort](../../example/sort/entry.py) 的多核分支。阶段计算与同步见 [Kernel](kernel-template.md)，完整 workspace 公式见 [Buffer](dag-buffers.md)。
-
-本例的任务与输出追踪见 [Kernel §6](kernel-template.md#6-贯穿两个长行与单元素尾-tile)，工作区与存活阶段见 [Buffer §5](dag-buffers.md#5-贯穿算例的规模)。
+来源：[PreparedSort](../../example/sort/entry.py)，执行及同步见 [Kernel](kernel-template.md)，完整空间公式见 [Buffer](dag-buffers.md)。

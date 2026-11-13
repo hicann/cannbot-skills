@@ -11,7 +11,19 @@
 
 import cannbotdsl as cb
 
-from sort_common import INSERTION_THREADS, key_dtype, ordered_key
+from sort_common import INSERTION_THREADS, key_dtype, ordered_key, dtype_bytes
+
+
+@cb.jit
+def copy_storage(dst, src, dst_start, src_start, count, item_bytes: cb.Constexpr[int]):
+    cb.mem_copy(
+        cb.strided_slice(
+            dst.view(cb.dtypes.uint8), (dst_start * item_bytes,), (count * item_bytes,)
+        ),
+        cb.strided_slice(
+            src.view(cb.dtypes.uint8), (src_start * item_bytes,), (count * item_bytes,)
+        ),
+    )
 
 
 @cb.kernel
@@ -23,13 +35,18 @@ class InsertionSort:
         self.row_stride = row_stride
         self.batch_rows = batch_rows
         self.descending = descending
-        self.values = cb.Buffer(cb.MemLoc.UB, (batch_rows * row_stride,), dtype)
-        self.keys = cb.Buffer(
-            cb.MemLoc.UB, (batch_rows * row_stride,), key_dtype(dtype)
+        self.values = cb.Buffer(
+            cb.MemLoc.UB, dtype, cb.make_layout((batch_rows * row_stride,))
         )
-        self.ids = cb.Buffer(cb.MemLoc.UB, (batch_rows * row_stride,), cb.dtypes.uint32)
+        self.keys = cb.Buffer(
+            cb.MemLoc.UB, key_dtype(dtype), cb.make_layout((batch_rows * row_stride,))
+        )
+        self.ids = cb.Buffer(
+            cb.MemLoc.UB, cb.dtypes.uint32, cb.make_layout((batch_rows * row_stride,))
+        )
 
-    def __call__(
+    @cb.jit
+    def strided(
         self,
         x: cb.Tensor,
         values: cb.Tensor,
@@ -41,13 +58,14 @@ class InsertionSort:
     ):
         block_id = cb.get_block_idx()
         with cb.vf(mode="simt", thread=INSERTION_THREADS):
-            thread = cb.dtypes.int64(cb.simt.thread_idx()[0])
+            thread = cb.dtypes.int32(cb.simt.thread_idx()[0])
+            local_length = cb.dtypes.int32(length)
             batch = cb.dtypes.int64(block_id)
             while batch * self.batch_rows < rows:
                 flat = thread
-                while flat < self.batch_rows * length:
-                    segment = flat // length
-                    axis = flat % length
+                while flat < self.batch_rows * local_length:
+                    segment = flat // local_length
+                    axis = flat % local_length
                     # 非末轴时优先沿连续的内维分配线程，UB 仍保持逐行布局。
                     if inner != 1:
                         segment = flat % self.batch_rows
@@ -67,12 +85,12 @@ class InsertionSort:
                 row = batch * self.batch_rows + thread
                 if thread < self.batch_rows and row < rows:
                     base = thread * self.row_stride
-                    element = cb.dtypes.int64(1)
-                    while element < length:
+                    element = cb.dtypes.int32(1)
+                    while element < local_length:
                         value = self.values[base + element]
                         key = self.keys[base + element]
                         index = self.ids[base + element]
-                        position = cb.dtypes.int64(element)
+                        position = cb.dtypes.int32(element)
                         moving = cb.dtypes.int32(1)
                         while position > 0 and moving != 0:
                             # 仅移动严格更大的键，等值元素不会越过先到的元素，保证稳定性。
@@ -96,9 +114,9 @@ class InsertionSort:
                 # 行排序完成后，协作写回线程才能读取结果。
                 cb.simt.syncthreads()
                 flat = thread
-                while flat < self.batch_rows * length:
-                    segment = flat // length
-                    axis = flat % length
+                while flat < self.batch_rows * local_length:
+                    segment = flat // local_length
+                    axis = flat % local_length
                     if inner != 1:
                         segment = flat % self.batch_rows
                         axis = flat // self.batch_rows
@@ -114,3 +132,72 @@ class InsertionSort:
                 # 写回读者结束后，下一批才能覆盖共享 UB。
                 cb.simt.syncthreads()
                 batch = batch + blocks
+
+    def __call__(
+        self,
+        x: cb.Tensor,
+        values: cb.Tensor,
+        indices: cb.Tensor,
+        rows: cb.dtypes.int64,
+        length: cb.dtypes.int64,
+        inner: cb.dtypes.int64,
+        blocks: cb.dtypes.int64,
+    ):
+        if inner == 1:
+            self.contiguous(x, values, indices, rows, length, blocks)
+        else:
+            self.strided(x, values, indices, rows, length, inner, blocks)
+
+    @cb.jit
+    def contiguous(self, x, values, indices, rows, length, blocks):
+        for batch in range(
+            cb.dtypes.int64(cb.get_block_idx()),
+            (rows + self.batch_rows - 1) // self.batch_rows,
+            blocks,
+        ):
+            row_start = batch * self.batch_rows
+            valid_rows = cb.dtypes.int32(self.batch_rows)
+            if rows - row_start < self.batch_rows:
+                valid_rows = cb.dtypes.int32(rows - row_start)
+            local_length = cb.dtypes.int32(length)
+            count = cb.dtypes.int64(valid_rows * local_length)
+            source = row_start * length
+            copy_storage(self.values, x, 0, source, count, dtype_bytes(self.dtype))
+            with cb.vf(mode="simt", thread=INSERTION_THREADS):
+                thread = cb.dtypes.int32(cb.simt.thread_idx()[0])
+                if thread < valid_rows:
+                    base = thread * local_length
+                    for axis in range(local_length):
+                        self.ids[base + axis] = cb.dtypes.uint32(axis)
+                        self.keys[base + axis] = ordered_key(
+                            self.values[base + axis], self.dtype, self.descending
+                        )
+                    for element in range(1, local_length):
+                        value = self.values[base + element]
+                        key = self.keys[base + element]
+                        index = self.ids[base + element]
+                        position = cb.dtypes.int32(element)
+                        moving = cb.dtypes.int32(1)
+                        while position > 0 and moving != 0:
+                            if self.keys[base + position - 1] > key:
+                                self.keys[base + position] = self.keys[
+                                    base + position - 1
+                                ]
+                                self.values[base + position] = self.values[
+                                    base + position - 1
+                                ]
+                                self.ids[base + position] = self.ids[
+                                    base + position - 1
+                                ]
+                                position = position - 1
+                            else:
+                                moving = cb.dtypes.int32(0)
+                        self.keys[base + position] = key
+                        self.values[base + position] = value
+                        self.ids[base + position] = index
+                cb.simt.syncthreads()
+                for flat in range(thread, cb.dtypes.int32(count), INSERTION_THREADS):
+                    values[source + cb.dtypes.int64(flat)] = self.values[flat]
+                    indices[source + cb.dtypes.int64(flat)] = cb.dtypes.int64(
+                        self.ids[flat]
+                    )

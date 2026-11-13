@@ -30,11 +30,16 @@ from sort_host import (
     ROUTE_RADIX_ONE_CORE,
     ROUTE_RADIX_MORE_CORE,
     ROUTE_TWO_STAGE_INVERSE,
-    ROUTE_TWO_STAGE_PACKED,
+    ROUTE_TWO_STAGE_GROUPED,
     sort_entry,
     validate_route,
 )
-from sort_transpose import TRANSPOSE_TILE, transpose_entry
+from sort_transpose import (
+    TRANSPOSE_TILE,
+    select_transpose_tile,
+    transpose_entry,
+    transpose_buffer_elements,
+)
 
 SUPPORTED_DTYPES = (
     torch.float16,
@@ -85,9 +90,10 @@ TWO_STAGE_TIERS = {
     torch.float16: ((54, 64), (64, 64), (256, 64)),
     torch.bfloat16: ((54, 64), (64, 64), (256, 64)),
 }
-TWO_STAGE_RANK_INVERSE_MAX_N = 64
-FLOAT_TWO_STAGE_RANK_INVERSE_MAX_N = 32
-TWO_STAGE_U16_KEY_SPACE = 65536
+TWO_STAGE_RANK_INVERSE_MAX_N = 32
+TWO_STAGE_ROW_KEY_BINS = 256
+# 软件驻留目标，不是硬件容量；核间任务均衡可要求更大的最小工作集。
+RADIX_WORKSPACE_TARGET_BYTES = 64 * 1024**2
 
 
 def min_segments(tiers, length):
@@ -96,39 +102,32 @@ def min_segments(tiers, length):
 
 def insertion_allowed(dtype, length, rows, cores):
     minimum = min_segments(INSERTION_TIERS[dtype], length)
-    return minimum is not None and (
-        length == 1 or (rows + cores - 1) // cores >= minimum
-    )
+    return minimum is not None and (rows + cores - 1) // cores >= minimum
 
 
-def use_rank_inverse(dtype, length):
-    limit = (
-        FLOAT_TWO_STAGE_RANK_INVERSE_MAX_N
-        if dtype in (torch.float16, torch.bfloat16, torch.float32)
-        else TWO_STAGE_RANK_INVERSE_MAX_N
-    )
-    return length <= limit
+def use_rank_inverse(length):
+    return length <= TWO_STAGE_RANK_INVERSE_MAX_N
 
 
 def two_stage_batch(dtype, length, rows, cores, usable):
     """返回可行批次行数，0 表示未命中；usable 为扣除 SIMT 保留后的 UB 字节数。"""
     per_core = (rows + cores - 1) // cores
     minimum = min_segments(TWO_STAGE_TIERS[dtype], length)
-    if length <= 1 or minimum is None or per_core < minimum:
+    if length <= 0 or minimum is None or per_core < minimum:
         return 0
     key_bytes = 8 if dtype in (torch.int64, torch.uint64) else 4
-    # 每元素两份键，加 19 字节的索引/排列/字节缓冲；1024 覆盖固定区和对齐余量。
+    # 每元素两份键，加 14 字节的索引/排列/字节缓冲；1024 覆盖固定区和对齐余量。
     # 65280 是 uint16 计数上限向下对齐到 256 后的最大元素数。
     max_elements = min(
         65280,
-        ((usable - 1024) // (2 * key_bytes + 19) // LOCAL_RADIX_ALIGNMENT)
+        ((usable - 1024) // (2 * key_bytes + 14) // LOCAL_RADIX_ALIGNMENT)
         * LOCAL_RADIX_ALIGNMENT,
     )
     max_batch = min(per_core, max_elements // length)
-    if not use_rank_inverse(dtype, length):
-        # 紧凑键最大为 B²*N-1：B²*N≤键空间，所以 B≤floor(sqrt(键空间/N))。
-        # 使用整数平方根，避免浮点舍入在键空间边界放行超出 uint16 的批次。
-        max_batch = min(max_batch, math.isqrt(TWO_STAGE_U16_KEY_SPACE // length))
+    if not use_rank_inverse(length):
+        # 第二阶段稳定地按行号分组，前一阶段的数值顺序自然保留。
+        # 将批次限制在 256 行以内，只需一个 8-bit digit。
+        max_batch = min(max_batch, TWO_STAGE_ROW_KEY_BINS)
     best = 0
     best_idle = rows
     first_rounds = None
@@ -147,31 +146,38 @@ def two_stage_batch(dtype, length, rows, cores, usable):
     return best
 
 
-def build_program(dtype, route, width, groups, descending):
+def build_program(dtype, route, width, groups, descending, narrow_counts=False):
+    """编译排序；直接调用默认 int64 工作区，受限轴长可显式选择 int32。"""
     validate_route(route, groups)
     elements = cb.Dim("elements", min=1, max=2**63 - 1)
     scratch = cb.Dim("scratch", min=1, max=2**63 - 1)
     bins = cb.Dim("bins", min=1, max=2**63 - 1)
+    states = cb.Dim("states", min=1, max=2**63 - 1)
     value_spec = cb.TensorSpec((elements,), DSL_DTYPES[dtype])
     output_indices = cb.TensorSpec((elements,), cb.dtypes.int64)
-    key_spec = cb.TensorSpec((scratch,), key_dtype(DSL_DTYPES[dtype]))
-    index_spec = cb.TensorSpec((scratch,), cb.dtypes.int64)
-    bin_spec = cb.TensorSpec((bins,), cb.dtypes.int64)
-    rank_spec = cb.TensorSpec((scratch,), cb.dtypes.uint32)
+    key_spec = cb.TensorSpec(
+        (scratch,),
+        DSL_DTYPES[dtype]
+        if route == ROUTE_RADIX_MORE_CORE
+        else key_dtype(DSL_DTYPES[dtype]),
+    )
+    counter_dtype = cb.dtypes.int32 if narrow_counts else cb.dtypes.int64
+    index_spec = cb.TensorSpec((scratch,), counter_dtype)
+    bin_spec = cb.TensorSpec((bins,), counter_dtype)
+    state_spec = cb.TensorSpec((states,), counter_dtype)
     return cb.compile(
         sort_entry,
         # 输入、输出值、输出索引。
         value_spec,
         value_spec,
         output_indices,
-        # 工作区：ping、pong、计数、偏移和排名，与 sort_entry 顺序一致。
+        # 工作区：ping、pong、计数和 lookback 状态，与 sort_entry 顺序一致。
         key_spec,
         index_spec,
         key_spec,
         index_spec,
         bin_spec,
-        bin_spec,
-        rank_spec,
+        state_spec,
         # 运行参数：rows、length、inner、blocks。
         cb.dtypes.int64,
         cb.dtypes.int64,
@@ -185,10 +191,40 @@ def build_program(dtype, route, width, groups, descending):
     )
 
 
-def build_transpose_program(dtype):
+class WordPairTranspose:
+    """64 位 Tensor 仅以 uint32 别名绑定到 NDDMA，不复制、不转换数值。"""
+
+    def __init__(self, program, dtype):
+        self.program = program
+        self.dtype = dtype
+
+    def __call__(self, x, output, *args, **kwargs):
+        if x.dtype != self.dtype or output.dtype != self.dtype:
+            raise TypeError("transpose input and output must match the compiled dtype")
+        return self.program(
+            x.view(torch.uint32), output.view(torch.uint32), *args, **kwargs
+        )
+
+    def close(self):
+        self.program.close()
+
+    def __enter__(self):
+        self.program.__enter__()
+        return self
+
+    def __exit__(self, *args):
+        return self.program.__exit__(*args)
+
+
+def build_transpose_program(dtype, tile_size=TRANSPOSE_TILE):
+    if tile_size not in (32, 64):
+        raise ValueError("unsupported transpose tile")
+    words = 2 if dtype in (torch.int64, torch.uint64) else 1
+    # NDDMA 检查 GM 根参数类型，不能仅在 kernel 内 reinterpret。
+    raw_dtype = torch.uint32 if words == 2 else dtype
     elements = cb.Dim("elements", min=1, max=2**63 - 1)
-    tensor_spec = cb.TensorSpec((elements,), DSL_DTYPES[dtype])
-    return cb.compile(
+    tensor_spec = cb.TensorSpec((elements,), DSL_DTYPES[raw_dtype])
+    program = cb.compile(
         transpose_entry,
         tensor_spec,
         tensor_spec,
@@ -196,7 +232,10 @@ def build_transpose_program(dtype):
         cb.dtypes.int64,
         cb.dtypes.int64,
         cb.dtypes.int64,
+        tile_size,
+        words,
     )
+    return WordPairTranspose(program, dtype) if words == 2 else program
 
 
 class PreparedSort:
@@ -245,8 +284,8 @@ class PreparedSort:
         if batch_rows:
             route = (
                 ROUTE_TWO_STAGE_INVERSE
-                if use_rank_inverse(x.dtype, length)
-                else ROUTE_TWO_STAGE_PACKED
+                if use_rank_inverse(length)
+                else ROUTE_TWO_STAGE_GROUPED
             )
             self.route = "two_stage"
             groups = batch_rows
@@ -269,8 +308,15 @@ class PreparedSort:
             width = (
                 (length + LOCAL_RADIX_ALIGNMENT - 1) // LOCAL_RADIX_ALIGNMENT
             ) * LOCAL_RADIX_ALIGNMENT
-            # 单核比两阶段少一份 stage1_ids，因此每元素附加空间从 19 减为 15 字节。
-            required = width * (2 * key_bytes + 15) + 1024
+            # 1/2 字节用局部排列表示；32/64 位仍采用键和索引双缓冲。
+            local_bytes = (
+                6
+                if x.element_size() == 1
+                else 12
+                if x.element_size() == 2
+                else 2 * key_bytes + 14
+            )
+            required = width * local_bytes + 1024
             if width <= LOCAL_RADIX_COUNT_MAX and required <= usable:
                 route = ROUTE_RADIX_ONE_CORE
                 self.route = "radix_one_core"
@@ -280,41 +326,72 @@ class PreparedSort:
                 route = ROUTE_RADIX_MORE_CORE
                 self.route = "radix_more_core"
                 width = DEFAULT_RADIX_TILE
-                # 多核的每元素 UB 为 digits(1)+permutation(4)+scratch(1)+byte_order(1)。
-                # 1024 覆盖桶偏移、warp 总量和固定 scratch；两波任务是并发策略门槛。
+                # UB 包含局部排列、digit、原值和索引 tile。
+                # 固定预算覆盖桶偏移、scatter bases 和对齐；两波任务是并发策略门槛。
                 # 候选升序排列，覆盖赋值后留下满足容量与并发门槛的最大块。
+                radix_tile_bytes = 6 + x.element_size() + (4 if length < 2**30 else 8)
                 for candidate in GLOBAL_RADIX_TILES:
                     candidate_tasks = rows * ((length + candidate - 1) // candidate)
                     if (
-                        candidate * 7 + 1024 <= usable
+                        candidate * radix_tile_bytes + 4096 <= usable
                         and candidate_tasks >= 2 * info.vector_core_num
                     ):
                         width = candidate
                 # 两波任务是性能偏好；即使使用默认块，容量也必须满足。
-                if width * 7 + 1024 > usable:
+                if width * radix_tile_bytes + 4096 > usable:
                     raise RuntimeError("insufficient UB for radix Sort tile")
                 tasks = rows * ((length + width - 1) // width)
-        # 全局屏障协议要求所有行在同一次 launch 中完成。改变工作区复用方式前须对比性能。
-        self.active_rows = rows  # 本实现 P_act=M，不做跨 launch 的有界行工作区复用。
+        # 单次 launch 内按批内行号复用 scratch，输入/输出仍使用全局行号。
         tiles = (length + width - 1) // width
         blocks = min(int(info.vector_core_num), max(1, tasks))
+        self.active_rows = rows
+        if route == ROUTE_RADIX_MORE_CORE:
+            # P*K 按 blocks 整除；按原值、索引和桶状态计算每行工作集。
+            counter_bytes = 4 if length < 2**30 else 8
+            per_row_workspace = length * (
+                2 * x.element_size() + 2 * counter_bytes
+            ) + counter_bytes * RADIX_BINS * (tiles + x.element_size() * (tiles + 1))
+            row_quantum = blocks // math.gcd(blocks, tiles)
+            target_rows = max(
+                row_quantum,
+                ((RADIX_WORKSPACE_TARGET_BYTES // per_row_workspace) // row_quantum)
+                * row_quantum,
+            )
+            if rows >= 2 * target_rows:
+                self.active_rows = target_rows
+                groups = target_rows
         count = self.active_rows * length if route == ROUTE_RADIX_MORE_CORE else 1
         bins = (
             self.active_rows * tiles * RADIX_BINS
             if route == ROUTE_RADIX_MORE_CORE
             else 1
         )
-        torch_key_dtype = torch.uint64 if key_bytes == 8 else torch.uint32
-        # 参数顺序与 sort_entry 一致：ping键/索引、pong键/索引、桶计数、全局偏移、打包排名。
+        states_count = (
+            self.active_rows * (tiles + 1) * RADIX_BINS * x.element_size()
+            if route == ROUTE_RADIX_MORE_CORE
+            else 1
+        )
+        torch_key_dtype = (
+            x.dtype
+            if route == ROUTE_RADIX_MORE_CORE
+            else torch.uint64
+            if key_bytes == 8
+            else torch.uint32
+        )
+        # 计数、前缀和原轴索引均限制在单行 N 内，保留 int32 累加余量。
+        # 行号、GM 地址和最终输出索引仍为 int64；大轴保留宽工作区。
+        narrow_counts = route == ROUTE_RADIX_MORE_CORE and length < 2**30
+        workspace_index_dtype = torch.int32 if narrow_counts else torch.int64
+        # 多核 ping/pong 与输入同 dtype，保存原值位模式；其他路线使用最小键占位。
+        # 参数顺序：ping值/索引、pong值/索引、桶计数和 lookback 状态。
         # 仅多核路线分配完整工作区；其他路线只保留调用签名所需的最小占位。
         self.workspace = (
             torch.empty(count, dtype=torch_key_dtype, device=x.device),
-            torch.empty(count, dtype=torch.int64, device=x.device),
+            torch.empty(count, dtype=workspace_index_dtype, device=x.device),
             torch.empty(count, dtype=torch_key_dtype, device=x.device),
-            torch.empty(count, dtype=torch.int64, device=x.device),
-            torch.empty(bins, dtype=torch.int64, device=x.device),
-            torch.empty(bins, dtype=torch.int64, device=x.device),
-            torch.empty(count, dtype=torch.uint32, device=x.device),
+            torch.empty(count, dtype=workspace_index_dtype, device=x.device),
+            torch.empty(bins, dtype=workspace_index_dtype, device=x.device),
+            torch.empty(states_count, dtype=workspace_index_dtype, device=x.device),
         )
         self.workspace_bytes = sum(t.numel() * t.element_size() for t in self.workspace)
         self.rows = rows
@@ -331,20 +408,27 @@ class PreparedSort:
             self.output_indices = torch.empty(
                 x.numel(), dtype=torch.int64, device=x.device
             )
+            tile_size = select_transpose_tile(length, inner)
+            if transpose_buffer_elements(tile_size) * 8 > usable:
+                raise RuntimeError("insufficient UB for Sort transpose")
             transpose_tasks = (
                 rows
                 // inner
-                * ((length + TRANSPOSE_TILE - 1) // TRANSPOSE_TILE)
-                * ((inner + TRANSPOSE_TILE - 1) // TRANSPOSE_TILE)
+                * ((length + tile_size - 1) // tile_size)
+                * ((inner + tile_size - 1) // tile_size)
             )
             transpose_blocks = min(int(info.vector_core_num), transpose_tasks)
             self.layout_shape = rows // inner, length, inner, transpose_blocks
             self.restore_shape = rows // inner, inner, length, transpose_blocks
-            self.transpose_program = build_transpose_program(x.dtype)
-            self.index_transpose_program = build_transpose_program(torch.int64)
+            self.transpose_program = build_transpose_program(x.dtype, tile_size)
+            self.index_transpose_program = build_transpose_program(
+                torch.int64, tile_size
+            )
         # 公开入口经布局规范化后始终传 inner=1；低层 Kernel 的跨步寻址仅供直接调用。
         self.runtime_shape = rows, length, 1, blocks
-        self.program = build_program(x.dtype, route, width, groups, descending)
+        self.program = build_program(
+            x.dtype, route, width, groups, descending, narrow_counts
+        )
 
     def run(self):
         if not self.empty:
@@ -399,9 +483,9 @@ def export_sort_example():
         pass
     with build_program(torch.float32, ROUTE_TWO_STAGE_INVERSE, 1280, 74, True):
         pass
-    with build_program(torch.int32, ROUTE_TWO_STAGE_PACKED, 1792, 25, False):
+    with build_program(torch.int32, ROUTE_TWO_STAGE_GROUPED, 1792, 25, False):
         pass
-    with build_program(torch.float32, ROUTE_RADIX_MORE_CORE, 8192, 0, True):
+    with build_program(torch.float32, ROUTE_RADIX_MORE_CORE, 8192, 224, True, True):
         pass
 
 

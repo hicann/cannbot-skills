@@ -13,7 +13,8 @@
 | 方案设计 | [generic/index](../../generic/index.md) → [capability-mapping](capability-mapping.md) | 通用算法叠加当前 DSL 能力与限制 |
 | Host 选路与资源 | [tiling.md](tiling.md) → 命中模板的 `tiling.md` | 全局分派、逐路线容量公式、候选搜索与尾块演算 |
 | 计算与调试 | [implementation-guide.md](implementation-guide.md) → 命中模板的 `kernel-template.md` | 实际数据流、原位置/名次含义、地址与阶段同步 |
-| 共用 Radix 原语 | [local-radix.md](local-radix.md) | 保序键、字节 permutation、局部 LSD 及 64 位 digit 提取 |
+| 共用 Radix 原语 | [local-radix.md](local-radix.md) → [toolkit 阶段映射](toolkit-radix-port.md) | 保序键、8-bit/2-bit 粒度、局部 LSD、各模板复用层级及 64 位处理 |
+| 非末轴物理转置 | [Transpose 映射](toolkit-transpose-port.md) | NDDMA/SIMT 选路、GM/UB 地址与尾块、紧凑写回、64 位 Native ABI 和验证范围 |
 | 模板选择 | [路线与布局对照](implementation-guide.md#路线命名与非末轴布局) → 下表 | 四类已适配路线；非末轴复用排序主体，归并尚未适配 |
 | 输出适配 | [公共映射](../../generic/output-mapping.md) → [DSL 表达](implementation-guide.md#统一输出适配) | 同一排序主体、名次区间写回与批次复用 |
 | 公开入口与启动 | [entry.py](example/sort/entry.py) → [sort_host.py](example/sort/sort_host.py) | 输入契约、Tiling、编译导出与 Kernel 分派 |

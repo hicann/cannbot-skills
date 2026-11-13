@@ -15,7 +15,7 @@
 | `CAP_BLOCK_SYNC` | 两阶段 `RankInverseScatter` 使用 `asc_syncthreads()`，先完成逆映射建表再供全块读取；搬运与 VF 的依赖另按实际事件核对 |
 | `CAP_GLOBAL_SYNC` | SyncAll 与 GM lookback 发布协议；按算法的实际参与者与内存可见性协议核对 |
 | `ALIGN_GRANULARITY` | block 对齐值由平台获取；TBuf/API 自身分配约束分别核对 |
-| `LOCAL_MEMORY_BUDGET` | 平台 UB 容量减当前路线的运行保留；包含 SIMT 调用时按路线要求扣除 32768 bytes |
+| `LOCAL_MEMORY_BUDGET` | 平台 UB 容量减当前路线的运行保留；SIMT 保留按目标 SDK 和实际调用链核对，参考 Host 的 `SIMT_UB=32768` bytes；纯 Vector 路线不扣此项 |
 | `INDEX_COUNT_DOMAIN` | 输出索引为 int32/int64；多核计数/前缀为 uint32/int64，保留两位状态后的数值上限分别为 0x3fffffff / 0x3fffffffffffffff；单核仍核对自身 uint32 范围 |
 
 ## API 与实现约束
@@ -29,7 +29,7 @@
 | 基数排序原语 | `AscendC::Sort` 配 `SortConfig{RADIX_SORT,...}`，临时空间由 `GetSortMaxMinTmpSize` 查询；overload 与索引模式必须核对 |
 | 两阶段恢复 | `RankInverseScatter` 或 uint16 Stage2 keys；inverse 上限 64 是当前策略，打包宽度是实际安全约束 |
 | 布局适配 | 非末轴不注册专用模板；调用层转置/等价 reshape 后复用末轴排序主体，按统一名次区间直接写长度 L 的输出，再还原各字段 |
-| UB 与资源 | 平台查询 UB/block/VReg 大小；SIMT scratch 预留 32768 bytes；加入 SIMT 调用可能影响其他分支预算 |
+| UB 与资源 | 平台查询 UB/block/VReg 大小；仅实际 SIMT 路线计入其运行保留（参考值 32768 bytes）；算法 scratch、SIMT 保留和系统 workspace 分开预算 |
 | 索引宽度 | 输出 int32/int64 与计数类型是不同维度；多核状态高两位保留，N≤2^30−1 采用 uint32，否则采用 int64（数值域最多 `0x3fffffffffffffff`） |
 | 浮点特殊值 | 零符号恢复及 NaN canonicalize 的启用条件见对应 caller；Merge 的方向相关补齐值见 `CopyIn` |
 | 跨核同步 | 保留的多核 radix 使用 `SyncAll`；lookback 还有 GM 数据/status 协议，不能删成单个 pipe barrier |

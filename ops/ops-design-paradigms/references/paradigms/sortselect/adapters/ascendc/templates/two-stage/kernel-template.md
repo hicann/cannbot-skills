@@ -1,5 +1,7 @@
 # AscendC 两阶段排序 Kernel
 
+输入契约：先实例化 [公共布局包装模板](../../layout-wrapper.md)，本模板接收连续 `[M,N]`、输出连续 `[M,L]`；输入 GM 按 `row*N+j` 寻址，原始轴与 stride 由调用层处理。白盒输入遵循同一交接。
+
 ## 1 整体计算流
 
 ```text
@@ -75,7 +77,21 @@ sortedKeys 的存储在键已无消费者后用作 uint32 offset；perm2 在最�
 
 完整 Sort 的两个结果 buffer 均是 v×N 的紧凑数组，各用一次连续搬运写出。输入区在 Stage1 读完后别名为 finalValues；写回前 V→MTE3 保护生成结果，批末 MTE3→MTE2 保护下一次加载，MTE3→Scalar 保护后续控制流。
 
-派生输出在行内 pos/rank 已确定后，只写 `first_rank≤pos<first_rank+L`，目标偏移为 `(rowStart+b)×L+(pos−first_rank)`。仍按 v×L 并行处理，不在外层逐行启动恢复 VF；inverse 建表、Stage1 和 Stage2 仍覆盖完整 e。
+派生输出保留上述完整恢复流程，在行归属与行内名次已确定后，按下列工作域完成短输出：
+
+```text
+若 L=N：直接以 finalValues / finalIndices 为搬出源
+否则：
+  p 并行覆盖 [0,v*L)，inverse 沿用 SIMT 分工，packed 沿用 Vector/Reg
+  b=p//L; rank=first_rank+p%L
+  compactValues[p]=finalValues[b*N+rank]
+  compactIndices[p]=finalIndices[b*N+rank]
+  以这两个紧凑区为搬出源
+values / indices 各提交一次连续 DMA，长度分别为 v*L*D / v*L*J 字节
+等待对应搬出读者完成，再复用本批恢复区和压紧区
+```
+
+紧凑区与仍被并行读取的完整恢复区分开；可复用已结束的物理角色，新增容量按 B×L 对齐后计入 `adaptBytes`，重新参与 Host 选批预算。N 与 L 的行距差异由批量压紧解决，不拆成 v 次单行 DMA；inverse 建表、Stage1、Stage2 及必要恢复仍覆盖完整 e。这里只改变最终区间，不改变两条恢复路线的分工。
 
 ## 6 手算验证
 
@@ -93,6 +109,7 @@ Init:
   分配 input、stage1Values、stage1Order、finalIndices、rankInverse、tmp
   packed 时另分配 stage2Order
   建立 finalValues=input、key2=finalIndices 等别名视图
+  L<N 时按 Host 预算绑定 compactValues / compactIndices，避开仍有读者的源区
 Process(core c):
   for batchId=c; batchId<Q; batchId+=C_act:
     rowStart=batchId*B; v=min(B,M-rowStart); e=v*N
@@ -103,14 +120,15 @@ Process(core c):
       RankInverseScatter(e,N): 建 inverse → syncthreads → 行内计秩与恢复
     else:
       BuildStage2Keys(e,N) → Stage2Sort(e) → BuildOutputs(e)
+    按§5选择整批搬出源；L<N时一次批量压紧v*L项
     SetFlag/WaitFlag<V_MTE3>
-    DataCopyPad(values[rowStart*N], finalValues, {1,e*D,0,0,0})
-    DataCopyPad(indices[rowStart*N], finalIndices, {1,e*J,0,0,0})
+    DataCopyPad(values[rowStart*L], 搬出值源, {1,v*L*D,0,0,0})
+    DataCopyPad(indices[rowStart*L], 搬出索引源, {1,v*L*J,0,0,0})
     SetFlag/WaitFlag<MTE3_MTE2>
     SetFlag/WaitFlag<MTE3_S>
 ```
 
-`DataCopyExtParams` 中 blockLen 为字节，GM `operator[]` 的 rowStart×N 则为对应字段的元素数。当前批次在 UB 中紧凑排列，整批复制一次即可，不使用逐行 pitch。
+`DataCopyExtParams` 中 blockLen 为字节，输入 GM 的 rowStart×N、输出 GM 的 rowStart×L 均为对应字段的元素数。当前批次在 UB 中紧凑排列，每个输出字段整批复制一次，不使用逐行 pitch；§5 的并行压紧完成后才交给 MTE3。
 
 ## 8 跨流水和别名的交接
 

@@ -8,7 +8,7 @@
 
 ## 2 批次容量上界
 
-扣除 SIMT 保留区，`U_work=U−32768`。令 `E=B×N`、q=2（逆映射）或 3（紧凑键）。最终索引别名区宽度 F 默认等于 J；若调用方设置 `finalIdxUbElemBytes`，则使用该显式宽度。参考 Host 的粗略估计在未设置该字段时先取 Frough=4，显式设置时取 Frough=F；精确检查始终使用 F：
+按[运行保留预算](../../output-mapping.md#scratch-与-ub-由-host-规划)核对 R_simt（参考 Host 为 32768），扣除后 `U_work=U−R_simt`。令 `E=B×N`、q=2（逆映射）或 3（紧凑键）。最终索引别名区宽度 F 默认等于 J；若调用方设置 `finalIdxUbElemBytes`，则使用该显式宽度。参考 Host 的粗略估计在未设置该字段时先取 Frough=4，显式设置时取 Frough=F；精确检查始终使用 F：
 
 ```text
 P = ceil(M/C)

@@ -8,6 +8,10 @@
 
 ## API 与非末轴转置包装
 
+所有路线先实例化 [公共布局包装模板](layout-wrapper.md)，明确调用层规范化、连续尾轴主体与输出还原的交接。以下仅说明 example 的 API 表达及现存差异。
+
+### example 包装参考及差异
+
 example 同时提供 [L2 接口](example/sort/op_api/aclnn_sort.cpp) 和 [L0 调用封装](example/sort/op_api/sort.cpp)。`aclnnSortGetWorkspaceSize → BuildSortGraph` 在创建执行图时决定布局；`aclnnSort` 执行已构建的图。不能直接调用 `sort.cpp` 后，把缺少 L2 包装的非末轴用例视为完整 Sort 不支持。
 
 - 本例的 AiCore L0 只接受末轴；连续末轴直接排序，输入和输出均不得启动布局转置 kernel。
@@ -16,8 +20,8 @@ example 同时提供 [L2 接口](example/sort/op_api/aclnn_sort.cpp) 和 [L0 调
 
 当前示例已跳过尾轴及轴后全为 singleton 的情况，但 N=1、I>1 仍进入原轴与末轴的置换路径。例如 `[2,1,3]` 沿中轴排序，置换不改变元素顺序却仍会提交转置。更高维的轴交换还可能重排其他非 singleton 维，不能只根据 N=1 就删除转置；须先统一折叠布局或核对实际置换。该路径尚未完全达到零冗余转置目标。
 
-生成 Sort 类、TopK、KthValue 均沿用条件布局包装及 [统一输出映射](../../generic/output-mapping.md)：主体直接写长度 L 的尾轴输出，再按需恢复各字段。生成代码必须保留转置条件，不能以 `rank>0` 代替。按三维折叠处理时，输入和输出分别按 N、L 判断，L=1 的输出只需 reshape；若沿用 example 的高维置换，则按实际置换核对元素顺序，见 [布局判定与验收](../../generic/shape-preprocessing.md#物理转置的判定与验收)。最终输出与实际需要的输入/输出布局区分别预算。
+本例 Sort 的 L=N；生成 TopK、KthValue 等 L≠N 的接口时，输出区间与字段按 [统一输出映射](../../generic/output-mapping.md) 配置，输入与输出分别按公共模板的 N、L 条件展开。若沿用 example 的高维置换，须按实际置换核对非选择维顺序，不能机械套用三维折叠的等价条件。
 
-转置后的轴内索引仍指向原排序轴位置，无需将索引数值转换为扁平地址。公开接口还承担连续化、类型处理、空张量及输出 view copy；API 的完整支持域与底层单个 schedule 的直接支持域应分别记录。性能比较累计该调用实际启动的全部 kernel，包括转入、排序、values/indices 还原和必要的输出拷贝，排除 Host 建图、编译与日志耗时。
+公开接口还承担类型处理等接口职责；API 的完整支持域与底层单个 schedule 的直接支持域应分别记录。
 
 构建需提供 `aclnn_kernels`、opdev、公共算子和 CANN SDK 等依赖，详见 [接入与验证](example/sort/README.md#接入与验证)。

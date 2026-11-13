@@ -17,7 +17,7 @@ sch1 的 halfIndex 是 `alignBlock(N×4)/4`，不能误当字节数；输出为 
 ## 公共字段与布局字段
 
 - `(schId,isInt32,isDescend)` 是模板键；多核的 `isInt32=1/0` 分别表示 32/64 位计数和前缀，按 N 是否超过 2^30−1 选择；其他 schedule 保留各自约束，不表示输出 indices 一定是 int32。
-- `tmpUbSize` 为该路线排序 scratch 字节数，来自匹配的 SDK 查询；不要跨路线复用查询结果。
+- `tmpUbSize` 为该路线实际分配的临时 UB 字节数：两阶段取 Stage1/Stage2 查询需求的对齐最大值，单核 Radix 按匹配的 SDK 查询；多核 Radix 在查询需求之上按剩余 UB 扩容，还供清零和 scatter 参数复用；Merge/插入的参考实现为 0。查询需求与最终分配值分别记录，不跨路线复用。
 - `numTileDataSize`、`lastDimTileNum` 等公共字段也由路线解释。按实际路线的 Host 写入与 Kernel 读取核对，不能只凭字段名推断单位。
 - 非末轴布局由调用层规范化；全部输出配置共用连续尾轴主体，输出区间、长度 L 和批次基址按生成实现的统一合同传递。
 

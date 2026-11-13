@@ -13,14 +13,14 @@ E=B×N 是容量，D/J 为值/最终索引字节数，A 为 UB block 对齐。�
 | inverse / stage2KeysOut / gatherOffsets | `A(4E)` | 逆映射表，或 Stage2 键输出 → Gather 字节偏移 |
 | stage2Order | `A(4E)`，仅紧凑键分支 | Stage2 排列 → Gather；可在后续阶段暂存收集的 int32 索引 |
 | tmp | `max(A(tmp1),A(tmp2))` | Stage1 / Stage2 排序 scratch 顺序复用；逆映射没有 tmp2 |
-| SIMT 保留 | 32768 | 单独扣除 |
+| SIMT 保留 | R_simt | 按[运行保留预算](../../output-mapping.md#scratch-与-ub-由-host-规划)核对；参考值 32768，单独扣除 |
 
 ## 2 预算推导
 
 逆映射分支有两份 uint32 索引区，紧凑键分支有三份。总量：
 
 ```text
-2×A(ED) + q×A(4E) + A(JE) + tmp + 32768 ≤ U
+2×A(ED) + q×A(4E) + A(JE) + tmp + R_simt ≤ U
 q = 2（inverse）或 3（packed）
 ```
 

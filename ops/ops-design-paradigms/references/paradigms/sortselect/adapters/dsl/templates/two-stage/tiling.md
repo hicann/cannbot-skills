@@ -4,19 +4,19 @@
 
 M 为独立行数，N 为轴长，C 为可用向量核数，U 为扣除 SIMT 32768 字节后的 UB，S 为键存储宽度：int64/uint64 为 8，其余为 4。`P=ceil(M/C)`。
 
-先应用 [two-stage 经验档位](../../tiling.md#dtype-路由表)。当前浮点 N≤32、整数 N≤64 使用逆映射；更长轴使用紧凑键。浮点候选可扩展至 N≤256。
+先应用 [two-stage 经验档位](../../tiling.md#dtype-路由表)。已通过档位检查的候选中，N≤32 使用逆映射；更长轴使用稳定行号分组。当前浮点档位最大 N=256；整数上限按各 dtype 表判断，不能只依据恢复阈值放行。
 
 ## 2 容量与键范围
 
-每批 B 行，逻辑元素数 E=BN，物理局部宽度 W=align256(E)。预算为 `W(2S+19)+1024≤U`。局部桶计数 uint16，因此最大 W 是 65280：
+每批 B 行，逻辑元素数 E=BN，物理局部宽度 W=align256(E)。预算为 `W(2S+14)+1024≤U`。局部桶计数 uint16，因此最大 W 是 65280：
 
 ```text
-Emax = min(65280, floor((U−1024)/(2S+19)/256)×256)
+Emax = min(65280, floor((U−1024)/(2S+14)/256)×256)
 Bmax = min(P, floor(Emax/N))
-若为紧凑键：Bmax = min(Bmax, isqrt(65536//N))
+若为行号分组：Bmax = min(Bmax, 256)
 ```
 
-紧凑键最大为 `B²N−1`。isqrt 使用整数平方根，避免浮点舍入放行非法键；尾批按有效行数 v 和 e=vN 生成键。
+行号键范围为 `[0,B−1]`；B≤256 保证只需一个字节。尾批仍按有效行数 v 和 e=vN 遍历。稳定性使 Stage1 排名无需再次编码。
 
 ## 3 批次均衡搜索
 
@@ -33,13 +33,13 @@ for B 从 Bmax 递减到 2:
 若无候选：返回其他排序路线
 ```
 
-本模板只枚举 B≥2；Bmax<2 时返回其他排序路线。最终编译 width=W、groups=B、rank_inverse=所选恢复分支，运行 blocks=min(C,Q)。
+本模板只枚举 B≥2；Bmax<2 时返回其他排序路线。选中 B 后，W=align256(BN)。编译入口传 width=W、groups=B 和 route=4/5；`sort_host.py` 据 route 向 `SmallAxisTwoStage` 固定传入 rank_inverse=True/False，不是在 VF 内运行时选择。运行 blocks=min(C,Q)。
 
 ## 4 演算
 
-取 int32、N=256、M=1088、C=17、U=131072，S=4。局部容量上界 Emax=4608，P=64；紧凑键把 Bmax 限为 16。W=4096 时预算 `4096×27+1024=111616`，Q=68，active=17，rounds=4、idle=0。B=15 的 Q=73、rounds=5，停止搜索，选 B=16。
+取 int32、N=256、M=1088、C=17、U=131072，S=4。局部容量上界 Emax=5888，P=64，Bmax=23。首个候选 B=23 的 Q=48、rounds=3、idle=3；B=22 的 Q=50、idle=1，因此选 B=22。B=21 需要 4 轮，停止搜索。W=5632，预算 `5632×22+1024=124928` 字节。
 
-若浮点 N=64，则走紧凑键，B≤32；B=32 时最大键为 65535。检查这两个恢复边界，以及局部宽度补齐后超 UB 的情形。
+浮点 N=64 走行号分组，B 的上限由 UB、行数和 256 行共同决定；不再受 B²N≤65536 限制。验证 255/256/257 行的低层字节切换、尾批稳定性与局部宽度补齐后的 UB 容量。
 
 来源：[two_stage_batch](../../example/sort/entry.py)。局部缓冲分解见 [Buffer](dag-buffers.md)，恢复算法见 [Kernel](kernel-template.md)。
 

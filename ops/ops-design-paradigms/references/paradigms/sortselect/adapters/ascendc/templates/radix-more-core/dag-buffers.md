@@ -14,9 +14,9 @@ T 为 tile 容量，D 为值字节数，S 为 CounterT 字节数，K 为每行 t
 | 局部桶计数、桶起点 | `2×256×2` | uint16 的 tile 内统计 |
 | 两份计数/状态辅助区 | `2×256S` | 原子累加、状态发布、前缀和散射 |
 | tmp | tmpAllocated，见 Tiling §3 | 批首清零源 → uint8 Sort → scatter 偏移 |
-| SIMT 保留 | 32768 | 运行时保留 |
+| SIMT 保留 | R_simt | 按[运行保留预算](../../output-mapping.md#scratch-与-ub-由-host-规划)核对；参考值 32768 |
 
-合计为 `T(D+S+6)+256(3S+4)+tmpAllocated+32768`，每份实际物理分配的对齐另核对。tmpAllocated 包含参考 Host 的剩余 UB 扩容；Sort 查询需求只是其中一部分。S 加宽时要同步改变计数区及索引搬运的实际视图；uint16 局部计数与 uint32 排列保持各自范围。
+合计为 `T(D+S+6)+256(3S+4)+tmpAllocated+R_simt`，每份实际物理分配的对齐另核对。tmpAllocated 包含参考 Host 的剩余 UB 扩容；Sort 查询需求只是其中一部分。S 加宽时要同步改变计数区及索引搬运的实际视图；uint16 局部计数与 uint32 排列保持各自范围。
 
 ## 2 六段 GM workspace
 
