@@ -1,6 +1,6 @@
 ---
 name: ascendc-cross-gen-migration
-description: 当用户希望将已有 AscendC 算子工程跨架构迁移（当前支持 A2/A3（910b/910_93、DAV_2201）→ A5（950、DAV_3510）与 A2/A3 → 310P（310P3、DAV_2002/dav-m200），按 Step R 判定迁移路线）时使用。按 Stage 0–6 完成 L1 基础适配、L2 RegBase 改造、L3 SIMT 优化及 Cube 类算子迁移；精度标杆由 agent 逆向源码自合成，并与目标平台实测双向互检。
+description: 当用户希望将已有 AscendC 算子工程跨架构迁移（当前支持 A2/A3（910b/910_93、DAV_2201）→ A5（950、DAV_3510）、A2/A3 → 310P（310P3、DAV_2002/dav-m200）与 A5（950、DAV_3510）→ A2/A3（910b/910_93、DAV_2201），按 Step R 判定迁移路线）时使用。按 Stage 0–6 完成 L1 基础适配、L2 RegBase 改造、L3 SIMT 优化及 Cube 类算子迁移；精度标杆由 agent 逆向源码自合成，并与目标平台实测双向互检。
 metadata:
   version: "3.4"
   date: "2026-09-30"
@@ -32,6 +32,7 @@ metadata:
 | 源平台 → 目标平台 | 路线包（判定后 MUST READ 其 `route.md`） |
 |---|---|
 | A2/A3（910b/910_93、DAV_2201）→ A5（950、DAV_3510） | [routes/2201-to-3510/route.md](routes/2201-to-3510/route.md) |
+| A5（950、DAV_3510）→ A2/A3（910b/910_93、DAV_2201） | [routes/3510-to-2201/route.md](routes/3510-to-2201/route.md) |
 | A2/A3（910b/910_93、DAV_2201）→ 310P（310P3、DAV_2002/dav-m200） | [routes/2201-to-2002/route.md](routes/2201-to-2002/route.md) |
 
 **判定规则**：
@@ -90,7 +91,7 @@ metadata:
 | 3 编译安装 | `routes/<路线>/stages/stage_3_build.md` | `[GATE-3] BUILD=PASS INSTALL=PASS` |
 | 4 精度验证 | `routes/<路线>/stages/stage_4_precision.md` | `[GATE-4] PRECISION=N/N_PASS`（仅当 N_FAIL==0 时允许输出 PASS；否则输出 `PRECISION=N/M_PASS BLOCKED`）。**硬性要求**：用例数 ≥30、单例元素数 ≤200K、覆盖全部 dtype 与数据排布、经 `torch.ops.npu`（EXEC_NPU_CMD 绑定）调用，禁止用 PyTorch 同名算子替代被测实现 |
 | 5 性能验证 | `routes/<路线>/stages/stage_5_performance.md` | `[GATE-5] PERF=COLLECTED`（仅当 10 项证据全部存在时允许输出；否则输出 `PERF=NOT_COLLECTED BLOCKED`） |
-| 6 收尾阶段（**由路线包定义**） | `2201→3510`：`routes/2201-to-3510/stages/stage_6_feature_enable.md`（A5 新特性使能）；`2201→2002`：`routes/2201-to-2002/stages/stage_6_optimize.md`（性能优化，owner 指令触发） | `2201→3510`：`[GATE-6] A5_FEATURES=ENABLED k/N`（k=保留数，N=适用特性数；逐项有界尝试，成功保留 / 失败回退并记录）；`2201→2002`：`[GATE-6] OPT=<达标/上限收敛/契约冲突升级> SPEEDUP=<值>`。**两条路线的 GATE-6 语义不同，按所属路线包判据执行，禁止跨路线套用** |
+| 6 收尾阶段（**由路线包定义**） | `2201→3510`：`routes/2201-to-3510/stages/stage_6_feature_enable.md`（A5 新特性使能）；`2201→2002`：`routes/2201-to-2002/stages/stage_6_optimize.md`（性能优化，owner 指令触发） | `2201→3510`：`[GATE-6] A5_FEATURES=ENABLED k/N`（k=保留数，N=适用特性数；逐项有界尝试，成功保留 / 失败回退并记录）；`2201→2002`：`[GATE-6] OPT=<达标/上限收敛/契约冲突升级> SPEEDUP=<值>`；`3510→2201`：`[GATE-6] DELIVERY=READY REPORT=<path>`。**各路线的 GATE-6 语义不同，按所属路线包判据执行，禁止跨路线套用** |
 
 ## Reference 文件索引
 

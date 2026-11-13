@@ -1,0 +1,98 @@
+# A5 → A2 迁移交付报告：<op_name>
+
+## 1. 结论
+
+| 项 | 结果 |
+|---|---|
+| 可运行 | 是 / 否 |
+| 精度 | <N>/<N> PASS（标准：ops-precision-standard / <文件>） |
+| 性能 | TARGET=<met\|not-met\|blocked>；口径：<...>；结果：<...> |
+| 功能裁剪 | <无 / 列表> |
+| 条件接受 | <无 / 列表 + 用户确认> |
+| 交付等级 | 完整 / 有条件 / 不完整 |
+
+## 2. 范围与平台
+
+| 项 | 值 |
+|---|---|
+| 源 | A5 工程 / 设计文档，版本 <...> |
+| 目标 | <910B\|910_93>，DAV_2201，arch22 |
+| CANN / 驱动 | <version> / <version> |
+| 设备 | <型号 + 数量> |
+| 构建命令 | `bash build.sh --pkg --ops=<op> --soc=<$SOC_BUILD>` |
+| 安装方式 | `install.sh` / `<run 包>` |
+
+## 3. A5 依赖处置汇总
+
+| 类别 | 命中数 | 处置 | 残留 |
+|---|---|---|---|
+| 编程模型（RegBase/SIMT） | | | |
+| 数据类型（FP8/HiF8/MX） | | | |
+| 数据通路/同步 | | | |
+| Cube 参数/分形 | | | |
+| 精度规避（FTZ/eps） | | | |
+| 工程接线 | | | |
+
+> 逐项明细见 `migration_analysis_<op>.md` §3。
+
+## 4. 变更账本
+
+| # | 文件 | 改动 | 依据 | 验证 |
+|---|---|---|---|---|
+| 1 | <path> | <删/改/增> | <清单项 / API 文档> | <编译/精度/性能> |
+
+## 5. Gate 证据
+
+| Gate | 输出 | 证据 |
+|---|---|---|
+| GATE-0 | `[GATE-0] ENV_CONFIRMED ...` | <命令输出路径> |
+| GATE-1 | `[GATE-1] LEVEL=... BLOCKING=... DECISIONS=...` | `migration_analysis_<op>.md` |
+| GATE-2 | `[GATE-2] MIGRATION=PASS FILES=<n> RESIDUAL=0` | `migration_scan_after.md` |
+| GATE-3 | `[GATE-3] BUILD=PASS INSTALL=PASS` | `build_<soc>.log`、安装输出 |
+| GATE-4 | `[GATE-4] PRECISION=N/N_PASS` | `precision.log`、精度报告 |
+| GATE-5 | `[GATE-5] PERF=COLLECTED TARGET=... EVIDENCE=<n>` | `performance.json`、`PROF_GROUP_*` |
+| GATE-6 | `[GATE-6] DELIVERY=READY ...` | 本报告 |
+
+## 6. 精度结果摘要
+
+| case | shape | dtype | layout | matched_ratio | max_abs_error | 结论 |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+失败/豁免明细：<...>
+
+## 7. 性能结果摘要
+
+| case | shape | dtype | 中位耗时(us) | 基线(us) | 加速比 | 主 Bound |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+优化记录：
+
+| 改动 | before(us) | after(us) | 改善 | 保留/回退 |
+|---|---|---|---|---|
+| | | | | |
+
+## 8. 残留风险与限制
+
+| # | 项 | 影响 | 建议 |
+|---|---|---|---|
+| 1 | <不支持的 dtype/特性> | <...> | <...> |
+| 2 | <未查证项 UNVERIFIED> | <...> | <查证方法> |
+| 3 | <性能未达标/硬件受限> | <...> | <整改建议> |
+
+## 9. 复现命令
+
+```bash
+source "${CANN_SET_ENV}"
+cd "${OP_REPO}"
+rm -rf ./build
+bash build.sh --pkg --ops="${OP_NAME}" --soc="${SOC_BUILD}" 2>&1 | tee "build_${SOC_BUILD}.log"
+bash install.sh
+python3 -m pytest <测试目录> -v 2>&1 | tee precision.log
+python3 <ops-profiling>/scripts/collect_perf_application.py ... --out-dir ./perf/a2
+```
+
+## 10. 维护提示
+
+- <最容易被误改的地方 / 为什么保留某写法 / 后续接手的坑>

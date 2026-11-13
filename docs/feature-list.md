@@ -19,7 +19,7 @@
 | **ascendc-env-check** | NPU 设备查询、CANN 环境验证 | — |
 | **ascendc-kirin-env-check** | 麒麟平台（Kirin NPU）端侧开发环境检查：开发依赖、CANN 双能力线（atc→omc / camodel sim 直调）、hdc 设备识别 | — |
 | **ops-kirin-device-verify** | 麒麟设备端到端验证：编译安装 vendor 包、生成 ONNX/裸 bin 与 golden、atc 转 OMC、HAP 安装与 hdc 推送、推理启动、输出回传与精度比对 | — |
-| **ascendc-cross-gen-migration** | 已有 A2/A3 AscendC 算子按 Stage 0–5 迁移到 A5；从源码自合成标杆并完成精度和性能验证 | — |
+| **ascendc-cross-gen-migration** | 已有 AscendC 算子跨架构迁移：A2/A3→A5、A2/A3→310P、A5→A2/A3 三条路线，按 Step R 判定；含 A5 能力盘点、预算重算、arch22 接线、精度与性能验证 | — |
 | **ascendc-tiling-design** | Tiling 和 Kernel 设计方法论，按算子类别分类 | — |
 | **ascendc-precision-debug** | 精度调试，症状-原因速查、常见陷阱 | — |
 | **ascendc-runtime-debug** | 运行时错误调试，错误码解析（161xxx/361xxx/561xxx） | — |

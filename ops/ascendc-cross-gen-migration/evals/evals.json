@@ -128,6 +128,199 @@
           "description": "测试必须调用实际迁移算子绑定。"
         }
       ]
+    },
+    {
+      "id": 5,
+      "title": "方向判定与平台边界",
+      "config": {
+        "max_tokens": 10000,
+        "ascend_platforms": [
+          "A5",
+          "A2",
+          "A3"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我有一个在 Ascend 950 上跑通的 Ascend C 算子工程，现在要让它能在 910B 上跑。请说明该用哪个技能、走什么路线、目标架构代号是什么、工程目录和构建参数要怎么改。另外有人建议直接把 A2→A5 的跨代迁移流程反过来用，或者把同一个工程也顺便迁到 310P，请说明这些做法是否可行。这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件。",
+      "expected_output": "1. 应判定为 A5→A2 的架构迁移，源平台 DAV_3510/arch35（Ascend 950），目标平台 DAV_2201/arch22（910B；910_93 同属 DAV_2201）。2. 目标 soc 使用 ascend910b（910_93 用 ascend910_93），构建为 build.sh --pkg --ops=<op> --soc=ascend910b；kernel 变体目录用 arch22，AddConfig 与 config 目录同步改。3. 不应直接把 A2→A5 迁移流程反向套用：那是升级路线，其 L1/L2/L3 分级、A5 特性使能阶段在迁移方向不成立；也不应把本流程用于 310P（DAV_2002），本技能只覆盖 3510→2201。4. 应指出需先做 A5 专有构造盘点再接线，不能只改编译参数。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "DAV_2201",
+          "description": "应给出目标架构代号。"
+        },
+        {
+          "type": "contains",
+          "pattern": "arch22",
+          "description": "应给出目标目录名。"
+        },
+        {
+          "type": "contains",
+          "pattern": "310P",
+          "description": "应说明平台边界，不覆盖 310P。"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "D1/D2/D3 定级与扫描",
+      "config": {
+        "max_tokens": 10000,
+        "ascend_platforms": [
+          "A5",
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "三个 A5 算子要降到 A2：甲只用 arch35 目录、ascend950 配置和 __NPU_ARCH__==3510 分支；乙在甲的基础上用了 L0C→UB 直通和 CrossCoreSetFlag<4>；丙的内核用 __VEC_SCOPE__、RegTensor、MicroAPI 重写并带 __simt_vf__。请分别判定迁移等级并说明每级要做什么，以及如何用技能自带的工具得到初判、阶段 2 结束时用什么标准确认残留清零。这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件。",
+      "expected_output": "1. 甲=D1 接线级：改目录、soc、AddConfig、config、CMake、宏；乙=D2 通路级：L0C→UB 改 GM 中转、模式 4 改模式 2 或标准事件同步；丙=D3 重写级：RegBase/MicroAPI 与 SIMT 必须按 MemBase SIMD（或 AICPU）重写。2. 等级取最高命中项，D3 包含 D1/D2 的工作。3. 用 scripts/scan_a5_only.py --root 扫描得到等级初判和 blocking/decision/verify/advisory 计数；阶段 2 结束以同一脚本 --fail-on blocking 返回 0（blocking 与 verify 均清零，verify 需先查证）作为 GATE-2 的 RESIDUAL=0 依据。4. 静态扫描只做初判，宏拼接与语义依赖需人工补盲。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "D3",
+          "description": "应识别 RegBase/SIMT 为最高等级。"
+        },
+        {
+          "type": "contains",
+          "pattern": "scan_a5_only",
+          "description": "应使用扫描脚本。"
+        },
+        {
+          "type": "contains",
+          "pattern": "RESIDUAL",
+          "description": "应说明残留清零标准。"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "RegBase/SIMT 改写与无法等价项",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": [
+          "A5",
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "一个 A5 算子的 kernel 用 RegTensor/MaskReg/MicroAPI 做逐元素计算，并用 __simt_vf__ 做 gather 索引；另一个算子把 FP8 输入直接送 Cube 做 matmul。降到 A2 时，这两部分应分别怎么处理？请说明能否通过改类型名、保留 VF 段或指针强转的方式快速兼容，以及哪些改动必须由用户确认。这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件。",
+      "expected_output": "1. RegBase 必须重写为 MemBase：RegTensor→LocalTensor（TQue/TBuf），MaskReg→显式 count 与尾块处理，MicroAPI 同名 API 改为 count 语义，__VEC_SCOPE__ 删除，同步改为 SetFlag/WaitFlag 或 PipeBarrier，CastTrait 映射到 RoundMode。2. SIMT 需按决策树在 SIMD 重写 / AICPU / 不支持三者中选一，不能注释掉留空。3. FP8 在 A2 无硬件格式，必须决策：反量化到 bf16/fp16、走 int8 量化路径、或声明不支持；禁止 reinterpret/指针强转，必须经用户确认并记录精度与性能影响。4. 只改类型名或保留 VF 段不可行，因为语义与执行模型不同。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "LocalTensor",
+          "description": "应给出 MemBase 改写目标。"
+        },
+        {
+          "type": "contains",
+          "pattern": "AICPU",
+          "description": "应覆盖 SIMT 替代方案。"
+        },
+        {
+          "type": "contains",
+          "pattern": "用户确认",
+          "description": "dtype 迁移必须由用户决策。"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "预算重算与 tile 缩放",
+      "config": {
+        "max_tokens": 10000,
+        "ascend_platforms": [
+          "A5",
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "A5 算子的 tiling 按 248KB UB 设计，并给 SIMT DCache 预留了 40KB；L0C 上按 256×256 fp32 的 C 块设计。直接搬到 910B 会出什么问题？请给出 A2 的可用预算、A5 实际可用预算、两者比例，以及 tile 和 base 块的调整方向；并说明可以用哪个脚本复核、为什么不能把 192KB/128KB 硬编码进代码。这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件。",
+      "expected_output": "1. A5 248KB 扣 40KB SIMT 预留后实际可用 208KB；A2 无 SIMT 预留、典型可用 192KB，比例约 0.923，A5 tile 直接搬运会 UB 越界。2. L0C 从 256KB 降到 128KB，256×256 fp32=256KB 超限，必须减小 baseM/baseN 或分段 Fixpipe 回写。3. 用 scripts/a2_ub_budget.py 复核：--buffer 逐项核算，--scale-from-a5 给出缩放比例与对齐后建议 tile。4. 192KB/128KB 只是典型值，运行时用 GetCoreMemSize/GetCoreNumAiv 获取，禁止硬编码；缩放后还要检查尾块占比与循环开销。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "208",
+          "description": "应算出 A5 实际可用 UB。"
+        },
+        {
+          "type": "contains",
+          "pattern": "a2_ub_budget",
+          "description": "应使用预算脚本。"
+        },
+        {
+          "type": "contains",
+          "pattern": "L0C",
+          "description": "应覆盖 L0C 减半问题。"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "证据化门禁与不可替代的验证",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": [
+          "A5",
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "当前没有 A2 设备，只有一台 A5 机器。我已经把 A5 专有代码删掉并编译通过，能不能直接说迁移完成、精度和性能都达标？如果坚持要交付，应该记录什么状态、还缺哪些证据？另外有人提议沿用 A5 的实测耗时作为 A2 的基线、或把精度阈值放宽一点让用例全过，这些做法在流程里允许吗？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。",
+      "expected_output": "1. 不能：编译通过只到 GATE-3；精度需 GATE-4 实测、性能需 GATE-5 arch22 实测，无 A2 设备时状态为 BLOCKED，不得声称达标。2. 应记录：已完成阶段、缺失证据（真机编译安装、全量精度输出、msprof 采集与瓶颈归因）、阻塞原因，并说明用 A5 机器不能替代 A2 验证。3. 不得用 A5 耗时作 A2 基线或跨架构加速比作验收判据；不得放宽阈值、删用例、缩 dtype 覆盖来伪造成 PASS；失败要根因分诊，条件接受仅限非缺陷差异且需用户确认并记录 CONDITIONAL/USER_ACCEPTED。4. 输出应明确 GATE-3/4/5 当前未通过。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "GATE-4",
+          "description": "应说明精度门禁必须有实测。"
+        },
+        {
+          "type": "contains",
+          "pattern": "BLOCKED",
+          "description": "无设备时应保持阻塞状态。"
+        },
+        {
+          "type": "contains",
+          "pattern": "CONDITIONAL",
+          "description": "条件接受通道应被正确描述。"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "A2 性能验证与恢复项",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": [
+          "A5",
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "A5 算子在 A2 上精度通过了，现在要证明它“高性能”。请说明性能验收口径、采集与计时协议、如何定位瓶颈，以及哪些 A5 时期的规避写法在 A2 上应该重新评估。还要说明为什么不能拿 A5 的 vnchwconv/VSLDB 结论直接推断 A2。这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件。",
+      "expected_output": "1. 口径先明确：相对 A2 基线加速比 / 利用率 / 绝对时延，用户未给则用瓶颈证据+收敛规则。2. 采集用 ops-profiling 的标准可比较计时（每例 10 组 warmup→target 取中位数），深度指标用 msprof 并按 arch22 文档解读；不混用 msprof 与 msprof op 数据。3. 按 aiv_vec_ratio/aiv_scalar_ratio/aiv_mte2_ratio/aiv_mte3_ratio/aic_mte1_ratio/aic_cube_ratio/aic_fixpipe_ratio 等归因主 Bound，再按搬运→计算→并行→微调顺序优化，一次一改并做 A/B。4. A2 恢复项：TransDataTo5HD/vnchwconv、常规归约 tiling、BilinearInterpolation、int4 Mmad/4:2 稀疏、L1→GM 与 GM→L0A/L0B、合并过碎 tiling；逐项 A/B，改善不足或精度失败即回退。5. arch35 的 RegBase/VF/RVEC 指标不适用于 arch22，A5 上 vnchwconv 降速、VSLDB 减半是 A5 结论，不能反推 A2。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "中位数",
+          "description": "应说明中位数计时协议。"
+        },
+        {
+          "type": "contains",
+          "pattern": "TransDataTo5HD",
+          "description": "应识别可恢复的 A2 能力。"
+        },
+        {
+          "type": "contains",
+          "pattern": "arch22",
+          "description": "性能结论必须来自目标架构实测。"
+        }
+      ]
     }
   ]
 }
