@@ -51,10 +51,11 @@ Agent loads SKILL.md, then pulls in references only as needed.
 
 ## Shared state
 
-All sub-agents read and write one shared file: `custom/<op>/MEMORY.md`. This
-memory file is the single source of truth for stage status, gate evidence,
-debug log, and module contracts. Every handoff between agents is a memory
-update, not a direct message. Template:
-skill `pypto-memory-template`'s `../pypto-memory-template/templates/MEMORY.template.md`.
+Stage 1–4 agents use their stage-specific deliverables for handoffs; they do
+not create or write `custom/<op>/MEMORY.md`. At Stage 5, the Coder creates this
+file from the template. From then on, Stage 5+ agents read and update the
+shared file at each handoff. It is the source of truth for stage status, gate
+evidence, debug log, and module contracts. Template: skill
+`pypto-memory-template`'s `templates/MEMORY.template.md`.
 
 ---
