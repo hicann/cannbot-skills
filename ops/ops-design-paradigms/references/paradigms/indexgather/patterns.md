@@ -56,7 +56,7 @@ Step 4 — tiling 预处理: dim 归一化 → 广播校验 → 合轴
 | 开发语言 | 加载内容 | 入口 |
 |------|------|------|
 | `ascendc` | 通用知识层 + AscendC 适配层 | [adapters/ascendc/index.md](adapters/ascendc/index.md) |
-| `dsl`（CANNBotDSL） | 通用知识层 + DSL 通用方法 | 当前无 IndexGather DSL 专用适配层；读取 `references/paradigms/general-methodology-dsl.md`，DSL API 和设备能力由调用方提供 |
+| `dsl`（CANNBotDSL） | 通用知识层 + DSL 适配层 | [adapters/dsl/index.md](adapters/dsl/index.md)（含语言规则与能力谓词 [adapters/dsl/language-rules.md](adapters/dsl/language-rules.md)、能力映射 [adapters/dsl/capability-mapping.md](adapters/dsl/capability-mapping.md)、设计约束 [adapters/dsl/design-spec.md](adapters/dsl/design-spec.md)） |
 | 其他语言 | 通用知识层；适配层待确认 | 报告当前没有对应的语言适配层，不读取其他语言的 API 或模板 |
 
 **互斥规则**：一次任务只加载命中语言的适配层，其他语言的适配层不加载、不参考其 API 与代码模板。
@@ -80,8 +80,8 @@ Step 4 — tiling 预处理: dim 归一化 → 广播校验 → 合轴
 
 ## 消费规则
 
-1. **按需加载**：Ascend C 先读适配层 index；DSL 读取通用层与 `general-methodology-dsl.md`。仅展开当前问题需要的叶子文档。
+1. **按需加载**：Ascend C 先读 ascendc 适配层 index；DSL 先读 [adapters/dsl/index.md](adapters/dsl/index.md)（语言规则与能力谓词在 [adapters/dsl/language-rules.md](adapters/dsl/language-rules.md)，能力映射在 [adapters/dsl/capability-mapping.md](adapters/dsl/capability-mapping.md)，设计约束在 [adapters/dsl/design-spec.md](adapters/dsl/design-spec.md)）。仅展开当前问题需要的叶子文档。
 2. **叶子文档限额**：单个子问题最多展开 5 个叶子文档，仍未闭环则拆分为更小的子问题
-3. **能力真值**：Ascend C 读取 [adapters/ascendc/capability-mapping.md](adapters/ascendc/capability-mapping.md)；DSL 无专用映射时，能力谓词须从调用方提供的 DSL API 与设备证据确认，未知项保留待验证。
-4. **编码前检视参考实现**：Ascend C 可从 `adapters/ascendc/example/` 选择（读收集基例：gather/index_select）；DSL 从调用方提供的 CANNBotDSL 样例中选择。样例仅用于核实语言用法，不提供当前算子的算法或资源默认值。
+3. **能力真值**：Ascend C 读取 [adapters/ascendc/capability-mapping.md](adapters/ascendc/capability-mapping.md)；DSL 读取 [adapters/dsl/capability-mapping.md](adapters/dsl/capability-mapping.md)。未知项保留待验证，不得写成已验证事实。
+4. **编码前检视参考实现**：Ascend C 可从 `adapters/ascendc/example/` 选择（读收集基例：gather/index_select）；DSL 从 `adapters/dsl/example/` 选择（读收集基例：custom_index_select）。样例仅用于核实语言用法，不提供当前算子的算法或资源默认值。
 5. **范式优先级**：本范式的专用知识优先于 agent 通用知识；同一设计点结论冲突时，以本范式指向的必读文件为准

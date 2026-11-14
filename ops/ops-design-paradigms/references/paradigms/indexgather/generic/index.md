@@ -17,5 +17,5 @@
 
 1. 单个子问题最多展开 5 个叶子文档；仍未闭环则拆分为更小的子问题
 2. 通用层不含任何具体语言 API；文中出现 API 名处均为 AscendC 示例标注，其他语言按各自适配层映射
-3. 具体语言的实现（代码模板、参考源码、生成规范）在语言适配层（AscendC：`../adapters/ascendc/`），不在本文档族内。**芯片级硬件事实（[common/simt-hardware-model.md](../../common/simt-hardware-model.md)）在公共层**——各适配层仅做 API 映射，不重复承载
+3. 具体语言的实现（代码模板、参考源码、生成规范）在语言适配层（AscendC：`../adapters/ascendc/`；DSL：`../adapters/dsl/`），不在本文档族内。**芯片级硬件事实（[common/simt-hardware-model.md](../../common/simt-hardware-model.md)）在公共层**——各适配层仅做 API 映射，不重复承载
 4. 快除（UintDiv）方法论的真值源在 [../../common/uintdiv-rules.md](../../common/uintdiv-rules.md)

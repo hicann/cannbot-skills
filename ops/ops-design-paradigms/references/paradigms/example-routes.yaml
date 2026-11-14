@@ -40,6 +40,8 @@ routes:
     IndexGather:
       ascendc:
         - references/paradigms/indexgather/adapters/ascendc/example/examples-custom-gather-code
+      dsl:
+        - references/paradigms/indexgather/adapters/dsl/example/custom_index_select
     SlidingWindow:
       ascendc:
         - references/paradigms/conv/forward/adapters/ascendc/example/conv2d
