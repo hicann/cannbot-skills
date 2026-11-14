@@ -68,8 +68,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "我要在 DAV_3510 上实现一个输入为 3D [A1,R,A0]、且 R 超出 UB 容量的 Softmax 算子，想复用这个技能里的模板代码。应该如何查找并集成这些模板？可阅读该技能文档获取规范，但不要实际执行代码修改。",
-      "expected_output": "回复应说明 Reduction 归约类（Softmax/LayerNorm/RMSNorm）模板代码查找链路：从 SKILL.md 定位 reduce 族 → references/reduce/guide.md → templates/ 下按 R 与 UB 关系选择模板，R 超出 UB 时应选 ARA-Recompute（R 切 bin、3 阶段重读 + 二分累加树）；并强调使用前必须按 usage_guide.md 将 .template 转成同名 .h 后拷贝到项目 op_kernel 使用，禁止从零重写。",
+      "prompt": "我要在 DAV_3510 上实现一个输入为 3D [A1,R,A0]、A0>1 且 R 超出 UB 容量的 Softmax 算子，想复用这个技能里的模板代码。应该如何查找并集成这些模板？请说明适用模板的资源或带宽取舍，并解释用作集成示例的方案如何沿 R 分块、得到全局 max/sum 和输出：重计算方案需说明各阶段及累加方式；在线方案需说明逐列状态及跨块更新关系。可阅读该技能文档获取规范，但不要实际执行代码修改。",
+      "expected_output": "回复应说明模板代码查找链路：SKILL.md 的 Reduction 族 → references/reduce/guide.md → templates/ 下的说明及源码，并按 3D [A1,R,A0] 布局、R 与 UB 容量关系选择适用模板。R 超出 UB 时，ARA-Recompute 与独立 ARA-Online 均为候选，应依据 templates/softmax_v2_ara_recompute.md 和 templates/softmax_v2_ara_online.md 说明所推荐方案的资源或带宽取舍，并在目标工程验证；仅凭 R 超 UB 不足以断言某方案性能最优。推荐 Recompute 时须说明 R 切 bin、max/sum/output 三阶段重读和 UpdateCache 二分累加树；推荐 Online 时须说明 R 分 chunk、逐 A0 列维护 running max/sum、max 改变时对旧 sum 进行指数缩放，以及统计和输出共两遍读取。可以推荐单个模板或比较两类候选；对用作集成示例的方案须说明上述归约机制；不应直接采用要求 R 全量载入 UB 的 ARA-FullLoad。集成须按 templates/usage_guide.md 将所需 .template 转成同名 .h，保留 dav310 子目录及公共依赖，拷贝到项目 op_kernel 使用，禁止从零重写。",
       "expectations": [],
       "files": []
     },
@@ -114,7 +114,7 @@
         "eval_mode": "text"
       },
       "prompt": "我在实现一个归约类算子，数据量不能被 tile 大小整除，尾块处理出现越界和负载不均衡的问题。这个技能里的公共优化能力有尾块处理的方案吗？可阅读该技能文档获取规范，但不要实际执行 profiling 或修改代码。",
-      "expected_output": "回复应引用公共优化能力中的尾块处理指南（references/common/tail_block_design.md），说明对不能被 tile 大小整除的数据量采用双轨制 norm/tail 核分离、GatherMask 向量化处理尾块以及 32B/64B 对齐与 DataCopyPad 等策略，避免越界访问与负载不均衡。",
+      "expected_output": "回复应引用公共优化能力中的尾块处理指南（references/common/arch35/tail_block_design.md），说明对不能被 tile 大小整除的数据量采用双轨制 norm/tail 核分离、GatherMask 向量化处理尾块以及 32B/64B 对齐与 DataCopyPad 等策略，避免越界访问与负载不均衡。",
       "expectations": [],
       "files": []
     },

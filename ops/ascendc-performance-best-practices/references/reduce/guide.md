@@ -100,6 +100,8 @@ Reduce 族算子均可拆为两段，模板的差异主要在"如何切分 R 以
 
 各模板的「解决的问题 / 适用条件 / 执行流程 / 关键技术 / 关键代码索引」详见对应 `.md` 文档。
 
+3D `[A1,R,A0]` 的 R 超出 UB 容量时，还可选用下文的[独立 ARA Online Softmax](#独立-ara-online-softmax)。Recompute 将 R 切 bin，以 max/sum/output 三阶段重读和 `UpdateCache` 二分累加树完成归约；Online 采用分 chunk 状态更新。选型需同时核对 UB 预算、带宽和目标工程精度/性能，R 超 UB 这一条件本身不足以确定最优模板。
+
 ### 维度命名约定
 
 - **A1**：最外层非归约轴（行方向），2D 中即行数。
@@ -211,7 +213,9 @@ Host 门控见 [euclidean_norm_group_tiling.template](templates/euclidean_norm_g
 |------|------|---------|------|------|
 | **ARA-Online** | 3D `[A1,R,A0]` | 沿 R 分 chunk 在线更新 running max/sum，输入读 2 次 | [.template](templates/dav310/softmax_v2_ara_online.template) | [.md](templates/softmax_v2_ara_online.md) |
 
-ARA Online Softmax 是**独立的 Online Softmax**，不包含 `QK^T`、`P×V` 或 FlashAttention 融合。与 ARA Recompute（输入读 3 次）相比，减少一次 R 全量搬入。
+ARA Online Softmax 沿 R 分 chunk，为每个 A0 列维护 FP32 running max `m` 和 running sum `l`。第一遍更新 `m_new = max(m_old, chunk_max)`、`l_new = l_old * exp(m_old - m_new) + sum(exp(x - m_new))`；max 变化时先对旧 sum 做指数缩放。第二遍重新读取输入，用最终 max/sum 计算输出。共两遍读取，比 ARA Recompute 少一次 R 全量搬入，且无需二分累加树的 cache buffer；最终选型以目标工程验证为准。完整流程、UB 预算及模板代码见 [ARA-Online 说明](templates/softmax_v2_ara_online.md)。
+
+该模板用于输入已存在 GM 中的独立 Softmax。集成时按 [usage_guide.md](templates/usage_guide.md) 将所选 `.template` 及公共依赖转成同名 `.h`，保留 `dav310/` 子目录并拷贝到目标项目 `op_kernel/`，再接入对应 Host tiling 和 Kernel 入口；禁止从零重写。它与下文融合 Attention 共享在线 max/sum 数学基础，独立模板的输出为完整 Softmax 概率。
 
 ### 融合 Attention Online Softmax 设计
 
