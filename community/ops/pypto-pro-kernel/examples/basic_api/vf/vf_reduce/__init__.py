@@ -6,4 +6,4 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""四个归约。datablock=True 就是 ascriptor 的组内归约 cgadd/cgmax/cgmin。"""
+"""Four native reductions, including DataBlock sum/max/min through datablock=True."""

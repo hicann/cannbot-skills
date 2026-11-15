@@ -11,13 +11,11 @@
 import numpy as np
 
 
+def _row_indices(row):
+    return sorted(range(len(row)), key=lambda col: (-float(row[col]), col))[:2]
+
+
 def top2_reference(x):
-    indices = np.array(
-        [
-            sorted(range(x.shape[1]), key=lambda col: (-float(row[col]), col))[:2]
-            for row in x
-        ],
-        dtype=np.int32,
-    )
+    indices = np.array([_row_indices(row) for row in x], dtype=np.int32)
     values = np.take_along_axis(x, indices, axis=1)
     return values, indices

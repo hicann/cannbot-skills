@@ -7,3 +7,17 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 """Independent mathematical references for every variant."""
+
+__all__ = [
+    "reference_k",
+    "reference_m",
+    "reference_n",
+    "reference_mnk",
+    "reference_odd",
+]
+
+from ._references.k import reference_k
+from ._references.m import reference_m
+from ._references.n import reference_n
+from ._references.mnk import reference_mnk
+from ._references.odd import reference_odd

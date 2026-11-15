@@ -21,7 +21,7 @@ r"""tile 的三层形状：物理形状、有效区、重解释后的视图。
 ## 二、`pl.reinterpret` 是视图声明，不是转换
 
 官方 docstring 原话：「a compile-time view declaration, not a conversion — no
-load/move/store/cast instruction is generated」。它在**原地址、原大小**重新声明一个 handle：
+load/move/store/cast instruction is generated」。它在**原地址**重新声明一个 handle；新视图的 shape/dtype 决定访问范围，调用者必须保证真实 backing 容量足够：
 
 - 继承 memory space、fractal、pad、compact、mutex 映射；
 - **不继承 `valid_shape`**——新 handle 从动态有效区开始（等于 `-1`）；
@@ -73,7 +73,7 @@ load/move/store/cast instruction is generated」。它在**原地址、原大小
 6. ``narrow_a_whole_group``：一次调用收窄整组，第二个槽搬出去的也只有 `4 × 8`。
 7. ``reinterpret_a_whole_group``：**比 IR，不上板**。新组的 tile 形状变成 `[4, 32]`，
    而锁用的还是原来那个 mutex_ids tuple——映射没丢。
-8. `reinterpret` footprint 超出原 buffer 被解析期拒。
+8. 扩大 `reinterpret` 不代表容量充足；危险别名只解析，完整物理 backing 上另做精确搬运与守卫检查。
 9. `reinterpret` 改 dtype 不给 shape 被拒。
 10. `reinterpret` 什么都不给被拒。
 11. VF 用坐标互异的矩阵检验真实字节地址：ZN 标签与新 shape 不产生物理转置。
@@ -112,17 +112,20 @@ Tile address 0x00004 (4) is not 32-byte aligned for memory space Vec
 设计依据见 [tooling/example-coverage.md](../../../../references/tooling/example-coverage.md) §二 一节。
 """
 
+import re
+
 import numpy as np
 import pytest
 import torch
 
 import pypto_pro as pp
-from pypto_pro._errors import InvalidShape, InvalidType, OutOfRange
+from pypto_pro._errors import InvalidShape, InvalidType
 
 from .kernel import load_reinterpreted_layout, make_receive_view
 from .kernel import (
     COLS,
     ROWS,
+    TOO_MANY_ROWS,
     VALID_COLS,
     VALID_ROWS,
     WIDE_COLS,
@@ -132,6 +135,7 @@ from .kernel import (
     narrow_before_store,
     reinterpret_a_whole_group,
     reinterpret_beyond_the_buffer,
+    reinterpret_over_complete_backing,
     reinterpret_drops_the_valid_shape,
     reinterpret_dtype_without_shape,
     reinterpret_to_another_shape,
@@ -156,9 +160,11 @@ def _run(kernel, device, out_shape=(ROWS, COLS)):
     return out.cpu().numpy(), x
 
 
-def _parse(kernel):
+def _parse(kernel, *, insert_sync=False):
     program, _ = kernel.to_kernel_def().parse_target_program(pp.ir.SectionKind.Vector)
-    return pp.ir.python_print(program)
+    if insert_sync:
+        program = pp.ir.Pass.insert_sync()(program)
+    return pp.ir.text_dump(program)
 
 
 def test_a_tile_without_narrowing_moves_everything(device):
@@ -221,25 +227,39 @@ def test_narrowing_a_group_narrows_every_slot(device):
 
 
 def test_reinterpreting_a_group_keeps_the_mutex_mapping():
-    """验证 7，**不上板**：直接比 IR。
+    """重解释两个原槽为 [4,32]，不分配新缓冲，并在同步 pass 后保留锁操作。
 
-    两条断言对应两件事：新组的形状真的变了（`[4, 32]`），而锁引用的还是**原来那个**
-    mutex_ids tuple（`_tg_group_mutex_ids`）——映射没丢。
-
-    为什么不用数值判据：`.next()` 的游标在原组和新组之间共享，`wide.next()` 拿到的是没装过
-    数据的槽 1，上板读到的是 UB 残留。**数值判据在这里只会证明残留长什么样。**
+    此入口只检查 IR；其第二个槽没有载入数据，不能将它当作数值验收入口。
     """
-    text = _parse(reinterpret_a_whole_group)
-    assert "make_tile([4, 32]" in text, "新组的形状没变成 [4, 32]"
-    assert "_tg_group_mutex_ids" in text, "锁没有引用原组的 mutex_ids tuple —— 映射丢了"
+    text = _parse(reinterpret_a_whole_group, insert_sync=True)
+    assert "mutex_tile<tile<4 x 32," in text, "新组的形状没变成 [4, 32]"
+    slots = re.findall(
+        r"block\.reinterpret\(getitem\((%\w+), ([01])\), tuple\(4, 32\)", text
+    )
+    assert len(slots) == 2 and len({source for source, _ in slots}) == 1
+    assert {slot for _, slot in slots} == {"0", "1"}
+    assert text.count("block.make_mutex_tile(") == 2, "重解释不应分配新的锁或缓冲"
     assert "mutex_lock_dyn" in text and "mutex_unlock_dyn" in text
 
 
-def test_a_reinterpret_beyond_the_buffer_is_refused():
-    """验证 8。`16 × 16` FP32 = 1024 字节 > 原 buffer 的 512。"""
-    with pytest.raises(OutOfRange) as raised:
-        _parse(reinterpret_beyond_the_buffer)
-    assert "exceeds the original buffer size" in str(raised.value), str(raised.value)
+def test_a_larger_reinterpret_does_not_establish_capacity():
+    """扩大别名可解析，但此危险入口不执行；容量仍是调用方的前提。"""
+    text = _parse(reinterpret_beyond_the_buffer)
+    assert "block.reinterpret" in text and "tuple(16, 16)" in text
+
+
+def test_a_larger_reinterpret_uses_complete_reserved_storage(device):
+    """完整 backing 上的扩大别名精确搬运全部元素，前后守卫保持不变。"""
+    x = make_input(TOO_MANY_ROWS, COLS)
+    guarded = torch.full(
+        (TOO_MANY_ROWS + 2, COLS), float(SENTINEL), dtype=torch.float32, device=device
+    )
+    out = guarded[1:-1]
+    reinterpret_over_complete_backing[None, 1](torch.from_numpy(x).to(device), out)
+    torch.npu.synchronize()
+    np.testing.assert_array_equal(out.cpu().numpy(), x)
+    np.testing.assert_array_equal(guarded[0].cpu().numpy(), SENTINEL)
+    np.testing.assert_array_equal(guarded[-1].cpu().numpy(), SENTINEL)
 
 
 def test_changing_the_dtype_requires_a_shape():

@@ -6,6 +6,12 @@ Use for normalized weighted sums of dense or indexed payloads and their reverse/
 
 For a new forward chain, choose an anchor by the retained/reduced dimensions and live storage, then establish one complete numerical slice before tuning. A permitted GM workspace does not require a materialized implementation. Follow [anchor adaptation](../workflows/authoring.md#selecting-an-example), including one relevant unchanged test on the installed toolchain.
 
+For a thin retained dimension, first read the [short-query/grouped geometry route](online-softmax.md#decode--very-thin-m-gqa). Match an anchor's computation shape and physical interfaces before its mask label: a non-causal thin-group implementation can be a better starting mechanism than a causal wide-query implementation, provided the new validity contract is implemented and tested separately.
+
+For normalized contraction gradients or the matrix algebra commonly called attention backward, match the matrix roles to the ordinary two-dimensional `Y = softmax(A @ B) @ C` chain and start with the [complete materialized backward control](../../examples/algorithms/mm_softmax_mm_backward/). For an unscaled, unmasked matrix instance, `A=Q`, `B=K.T` and `C=V` map its outputs to `dQ=dA`, `dK=dB.T` and `dV=dC`. Its five Cube contractions and two VF phases expose the gradient dependency graph. The example implements contiguous 2-D FP16/BF16 matrices with dimensions that are multiples of 64 in [64,1024], finite input magnitudes at most one and score-row ranges at most 16; it has no mask or head mapping. Scaling, validity and public layouts need a separately verified adapter. Read its native entries, independent CPU autograd reference and tests together, including FP32 gradients and the two-component coefficient representation.
+
+For a bounded resident score row, compare the same example's [on-chip front end](../../examples/algorithms/mm_softmax_mm_backward/onchip.py) after establishing that control. It keeps S, dP, P and dS in FP32 local state, writes only four coefficient components to GM and retains the original three complete-grid Cube gradient owners, giving four native tasks without gradient partials or a merge. K/N/D are limited to multiples of 64 in [64,256]; its header owns the row tiling, disjoint stores, last readers and physical capacity. The smaller workspace trades against repeated input-panel loads and less independent row work. Compare all four tasks with all seven control tasks at the original numerical criterion and complete-call metric; workspace size alone does not establish HBM traffic or speed.
+
 ### Starting path for runtime-selected rows
 
 Choose the anchor by its value/index contract as well as its dimensions. The [sparse-attention kernel](../../examples/algorithms/sparse_attention/kernel.py) and [tests](../../examples/algorithms/sparse_attention/test.py) implement the CANN contract: FP16, distinct valid indices, V equal to a K prefix, BSND dense-mask traversal or BNSD selected-row traversal, and right-aligned causal masking. They show a staged online recurrence with static first/last VF bodies. They are not an independent-V, BF16 or duplicate-index contract; preserve those semantics through a compatible anchor or a separately verified adaptation.
@@ -23,6 +29,8 @@ Keep the verified control for later comparisons. A per-index scalar/VF dot can d
 | Contract or interface to inspect | Runnable entry and scope |
 | --- | --- |
 | Dense forward chain with inspectable GM scores and coefficients, including short or partial M tiles | [Materialized matrix-chain control](../../examples/algorithms/mm_softmax_mm_materialized/): independent phase grids, runtime prefix validity and FP16/BF16 conversion; no head mapping, positional mask or split features |
+| Dense reverse chain with separately owned gradients of all three operands | [Materialized matrix-chain backward](../../examples/algorithms/mm_softmax_mm_backward/): ordinary 2-D matrices, FP32 intermediates/outputs and residual FP16/BF16 Cube operands; no batch folding or runtime validity |
+| Dense reverse chain with a bounded resident normalization front end | [On-chip matrix-chain backward front end](../../examples/algorithms/mm_softmax_mm_backward/onchip.py): C→V score/gradient handovers, four GM coefficient components and unchanged complete-grid gradient owners; K/N/D≤256 |
 | Split score features and a single KV head (MLA) | [Materialized MLA](../../examples/algorithms/mla_bounded/kernel.py): BSND/BNSD, right-aligned causal visibility, independent V and explicit BF16 tiny-value preservation |
 | Short resident key axis | [Fused MLA](../../examples/algorithms/mla_bounded/_kernels/fused.py): FP16, resident coefficients, serial payload-column consumption and causal query intervals; inspect this path before stopping at materialization |
 | Single query with a long key axis and wide payload | [Streamed MLA](../../examples/algorithms/mla_bounded/_kernels/decode.py): FP16, independent V and local FP32 running state; its visibility rule does not implement a multi-query causal mask |
@@ -79,8 +87,6 @@ Preserve the mapping from panel positions to original indices: positional masks 
 | Row normalization and statistics | [VF row reduction](vf-row-reduce.md) and [small-result transport](vf-small-results.md) | Runtime validity, empty rows, precision and output ownership |
 | Weighted payload contraction | Cube if dtype/layout/error budget fit; otherwise a native consumer of shared coefficients | Coefficient rounding, neutral reduction padding and payload layout |
 
-For a thin retained dimension, first read the [short-query/grouped geometry route](online-softmax.md#decode--very-thin-m-gqa). Match an anchor's computation shape and physical interfaces before its mask label: a non-causal thin-group implementation can be a better starting mechanism than a causal wide-query implementation, provided the new validity contract is implemented and tested separately.
-
 Choose one repeated dense product as the first compute probe: map its retained/reduced axes to a bounded block, run the [short GEMM route](gemm-desugar.md#the-mapping) or [VF row reduction](vf-row-reduce.md), and compare it to the mathematical values before expanding the full kernel. Runtime indirection may select a contiguous physical block. Establish this path or a concrete failed capability probe before spending the optimization budget on scalar SIMT algebra, partition counts or launch sweeps. A working scalar kernel and a faster scalar variant do not complete that paradigm comparison.
 
 Include physical-row padding, independent work-item counts and the consumer in the comparison. SIMT remains a candidate for small or irregular work; justify it with complete-call measurements or the specific installed-interface failure. Familiarity with direct-GM scalar code, outer indirection, thin groups and high SIMT pipe activity alone do not establish that it is efficient.
@@ -120,6 +126,8 @@ Batch rows sharing a validity descriptor when the physical view permits it. Comp
 If runtime predicates intersect contiguous intervals, derive lower/upper bounds once per row with consistent index types, handle the empty interval, then visit that interval. A full padded-axis scan with per-element predicates performs different work. Masks with holes still need their actual participation rule.
 
 For a monotone causal prefix, propagate visibility into both contractions, not only the softmax mask. A row block needs keys only through its largest visible key, rounded up to the chosen key tile; retain row masks inside the final intersecting tile. Group rows with compatible bounds in original query coordinates. For static shapes, a small number of query intervals can select smaller native reduction shapes in separate launches; count every launch in the complete-call result and prove disjoint, complete output coverage. For runtime bounds, use a bounded device loop where supported. Skipping a score producer is insufficient if a later consumer still reads those uninitialized score lanes: either exclude them from every downstream read or initialize them explicitly and include that cost.
+
+For right-aligned causal attention with query length `S`, KV length `L`, `0 < S <= L` and zero-based mask `j <= i + L - S`, the useful pair count is `S * (L - S + 1) + S * (S - 1) / 2`. Divide by `S * L` for the useful fraction. Partially executed masked tiles, reloads, conversions and epilogues still contribute to actual hardware work.
 
 ### Choose the exponential reference and state
 
@@ -163,6 +171,7 @@ Use the [optimization workflow](../workflows/optimization.md) and [complete-call
 | Interface to inspect | Runnable example |
 | --- | --- |
 | A whole score row resident on chip, with two products and VF normalization | [mm_softmax_mm](../../examples/algorithms/mm_softmax_mm/) |
+| A complete dense reverse dependency graph with GM cut points and Cube products | [mm_softmax_mm_backward](../../examples/algorithms/mm_softmax_mm_backward/) |
 | Reverse contractions with bounded row state and distinct output owners | [Causal attention backward](../../examples/algorithms/causal_attention_backward/) |
 | Runtime intervals and shared row statistics | [window_gqa_attention](../../examples/algorithms/window_gqa_attention/) |
 | Indexed segments, shared weights and owned partials | [CSR softmax aggregation](../../examples/algorithms/csr_softmax_aggregate/) |

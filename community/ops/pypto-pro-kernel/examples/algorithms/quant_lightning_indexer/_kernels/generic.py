@@ -621,10 +621,10 @@ def make_score(
                     if has_offset:
                         offset = pl.getval(offsets, row)
                     if max_k <= topk:
-                        emit_ordered(src, oi, ov, topk, max_k, offset)
+                        emit_ordered(src, oi, ov, topk, max_k, offset, True)
                     else:
                         keys_from_scores(src, keys, select_width, max_k)
-                        histograms_high_vf(high, keys, select_width // 256)
+                        histograms_high_vf(high, keys, select_width // 256, 0)
                         find_high_bin_and_histograms_low(
                             low,
                             index,
@@ -633,11 +633,11 @@ def make_score(
                             buf,
                             nth,
                             select_width - pl.min(topk, max_k) + 1,
-                            select_width // 256,
+                            select_width // 256, 0,
                         )
                         find_kth_vf(threshold, low, index, buf, nth)
                         collect_indices_gt_eq_vf(
-                            selected, keys, threshold, 0, select_width // 128
+                            selected, keys, threshold, 0, select_width // 128, 0
                         )
                         emit_selection(
                             selected,
@@ -649,7 +649,7 @@ def make_score(
                             0,
                             src,
                             False,
-                            offset,
+                            offset, True,
                         )
                     pl.set_validshape(oi, [1, topk])
                     pl.set_validshape(ov, [1, topk])
@@ -708,7 +708,7 @@ def make_score(
                             )
                         else:
                             keys_from_scores(src, keys, block_width, blocks)
-                            histograms_high_vf(high, keys, block_width // 256)
+                            histograms_high_vf(high, keys, block_width // 256, 0)
                             find_high_bin_and_histograms_low(
                                 low,
                                 index,
@@ -717,11 +717,11 @@ def make_score(
                                 buf,
                                 nth,
                                 block_width - pl.min(candidate_capacity, blocks) + 1,
-                                block_width // 256,
+                                block_width // 256, 0,
                             )
                             find_kth_vf(threshold, low, index, buf, nth)
                             collect_indices_gt_eq_vf(
-                                selected, keys, threshold, 0, block_width // 128
+                                selected, keys, threshold, 0, block_width // 128, 0
                             )
                             emit_selection(
                                 selected,

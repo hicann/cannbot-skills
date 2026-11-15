@@ -69,7 +69,7 @@ MX_SCALE_ONLY = {"ZZ", "NN"}
 
 REJECTED_ON_A5 = {"Left", "Right", "Acc"}
 """这三个空间上 `ZZ` / `NN` 走**另一条**规则被拒，报错文本也不同
-（`tiles do not support ... layout on 'a5'` 而不是 `tiles require layout in {...}`）。
+（`tiles do not support ... layout on '3510'` 而不是 `tiles require layout in {...}`）。
 判据 3 把两种消息分开断言。
 """
 

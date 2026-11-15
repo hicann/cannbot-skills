@@ -66,7 +66,7 @@ r"""九个原子族：七个顺序无关，两个不是。
 
 ## 七、操作数的 dtype 必须和目标完全一致
 
-`tid + 1` 和 Python 字面量在 SIMT 里都是 **INT64**。目标是 INT32 计数器时解析期直接拒：
+运行时 `tid + 1` 在 SIMT 里是 **INT64**。目标是 INT32 计数器时解析期直接拒；数值常量由接口按目标 dtype 定型：
 
 ```
 simt.atomic_add operand 0 dtype must match target dtype int32, but got int64
@@ -95,7 +95,7 @@ import numpy as np
 import pypto_pro as pp
 import pytest
 import torch
-from pypto_pro._errors import CommonExternal
+from pypto_pro._errors import InvalidType
 
 from . import reference as ref
 
@@ -188,7 +188,7 @@ def test_an_int64_operand_is_refused():
 
     判据匹配两边的 dtype 名字，不匹配错误码。
     """
-    with pytest.raises(CommonExternal) as raised:
+    with pytest.raises(InvalidType) as raised:
         operand_dtype_mismatch.to_kernel_def().parse_target_program(
             pp.ir.SectionKind.Vector
         )

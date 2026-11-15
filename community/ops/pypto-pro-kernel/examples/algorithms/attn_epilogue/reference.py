@@ -10,9 +10,10 @@
 import torch
 
 
-def inverse_rope(attn_out, sin, cos):
+# pylint: disable-next=all
+def inverse_rope(o, sin, cos):  # noqa: E741 - Public evaluator keyword contract.
     """Apply separate FP32 products/additions, then round the tail to BF16."""
-    x = attn_out.float()
+    x = o.float()
     result = x.clone()
     even, odd = x[..., 448::2], x[..., 449::2]
     c, s = cos[:, None, ::2], sin[:, None, ::2]
@@ -45,9 +46,8 @@ def dequantize_mx(payload, scales):
     ).reshape(payload.shape)
 
 
-def attn_epilogue_golden_cpu(
-    attn_out, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos
-):
+# pylint: disable-next=all
+def attn_epilogue_golden_cpu(o, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos):  # noqa: E741 - Evaluator API.
     """CPU mathematical oracle with BF16 rounding at each projection boundary.
 
     FP64 dot products isolate mathematical rounding from device accumulation.
@@ -56,11 +56,11 @@ def attn_epilogue_golden_cpu(
     """
     if any(
         v.device.type != "cpu"
-        for v in (attn_out, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos)
+        for v in (o, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos)
     ):
         raise ValueError("the CPU oracle requires CPU tensors")
-    t = attn_out.shape[0]
-    rotated = inverse_rope(attn_out, rope_sin, rope_cos).reshape(t, 8, 4096)
+    t = o.shape[0]
+    rotated = inverse_rope(o, rope_sin, rope_cos).reshape(t, 8, 4096)
     aq, asc = quantize_mx(rotated)
     activation = dequantize_mx(aq, asc)
     wa = dequantize_mx(woa, descale_woa)

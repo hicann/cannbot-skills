@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import os
 import re
 from urllib.parse import unquote, urlsplit
 
@@ -32,7 +33,7 @@ class Catalog:
     findings: tuple[Finding, ...]
 
 
-def table_links(text: str):
+def table_rows(text: str):
     """Read inline table links, excluding fenced examples and ordinary prose."""
     fence = None
     for lineno, line in enumerate(text.splitlines(), 1):
@@ -48,8 +49,30 @@ def table_links(text: str):
                 fence = None
             continue
         if fence is None and stripped.startswith("|"):
-            for target in _LINK.findall(stripped):
-                yield lineno, target.strip("<>")
+            yield (
+                lineno,
+                stripped,
+                [target.strip("<>") for target in _LINK.findall(stripped)],
+            )
+
+
+def table_links(text: str):
+    for lineno, _, targets in table_rows(text):
+        for target in targets:
+            yield lineno, target
+
+
+def public_kernels(root: Path, groups=GROUPS, *, onerror=None):
+    """Share the public-example boundary with discovery; support packages are not examples."""
+    for group in groups:
+        for parent, directories, names in os.walk(
+            root / group, followlinks=False, onerror=onerror
+        ):
+            directories[:] = sorted(
+                name for name in directories if not name.startswith(("_", "."))
+            )
+            if "kernel.py" in names:
+                yield Path(parent) / "kernel.py"
 
 
 def collect(root: Path = EXAMPLES_ROOT, *, document: Path = CATALOG_DOC) -> Catalog:
@@ -62,7 +85,15 @@ def collect(root: Path = EXAMPLES_ROOT, *, document: Path = CATALOG_DOC) -> Cata
         if not folder.is_dir():
             findings.append(Finding(folder, 1, RULE, "Missing example group"))
             continue
-        for kernel in folder.rglob("kernel.py"):
+        for kernel in public_kernels(
+            root,
+            (group,),
+            onerror=lambda error: findings.append(
+                Finding(
+                    Path(error.filename), 1, RULE, f"Cannot scan example group: {error}"
+                )
+            ),
+        ):
             relative = kernel.parent.relative_to(root)
             if not any(part.startswith(("_", ".")) for part in relative.parts):
                 examples.add(relative)
@@ -73,6 +104,16 @@ def collect(root: Path = EXAMPLES_ROOT, *, document: Path = CATALOG_DOC) -> Cata
     except OSError as exc:
         findings.append(Finding(document, 1, RULE, f"Cannot read catalog: {exc}"))
         return Catalog(frozenset(examples), frozenset(), tuple(findings))
+    rows, selected_findings = selection(root, document, text, examples)
+    findings.extend(selected_findings)
+    indexed.update(rows)
+    return Catalog(frozenset(examples), frozenset(indexed), tuple(findings))
+
+
+def selection(root, document, text, examples):
+    """Return original selection rows and the same admission findings for a live inventory."""
+    rows, findings = {}, []
+    source_lines = dict((line, text) for line, text, _ in table_rows(text))
     for lineno, target in table_links(text):
         link = urlsplit(target)
         if link.scheme or link.netloc:
@@ -95,7 +136,9 @@ def collect(root: Path = EXAMPLES_ROOT, *, document: Path = CATALOG_DOC) -> Cata
         elif not destination.is_dir():
             continue
         if owner in examples:
-            indexed.add(owner)
+            rows.setdefault(owner, []).append(
+                {"line": lineno, "text": source_lines[lineno]}
+            )
         elif not any(owner in example.parents for example in examples):
             findings.append(
                 Finding(
@@ -105,7 +148,7 @@ def collect(root: Path = EXAMPLES_ROOT, *, document: Path = CATALOG_DOC) -> Cata
                     f"Catalog target has no example kernel: {target}",
                 )
             )
-    for example in sorted(examples - indexed):
+    for example in sorted(set(examples) - set(rows)):
         findings.append(
             Finding(
                 document,
@@ -115,4 +158,4 @@ def collect(root: Path = EXAMPLES_ROOT, *, document: Path = CATALOG_DOC) -> Cata
                 "add a direct directory or kernel.py link to a selection table",
             )
         )
-    return Catalog(frozenset(examples), frozenset(indexed), tuple(findings))
+    return rows, findings

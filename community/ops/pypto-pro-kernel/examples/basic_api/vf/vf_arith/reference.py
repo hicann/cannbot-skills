@@ -112,7 +112,10 @@ def carry(a, b):
     参考这里按实测写，不按参数名的字面读法写。
     """
     a64, b64 = a.astype(np.int64), b.astype(np.int64)
-    as_u32 = lambda x: (x & 0xFFFFFFFF).astype(np.uint32).astype(np.int32)  # noqa: E731
+
+    def as_u32(x):
+        return (x & 0xFFFFFFFF).astype(np.uint32).astype(np.int32)
+
     return [
         as_u32(a64 + b64),  # addc, carry_in = 0
         as_u32(a64 + b64 + 1),  # addc, carry_in = 1

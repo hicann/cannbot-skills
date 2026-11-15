@@ -6,37 +6,33 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""写法：语法糖。原生 pipeline 重写的 dense-mask / indexed-KV 注意力。
+# pylint: disable=line-too-long
+"""写法：语法糖。SparseFlashAttention 的 dense-mask / indexed-KV 两条完整路径。
+
+example-query: {"aliases": ["sparse flash attention", "SparseFlashAttention", "SFA", "ROWPLUSONE", "ROWPLUSONE attention", "稀疏闪存注意力"], "term_groups": [["sparse flash attention", "SparseFlashAttention", "SFA", "稀疏闪存注意力"]], "facets": {"source_dtype": ["FP16"], "destination_dtype": ["FP16"]}, "exclude": [{"term_groups": [["independent v", "independent value", "独立V"]], "reason": "The native paths require V to equal the K prefix."}]}
 
 契约为 CANN SparseFlashAttention：FP16，索引无重复且在序列范围内，V 是 K 的前缀。
-Dense 路径将同一 KV head 的相邻 query/head 合为 M 行；indexed 路径的一个 owner
-是一条 query 的 M 个 GQA heads。两者都使用 FP32 online softmax 和输出累加，FP16 P。
-因果比较保留原始 key 坐标，右下角对齐；全屏蔽行输出零。
+Q/K 为有限值且幅值不超过 1，scale 有限且绝对值不超过 32；输入连续且 32 B 对齐。
+Dense 路径将同一 KV head 的相邻 query/head 合为 M 行；indexed 路径的一位 owner
+处理一条 query 的 GQA heads。两者均用 Cube 计算 QK/PV、FP32 online softmax
+和输出累加、FP16 P；因果比较保留原始 key 坐标并右下角对齐，全屏蔽行输出零。
 
-五个 stage 为准备输入、QK、softmax/发布 P/V、PV、更新输出，V-C-V-C-V 交替。
-P=1 时延迟为 0/1/1/2/2；第 1/3 条跨核边两槽，第 2/4 条边一槽。
-同核 KV/alpha 交接两槽；dense membership 在 normalize 内按 key 窗口更新 epoch，
-单槽复用，跨 owner 重新清零。单个平坦 tick 循环跨 owner 连续排布。
+公开入口 sparse_attention 按元数据选择默认配置：BSND dense 为 M128/Bk256、
+preload1/双缓冲；代表性 BNSD wide case 为 M64/Bk128、preload0/单缓冲。
+make_kernel 只构建调用方指定的配置，通用默认值为 M64/Bk64、preload1/双缓冲，
+不会执行公开入口的选择策略。适配预分配 output 时，应保留对应的完整计算路径和配置。
 
-Dense M=128、Bk=256、Dk=192、Dv=128、R=512、GQA=4 时 L1 427008 B、UB 252928 B；
-indexed M=64、Bk=64、Dk=576、Dv=512 时 L1 369152 B、UB 218624 B，均包含对齐。
-Dense 用 DMA/ND→NZ 打包 Q、VF scatter 建立窗口 mask；indexed 用逐行 DMA，
-两者均无 SIMT，UB 上限为 256 KiB。P 在 VF 中直接写入带填充行的 NZ 缓冲；
-最后一块将 numerator 已读过的字节压紧成 FP16 输出，不增设输出缓冲。
-共享 L0A 为 [M,64] 两槽，L0B 为 [64,256] 两槽；两个 GEMM 通过组视图复用。
-QK/PV 累加器分别常驻，PV 按最多 256 列分条写入共享输出，避免撑满 L0B。
-TileType/make_tile_group 显式指定物理地址，mutex_ids="auto" 分配核内 ID，别名继承 ID。
-四条跨核边的交接/回收事件为 0/1→2/3、4→5、6/7→8/9、10→11，
-由 pipeline 生成相应同步。默认 preload=1，preload=0 留作同步/调度对照。
-首块/末块判断放在 stage 中，选择静态 VF 变体，避免在 VF 的行/列循环内反复执行运行时分支。
-
-指数以运行最大值为基准，输入给 exp 的有效值非正，P 在 [0,1]；分母为非负指数之和。
-输出 FP32→FP16 使用 ZERO 布局并以 PACK_B32 写回；P 经 de_interleave 后按 NZ 块间距存放。
-测试与性能入口保留原评测器的误差标准。此实现覆盖这两类规则分块，不声明通用尾块、
-独立 V、BF16、重复或越界索引支持。目标为支持原生自动 mutex ID 的 PyPTO 与 Ascend950PR。
+P 默认采用 ROWPLUSONE；aligned 和 padded 保留为布局对照。物理 pitch、资源预算、
+跨核事件与阶段延迟的说明紧邻下面的声明。首块/末块用静态 VF 变体处理。
+递推、稀疏坐标与比较原则见
+[sparse recurrence](../../../references/patterns/online-softmax.md#sparse-keys-and-representative-implementation-comparisons)。
+此实现覆盖上述两类规则分块，不声明通用尾块、独立 V、BF16、重复或越界索引支持。
+目标为支持原生自动 mutex ID 的 PyPTO 与 Ascend950PR；测试保留原评测器的误差标准。
 """
+# pylint: enable=line-too-long
 
 from functools import lru_cache
+from math import isfinite
 
 import pypto_pro.language as pl
 import torch
@@ -60,8 +56,17 @@ def make_kernel(
     preload=1,
     rows=64,
     key_block=64,
+    buffers=2,
+    probability_layout="row_plus_one",
 ):
+    """Build one explicit native configuration without metadata-based dispatch.
+
+    The factory defaults are M64/Bk64, preload1 and two buffers. The public
+    sparse_attention entry chooses its own geometry from the workload.
+    """
     assert preload in (0, 1)
+    assert buffers in (1, 2) and (preload == 0 or buffers == 2)
+    assert probability_layout in ("aligned", "padded", "row_plus_one")
     assert rows >= 32 and rows % 32 == 0
     assert key_dim % 64 == value_dim % 64 == key_block % 64 == 0
     assert (
@@ -83,7 +88,12 @@ def make_kernel(
     half_rows, half_keys = rows // 2, key_block // 2
     assert not dense or half_rows % heads == 0
     half_queries = half_rows // heads if dense else 1
-    strip = min(value_dim, 256)
+    # QK steps through K64 views of the same slots used by PV. For a wide PV,
+    # the full Bk and a bounded N strip keep L0B within capacity; Bk128/Dv512
+    # uses K128/N128 while QK retains the original slot span through its K64 view.
+    product_k = key_block if value_dim > 256 else 64
+    local_k = max(64, product_k)
+    strip = min(value_dim, 16384 // local_k)
     right_columns = max(key_block, strip)
     fp16, fp32, i32 = pl.DT_FP16, pl.DT_FP32, pl.DT_INT32
     qshape = (
@@ -110,14 +120,69 @@ def make_kernel(
     query_pack_rows = max(16 // heads, 1) if dense else 1
     query_pack_cols = min(heads, 16) * key_dim if dense else 16
     assert not dense or 16 % heads == 0 or heads % 16 == 0
+    # Each AIV owns half_rows, a multiple of 16. ROWPLUSONE uses physical
+    # pitch half_rows+1 and compact=2; VF publication and TINSERT share this map.
+    # padded keeps that pitch with compact=0; aligned has no extra physical row.
+    probability_rows = half_rows + (probability_layout != "aligned")
+    probability_compact = 2 if probability_layout == "row_plus_one" else 0
+
+    # Byte offsets describe physical allocations, including every rotating slot.
+    # Valid extents and reinterpretations below never change these slot pitches.
+    l1_query = buffers * 2 * key_dim * (rows if dense else key_block)
+    l1_key = l1_query + 2 * (16 * 16 if dense else rows * key_dim)
+    l1_probability = l1_key + 2 * (2 * key_block * key_dim if dense else 16 * 16)
+    l1_value = l1_probability + buffers * 2 * rows * key_block
+    acc_product = 4 * rows * key_block
+
+    ub_product = 4 * half_rows * key_block
+    ub_staging = ub_product + 4 * half_rows * value_dim
+    ub_indices = ub_staging + 2 * (1 if dense else buffers) * staging_rows * key_dim
+    ub_membership = ub_indices + 4 * index_rows * (
+        selected_rows if dense else key_block
+    )
+    ub_selectors = (
+        ub_membership + 4 * (1 if dense else buffers) * half_queries * mask_width
+    )
+    ub_probability_low = ub_selectors + 4 * key_block
+    ub_probability_high = ub_probability_low + 2 * probability_rows * (
+        128 if dense else key_block
+    )
+    ub_maxima = ub_probability_high + 2 * (probability_rows if dense else 1) * (
+        128 if dense else 16
+    )
+    ub_denominators = ub_maxima + 4 * half_rows
+    ub_statistics = ub_denominators + 4 * half_rows
+    ub_numerator = ub_statistics + 2 * 8 * half_rows
+    ub_query = ub_numerator + 4 * half_rows * value_dim
+    l1_end = l1_value + 2 * (16 * 16 if dense else buffers * key_block * value_dim)
+    ub_end = ub_query + 2 * (16 * key_dim if dense else 16)
+    # With preload1/two buffers, dense M128/Bk256/Dk192/Dv128/R512/GQA4
+    # uses L1 427008 B and UB 252928 B. Indexed M64/Bk64/Dk576/Dv512
+    # uses L1 369152 B and UB 218624 B, including alignment and rotating slots.
+    assert l1_end <= 512 * 1024 and ub_end <= 256 * 1024
+    assert 4 * rows * (key_block + value_dim) <= 256 * 1024
+    assert 4 * rows * local_k <= 64 * 1024
+    assert 4 * local_k * right_columns <= 64 * 1024
+
+    # Input and P/V have two cross-core slots with preload1, while score and
+    # product each have one. Forward/reverse events are 0/1→2/3, 4→5,
+    # 6/7→8/9 and 10→11. Aliases inherit ownership; IDs within each core are auto.
+    # preload0/one buffer shortens input/P/V rings and permits indexed Bk128,
+    # trading fewer panels against overlap; compare complete calls.
+    input_ready, input_free = list(range(buffers)), list(range(2, 2 + buffers))
+    probability_ready = list(range(6, 6 + buffers))
+    probability_free = list(range(8, 8 + buffers))
+    # Dense uses DMA/ND→NZ query packing and VF-scattered window membership;
+    # indexed uses per-row DMA for selected K/V. Neither path needs SIMT.
     clear_membership, write_membership = make_dense_mask(
         half_queries, mask_width, selected_rows, key_rows, query_rows, causal
     )
 
+    # Running-max subtraction keeps valid exp inputs nonpositive and P in
+    # [0,1], with a nonnegative denominator. Softmax packs P with de_interleave
+    # at the NZ pitch above; the final update narrows FP32→FP16 with ZERO and
+    # writes PACK_B32. First/last decisions select static VF bodies.
     online_softmax = make_softmax(
-        dense, half_rows, heads, key_block, key_rows, query_rows, causal
-    )
-    online_softmax_first = make_softmax(
         dense,
         half_rows,
         heads,
@@ -125,13 +190,10 @@ def make_kernel(
         key_rows,
         query_rows,
         causal,
-        first_block=True,
+        probability_pitch=probability_rows,
     )
     update_numerator = make_update(half_rows, value_dim)
-    update_numerator_first = make_update(
-        half_rows, value_dim, first_block=True, last_block=blocks == 1
-    )
-    update_numerator_last = make_update(half_rows, value_dim, last_block=True)
+    single_block = blocks == 1
 
     @pl.pipeline.stage
     def prepare(
@@ -154,7 +216,7 @@ def make_kernel(
         target = shared_input.next()
         sub = pl.get_subblock_idx()
         if dense:
-            if block < 2:
+            if block < buffers:
                 local = staging_query.current()
                 nd = query_nd.current()
                 packed_rows = query_rows_nd.current()
@@ -172,10 +234,10 @@ def make_kernel(
                     pl.move(local, nd)
                     pl.insert(target, local, [sub * half_rows + slab * 16, 0])
         else:
-            local = staging[tick % 2]
+            local = staging[tick % buffers]
             index_tile = gather_indices.current()
             pl.load(index_tile, index_flat, [item * selected_rows + block * key_block])
-            packed = staging_dma[tick % 2]
+            packed = staging_dma[tick % buffers]
             b = item // (kv_heads * query_rows)
             head = (item // query_rows) % kv_heads
             for row in pl.range(half_keys):
@@ -184,7 +246,7 @@ def make_kernel(
                     key_dim // 16
                 )
                 pl.load(
-                    packed[:, slice(row * 16, (row + 1) * 16)],
+                    packed[:, row * 16: (row + 1) * 16],
                     key_fragments,
                     [source_row, 0],
                 )
@@ -257,7 +319,7 @@ def make_kernel(
         denominator = denominators.current()
         stats = statistics[tick % 2]
         ix = selectors.current()
-        mask = membership[0 if dense else owner_step % 2]
+        mask = membership[0 if dense else owner_step % buffers]
         if dense:
             if block % mask_parts == 0:
                 if block == 0:
@@ -288,23 +350,21 @@ def make_kernel(
         else:
             pl.load(ix, indices, [item * selected_rows + block * key_block])
             values = shared_v.next()
-            prefix = staging_values[tick % 2]
+            prefix = staging_values[tick % buffers]
             sub = pl.get_subblock_idx()
             pl.insert(values, prefix, [sub * half_keys, 0])
         qpos = item % items_per_head
         if block == 0:
-            online_softmax_first(
-                score, mask, ix, low, high, m, denominator, stats, block, qpos, scale
+            online_softmax(
+                score, mask, ix, low, high, m, denominator, stats, block, qpos, scale, True
             )
         else:
             online_softmax(
-                score, mask, ix, low, high, m, denominator, stats, block, qpos, scale
+                score, mask, ix, low, high, m, denominator, stats, block, qpos, scale, False
             )
         sub = pl.get_subblock_idx()
-        pl.set_validshape(low, [half_rows, 128 if dense else key_block])
         pl.insert(p, low, [sub * half_rows, 0])
         if dense:
-            pl.set_validshape(high, [half_rows, 128])
             pl.insert(p, high, [sub * half_rows, 128])
 
     @pl.pipeline.stage
@@ -333,11 +393,11 @@ def make_kernel(
         running = numerator.current()
         result = output_local.current()
         if block == 0:
-            update_numerator_first(product, stats, running, result)
+            update_numerator(product, stats, running, result, True, single_block)
         elif block == blocks - 1:
-            update_numerator_last(product, stats, running, result)
+            update_numerator(product, stats, running, result, False, True)
         else:
-            update_numerator(product, stats, running, result)
+            update_numerator(product, stats, running, result, False, False)
         if block == blocks - 1:
             b = item // (kv_heads * items_per_head)
             head = (item // items_per_head) % kv_heads
@@ -347,7 +407,7 @@ def make_kernel(
                 for row in pl.range(half_queries):
                     pl.store(
                         output,
-                        result[slice(row * heads, (row + 1) * heads), :],
+                        result[row * heads: (row + 1) * heads, :],
                         [b, qbase + sub * half_queries + row, head * heads, 0],
                         order=[2, 3],
                     )
@@ -362,7 +422,7 @@ def make_kernel(
     name = (
         f"cann_sfa_{'dense' if dense else 'indexed'}_m{rows}_k{key_block}_p{preload}"
         f"_b{batch}s{query_rows}t{key_rows}h{query_heads}v{kv_heads}d{key_dim}o{value_dim}"
-        f"r{selected_rows}c{int(causal)}"
+        f"r{selected_rows}c{int(causal)}_d{buffers}_{probability_layout}_expsub"
     )
 
     @pl.jit(
@@ -400,9 +460,9 @@ def make_kernel(
             type=shared_input_type,
             addrs=0,
             mutex_ids="auto",
-            depth=2,
-            fwd_ids=[0, 1],
-            bwd_ids=[2, 3],
+            depth=buffers,
+            fwd_ids=input_ready,
+            bwd_ids=input_free,
         )
         query_local_type = pl.TileType(
             shape=[16 if dense else rows, 16 if dense else key_dim],
@@ -411,7 +471,7 @@ def make_kernel(
         )
         query_local = pl.make_tile_group(
             type=query_local_type,
-            addrs=4 * key_dim * (rows if dense else key_block),
+            addrs=l1_query,
             mutex_ids="auto",
             depth=1,
         )
@@ -422,10 +482,7 @@ def make_kernel(
         )
         key_local = pl.make_tile_group(
             type=key_local_type,
-            addrs=(
-                4 * key_dim * (rows if dense else key_block)
-                + 2 * (16 if dense else key_dim) * (16 if dense else rows)
-            ),
+            addrs=l1_key,
             mutex_ids="auto",
             depth=2 if dense else 1,
         )
@@ -437,20 +494,13 @@ def make_kernel(
         )
         shared_p = pl.make_tile_group(
             type=shared_p_type,
-            addrs=(
-                4 * key_dim * (rows if dense else key_block)
-                + 2 * (16 if dense else key_dim) * (16 if dense else rows)
-                + 2
-                * (2 if dense else 1)
-                * (key_block if dense else 16)
-                * (key_dim if dense else 16)
-            ),
+            addrs=l1_probability,
             mutex_ids="auto",
-            depth=2,
-            fwd_ids=[6, 7],
-            bwd_ids=[8, 9],
+            depth=buffers,
+            fwd_ids=probability_ready,
+            bwd_ids=probability_free,
         )
-        # Sparse V shares P's two-slot handover: normalize writes both on MTE3,
+        # Sparse V shares P's handover slots: normalize writes both on MTE3,
         # weighted_product reads both on MTE1, and P's generated forward/reverse
         # events bracket both lifetimes. Dense does not use this placeholder.
         shared_v_type = pl.TileType(
@@ -461,20 +511,12 @@ def make_kernel(
         )
         shared_v = pl.make_tile_group(
             type=shared_v_type,
-            addrs=(
-                4 * key_dim * (rows if dense else key_block)
-                + 2 * (16 if dense else key_dim) * (16 if dense else rows)
-                + 2
-                * (2 if dense else 1)
-                * (key_block if dense else 16)
-                * (key_dim if dense else 16)
-                + 4 * key_block * rows
-            ),
+            addrs=l1_value,
             mutex_ids="auto",
-            depth=1 if dense else 2,
+            depth=1 if dense else buffers,
         )
         left_type = pl.TileType(
-            shape=[rows, 64],
+            shape=[rows, local_k],
             dtype=fp16,
             target_memory=pl.MemorySpace.Left,
         )
@@ -485,7 +527,7 @@ def make_kernel(
             depth=2,
         )
         right_type = pl.TileType(
-            shape=[64, right_columns],
+            shape=[local_k, right_columns],
             dtype=fp16,
             target_memory=pl.MemorySpace.Right,
         )
@@ -513,7 +555,7 @@ def make_kernel(
         )
         product_acc = pl.make_tile_group(
             type=product_acc_type,
-            addrs=4 * key_block * rows,
+            addrs=acc_product,
             mutex_ids="auto",
             depth=1,
         )
@@ -537,7 +579,7 @@ def make_kernel(
         )
         shared_product = pl.make_tile_group(
             type=shared_product_type,
-            addrs=4 * half_rows * key_block,
+            addrs=ub_product,
             mutex_ids="auto",
             depth=1,
             fwd_ids=[10],
@@ -551,9 +593,9 @@ def make_kernel(
         )
         staging = pl.make_tile_group(
             type=staging_type,
-            addrs=4 * half_rows * key_block + 4 * half_rows * value_dim,
+            addrs=ub_staging,
             mutex_ids="auto",
-            depth=1 if dense else 2,
+            depth=1 if dense else buffers,
         )
         gather_indices_type = pl.TileType(
             shape=[index_rows, selected_rows if dense else key_block],
@@ -562,11 +604,7 @@ def make_kernel(
         )
         gather_indices = pl.make_tile_group(
             type=gather_indices_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-            ),
+            addrs=ub_indices,
             mutex_ids="auto",
             depth=1,
         )
@@ -577,14 +615,9 @@ def make_kernel(
         )
         membership = pl.make_tile_group(
             type=membership_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-            ),
+            addrs=ub_membership,
             mutex_ids="auto",
-            depth=1 if dense else 2,
+            depth=1 if dense else buffers,
         )
         selectors_type = pl.TileType(
             shape=[1, key_block],
@@ -593,53 +626,37 @@ def make_kernel(
         )
         selectors = pl.make_tile_group(
             type=selectors_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-                + 4 * (1 if dense else 2) * half_queries * mask_width
-            ),
+            addrs=ub_selectors,
             mutex_ids="auto",
             depth=1,
         )
+        # The VF cursor and TINSERT must use the same pitch. The padded control
+        # uses exact declared rows; RowPlusOne uses align16(valid rows)+1.
         p_low_type = pl.TileType(
-            shape=[half_rows + 1, 128 if dense else key_block],
+            shape=[probability_rows, 128 if dense else key_block],
+            valid_shape=[half_rows, 128 if dense else key_block],
             dtype=fp16,
             target_memory=pl.MemorySpace.Vec,
             layout=pl.NZ,
+            compact=probability_compact,
         )
         p_low = pl.make_tile_group(
             type=p_low_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-                + 4 * (1 if dense else 2) * half_queries * mask_width
-                + 4 * key_block
-            ),
+            addrs=ub_probability_low,
             mutex_ids="auto",
             depth=1,
         )
         p_high_type = pl.TileType(
-            shape=[half_rows + 1 if dense else 1, 128 if dense else 16],
+            shape=[probability_rows if dense else 1, 128 if dense else 16],
+            valid_shape=[half_rows if dense else 1, 128 if dense else 16],
             dtype=fp16,
             target_memory=pl.MemorySpace.Vec,
             layout=pl.NZ,
+            compact=probability_compact if dense else 0,
         )
         p_high = pl.make_tile_group(
             type=p_high_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-                + 4 * (1 if dense else 2) * half_queries * mask_width
-                + 4 * key_block
-                + 2 * (128 if dense else key_block) * half_rows
-                + 2 * (128 if dense else key_block)
-            ),
+            addrs=ub_probability_high,
             mutex_ids="auto",
             depth=1,
         )
@@ -650,17 +667,7 @@ def make_kernel(
         )
         maxima = pl.make_tile_group(
             type=maxima_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-                + 4 * (1 if dense else 2) * half_queries * mask_width
-                + 4 * key_block
-                + 2 * (128 if dense else key_block) * half_rows
-                + 2 * (128 if dense else key_block)
-                + 2 * (128 if dense else 16) * (half_rows + 1 if dense else 1)
-            ),
+            addrs=ub_maxima,
             mutex_ids="auto",
             depth=1,
         )
@@ -671,18 +678,7 @@ def make_kernel(
         )
         denominators = pl.make_tile_group(
             type=denominators_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-                + 4 * (1 if dense else 2) * half_queries * mask_width
-                + 4 * key_block
-                + 2 * (128 if dense else key_block) * half_rows
-                + 2 * (128 if dense else key_block)
-                + 2 * (128 if dense else 16) * (half_rows + 1 if dense else 1)
-                + 4 * half_rows
-            ),
+            addrs=ub_denominators,
             mutex_ids="auto",
             depth=1,
         )
@@ -693,18 +689,7 @@ def make_kernel(
         )
         statistics = pl.make_tile_group(
             type=statistics_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-                + 4 * (1 if dense else 2) * half_queries * mask_width
-                + 4 * key_block
-                + 2 * (128 if dense else key_block) * half_rows
-                + 2 * (128 if dense else key_block)
-                + 2 * (128 if dense else 16) * (half_rows + 1 if dense else 1)
-                + 8 * half_rows
-            ),
+            addrs=ub_statistics,
             mutex_ids="auto",
             depth=2,
         )
@@ -715,18 +700,7 @@ def make_kernel(
         )
         numerator = pl.make_tile_group(
             type=numerator_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 4 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-                + 4 * (1 if dense else 2) * half_queries * mask_width
-                + 4 * key_block
-                + 2 * (128 if dense else key_block) * half_rows
-                + 2 * (128 if dense else key_block)
-                + 2 * (128 if dense else 16) * (half_rows + 1 if dense else 1)
-                + 24 * half_rows
-            ),
+            addrs=ub_numerator,
             mutex_ids="auto",
             depth=1,
         )
@@ -738,21 +712,11 @@ def make_kernel(
         )
         query_nd = pl.make_tile_group(
             type=query_nd_type,
-            addrs=(
-                4 * half_rows * key_block
-                + 8 * half_rows * value_dim
-                + 2 * (1 if dense else 2) * key_dim * staging_rows
-                + 4 * index_rows * (selected_rows if dense else key_block)
-                + 4 * (1 if dense else 2) * half_queries * mask_width
-                + 4 * key_block
-                + 2 * (128 if dense else key_block) * half_rows
-                + 2 * (128 if dense else key_block)
-                + 2 * (128 if dense else 16) * (half_rows + 1 if dense else 1)
-                + 24 * half_rows
-            ),
+            addrs=ub_query,
             mutex_ids="auto",
             depth=1,
         )
+        # The final update packs already-read numerator bytes into FP16 output.
         output_local = pl.reinterpret(
             numerator, shape=[half_rows, value_dim], dtype=fp16
         )
@@ -782,10 +746,14 @@ def make_kernel(
             layout=pl.NZ,
         )
         right_qk = pl.reinterpret(right, shape=[64, key_block])
-        right_pv = pl.reinterpret(right, shape=[64, strip])
+        right_pv = pl.reinterpret(right, shape=[product_k, strip])
+        left_qk = pl.reinterpret(left, shape=[rows, 64])
         core = pl.get_block_idx() // pl.get_subblock_num()
         cores = pl.get_block_num()
         count = (items - core + cores - 1) // cores
+        # Five V-C-V-C-V stages run over one flat tick loop across owners.
+        # With preload1 their delays are 0/1/1/2/2. Local KV/alpha use two slots;
+        # dense membership has one epoch-updated slot, cleared at each owner.
         for tick in pl.range(count * blocks):
             owner_step = tick // blocks
             item = core + owner_step * cores
@@ -820,7 +788,7 @@ def make_kernel(
                     query_local,
                     key_local,
                     key_transpose,
-                    left,
+                    left_qk,
                     right_qk,
                     score_acc,
                     shared_score,
@@ -882,18 +850,36 @@ def sparse_attention(
     layout="BSND",
     causal=False,
     *,
-    preload=1,
+    preload=None,
     workers=None,
     rows=None,
     key_block=None,
+    buffers=None,
+    probability_layout="row_plus_one",
 ):
-    """Run the CANN prefix-V contract; the caller guarantees value == key[..., :Dv]."""
+    """Run prefix-V attention with metadata-selected defaults.
+
+    BSND uses dense M128/Bk256 with preload1/two buffers. The representative
+    BNSD wide shape selects M64/Bk128 with preload0/one buffer when all geometry
+    controls are omitted. Explicit controls retain the fallback rules below;
+    make_kernel itself does not apply this selector. The caller guarantees
+    value == key[..., :Dv].
+    """
     assert layout in ("BSND", "BNSD")
     assert query.dtype == key.dtype == value.dtype == torch.float16
     assert sparse_indices.dtype == torch.int32
     assert all(x.is_contiguous() for x in (query, key, value, sparse_indices))
     assert query.ndim == key.ndim == value.ndim == sparse_indices.ndim == 4
     assert query.device == key.device == value.device == sparse_indices.device
+    if query.device.type != "npu" or any(
+        x.data_ptr() % 32 for x in (query, key, value, sparse_indices)
+    ):
+        raise ValueError("expected 32-byte-aligned tensors on one NPU")
+    if isinstance(scale, torch.Tensor):
+        raise TypeError("scale must be a host number")
+    scale = float(scale)
+    if not isfinite(scale) or abs(scale) > 32:
+        raise ValueError("scale must be finite with magnitude at most 32")
     sequence_axis, head_axis = (1, 2) if layout == "BSND" else (2, 1)
     b, sq, hq, dk = (
         query.shape[0],
@@ -911,6 +897,21 @@ def sparse_attention(
     )
     assert sparse_indices.shape == expected_indices
     dense = layout == "BSND"
+    if all(x is None for x in (preload, rows, key_block, buffers)) and (
+        b,
+        sq,
+        sk,
+        hq,
+        hkv,
+        dk,
+        dv,
+        selected,
+        layout,
+        causal,
+    ) == (16, 4, 8192, 64, 1, 576, 512, 512, "BNSD", True):
+        preload, rows, key_block, buffers = 0, 64, 128, 1
+    preload = 1 if preload is None else preload
+    buffers = 2 if buffers is None else buffers
     rows = rows if rows is not None else (128 if dense else 64)
     block = key_block if key_block is not None else (256 if dense else 64)
     shape = tuple(query.shape[:-1]) + (dv,)
@@ -930,10 +931,11 @@ def sparse_attention(
         preload,
         rows,
         block,
+        buffers,
+        probability_layout,
     )
     if workers is None:
-        from pypto_pro.runtime.platform import get_platform_info
-
-        workers = int(get_platform_info().core_num)
-    kernel[None, workers](query, key, sparse_indices, output, float(scale))
+        kernel(query, key, sparse_indices, output, float(scale))
+    else:
+        kernel[None, workers](query, key, sparse_indices, output, float(scale))
     return output

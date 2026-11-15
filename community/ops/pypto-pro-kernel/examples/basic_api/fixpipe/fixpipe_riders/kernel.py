@@ -69,7 +69,7 @@ FP32 = pl.DT_FP32
 
 M = N = K = 64
 
-ND = pl.TensorLayout.ND
+ND = pl.ND
 
 #: 量化比例。2 的幂，浮点乘法精确。
 SCALE = 0.5
@@ -324,7 +324,7 @@ def store_order_descending(
 def store_order_nz_out(
     a: pl.Tensor[[M, K], FP16],
     b: pl.Tensor[[K, N], FP16],
-    out: pl.Tensor[[M, PAGES, N], FP16, pl.TensorLayout.NZ],
+    out: pl.Tensor[[M, PAGES, N], FP16, pl.NZ],
 ):
     """同一个升序 `order=[0, 2]`，但目的 Tensor 是 **NZ**——也被拒。
 

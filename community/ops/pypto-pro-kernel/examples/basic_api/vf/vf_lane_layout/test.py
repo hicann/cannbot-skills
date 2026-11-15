@@ -27,7 +27,7 @@ r"""十个改排布或改位宽的算子：`interleave` `de_interleave` `squeeze
 | `astype(a, preg, dtype=I32)` | `2` | **真转换**（`vcvt`），默认**就近取偶** |
 | `astype(..., round_mode=CAST_TRUNC)` | `1` | 同一个算子，换取整模式 |
 | `bit_cast(a, dtype=I32)` | `1069547520` | **只改视图**，`0x3FC00000` 原样读成整数 |
-| `truncate(a, preg)` | `1.0` | 向零取整，**结果还是 FP32** |
+| `truncate(a, preg, round_mode=CAST_TRUNC)` | `1.0` | 显式向零取整，**结果还是 FP32** |
 | `muls_cast(a, 4.0, preg, dtype=FP16)` | `6.0`（FP16） | 乘完转窄，**dtype 只能是 FP16** |
 
 `test_astype_and_bit_cast_differ_by_orders_of_magnitude` 直接断言这两个差着数量级——
@@ -330,7 +330,7 @@ def test_astype_rounds_to_nearest_even_by_default(device):
 
 
 def test_truncate_stays_in_floating_point(device):
-    """`truncate` 的结果仍是 FP32——它取整但不换类型。这是它和 `astype` 的区别。
+    """`truncate(round_mode=CAST_TRUNC)` 的结果仍是 FP32，它取整但不换类型。
 
     取整规则上它等于 `astype(round_mode=CAST_TRUNC)`，差别只在输出类型。
     """

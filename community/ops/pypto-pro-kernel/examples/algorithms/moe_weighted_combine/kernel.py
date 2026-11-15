@@ -102,7 +102,7 @@ def _make_kernels(tokens, records, dims, workers, shards, group_width):
                     scaled = pl.simt.rint(product * SCALE)
                     contribution = pl.simt.cast(scaled, INT64)
                     pl.simt.atomic_add(
-                        partials[block, shard, token, column], contribution
+                        partials, [block, shard, token, column], contribution
                     )
 
     @pl.vector_function(mode="simt", max_threads=THREADS)

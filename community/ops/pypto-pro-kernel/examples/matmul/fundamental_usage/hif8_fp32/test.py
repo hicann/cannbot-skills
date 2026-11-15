@@ -111,7 +111,7 @@ def test_the_whole_operand_path_is_hf8():
     import pypto_pro as pp
 
     program, _ = matmul_hf8.to_kernel_def().parse_target_program(pp.ir.SectionKind.Cube)
-    text = pp.ir.python_print(program)
+    text = program.as_python()
 
     by_space: dict[str, set[str]] = {}
     for dtype, space in _TILE_TYPE.findall(text):

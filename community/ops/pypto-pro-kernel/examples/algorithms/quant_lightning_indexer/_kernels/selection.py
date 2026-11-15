@@ -43,7 +43,7 @@ def keys_from_scores(scores, keys, size, valid_size):
 
 
 @pl.vector_function
-def emit_ordered(scores, out_idx, out_val, topk, count, offset, write_values=True):
+def emit_ordered(scores, out_idx, out_val, topk, count, offset, write_values):
     """All keys fit: preserve logical order and pad without selection."""
     p = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=U32)
     inf_bits = vf.full(0xFF80, p, dtype=U32)
@@ -78,8 +78,9 @@ def emit_selection(
     mapping,
     mapped,
     offset,
-    write_values=True,
+    write_values,
 ):
+    _p16 = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=U16)
     p32 = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=U32)
     for c in pl.range(0, topk, 64):
         active = vf.update_mask(pl.min(64, topk - c), dtype=U32)
@@ -282,7 +283,7 @@ def make_select(local_width, topk, chunk=16384, mapped=False, add_offset=False):
                     pl.set_validshape(mt, [1, size])
                     pl.load(mt, index_map, [row, part * chunk])
                 keys_from_scores(st, kt, local_width, size)
-                histograms_high_vf(ht, kt, local_width // 256)
+                histograms_high_vf(ht, kt, local_width // 256, 0)
                 find_high_bin_and_histograms_low(
                     lt,
                     it,
@@ -291,10 +292,10 @@ def make_select(local_width, topk, chunk=16384, mapped=False, add_offset=False):
                     bt,
                     nt,
                     local_width - pl.min(topk, size) + 1,
-                    local_width // 256,
+                    local_width // 256, 0,
                 )
                 find_kth_vf(tt, lt, it, bt, nt)
-                collect_indices_gt_eq_vf(xt, kt, tt, 0, local_width // 128)
+                collect_indices_gt_eq_vf(xt, kt, tt, 0, local_width // 128, 0)
                 offset = 0
                 if add_offset:
                     offset = pl.getval(offsets, row)
@@ -308,7 +309,7 @@ def make_select(local_width, topk, chunk=16384, mapped=False, add_offset=False):
                     part * chunk,
                     mt,
                     mapped,
-                    offset,
+                    offset, True,
                 )
                 pl.set_validshape(ot, [1, topk])
                 pl.set_validshape(vt, [1, topk])
@@ -319,7 +320,7 @@ def make_select(local_width, topk, chunk=16384, mapped=False, add_offset=False):
 
 
 @pl.vector_function
-def histograms_high_vf(hist_high_tile, score_u16_tile, hist_loop: pl.DT_INT64, base=0):
+def histograms_high_vf(hist_high_tile, score_u16_tile, hist_loop: pl.DT_INT64, base):
     """Histogram high byte (BYTE_1, MSB) — chistv2 accumulates into dst reg."""
     preg_b8 = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=pl.DT_UINT8)
     preg_b16 = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=pl.DT_UINT16)
@@ -371,7 +372,7 @@ def find_high_bin_and_histograms_low(
     nk_value_tile,
     bottom_k,
     hist_loop,
-    base=0,
+    base,
 ):
     p8 = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=pl.DT_UINT8)
     p16 = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=U16)
@@ -458,7 +459,7 @@ def collect_indices_gt_eq_vf(
     kth_value_tile,
     begin_idx: pl.DT_INT64,
     vf_loop: pl.DT_INT64,
-    base=0,
+    base,
 ):
     """Collect indices where value > kth (GT), then value == kth (EQ).
 
@@ -477,21 +478,21 @@ def collect_indices_gt_eq_vf(
 
     # Pass 1: collect GT indices
     for i in pl.range(0, vf_loop):
-        idx_c = vf.arange(begin_idx + i * 128, dtype=pl.DT_INT16)
+        idx_c = vf.arange(begin_idx + i * 128, dtype=pl.DT_UINT16)
         vreg_input = vf.load_align(score_u16_tile, base + i * 128)
         pout_gt = vf.gt(vreg_input, kth_value, preg_b16)
         sqz_idx_out = vf.squeeze(
-            idx_c, pout_gt, gather_mode=pl.SqueezeMode.STORE_REG, dtype=pl.DT_UINT16
+            idx_c, pout_gt, gather_mode=pl.SqueezeMode.STORE_REG
         )
         vf.squeeze_store_unalign(output_idx_tile, sqz_idx_out, align_idx)
 
     # Pass 2: collect EQ indices (appends after GT)
     for i in pl.range(0, vf_loop):
-        idx_c = vf.arange(begin_idx + i * 128, dtype=pl.DT_INT16)
+        idx_c = vf.arange(begin_idx + i * 128, dtype=pl.DT_UINT16)
         vreg_input = vf.load_align(score_u16_tile, base + i * 128)
         pout_eq = vf.eq(vreg_input, kth_value, preg_b16)
         sqz_idx_out = vf.squeeze(
-            idx_c, pout_eq, gather_mode=pl.SqueezeMode.STORE_REG, dtype=pl.DT_UINT16
+            idx_c, pout_eq, gather_mode=pl.SqueezeMode.STORE_REG
         )
         vf.squeeze_store_unalign(output_idx_tile, sqz_idx_out, align_idx)
 

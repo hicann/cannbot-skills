@@ -101,60 +101,56 @@ CUBE_WORKERS = 28
 VEC_WORKERS = 56
 
 
-def _rmsnorm_vf(width):
-    """Row RMSNorm over a compile-time width; emits three BF16 components."""
-    n_regs = width // 64
-    inv_width = 1.0 / width
-
-    @pl.vector_function
-    def rmsnorm_row(src, gamma, dst0, dst1, dst2, eps: pl.DT_FP32):
-        preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
-        total = vf.full(0.0, preg, dtype=FP32)
-        for r in pl.range(n_regs):
-            reg = vf.load_align(src, r * 64)
-            square = vf.mul(reg, reg, preg)
-            part = vf.reduce_sum(square, preg)
-            total = vf.add(total, part, preg)
-        mean = vf.muls(total, inv_width, preg)
-        mean = vf.adds(mean, eps, preg)
-        rms = vf.sqrt(mean, preg)
-        rms_b = vf.full(rms, preg)
-        for r in pl.range(n_regs):
-            reg = vf.load_align(src, r * 64)
-            g16 = vf.load_align(gamma, r * 64, dist=pl.LoadDist.UNPK)
-            scale = vf.astype(g16, preg, dtype=FP32, layout=pl.CastLayout.ZERO)
-            norm = vf.div(reg, rms_b, preg)
-            out = vf.mul(norm, scale, preg)
-            c0 = vf.astype(
-                out,
-                preg,
-                dtype=BF16,
-                layout=pl.CastLayout.ZERO,
-                round_mode=pl.VFRoundMode.CAST_RINT,
-            )
-            f0 = vf.astype(c0, preg, dtype=FP32, layout=pl.CastLayout.ZERO)
-            rem1 = vf.sub(out, f0, preg)
-            c1 = vf.astype(
-                rem1,
-                preg,
-                dtype=BF16,
-                layout=pl.CastLayout.ZERO,
-                round_mode=pl.VFRoundMode.CAST_RINT,
-            )
-            f1 = vf.astype(c1, preg, dtype=FP32, layout=pl.CastLayout.ZERO)
-            rem2 = vf.sub(rem1, f1, preg)
-            c2 = vf.astype(
-                rem2,
-                preg,
-                dtype=BF16,
-                layout=pl.CastLayout.ZERO,
-                round_mode=pl.VFRoundMode.CAST_RINT,
-            )
-            vf.store_align(dst0, c0, preg, r * 64, dist=pl.StoreDist.PACK_B32)
-            vf.store_align(dst1, c1, preg, r * 64, dist=pl.StoreDist.PACK_B32)
-            vf.store_align(dst2, c2, preg, r * 64, dist=pl.StoreDist.PACK_B32)
-
-    return rmsnorm_row
+@pl.vector_function
+def _rmsnorm_row(
+    src, gamma, dst0, dst1, dst2, eps: pl.DT_FP32,
+    width: pl.DT_INT64, inv_width: pl.DT_FP32,
+):
+    preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
+    total = vf.full(0.0, preg, dtype=FP32)
+    for r in pl.range(width // 64):
+        reg = vf.load_align(src, r * 64)
+        square = vf.mul(reg, reg, preg)
+        part = vf.reduce_sum(square, preg)
+        total = vf.add(total, part, preg)
+    mean = vf.muls(total, inv_width, preg)
+    mean = vf.adds(mean, eps, preg)
+    rms = vf.sqrt(mean, preg)
+    rms_b = vf.full(rms, preg)
+    for r in pl.range(width // 64):
+        reg = vf.load_align(src, r * 64)
+        g16 = vf.load_align(gamma, r * 64, dist=pl.LoadDist.UNPK)
+        scale = vf.astype(g16, preg, dtype=FP32, layout=pl.CastLayout.ZERO)
+        norm = vf.div(reg, rms_b, preg)
+        out = vf.mul(norm, scale, preg)
+        c0 = vf.astype(
+            out,
+            preg,
+            dtype=BF16,
+            layout=pl.CastLayout.ZERO,
+            round_mode=pl.VFRoundMode.CAST_RINT,
+        )
+        f0 = vf.astype(c0, preg, dtype=FP32, layout=pl.CastLayout.ZERO)
+        rem1 = vf.sub(out, f0, preg)
+        c1 = vf.astype(
+            rem1,
+            preg,
+            dtype=BF16,
+            layout=pl.CastLayout.ZERO,
+            round_mode=pl.VFRoundMode.CAST_RINT,
+        )
+        f1 = vf.astype(c1, preg, dtype=FP32, layout=pl.CastLayout.ZERO)
+        rem2 = vf.sub(rem1, f1, preg)
+        c2 = vf.astype(
+            rem2,
+            preg,
+            dtype=BF16,
+            layout=pl.CastLayout.ZERO,
+            round_mode=pl.VFRoundMode.CAST_RINT,
+        )
+        vf.store_align(dst0, c0, preg, r * 64, dist=pl.StoreDist.PACK_B32)
+        vf.store_align(dst1, c1, preg, r * 64, dist=pl.StoreDist.PACK_B32)
+        vf.store_align(dst2, c2, preg, r * 64, dist=pl.StoreDist.PACK_B32)
 
 
 @pl.vector_function
@@ -274,32 +270,29 @@ def _split_rope(src, cos_tile, sin_tile, hi_tile, lo_tile, lo2_tile, qrope_tile)
         vf.store_align(qrope_tile, packed, preg, h * DR, dist=pl.StoreDist.PACK_B32)
 
 
-def _rmsnorm_full_vf(width):
-    n_regs = width // 64
-    inv_width = 1.0 / width
-
-    @pl.vector_function
-    def rmsnorm_full(src, gamma, dst0, dst1, dst2, eps: pl.DT_FP32):
-        preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
-        total = vf.full(0.0, preg, dtype=FP32)
-        for r in pl.range(n_regs):
-            reg = vf.load_align(src, r * 64)
-            square = vf.mul(reg, reg, preg)
-            part = vf.reduce_sum(square, preg)
-            total = vf.add(total, part, preg)
-        mean = vf.muls(total, inv_width, preg)
-        mean = vf.adds(mean, eps, preg)
-        rms = vf.sqrt(mean, preg)
-        rms_b = vf.full(rms, preg)
-        for r in pl.range(n_regs):
-            reg = vf.load_align(src, r * 64)
-            g16 = vf.load_align(gamma, r * 64, dist=pl.LoadDist.UNPK)
-            scale = vf.astype(g16, preg, dtype=FP32, layout=pl.CastLayout.ZERO)
-            norm = vf.div(reg, rms_b, preg)
-            out = vf.mul(norm, scale, preg)
-            vf.store_align(dst0, out, preg, r * 64)
-
-    return rmsnorm_full
+@pl.vector_function
+def _rmsnorm_full(
+    src, gamma, dst0, dst1, dst2, eps: pl.DT_FP32,
+    width: pl.DT_INT64, inv_width: pl.DT_FP32,
+):
+    preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
+    total = vf.full(0.0, preg, dtype=FP32)
+    for r in pl.range(width // 64):
+        reg = vf.load_align(src, r * 64)
+        square = vf.mul(reg, reg, preg)
+        part = vf.reduce_sum(square, preg)
+        total = vf.add(total, part, preg)
+    mean = vf.muls(total, inv_width, preg)
+    mean = vf.adds(mean, eps, preg)
+    rms = vf.sqrt(mean, preg)
+    rms_b = vf.full(rms, preg)
+    for r in pl.range(width // 64):
+        reg = vf.load_align(src, r * 64)
+        g16 = vf.load_align(gamma, r * 64, dist=pl.LoadDist.UNPK)
+        scale = vf.astype(g16, preg, dtype=FP32, layout=pl.CastLayout.ZERO)
+        norm = vf.div(reg, rms_b, preg)
+        out = vf.mul(norm, scale, preg)
+        vf.store_align(dst0, out, preg, r * 64)
 
 
 # M=1 Vec: A at 0; two 114688-byte B slots at 8192; C ends at 239360.
@@ -949,9 +942,9 @@ def _cooperative_up(
 
 @lru_cache(maxsize=None)
 def _kernels(he, vector_up=False):
-    rms_cq = _rmsnorm_full_vf(HCQ) if vector_up else _rmsnorm_vf(HCQ)
+    rms_cq = _rmsnorm_full if vector_up else _rmsnorm_row
     cq_dtype = FP32 if vector_up else BF16
-    rms_kv = _rmsnorm_vf(HCKV)
+    rms_kv = _rmsnorm_row
 
     # ------------------------------------------------------------------ down
     def make_down(nb, ks, bdepth, tag):
@@ -1189,7 +1182,7 @@ def _kernels(he, vector_up=False):
                 pl.load(cq2, cq_raw, [2, row, 0], order=[1, 2])
                 pl.load(cq3, cq_raw, [3, row, 0], order=[1, 2])
                 _sum_rows(cq, cq1, cq2, cq3, HCQ)
-                rms_cq(cq, gc, c0, c1, c2, eps_cq)
+                rms_cq(cq, gc, c0, c1, c2, eps_cq, HCQ, 1.0 / HCQ)
                 pl.store(c_q0, c0, [row, 0])
                 if not vector_up:
                     pl.store(c_q1, c1, [row, 0])
@@ -1207,7 +1200,7 @@ def _kernels(he, vector_up=False):
                 pl.load(dk2, dkv_raw, [2, row, 0], order=[1, 2])
                 pl.load(dk3, dkv_raw, [3, row, 0], order=[1, 2])
                 _sum_rows(dk, dk1, dk2, dk3, NKR)
-                rms_kv(dk, gk, kv, kv1, kv2, eps_ckv)
+                rms_kv(dk, gk, kv, kv1, kv2, eps_ckv, HCKV, 1.0 / HCKV)
                 pl.store(c_kv, kv, [row, 0])
 
                 sn = sn_g.current()
@@ -1367,8 +1360,6 @@ def _kernels(he, vector_up=False):
                         init=False,
                     )
                 pl.store(qr, cur_acc, [m0, n0])
-
-    # ------------------------------------------------------------- up (slab)
 
     # ----------------------------------------------------------------- split
     @pl.jit(arch="a5", auto_mutex=True, name="mla_prolog_split")

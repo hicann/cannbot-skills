@@ -455,6 +455,7 @@ def make_decode_kernel(batch, keys, heads, nope, rope=64, *, rows=64, preload=1)
             dtype=dtype,
             target_memory=pl.MemorySpace.Vec,
             layout=pl.NZ,
+            compact=0,
         )
         nz_lo_group = pl.make_tile_group(
             type=nz_lo_group_type,

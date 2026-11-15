@@ -1,16 +1,10 @@
-# Measured Support Findings
+# Supporting interfaces and version-scoped findings
 
-**All eight examples were run on board** (2026-09-28, Ascend950PR). The examples are in [`examples/basic_api/support/`](../../examples/basic_api/support/). **At the close of this chapter, all 40 examples in the example plan had been implemented.**
+**Calibration context:** Ascend950PR, 2026-09-28. Individually stated behavior versions and toolchains qualify their own findings; these measurements do not establish acceptance on a different runtime.
 
-`debug_probe` and `dtype_carriers` were delivered in batch 1 (you need `printf` and a low-precision carrier table on the first day of writing VF); their findings are in §13 / §14 at the end. Sections 2–12 cover the six examples from batch 6.
+## 1. Supporting interface examples
 
-The contract table is in [`tooling/example-coverage.md`](../tooling/example-coverage.md).
-
-## 1. Responsibilities of the Eight Examples
-
-The six examples in batch 6 are `spr_ctrl` (CTRL bitfields), `saturation` (saturation flags), `block_grid` (core/subcore indices), `scalar_const` (scalars and compile-time constants), `entry_and_loop` (`pl.jit` / `pl.pipeline` / `pl.range`), and `layout_table` (legal layout combinations). The two examples delivered in batch 1 are at the end: `debug_probe` (§13) and `dtype_carriers` (§14).
-
-**None of the `spr_ctrl` and `saturation` APIs has an ST**—those two examples probe behavior from scratch rather than copying an ST. See [`tooling/example-coverage.md`](../tooling/example-coverage.md) for the contract table; use `pytest examples/basic_api/support -q` for the current test count.
+[`examples/basic_api/support/`](../../examples/basic_api/support/) covers CTRL bitfields (`spr_ctrl`), saturation flags, block/subcore indexing (`block_grid`), scalar constants, entry/loop forms, layout combinations, debug probes and dtype carriers. Sections 13 and 14 own the last two topics. The [coverage table](../tooling/example-coverage.md) maps contracts to examples; run the relevant tests on the selected toolchain for current acceptance.
 
 ## 2. CTRL Register: Entry Value Differs from the Documented Default
 
@@ -63,6 +57,10 @@ If passing `saturate=ON` to `astype` has no effect, the first instinct is to thi
 
 ## 5. `get_subblock_num` Depends on Whether the Kernel Has a Cube Section
 
+When porting a work partition, verify block and subblock indices on the target with the same kernel sections. A `pl.store` keyword or the presence of a Python API cannot establish the divisor for worker ownership.
+
+The native launcher resolves the automatic block count from the executing stream's core budget and the compiled kernel's engine requirements. An explicit `kernel[None, W]` must fit that stream's block budget; the current `runtime/jit.py` reports an over-budget request before launching it. A device-wide core count alone does not establish the stream's available budget. Use the automatic launch for an initial legal control or establish the actual limit before comparing explicit worker counts; legality does not establish the fastest count.
+
 | Kernel | `subblock_num` | `subblock_idx` (4 blocks) |
 | --- | ---: | --- |
 | Only `section_vector` | 1 | 0, 0, 0, 0 |
@@ -86,6 +84,7 @@ For a pure Vector loop that processes one row per iteration, use `pl.range(pl.ge
 
 The distinction is **where each can be called**: `pl.get_block_idx()` is rejected during parsing inside a SIMT body (`parse_op_call` in `_call_parser.py`), while `pl.simt.block_idx()` is the SIMT-side entry point. For the measured block index and grid size above, their values agree across the two scopes; do not infer different ownership merely from the namespace.
 
+<!-- kernel-query: {"id":"gm-scalar-write-ownership","aliases":["GM scalar writes","adjacent multiworker scalar writes","GM 标量写回"],"symbols":["pl.setval"],"when":"Multiple workers write nearby values through the GM scalar path; a UB Tile setval or a single-worker control has a different contract.","missing_facts":["Identify GM Tensor versus UB Tile, physical write regions, worker count, dense output layout, installed behavior and complete readback/guards before selecting the writeback route."],"discovery_terms":[["gm","global","GM"],["scalar","setval","标量"],["write","writes","writeback","写回"]]} -->
 ## 7. Small GM Scalar Writes from Multiple Blocks
 
 The following historical observation applies only to the GM scalar path using `pl.setval`; eight blocks each write four INT32 values to their own segment. Do not generalize it into a rule requiring gaps between all GM writes.
@@ -201,6 +200,7 @@ Tile declaration table (A5, FP16):
 
 `set_mm_layout_transform` was checked only to show that it is accepted and does not change the result of one ordinary transfer; only a matmul that accumulates along K reveals the transposed direction. **No layer rejects it inside a vector section.**
 
+<!-- kernel-query: {"id":"debug-assert-behavior","aliases":["pto_assert behavior","assert logging","日志断言"],"term_groups":[["log","logging","print","打印","日志"],["without abort","does not abort","not abort","不中止","不终止","不退出"]],"symbols":["pl.pto_assert"],"when":"A device assertion is being used as an abort or safety boundary; reconcile the selected official documentation, source docstring and matching installed behavior.","missing_facts":["A source statement or historical probe does not establish the current installed assertion behavior; keep a potentially unsafe continuation in an isolated diagnostic probe."]} -->
 ## 13. `debug_probe`: Printing, Assertions, and Their Boundaries
 
 **These four constraints determine how the tests in later examples are written**, so they are collected here. See [`examples/basic_api/support/debug_probe/`](../../examples/basic_api/support/debug_probe/test.py) for reproductions and a table of four pitfalls.
@@ -210,13 +210,15 @@ Tile declaration table (A5, FP16):
 | Printing cannot be used inside an `@pl.vector_function` body (`_call_parser.py:1159`, rejected during parsing). | To inspect a VF register, `store_align` it to a Tile, then call `dump_data` **outside** the body. |
 | Device printing is not flushed by `torch.npu.synchronize()`. | To **assert** printed content, read the child process's stdout. |
 | Each print point is multiplied by the number of cores (56 copies for one point). | Two points in a probe produce more than 400 lines, burying pytest's summary line (see [verification/board-runs.md](../verification/board-runs.md) §1). |
-| `pl.pto_assert` only logs and **does not abort**. | It is not a safety net. The source docstring says “abort if condition is false”; official documentation and measurement both show logging only—when the three evidence sources disagree, state which one is authoritative. |
+| The selected `pl.pto_assert` contract and docstring specify logging without aborting. | The official contract (`pypto/docs/zh/api/pro_api/Utils-API/debugging/pto_assert.md` in the matching source checkout) and `_api.py::pto_assert` (`pypto/python/pypto_pro/language/_api.py` in the matching source checkout) at review baseline `cbd3c4a778` both describe continuation. Do not use the assertion as a safety boundary; establish behavior on the matching installation with an isolated probe rather than promoting a source statement or historical pass to current execution evidence. |
 
 One related point: only `pl.trap` unconditionally terminates execution; **give it its own test shape**, not the same process as other cases.
 
 ## 14. `dtype_carriers`: Dtype Carriers and Transfer Table
 
 Bit-width groups for each dtype, formulas for 69 combinations, the `HF8→uint8` mapping, and three independent confirmations for 4-bit formats are all in [`examples/basic_api/support/dtype_carriers/`](../../examples/basic_api/support/dtype_carriers/test.py). This page keeps only cross-example findings—**four constraints that affect how other chapters declare tensors**:
+
+Host and native dtype objects belong to different interfaces. In a Torch wrapper, compare `x.dtype` with `torch.float32` (and other Torch dtypes); use `pl.DT_FP32` in native `pl.Tensor` / `pl.TileType` declarations. Equality between a Torch dtype and a PyPTO `DataType` enum does not validate a compatible input.
 
 | Fact | Affected |
 | --- | --- |
@@ -236,3 +238,14 @@ core_id = pl.get_block_idx() // pl.get_subblock_num()
 The official `cube_vector_fusion.md` example `matmul_softmax_kernel` contains this line, but no documentation states it as a rule. Diagnostic signature when division is omitted (highly useful for diagnosis): roughly 70% of elements are wrong, large parts of output retain their initial values (even threads write only the first half of each core's range, odd threads write only the second half), error magnitude looks random from tens to 1e33, and **every kernel variant fails in exactly the same way** (ruling out a synchronization bug unique to one variant). This is in the same family as §5 (`get_subblock_num` depends on whether there is a cube section) and §6 (the two index APIs).
 
 **Launch has different semantics; do not extrapolate from this rule:** for a mixed kernel, `X` in `kernel[None, X]` is the **number of execution groups** (one AIC + two AIVs per group; official `kernel_function.md` “Meaning of blockDim”, `LimitLaunchBlocks` in `pypto_launch.h` does not divide the request by 2; all three evidence sources agree, board-verified 2026-09-29). “Vector-side index is thread-based” ⇏ “launch count is thread-based”—passing `2×core_count` to match thread count really launches twice as many groups, with extra ghost groups whose `core_id ≥ core_count` writes past `out` into GM rows `[M, 2M)`. The first call may still return correct output (real groups filled `out`), while an adjacent tensor is silently changed or the device raises 507015 (the location drifts with `out` size). See [api/crosscore-sync.md](crosscore-sync.md) “Mix-kernel block_dim is a group count” for the full diagnosis and address accounting.
+
+## 16. Bounded tensor collections under a fixed-arity interface
+
+First check the target runtime's supported parameter kinds and list interface; a historical lack of TensorList support is not a current capability verdict. If only fixed parameters are available, a finite, contract-bounded list of contiguous rank-insensitive elementwise inputs can be considered for separate typed `Ptr` slots plus runtime lengths/metadata. This is an interface candidate requiring target parsing and end-to-end device validation, not a retained validated TensorList kernel.
+
+- Establish the maximum list length, relationships between multiple lists, each slot's dtype/device/layout and element-count/address-arithmetic bounds. A list is different from one tensor with a batch axis. Noncontiguous or rank-sensitive semantics need a separately specified shape/stride ABI; flattening them by element count loses meaning.
+- Validate real tensors in the public wrapper; do not assume pointer annotations provide Tensor rank/dtype checks. When supported, pass each original tensor through its declared pointer parameter and create the permitted logical view in the native kernel with `pl.make_tensor`. An integer table of host `data_ptr()` values does not establish that runtime scalars can become native pointers.
+- For padded slots, specify safe pointer arguments and zero work. Keep all loads, stores and nonempty view construction behind the actual work range; test guards proving padded outputs stay untouched. Define empty-list and all-empty behavior separately, since there may be no real slot to reuse. Do not infer a large pointer signature's ABI support from an older Tensor-parameter test.
+- Reuse a bounded local-buffer plan across sequential list items when lifetimes permit; do not multiply UB allocation by the maximum arity merely because slots are written out in source. Count work across the whole list using the [continuous ownership principle](gemm.md#distribute-tiles-across-runtime-groups), so every short item does not repeatedly select the same few workers.
+
+Compare a padded fixed-arity entry with permitted batching/launch alternatives using [complete-call timing](../verification/native-timing.md#choose-and-name-the-metric), including wrapper overhead and compilation variants. The task and [delivery contract](../workflows/delivery.md#kernel-definitions-and-dispatch) govern entry count and launch structure; this candidate adds no universal one-launch rule, source generator or kernel factory.

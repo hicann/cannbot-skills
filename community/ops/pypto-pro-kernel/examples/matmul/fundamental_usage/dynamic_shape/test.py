@@ -111,7 +111,7 @@ def test_the_ir_has_no_phase_and_both_init_paths():
     program, _ = matmul_dynamic.to_kernel_def().parse_target_program(
         pp.ir.SectionKind.Cube
     )
-    text = pp.ir.python_print(program)
+    text = program.as_python()
 
     assert "phase" not in text.lower(), "gemm 不该产出 phase"
     assert "matmul_acc" in text, "init=False 那一臂应当降成 matmul_acc"

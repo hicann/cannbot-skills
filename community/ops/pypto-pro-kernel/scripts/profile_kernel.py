@@ -15,11 +15,24 @@ task sums do not include host dispatch time or gaps between tasks.
 """
 
 import csv
+import logging
+from functools import partial
 from pathlib import Path
+import shutil
 import statistics
 import tempfile
 import math
 import time
+
+_LOGGER = logging.getLogger(__name__)
+
+_METRIC_GROUPS = (
+    "PipeUtilization",
+    "Memory",
+    "MemoryUB",
+    "L2Cache",
+    "ResourceConflictRatio",
+)
 
 
 def _task_rows(path, *, repeats, tasks_per_call):
@@ -217,7 +230,9 @@ def paired_task_statistics(path, *, repeats, before_tasks, after_tasks, order="A
     return _paired_statistics(calls, before_tasks, after_tasks, order)
 
 
-def _runtime(*, pipe_metrics=False):
+def _runtime(*, pipe_metrics=False, metric=None):
+    if metric is not None and metric not in _METRIC_GROUPS:
+        raise ValueError(f"metric must be one of {_METRIC_GROUPS}")
     import torch
     import torch_npu
 
@@ -236,8 +251,9 @@ def _runtime(*, pipe_metrics=False):
             f"torch_npu {torch_npu.__version__}: unavailable profiler capabilities {missing}; no timing established"
         )
     try:
+        selected = metric or ("PipeUtilization" if pipe_metrics else None)
         metrics = (
-            {"aic_metrics": profiler.AiCMetrics.PipeUtilization} if pipe_metrics else {}
+            {"aic_metrics": getattr(profiler.AiCMetrics, selected)} if selected else {}
         )
         config = profiler._ExperimentalConfig(
             export_type=[profiler.ExportType.Text],
@@ -253,7 +269,8 @@ def _runtime(*, pipe_metrics=False):
 
 def _capture_calls(call, *, repeats, tasks_per_call, runtime, pipe_metrics=False):
     torch, _, profiler, config = runtime
-    with tempfile.TemporaryDirectory(prefix="native-task-profile-") as directory:
+    directory = tempfile.mkdtemp(prefix="native-task-profile-")
+    try:
         with profiler.profile(
             activities=[profiler.ProfilerActivity.NPU],
             with_stack=False,
@@ -277,14 +294,25 @@ def _capture_calls(call, *, repeats, tasks_per_call, runtime, pipe_metrics=False
             pipes = task_pipe_statistics(
                 files[0], repeats=repeats, tasks_per_call=tasks_per_call
             )
-            return calls, pipes
-    return calls
+            result = calls, pipes
+        else:
+            result = calls
+    except BaseException:
+        _LOGGER.error(
+            "Profiler capture failed; artifacts preserved at %s; "
+            "no device timing established",
+            directory,
+        )
+        raise
+    else:
+        shutil.rmtree(directory)
+        return result
 
 
 def measure_native(call, *, warmup=3, repeats=20, tasks_per_call=1):
     """Return whole-call and per-task durations, excluding event/host intervals.
 
-    Caller owns device selection, external board lock and timeout. This function
+    Caller owns device selection, load comparability and timeout. This function
     invokes call warmup + repeats times; validate numerical results separately.
     """
     if any(
@@ -311,7 +339,7 @@ def measure_pipes(call, *, warmup=3, repeats=20, tasks_per_call=1):
     """Collect warmed task-level PipeUtilization alongside complete-call durations.
 
     Use per-core msprof op output when these aggregates cannot explain a tail.
-    Caller owns immutable inputs, numerical validation, device lock and timeout.
+    Caller owns immutable inputs, numerical validation, device selection and timeout.
     """
     if any(
         type(value) is not int or value < 1
@@ -339,13 +367,56 @@ def measure_pipes(call, *, warmup=3, repeats=20, tasks_per_call=1):
     }
 
 
+def measure_metrics(call, *, metric, warmup=3, repeats=20, tasks_per_call=1):
+    """Collect one supported AiCMetrics group with task-level native timing.
+
+    Counter names, units, zeros and missing samples retain their exported form.
+    These aggregates are not per-core data or an authenticated HBM byte count.
+    L2Cache selects the metric group, not the separate l2_cache export switch.
+    Caller owns source/variant identity, correctness, stream and timeout.
+    """
+    if metric not in _METRIC_GROUPS:
+        raise ValueError(f"metric must be one of {_METRIC_GROUPS}")
+    if any(
+        type(value) is not int or value < 1
+        for value in (warmup, repeats, tasks_per_call)
+    ):
+        raise ValueError("warmup, repeats and tasks_per_call must be positive integers")
+    runtime = _runtime(metric=metric)
+    torch, torch_npu, _, _ = runtime
+    for _ in range(warmup):
+        call()
+    torch.npu.synchronize()
+    calls, counters = _capture_calls(
+        call,
+        repeats=repeats,
+        tasks_per_call=tasks_per_call,
+        runtime=runtime,
+        pipe_metrics=True,
+    )
+    return {
+        **_statistics(calls),
+        "counter_group": metric,
+        "counter_scope": "task_aggregate",
+        "counters": counters,
+        "torch": str(torch.__version__),
+        "torch_npu": str(torch_npu.__version__),
+    }
+
+
+def _call_pair(first, second):
+    first()
+    second()
+
+
 def compare_native(baseline, candidate, *, warmup=3, repeats=20, tasks_per_call=(1, 1)):
     """Measure AB and BA in one process; ratios pair complete native-task sums.
 
     tasks_per_call is (baseline_count, candidate_count), independent of order.
     Callbacks must use equivalent immutable inputs, repeat a fixed task sequence
     on one stream, and overwrite their outputs. Check correctness before calling.
-    Caller owns the device, board lock and timeout. Captures are always temporary.
+    Caller owns device selection, load comparability and timeout. Failed captures
+    are retained for diagnosis at the path printed with the original error.
     """
     if not isinstance(tasks_per_call, (tuple, list)) or len(tasks_per_call) != 2:
         raise ValueError(
@@ -371,12 +442,8 @@ def compare_native(baseline, candidate, *, warmup=3, repeats=20, tasks_per_call=
             (baseline, candidate) if order == "AB" else (candidate, baseline)
         )
 
-        def pair():
-            first()
-            second()
-
         calls = _capture_calls(
-            pair,
+            partial(_call_pair, first, second),
             repeats=repeats,
             tasks_per_call=before_tasks + after_tasks,
             runtime=runtime,
@@ -393,6 +460,88 @@ def compare_native(baseline, candidate, *, warmup=3, repeats=20, tasks_per_call=
     }
 
 
+def compare_configurations(
+    baseline, candidates, *, warmup=3, repeats=5, tasks_per_call=1
+):
+    """Screen named configurations in two captures, retaining adjacent AB/BA pairs.
+
+    All callbacks must use equivalent immutable inputs, overwrite their outputs
+    and emit the same positive task count on one stream. Validate every callable
+    before this function. Candidate construction and compilation stay outside
+    capture; warmup invokes each callback before any recorded calls.
+
+    AB visits candidates in mapping order; BA reverses that order. Each candidate
+    has its own adjacent baseline invocation in every repetition. With N
+    candidates, baseline runs warmup + 2*N*repeats times; each candidate runs
+    warmup + 2*repeats times. The caller owns load comparability, timeout and
+    bounded batch size. Use compare_native for different task counts and final
+    pairwise checks.
+    """
+    if not callable(baseline):
+        raise ValueError("baseline must be callable")
+    if not isinstance(candidates, dict) or not candidates:
+        raise ValueError("candidates must be a nonempty name-to-callable dictionary")
+    entries = tuple(candidates.items())
+    if any(
+        not isinstance(name, str) or not name or not callable(call)
+        for name, call in entries
+    ):
+        raise ValueError(
+            "candidate names must be nonempty strings and values must be callable"
+        )
+    if any(
+        type(value) is not int or value < 1
+        for value in (warmup, repeats, tasks_per_call)
+    ):
+        raise ValueError("warmup, repeats and tasks_per_call must be positive integers")
+    runtime = _runtime()
+    torch, torch_npu, _, _ = runtime
+    for _ in range(warmup):
+        baseline()
+        for _, candidate in entries:
+            candidate()
+    torch.npu.synchronize()
+    results = {name: [] for name, _ in entries}
+    schedules = {}
+    pair_tasks = 2 * tasks_per_call
+    for order in ("AB", "BA"):
+        sequence = entries if order == "AB" else tuple(reversed(entries))
+        schedules[order] = [name for name, _ in sequence]
+
+        def round_of_pairs(ordered_entries=sequence, baseline_first=order == "AB"):
+            for _, candidate in ordered_entries:
+                first, second = (
+                    (baseline, candidate) if baseline_first else (candidate, baseline)
+                )
+                first()
+                second()
+
+        rounds = _capture_calls(
+            round_of_pairs,
+            repeats=repeats,
+            tasks_per_call=len(entries) * pair_tasks,
+            runtime=runtime,
+        )
+        for position, (name, _) in enumerate(sequence):
+            pairs = tuple(
+                call[position * pair_tasks: (position + 1) * pair_tasks]
+                for call in rounds
+            )
+            results[name].append(
+                _paired_statistics(pairs, tasks_per_call, tasks_per_call, order)
+            )
+    return {
+        "metric": "native_task_sum_us",
+        "candidates": {name: {"orders": orders} for name, orders in results.items()},
+        "candidate_order": schedules,
+        "tasks_per_call": tasks_per_call,
+        "warmup": warmup,
+        "pairs_per_order": repeats,
+        "torch": str(torch.__version__),
+        "torch_npu": str(torch_npu.__version__),
+    }
+
+
 def compare_wall(baseline, candidate, *, warmup=3, repeats=20):
     """Pair warmed, synchronized full-call latency in AB and BA order.
 
@@ -400,7 +549,7 @@ def compare_wall(baseline, candidate, *, warmup=3, repeats=20):
     outside the callbacks, including fresh pools for single in-place updates.
     This measures host dispatch, execution and the final synchronization; it
     does not collect profiler task durations or establish numerical correctness.
-    Caller owns device selection, the board lock and an otherwise idle stream.
+    Caller owns device selection, load comparability and an otherwise idle stream.
     """
     if any(type(value) is not int or value < 1 for value in (warmup, repeats)):
         raise ValueError("warmup and repeats must be positive integers")

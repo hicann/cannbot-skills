@@ -281,22 +281,24 @@ def test_a_vf_op_outside_vector_function_is_refused():
     assert "vector_function" in message, message
 
 
-def _vector_ir(kernel):
+def _vector_ir(kernel, *, insert_mutex=False):
     program, _ = kernel.to_kernel_def().parse_target_program(pp.ir.SectionKind.Vector)
-    return pp.ir.python_print(program)
+    if insert_mutex:
+        program = pp.ir.Pass.insert_sync()(program)
+    return pp.ir.text_dump(program)
 
 
 def _op_names(text):
-    return re.findall(r"@([\w.]+)\(", text)
+    return re.findall(r"\b([\w.]+)\(", text)
 
 
 def test_the_two_sync_forms_compile_to_different_mechanisms():
     """验证 5。防验证 2 变成空测：两版必须真的不同，而 vf 体必须真的相同。
 
-    不需要卡。auto_mutex 走 buffer mutex（按 ``mutex_ids`` 上锁），手工走 pipe event（按
-    ``event_id`` 配对）——不是同一件事的两种写法。
+    不需要卡。自动版本在解析后运行与 JIT 相同的 ``insert_sync`` pass，再检查 buffer mutex；
+    手工版本直接检查解析后的 pipe event。两者的 VF 运算序列必须保持一致。
     """
-    auto_ops = _op_names(_vector_ir(vf_auto))
+    auto_ops = _op_names(_vector_ir(vf_auto, insert_mutex=True))
     manual_ops = _op_names(_vector_ir(vf_manual_sync))
 
     # vf 体是同一个 Python 函数，op 序列必须逐条相同
@@ -306,12 +308,14 @@ def test_the_two_sync_forms_compile_to_different_mechanisms():
     assert auto_vf, "vf 体一条 op 都没有，说明没解析到 vf"
 
     # 同步机制必须不同类
-    auto_sync = [op for op in auto_ops if "mutex" in op]
+    auto_sync = [op for op in auto_ops if op.startswith("system.mutex_")]
     manual_sync = [op for op in manual_ops if "sync_" in op]
     assert auto_sync, f"auto_mutex 版没有 mutex op: {auto_ops}"
     assert manual_sync, f"手工版没有 sync op: {manual_ops}"
     assert not [op for op in auto_ops if "sync_" in op], "auto 版不该有 pipe event"
-    assert not [op for op in manual_ops if "mutex" in op], "手工版不该有 buffer mutex"
+    assert not [op for op in manual_ops if op.startswith("system.mutex_")], (
+        "手工版不该有 buffer mutex"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -52,7 +52,9 @@ def _filter_row(x_tile, values_tile, indices_tile, count_tile, cols):
         values = vf.load_align(x_tile, [0, col])
         positive = vf.gt(values, 0.0, tail_fp)
 
-        local_rank = vf.unsqueeze(positive, dtype=INT32)
+        selected = vf.select(one, zero, positive)
+        positive_rank = vf.eq(selected, one, int_mask)
+        local_rank = vf.unsqueeze(positive_rank)
         base_rank = vf.full(written, int_mask, dtype=INT32, pos=pl.DuplicatePos.LOWEST)
         destination_i32 = vf.add(local_rank, base_rank, int_mask)
         destination_u32 = vf.astype(destination_i32, int_mask, dtype=UINT32)
@@ -61,7 +63,6 @@ def _filter_row(x_tile, values_tile, indices_tile, count_tile, cols):
         vf.scatter(values_tile, values, destination_u32, positive)
         vf.scatter(indices_tile, source_indices, destination_u32, positive)
 
-        selected = vf.select(one, zero, positive)
         chunk_count = vf.reduce_sum(selected, int_mask)
         written = vf.add(written, chunk_count, int_mask)
 

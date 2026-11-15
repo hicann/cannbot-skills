@@ -111,8 +111,8 @@ carry, r = vf.addc(a, b, carry_in, preg)
 
 参数名叫 `borrow_src` 会让人以为「全 0 = 不借位」。实测是反的，验证 6 四个组合全测，就是钉这条。
 
-**为什么它们在框架里一次没被调用过、ascriptor 也没映射**：不是因为坏，是因为宽整数算术在 A5 上
-还没有用例。官方文档有调用示例，但 ST 里没有——这一例是第一份可跑的回归。
+Wide-integer operations need independent low/high-word and carry/borrow controls.
+The absence of an upstream ST caller is not evidence that the native operation is broken.
 
 ## 五、如何独立验证
 

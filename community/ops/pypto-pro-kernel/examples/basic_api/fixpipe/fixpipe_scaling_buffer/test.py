@@ -12,9 +12,10 @@ The CPU reference encodes FP32 scale bits and the signed INT8 flag, then indepen
 rounding and saturation. Powers of two and small integer products preserve the existing rtol=atol=0 criterion.
 
 Numerical controls cover FP16/INT8 move, direct GM store, column-dependent tables and bit46 saturation. Parse-only
-checks cover unsupported FP32 output, shape/dtype/space restrictions, FB capacity, a GM Tensor passed as scale and
-per-channel atomic updates. The scale consumer rejects N > 512 before launch, since INT64 tables must fit the 4096B
-Scaling space.
+checks require rejection of the unsafe scaled FP32→FP32 move route; the current official master lacks this guard, so
+that check fails. Other parse checks cover shape/dtype/space restrictions, FB capacity, a GM Tensor passed as scale and
+per-channel atomic updates. Allocation or scale consumption rejects N > 512 before launch, since INT64 tables must
+fit the 4096B Scaling space.
 
 The kernel uses MTE2→FIX synchronization before L1→Scaling. The shared Cube producer and scale table occupy disjoint L1
 ranges; the declaration helper is owned by fixpipe_riders.
@@ -25,11 +26,12 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+
+import pypto_pro as pp
 from pypto_pro._errors import (
     InvalidOperation,
     InvalidTile,
     InvalidType,
-    InvalidVal,
     NotSupported,
     OutOfRange,
 )
@@ -132,28 +134,22 @@ def test_per_channel_store_to_gm(device):
     )
 
 
-def test_per_channel_fp32_to_fp32_is_rejected(device):
-    """`FP32 → FP32` 带 per-channel 的 scale 走 `pl.move`，**解析期被拒**。
+@pytest.mark.xfail(
+    strict=True,
+    raises=pytest.fail.Exception,
+    reason="PyPTO bca90a6c lacks the guard for Acc-to-Vec FP32 -> FP32 per-channel scaling",
+)
+def test_per_channel_fp32_to_fp32_is_rejected():
+    """要求解析期拒绝会静默丢弃 scale 的 FP32→FP32 Acc→Vec 路由。
 
-    原来的行为是**静默丢弃**，和 per-tensor 那一格一样;
-    当时这一条的价值在于把缺陷的范围收窄：**per-channel 走的是完全不同的编码路**
-    （FB 里的位域，不是指令里的立即数），两条路都丢,
-    所以坏的是「目的是 UB 且目的 dtype 也是 FP32」这条路，不是 scale 怎么编。
-
-    **2026-09-27 起 pypto 在解析期拒掉这一格**（根因在 CANN 的 PTO 头，先不修）。
-    拦截不看 scale 是标量还是 Tile，所以两条编码路一起被拦——这条测试钉的就是
-    「per-channel 也被拦住了」，别只拦了 per-tensor 那一半。
+    per-channel 的 Scaling Tile 与 per-tensor 标量使用不同编码，两条路都需要保护。当前官方 master
+    缺少该 guard，因此本检查标为 strict xfail；这里只接受缺失拒绝这一失败，不将已知错误路由提交到设备。
 
     根因见 [defect](../../../../references/diagnostics/defects/fixpipe-fp32-to-fp32-drops-scale.md),
     处置见 [`diagnostics/defects/fixpipe-overview.md`](../../../../references/diagnostics/defects/fixpipe-overview.md)。
     """
-    scales = ref.column_scales(N)
-    a, b, ta, tb = _operands(device)
-    enc = torch.from_numpy(ref.encode_scales(scales)).to(device)
-    out = torch.zeros((M, N), dtype=torch.float32, device=device)
-
-    with pytest.raises(Exception) as excinfo:
-        move_to_fp32(ta, tb, enc, out)
+    with pytest.raises(NotSupported) as excinfo:
+        move_to_fp32.to_kernel_def().parse_target_program(pp.ir.SectionKind.Cube)
     assert "silently dropped" in str(excinfo.value), (
         f"报错不是那条拦截：{excinfo.value}"
     )
@@ -251,16 +247,9 @@ def test_the_columns_of_the_default_table_really_differ():
 
 
 def _reject(kernel, exc, pattern):
-    """在 host 上调一次，断言解析期就拒。传 CPU 张量就够。"""
-    a, b = ref.make_operands(M, K, N)
-    enc = torch.from_numpy(ref.encode_scales(ref.column_scales(N)))
+    """显式检查解析期拒绝，避免缺少 guard 时把非法组合提交到设备。"""
     with pytest.raises(exc, match=pattern):
-        kernel(
-            torch.from_numpy(a),
-            torch.from_numpy(b),
-            enc,
-            torch.zeros(M, N, dtype=torch.float16),
-        )
+        kernel.to_kernel_def().parse_target_program(pp.ir.SectionKind.Cube)
 
 
 def test_a_scale_tile_with_two_rows_is_rejected(device):
@@ -273,9 +262,13 @@ def test_a_column_count_not_divisible_by_16_is_rejected(device):
     _reject(scale_unaligned_cols, InvalidTile, "must be a multiple of 16")
 
 
-def test_too_many_columns_is_rejected_by_the_scale_consumer(device):
-    """The scale consumer rejects N=1024 under the 4096B INT64 table limit."""
-    _reject(scale_too_many_cols, OutOfRange, r"N must be <= 512.*got \[1, 1024\]")
+def test_too_many_columns_exceeds_scaling_storage(device):
+    """[1,1024] INT64 需要 8192B，解析期拒绝超过 4096B Scaling 容量的分配。"""
+    _reject(
+        scale_too_many_cols,
+        OutOfRange,
+        r"size 8192.*exceeds Scaling capacity .*4096 bytes",
+    )
 
 
 def test_an_fp32_scale_tile_is_rejected_with_a_conversion_hint(device):
@@ -297,8 +290,8 @@ def test_a_scale_tile_outside_the_scaling_space_is_rejected(device):
 
 
 def test_a_gm_tensor_as_scale_is_rejected(device):
-    """不能把 GM 上的表直接当 `scale=` 传——自动 per-channel 路径已经删了。"""
-    _reject(scale_from_gm_tensor, InvalidVal, "scale Tensor is not supported")
+    """scale 接受标量或 Scaling Tile，不接受直接传入的 GM Tensor。"""
+    _reject(scale_from_gm_tensor, InvalidType, r"scale expects .*got TensorType")
 
 
 def test_per_channel_cannot_be_combined_with_atomic(device):

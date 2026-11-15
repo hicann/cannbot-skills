@@ -34,7 +34,7 @@ def check(path: Path):
     source = read(path)
     if not source.pl:
         return []
-    findings = []
+    results = []
 
     def native_call(node, name):
         return (
@@ -42,14 +42,15 @@ def check(path: Path):
             and attribute_path(node.func) == f"{source.pl}.{name}"
         )
 
-    for function in ast.walk(source.tree):
+    def inspect_function(function):
+        findings = []
         if not has_decorator(function, source.pl, "jit"):
-            continue
+            return findings
         arguments = (
             function.args.posonlyargs + function.args.args + function.args.kwonlyargs
         )
         if source.pl in {arg.arg for arg in arguments}:
-            continue
+            return findings
         tensors = set()
         for arg in arguments:
             annotation = arg.annotation
@@ -70,7 +71,7 @@ def check(path: Path):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
         }
         if source.pl in rebound:
-            continue
+            return findings
         tensors -= rebound
         found = []
 
@@ -140,4 +141,8 @@ def check(path: Path):
         findings += apply_claim(
             source, function, RULE, found, counterexample_claims(function)
         )
-    return findings
+        return findings
+
+    for candidate in ast.walk(source.tree):
+        results += inspect_function(candidate)
+    return results

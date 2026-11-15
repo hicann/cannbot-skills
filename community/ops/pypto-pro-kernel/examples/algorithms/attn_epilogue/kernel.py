@@ -462,7 +462,8 @@ def attn_epilogue_kernel(
     # L0A/B use (256//K0) panels, each BM/max(BN1,BN)*K0 bytes. Each
     # accumulator uses 4*BM*N bytes with the largest fitting depth, at most two.
     # The first weight tile of GEMM2 reuses L1 address 2*BM*BK, after GEMM1's
-    # final reads. The inter-phase barrier drains it before new mutex IDs apply.
+    # final reads. Both phases retain the slot's mutex identity; the barrier
+    # drains all Cube work before the second phase reuses local storage.
     # On 32 cores, AQ is published in two immutable 2048-column slabs. Events
     # 5/6 globally order AIV stores before events 3/4 notify each paired AIC.
     # Each AIC consumes both once on MTE2. C->V uses automatic events 0/1.
@@ -482,8 +483,9 @@ def attn_epilogue_kernel(
     # Byte offsets preserve the L1 prefetch alias and the C->V buffer lifetime.
     # Vec mutex IDs 0..8 belong to inverse RoPE; these groups start at ID 9.
     l0_slots = 256 // K0
+    max_n = max(BN1, BN)
     acc_id = 6 + 4 * l0_slots
-    acc_slots = min(2, 65536 // (BM * BN1))
+    acc_slots = min(2, 65536 // (BM * max_n))
     q_rows = Q_ROWS if BN1 == 256 else BM // 2
     scale_cols = 64 if BN1 == 256 else 128
     vec_bf = 32768 + 2 * BM * BN1 * VSlots
@@ -515,11 +517,12 @@ def attn_epilogue_kernel(
         addrs=[2 * (BM + max(BN1, BN)) * BK],
         mutex_ids=[4],
     )
+    # Reserve 256 A-scale columns for the second projection at the same base.
     bsg = pl.make_tile_group(
         type=pl.TileType(
             shape=[128, BN1], dtype=E8, target_memory=pl.MemorySpace.Mat, layout=pl.NN
         ),
-        addrs=[2 * (BM + max(BN1, BN)) * BK + BM * scale_cols],
+        addrs=[2 * (BM + max_n) * BK + BM * 256],
         mutex_ids=[5],
     )
     al = pl.make_tile_group(
@@ -533,7 +536,7 @@ def attn_epilogue_kernel(
         type=pl.TileType(
             shape=[K0, BN1], dtype=FP8, target_memory=pl.MemorySpace.Right, compact=1
         ),
-        addrs=[0, BN1 * K0][:l0_slots],
+        addrs=[0, max_n * K0][:l0_slots],
         mutex_ids=[6 + l0_slots, 7 + l0_slots][:l0_slots],
     )
     als = pl.make_tile_group(
@@ -553,7 +556,7 @@ def attn_epilogue_kernel(
             target_memory=pl.MemorySpace.ScaleRight,
             compact=1,
         ),
-        addrs=[0, BN1 * K0 // 16][:l0_slots],
+        addrs=[0, max_n * K0 // 16][:l0_slots],
         mutex_ids=[6 + 3 * l0_slots, 7 + 3 * l0_slots][:l0_slots],
     )
     accg = pl.make_tile_group(
@@ -563,7 +566,7 @@ def attn_epilogue_kernel(
             target_memory=pl.MemorySpace.Acc,
             compact=1,
         ),
-        addrs=[0, 4 * BM * BN1][:acc_slots],
+        addrs=[0, 4 * BM * max_n][:acc_slots],
         mutex_ids=[acc_id, acc_id + 1][:acc_slots],
     )
     # Cross-core IDs are literal lists selected by the compile-time slot count.
@@ -961,19 +964,21 @@ def _project_b(yq_ptr, ys_ptr, wb_ptr, sb_ptr, out_ptr, t, padded):
     sb = pl.make_tensor(sb_ptr, [n, k // 64, 2], dtype=E8)
     output = pl.make_tensor(out_ptr, [padded, n], dtype=pl.DT_BF16)
     # The Cube pipe barrier drains the first projection before address reuse.
-    # Continue its Cube mutex numbering; L0 scale planes follow data address >> 4.
+    # Match GEMM1 slot pitches and mutex owners, including reserved scale space.
+    # Scale-plane addresses remain the corresponding L0 data address >> 4.
     l0_slots = 256 // K0
-    cube_id = 6 + 4 * l0_slots + min(2, 65536 // (BM * BN1))
-    acc_slots = min(2, 65536 // (BM * BN))
+    max_n = max(BN1, BN)
+    acc_id = 6 + 4 * l0_slots
+    acc_slots = min(2, 65536 // (BM * max_n))
     ag = pl.make_tile_group(
         type=pl.TileType(shape=[BM, BK], dtype=FP8, target_memory=pl.MemorySpace.Mat),
         addrs=[0, BM * BK],
-        mutex_ids=[cube_id, cube_id + 1],
+        mutex_ids=[0, 1],
     )
     bg = pl.make_tile_group(
         type=pl.TileType(shape=[BN, BK], dtype=FP8, target_memory=pl.MemorySpace.Mat),
-        addrs=[2 * BM * BK, (2 * BM + BN) * BK],
-        mutex_ids=[cube_id + 2, cube_id + 3],
+        addrs=[2 * BM * BK, (2 * BM + max_n) * BK],
+        mutex_ids=[2, 3],
     )
     asg = pl.make_tile_group(
         type=pl.TileType(
@@ -982,8 +987,8 @@ def _project_b(yq_ptr, ys_ptr, wb_ptr, sb_ptr, out_ptr, t, padded):
             target_memory=pl.MemorySpace.Mat,
             layout=pl.ZZ,
         ),
-        addrs=[2 * (BM + BN) * BK],
-        mutex_ids=[cube_id + 4],
+        addrs=[2 * (BM + max_n) * BK],
+        mutex_ids=[4],
     )
     bsg = pl.make_tile_group(
         type=pl.TileType(
@@ -992,22 +997,22 @@ def _project_b(yq_ptr, ys_ptr, wb_ptr, sb_ptr, out_ptr, t, padded):
             target_memory=pl.MemorySpace.Mat,
             layout=pl.NN,
         ),
-        addrs=[2 * (BM + BN) * BK + BM * (k // 32)],
-        mutex_ids=[cube_id + 5],
+        addrs=[2 * (BM + max_n) * BK + BM * (k // 32)],
+        mutex_ids=[5],
     )
     al = pl.make_tile_group(
         type=pl.TileType(
             shape=[BM, K0], dtype=FP8, target_memory=pl.MemorySpace.Left, compact=1
         ),
         addrs=[0, BM * K0][:l0_slots],
-        mutex_ids=[cube_id + 6, cube_id + 7][:l0_slots],
+        mutex_ids=[6, 7][:l0_slots],
     )
     bl = pl.make_tile_group(
         type=pl.TileType(
             shape=[K0, BN], dtype=FP8, target_memory=pl.MemorySpace.Right, compact=1
         ),
-        addrs=[0, BN * K0][:l0_slots],
-        mutex_ids=[cube_id + 6 + l0_slots, cube_id + 7 + l0_slots][:l0_slots],
+        addrs=[0, max_n * K0][:l0_slots],
+        mutex_ids=[6 + l0_slots, 7 + l0_slots][:l0_slots],
     )
     als = pl.make_tile_group(
         type=pl.TileType(
@@ -1017,7 +1022,7 @@ def _project_b(yq_ptr, ys_ptr, wb_ptr, sb_ptr, out_ptr, t, padded):
             compact=1,
         ),
         addrs=[0, BM * K0 // 16][:l0_slots],
-        mutex_ids=[cube_id + 6 + 2 * l0_slots, cube_id + 7 + 2 * l0_slots][:l0_slots],
+        mutex_ids=[6 + 2 * l0_slots, 7 + 2 * l0_slots][:l0_slots],
     )
     bls = pl.make_tile_group(
         type=pl.TileType(
@@ -1026,8 +1031,8 @@ def _project_b(yq_ptr, ys_ptr, wb_ptr, sb_ptr, out_ptr, t, padded):
             target_memory=pl.MemorySpace.ScaleRight,
             compact=1,
         ),
-        addrs=[0, BN * K0 // 16][:l0_slots],
-        mutex_ids=[cube_id + 6 + 3 * l0_slots, cube_id + 7 + 3 * l0_slots][:l0_slots],
+        addrs=[0, max_n * K0 // 16][:l0_slots],
+        mutex_ids=[6 + 3 * l0_slots, 7 + 3 * l0_slots][:l0_slots],
     )
     accg = pl.make_tile_group(
         type=pl.TileType(
@@ -1036,8 +1041,8 @@ def _project_b(yq_ptr, ys_ptr, wb_ptr, sb_ptr, out_ptr, t, padded):
             target_memory=pl.MemorySpace.Acc,
             compact=1,
         ),
-        addrs=[0, 4 * BM * BN][:acc_slots],
-        mutex_ids=[cube_id + 6 + 4 * l0_slots, cube_id + 7 + 4 * l0_slots][:acc_slots],
+        addrs=[0, 4 * BM * max_n][:acc_slots],
+        mutex_ids=[acc_id, acc_id + 1][:acc_slots],
     )
     b_transposed = pl.reinterpret(bg, shape=[BK, BN], layout=pl.ZN)
     with pl.section_cube():
@@ -1196,21 +1201,22 @@ def _launch(
         ](*args)
 
 
-def attn_epilogue(attn_out, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos):
+# pylint: disable-next=all
+def attn_epilogue(o, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos):  # noqa: E741 - Evaluator API.
     """Return a contiguous BF16 [T,5120] projection from prequantized ND weights."""
     if (
-        not isinstance(attn_out, torch.Tensor)
-        or attn_out.ndim != 3
-        or tuple(attn_out.shape[1:]) != (64, 512)
+        not isinstance(o, torch.Tensor)
+        or o.ndim != 3
+        or tuple(o.shape[1:]) != (64, 512)
     ):
-        raise ValueError("attn_out must have shape [T,64,512]")
-    t = attn_out.shape[0]
+        raise ValueError("o must have shape [T,64,512]")
+    t = o.shape[0]
     if t < 1:
         raise ValueError("T must be positive")
-    if attn_out.device.type not in ("npu", "privateuseone"):
+    if o.device.type not in ("npu", "privateuseone"):
         raise ValueError("inputs must be on an NPU")
     for name, tensor, shape, dtype in (
-        ("attn_out", attn_out, (t, 64, 512), torch.bfloat16),
+        ("o", o, (t, 64, 512), torch.bfloat16),
         ("woa", woa, (8, 1024, 4096), torch.float8_e4m3fn),
         ("wob", wob, (5120, 8192), torch.float8_e4m3fn),
         ("descale_woa", descale_woa, (8, 1024, 64, 2), torch.float8_e8m0fnu),
@@ -1222,23 +1228,13 @@ def attn_epilogue(attn_out, woa, wob, descale_woa, descale_wob, rope_sin, rope_c
             raise ValueError(f"{name} must have shape {shape}")
         if tensor.dtype != dtype:
             raise TypeError(f"{name} must have dtype {dtype}")
-        if tensor.device != attn_out.device or not tensor.is_contiguous():
-            raise ValueError(f"{name} must be contiguous on {attn_out.device}")
+        if tensor.device != o.device or not tensor.is_contiguous():
+            raise ValueError(f"{name} must be contiguous on {o.device}")
         if torch_npu.get_npu_format(tensor) not in (0, 2):
             raise ValueError(f"{name} must use ND storage")
     padded = (t + 15) // 16 * 16
-    with torch.npu.device(attn_out.device):
-        buffers = _scratch(attn_out, padded)
-        out = torch.empty((t, 5120), dtype=torch.bfloat16, device=attn_out.device)
-        _launch(
-            attn_out,
-            woa,
-            wob,
-            descale_woa,
-            descale_wob,
-            rope_sin,
-            rope_cos,
-            buffers,
-            out,
-        )
+    with torch.npu.device(o.device):
+        buffers = _scratch(o, padded)
+        out = torch.empty((t, 5120), dtype=torch.bfloat16, device=o.device)
+        _launch(o, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos, buffers, out)
     return out

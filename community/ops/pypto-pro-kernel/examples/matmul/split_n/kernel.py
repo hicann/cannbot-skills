@@ -49,7 +49,7 @@ def split_n_even(
         mutex_ids="auto",
         depth=1,
     )
-    # 宽度是一条带的宽度；整除时不会收窄，所以不需要 compact。
+    # 宽度是一条带的宽度；整除时不收窄，省略 compact 沿用默认的普通紧凑模式。
     l0b = pl.make_tile_group(
         type=pl.TileType(
             shape=[K, SN], dtype=pl.DT_FP16, target_memory=pl.MemorySpace.Right

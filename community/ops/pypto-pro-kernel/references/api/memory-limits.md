@@ -1,3 +1,4 @@
+<!-- kernel-query: {"id":"tile-capacity","aliases":["tile capacity","UB capacity","Vec capacity","UB容量","tile容量","SIMT DCache","SIMT DCache budget","SIMT UB budget","SIMT 缓存预算"],"symbols":["pl.TileType"],"term_groups":[["ub","vec","tile","tiletype"],["capacity","容量"]],"missing_facts":["Resolve the installed architecture, capacity normalization, physical slot spans and VF/SIMT launch mode before asserting a bound."]} -->
 # Tile Capacity: Which Accounting to Use
 
 Capacity checks are owned by generated tile declarations; do not maintain another set of hardware limits in agent tools. block_ops.py::_validate_tile_addr_capacity (`pypto/python/pypto_pro/ir/op/block_ops.py`) and the JIT SIMT high-water check run at different stages. Do not conflate the platform query value for Vec, the tile address capacity available to ordinary VF, and the launch budget when SIMT is present.

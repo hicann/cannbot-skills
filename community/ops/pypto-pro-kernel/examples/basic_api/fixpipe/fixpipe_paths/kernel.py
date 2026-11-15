@@ -9,7 +9,7 @@
 """写法：原始。Fixpipe 的三条输出路径及目的布局。
 
 Acc→GM 用 ``pl.store`` 直接出片；Acc→Vec 用 ``pl.move`` 后由 Vector 存储；Acc→Mat 用 ``pl.move`` 留在 L1，作为下一次 GEMM 的操作数。源在 Acc 时，这些调用使
-用 FIX 流水。目的布局由 Tensor/Tile 的 layout 指定；ND 与 NZ 有数值及物理排布对照，二维 DN 的落盘限制由独立编译反例检查。
+用 FIX 流水。目的布局由 Tensor/Tile 的 layout 指定；ND 与 NZ 有数值及物理排布对照，DN Tensor 注解由独立解析反例检查。
 
 本例 M=N=K=128，FP16 输入、FP32 累加。原生 ``pl.gemm`` 只负责产生 Acc；``acc_to_mat_chain`` 的契约是 ``fp16(a @ b) @ c``，中间降位由 Fixpipe 完成。
 
@@ -28,9 +28,9 @@ FP32 = pl.DT_FP32
 
 M = N = K = 128
 
-ND = pl.TensorLayout.ND
-DN = pl.TensorLayout.DN
-NZ = pl.TensorLayout.NZ
+ND = pl.ND
+DN = pl.DN
+NZ = pl.NZ
 
 
 def _cube_groups():
@@ -109,10 +109,8 @@ def make_acc_to_vec(dst_layout):
     工厂函数的写法：枚举值从闭包传进 kernel 体是可以的（`vf_spr_misc` 实测过），
     所以三个只差一个枚举的 kernel 用一个工厂造，不抄三遍。
 
-    **GM 侧的 Tensor 必须声明成同一个 layout。** Vec→GM 的组合表只有
-    `ND→ND` / `DN→DN` / `NZ→NZ` 三对——**跨布局的 store 不存在**，
-    布局转换是 fixpipe 那一步做的，MTE3 不做。写 `ND` 的 Tensor 接 DN 的 Tile 会被
-    `block_ops.py:3127` 拦。注解带 layout 的写法是 `pl.Tensor[[M, N], FP32, layout]`。
+    GM Tensor 的注解只支持 ND/NZ；本例对这两种布局进行数值验证，DN 实例只用于解析拒绝检查。
+    Vec→GM 不做布局转换，ND/NZ 输出的 Tensor 与 Tile 使用相同 layout。
 
     ## 这条路要跨核交接，Acc→GM 不用
 

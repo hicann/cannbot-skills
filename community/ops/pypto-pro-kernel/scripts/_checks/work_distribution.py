@@ -35,10 +35,12 @@ def _nodes(node):
 
 def check(path: Path) -> list[Finding]:
     source = read(path)
-    findings = []
-    for fn in ast.walk(source.tree):
+    results = []
+
+    def inspect_function(fn):
+        findings = []
         if not has_decorator(fn, source.pl, "jit"):
-            continue
+            return findings
         nodes = list(_nodes(fn))
         parameters = {
             a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs
@@ -52,7 +54,7 @@ def check(path: Path) -> list[Finding]:
             and n.id == source.pl
             for n in nodes
         ):
-            continue
+            return findings
         bindings = defaultdict(list)
         for node in nodes:
             if isinstance(node, ast.Assign):
@@ -145,4 +147,8 @@ def check(path: Path) -> list[Finding]:
         visitor = Visitor()
         for statement in fn.body:
             visitor.visit(statement)
-    return findings
+        return findings
+
+    for candidate in ast.walk(source.tree):
+        results += inspect_function(candidate)
+    return results

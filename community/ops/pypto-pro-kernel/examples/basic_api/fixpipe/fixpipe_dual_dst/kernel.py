@@ -6,6 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：原始。Fixpipe 的 Single/Dual 目的选择与两个 AIV 的输出所有权。
 
 M=N=K=64，输入为 FP16、Acc 为 FP32。SingleModeVec0/Vec1 把整块矩阵送到指定 AIV；DualModeSplitM/N 分别按行/列拆给两个 AIV。UB 物理容量与各自消费的半块形状一致，测试检查两
@@ -16,10 +17,11 @@ Single 模式探针先给两个 UB 写入不同的已知值（2×acc 与 1×acc�
 L1 的 A/B 位于 0、0x2000；Left、Right、Vec 各自从 0 开始。两个 Acc 使用独立的 0、0x4000 地址，保留两个生产者，避免为了测试目的选择而引入同一 Acc 的读写复用。组深度均为 1，核内 mutex
 ID 自动分配。跨核交接保留显式 FIX→MTE3 事件，两个 AIV 按 subblock 索引写各自的输出区域。
 
-Dual 与 scale、ReLU、降位 dtype、DN 目的布局的非法组合均只检查解析期拒绝，不执行危险组合。phase 不在本例的运行范围内。
+Dual 与 scale、ReLU、降位 dtype、DN 目的布局的非法组合均要求解析期拒绝，不执行危险组合。当前官方 master 缺少 ReLU、降位 dtype 和 DN 目的布局的相应 guard，因此这些检查失败。phase 不在本例的运行范围内。
 
 混合与纯 Vector 两个探针分别读回 block/subblock 数，测试依据当前执行预算检查关系，不固定核数。``reference.py`` 与 ``test.py`` 保留逐位数值对照、目的区分和参数覆盖检查。
 """
+# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 
@@ -144,7 +146,7 @@ def single_vec0_and_vec1(
             shape=[M, N],
             dtype=FP32,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.ND,
+            layout=pl.ND,
         ),
         addrs=0x0,
         mutex_ids="auto",
@@ -203,7 +205,7 @@ def default_mode(
             shape=[M, N],
             dtype=FP32,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.ND,
+            layout=pl.ND,
         ),
         addrs=0x0,
         mutex_ids="auto",
@@ -257,7 +259,7 @@ def dual_split_m(
             shape=[HALF_M, N],
             dtype=FP32,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.ND,
+            layout=pl.ND,
         ),
         addrs=0x0,
         mutex_ids="auto",
@@ -295,7 +297,7 @@ def dual_split_n(
             shape=[M, HALF_N],
             dtype=FP32,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.ND,
+            layout=pl.ND,
         ),
         addrs=0x0,
         mutex_ids="auto",
@@ -320,7 +322,7 @@ def dual_split_n(
 
 
 # ---------------------------------------------------------------------------
-# 四、dual + rider：一条拒、两条要量
+# 四、dual：四类不安全组合的解析拒绝要求
 # ---------------------------------------------------------------------------
 
 
@@ -328,21 +330,13 @@ def dual_split_n(
 def dual_with_relu(
     a: pl.Tensor[[M, K], FP16], b: pl.Tensor[[K, N], FP16], out: pl.Tensor[[M, N], FP32]
 ):
-    """`DualModeSplitM` + `relu_pre_mode=NormalRelu`——**pypto_pro 没拦，效果待量**。
-
-    预测（写在测出来之前）：**静默丢弃**。依据是 C++ 的 `TExtractL0CToUBDualDst`
-    只收 `AccToVecMode` 模板参数，不收 relu；而 Python 侧 `block_ops.py:754`
-    那条检查只查了 `scale`。
-
-    预测错了也留着——`fixpipe_quant_matrix` 那次静态读 C++ 谓词的预测
-    11 格错了 8 格（设计文档 §十四点三），这一条同样只是预测。
-    """
+    """双目标与 Relu 的非法组合；仅供解析拒绝检查，不提交到设备。"""
     ub = pl.make_tile_group(
         type=pl.TileType(
             shape=[HALF_M, N],
             dtype=FP32,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.ND,
+            layout=pl.ND,
         ),
         addrs=0x0,
         mutex_ids="auto",
@@ -375,17 +369,13 @@ def dual_with_relu(
 def dual_with_scale(
     a: pl.Tensor[[M, K], FP16], b: pl.Tensor[[K, N], FP16], out: pl.Tensor[[M, N], FP32]
 ):
-    """`DualModeSplitM` + `scale`——**解析期拒**，这个 kernel 只为钉住那条报错。
-
-    `block_ops.py:754`：「the fixpipe dual-destination control word does not
-    support quantization (hardware limit)」。
-    """
+    """显式 scale 与双目标传输不兼容；仅供解析拒绝检查。"""
     ub = pl.make_tile_group(
         type=pl.TileType(
             shape=[HALF_M, N],
             dtype=FP32,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.ND,
+            layout=pl.ND,
         ),
         addrs=0x0,
         mutex_ids="auto",
@@ -411,21 +401,13 @@ def dual_with_scale(
 def dual_dn_destination(
     a: pl.Tensor[[M, K], FP16], b: pl.Tensor[[K, N], FP16], out: pl.Tensor[[M, N], FP32]
 ):
-    """`DualModeSplitM` + **`DN` 目的布局**——同类型、不带 scale、不带 relu。
-
-    前三条排除规则（scale / relu / dtype 转换）都避开了，只剩布局这一项,
-    所以这个 kernel 只钉一件事：**`GetDualDstCtl` 的第二条 static_assert**
-    `"Dual Dst Mode is not support in nz2dn."`。
-
-    这一格是把 ISA 的八条规则逐条对账时找出来的，不是撞出来的——
-    本章原来所有 kernel 都用 `ND`，从没碰到它。
-    """
+    """DN 目的布局与双目标传输不兼容；仅供解析拒绝检查。"""
     ub = pl.make_tile_group(
         type=pl.TileType(
             shape=[HALF_M, N],
             dtype=FP32,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.DN,
+            layout=pl.DN,
         ),
         addrs=0x0,
         mutex_ids="auto",
@@ -451,18 +433,13 @@ def dual_dn_destination(
 def dual_narrowing_dtype(
     a: pl.Tensor[[M, K], FP16], b: pl.Tensor[[K, N], FP16], out: pl.Tensor[[M, N], FP16]
 ):
-    """`DualModeSplitM` + **降位**（L0C 是 FP32，UB 是 FP16）——不带 scale。
-
-    `FP32 → FP16` 在不带 scale 的组合表里是合法的（`fixpipe_quant_matrix` 量过），
-    所以 Python 侧放行；ascriptor 的规则说双目标**连不带 deqScalar 的浮点降位
-    也不支持**。这一条量的是「拦在哪一层、报什么」。
-    """
+    """FP32→FP16 选择量化模式，与双目标传输不兼容；仅供解析拒绝检查。"""
     ub = pl.make_tile_group(
         type=pl.TileType(
             shape=[HALF_M, N],
             dtype=FP16,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.ND,
+            layout=pl.ND,
         ),
         addrs=0x0,
         mutex_ids="auto",

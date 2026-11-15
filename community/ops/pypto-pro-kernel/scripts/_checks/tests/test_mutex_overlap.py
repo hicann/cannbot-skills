@@ -21,6 +21,8 @@ motivated it.”
 import ast
 from pathlib import Path
 
+import pytest
+
 from _checks import mutex_overlap
 from _checks.source import has_decorator
 
@@ -89,6 +91,59 @@ def test_partial_overlap_of_the_byte_range_counts(tmp_path):
         f"    b = pl.make_tile_group(type={T8x8}, addrs=[0x80], mutex_ids=[1])\n",
     )
     assert len(_hits(path)) == 1
+
+
+@pytest.mark.parametrize("section", ["cube", "vector"])
+def test_full_drain_between_direct_phases_requires_native_review(tmp_path, section):
+    path = _write(
+        tmp_path,
+        f"    a = pl.make_tile_group(type={T8x8}, addrs=[0], mutex_ids=[0])\n"
+        f"    b = pl.make_tile_group(type={T8x8}, addrs=[0], mutex_ids=[1])\n"
+        f"    with pl.section_{section}():\n"
+        "        pl.load(a[0], x)\n"
+        "        pl.system.bar_all()\n"
+        "        pl.load(b[0], x)\n",
+    )
+    finding, = mutex_overlap.check(path)
+    assert finding.advisory and not finding.waived
+    assert "PIPE_ALL" in finding.message
+
+
+@pytest.mark.parametrize("middle,tail", [
+    ("        pl.system.bar_mte2()\n", ""),
+    ("        if x:\n            pl.system.bar_all()\n", ""),
+    ("        pl.system.bar_all()\n", "        pl.store(out, a[0])\n"),
+    ("        pl.system.bar_all()\n        alias = a\n", ""),
+    ("        helper(a)\n        pl.system.bar_all()\n", ""),
+    ("        pl.system.bar_all()\n", "        with pl.section_vector():\n            pl.load(a[0], x)\n"),
+    ("        pl.system.bar_all = helper\n        pl.system.bar_all()\n", ""),
+])
+def test_unresolved_or_overlapping_lifetimes_are_not_downgraded(tmp_path, middle, tail):
+    path = _write(
+        tmp_path,
+        f"    a = pl.make_tile_group(type={T8x8}, addrs=[0], mutex_ids=[0])\n"
+        f"    b = pl.make_tile_group(type={T8x8}, addrs=[0], mutex_ids=[1])\n"
+        "    with pl.section_cube():\n"
+        "        pl.load(a[0], x)\n" + middle + "        pl.load(b[0], x)\n" + tail,
+    )
+    finding, = mutex_overlap.check(path)
+    assert not finding.advisory and not finding.waived
+    assert "未证明实际并发访问" in finding.message
+
+
+def test_separate_core_domains_require_handover_review(tmp_path):
+    path = _write(
+        tmp_path,
+        f"    a = pl.make_tile_group(type={T8x8}, addrs=[0], mutex_ids=[0])\n"
+        f"    b = pl.make_tile_group(type={T8x8}, addrs=[0], mutex_ids=[1])\n"
+        "    with pl.section_cube():\n"
+        "        pl.load(a[0], x)\n"
+        "    with pl.section_vector():\n"
+        "        pl.load(b[0], x)\n",
+    )
+    finding, = mutex_overlap.check(path)
+    assert finding.advisory
+    assert "不能跨核心互斥" in finding.message
 
 
 def test_the_check_is_per_slot_not_per_group(tmp_path):

@@ -6,7 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Enforce the Vector authoring policy and verify VF namespace membership.
+"""Check native loop spelling, Vector authoring policy and VF namespace membership.
 
 The policy is independent of whether a tile operation can compile. Source-based
 membership is only a spelling check, not argument, dtype, or numerical validation.
@@ -20,11 +20,12 @@ from functools import lru_cache
 from pathlib import Path
 
 from .paths import PYPTO_ROOT
-from .source import Finding, PL_MODULE, read
+from .source import Finding, PL_MODULE, apply_claim, counterexample_claims, read
 
 TILE_RULE = "tile-vector-compute-forbidden"
 VF_RULE = "vf-api-not-in-source"
 VF_UNAVAILABLE = "vf-api-source-unavailable"
+LOOP_RULE = "native-loop-iterator"
 VF_PREFIX = PL_MODULE + ".Vf."
 
 # Workspace policy, covering declared and parser-supported block computations at
@@ -113,12 +114,43 @@ def surface(pypto_root: Path) -> Surface:
         complete = False
     try:
         payload = registry.read_bytes()
-        registered = set(
-            re.findall(
-                r'REGISTER_OP\(\s*"vf\.([A-Za-z_][A-Za-z_0-9]*)"\s*\)',
-                payload.decode("utf-8"),
-            )
-        )
+        registry_text = _without_cpp_comments(payload.decode("utf-8"))
+        arguments = re.findall(r"\bREGISTER_OP\s*\(([^()]*)\)", registry_text)
+        macros = {}
+        unresolved = set()
+        if len(arguments) != len(re.findall(r"\bREGISTER_OP\s*\(", registry_text)):
+            unresolved.add("<unparsed registration>")
+        if any(not argument.strip().startswith('"') for argument in arguments):
+            header = root / "framework/include/ir/reg_op.h"
+            try:
+                header_payload = header.read_bytes()
+                header_text = _without_cpp_comments(header_payload.decode("utf-8"))
+                for name, value in re.findall(
+                    r'^\s*#\s*define\s+([A-Za-z_]\w*)[ \t]+"([^"\\]*)"[ \t]*$',
+                    header_text,
+                    re.MULTILINE,
+                ):
+                    macros.setdefault(name, set()).add(value)
+                identities.append("C++ macros=" + hashlib.sha256(header_payload).hexdigest()[:12])
+            except (OSError, UnicodeError):
+                pass
+        registered = set()
+        for argument in arguments:
+            argument = argument.strip()
+            literal = re.fullmatch(r'"([^"\\]*)"', argument)
+            values = {literal.group(1)} if literal else macros.get(argument, set())
+            if len(values) != 1:
+                unresolved.add(argument)
+                continue
+            value = next(iter(values))
+            member = re.fullmatch(r"vf\.([A-Za-z_]\w*)", value)
+            if member:
+                registered.add(member.group(1))
+            elif value.startswith("vf."):
+                unresolved.add(argument)
+        if unresolved:
+            identities.append("unresolved registrations=" + ",".join(sorted(unresolved)[:8]))
+        complete &= not unresolved
         complete &= {"full", "load_align"} <= registered
         names.update(registered)
         identities.append("C++=" + hashlib.sha256(payload).hexdigest()[:12])
@@ -132,7 +164,22 @@ def surface(pypto_root: Path) -> Surface:
     )
 
 
-def inspect(path: Path, *, pypto_root: Path = PYPTO_ROOT):
+def _without_cpp_comments(text):
+    return re.sub(
+        r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*.*?\*/',
+        lambda match: match.group(0) if match.group(0).startswith('"') else " ",
+        text,
+        flags=re.DOTALL,
+    )
+
+
+def inspect(
+    path: Path,
+    *,
+    pypto_root: Path = PYPTO_ROOT,
+    observed_calls=None,
+    resolved_calls=None,
+):
     source = read(path)
     catalog = surface(Path(pypto_root))
     findings = []
@@ -157,6 +204,9 @@ def inspect(path: Path, *, pypto_root: Path = PYPTO_ROOT):
                 bind(item)
 
     class Visitor(ast.NodeVisitor):
+        native_body = False
+        loop_findings = None
+
         def visit_Import(self, node):
             for alias in node.names:
                 scopes[-1][alias.asname or alias.name.split(".")[0]] = (
@@ -185,6 +235,11 @@ def inspect(path: Path, *, pypto_root: Path = PYPTO_ROOT):
             bind(node.target)
 
         def visit_FunctionDef(self, node):
+            native_body = any(
+                resolve(decorator.func if isinstance(decorator, ast.Call) else decorator)
+                == PL_MODULE + ".jit"
+                for decorator in node.decorator_list
+            )
             parameters = node.args.posonlyargs + node.args.args + node.args.kwonlyargs
             annotated = {arg.arg: resolve(arg.annotation) for arg in parameters}
             local = {
@@ -204,14 +259,45 @@ def inspect(path: Path, *, pypto_root: Path = PYPTO_ROOT):
                 if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
                     local.setdefault(child.id, None)
             scopes.append(local)
+            previous_native = self.native_body
+            previous_loop_findings = self.loop_findings
+            self.native_body = native_body
+            self.loop_findings = [] if native_body else None
             for statement in node.body:
                 self.visit(statement)
+            if native_body:
+                findings.extend(apply_claim(
+                    source, node, LOOP_RULE, self.loop_findings, counterexample_claims(node)
+                ))
+            self.native_body = previous_native
+            self.loop_findings = previous_loop_findings
             scopes.pop()
 
         visit_AsyncFunctionDef = visit_FunctionDef
 
+        # pylint: disable-next=all
+        def visit_For(self, node):
+            if (self.native_body and isinstance(node.iter, ast.Call)
+                    and isinstance(node.iter.func, ast.Name) and node.iter.func.id == "range"):
+                self.loop_findings.append(Finding(
+                    source.path, node.iter.lineno, LOOP_RULE,
+                    "@pl.jit 原生循环使用 pl.range(...)；当前写法是 Python range(...)。"
+                    "只改原生函数内的循环，Host factory 的 Python 循环保留；"
+                    "见 references/workflows/getting-started.md。",
+                ))
+            self.generic_visit(node)
+
         def visit_Call(self, node):
             name = resolve(node.func)
+            if resolved_calls is not None and name and name.startswith(PL_MODULE + "."):
+                resolved_calls.append((node, name))
+            if observed_calls is not None and name and name.startswith(PL_MODULE + "."):
+                symbol = (
+                    "vf." + name[len(VF_PREFIX):]
+                    if name.startswith(VF_PREFIX)
+                    else "pl." + name[len(PL_MODULE) + 1:]
+                )
+                observed_calls.append({"symbol": symbol, "line": node.lineno})
             if (
                 name
                 and name.startswith(VF_PREFIX)

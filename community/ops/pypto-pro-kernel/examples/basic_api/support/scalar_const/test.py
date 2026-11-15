@@ -18,7 +18,7 @@ import pytest
 import torch
 
 import pypto_pro as pp
-from pypto_pro._errors import InvalidType, RuntimeFailure
+from pypto_pro._errors import InvalidType
 
 from .kernel import (
     CLAMP_HIGH,
@@ -193,14 +193,12 @@ def test_row_output_layouts_preserve_the_result(device):
 
 
 def test_scalar_min_on_tiles_is_refused():
-    """验证 6 之一。`pl.min` 只吃标量。逐元素计算应在 VF 中使用 `vf.min`。
-
-    消息说的是「表达式必须是 ScalarType 的 Var」——**它没点出该用哪个接口**,
-    所以这条判据同时是一份「看到这个消息该往哪想」的记录。
-    """
-    with pytest.raises(RuntimeFailure) as raised:
+    """`pl.min` 的标量参数拒绝 Tile；逐元素计算应在 VF 中使用 `vf.min`。"""
+    with pytest.raises(InvalidType) as raised:
         _parse(scalar_min_on_tiles)
-    assert "ScalarType" in str(raised.value), str(raised.value)
+    message = str(raised.value)
+    assert "pl.min: lhs expects" in message, message
+    assert "TileType" in message, message
 
 
 def test_const_of_a_runtime_value_is_refused():

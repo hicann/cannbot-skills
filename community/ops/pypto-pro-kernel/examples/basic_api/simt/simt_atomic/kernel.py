@@ -25,14 +25,15 @@
 拿回来的 N 个旧值必须**恰好是 `0..N-1` 的一个排列**。少一个就是丢了更新，重一个就是两个线程
 读到了同一个旧值。**这比看最终值有力**——最终值对了也可能是别的原因。
 
-**操作数的 dtype 必须和目标完全一致。** `tid + 1` 和 Python 字面量都是 INT64，目标是 INT32 时
-解析期直接拒：
+**运行时操作数的 dtype 必须和目标一致。** `tid + 1` 是 INT64，目标是 INT32 时
+解析期直接拒；数值常量由接口按目标 dtype 定型：
 
 ```
 simt.atomic_add operand 0 dtype must match target dtype int32, but got int64
 ```
 
-所以这一例里每个标量操作数都过一次 `pl.simt.cast`。从 INT32 张量读出来的值不用再 cast。
+运行时 INT64 表达式显式经过 `pl.simt.cast`；从 INT32 张量读出来的值无需转换。
+原子调用使用容器与逐轴坐标，例如 `pl.simt.atomic_add(state, [row, 0], value)`。
 
 第一手来源：`pypto/python/tests/st/pypto_pro/frontend/simt/atomic/` 的 11 个文件。
 """
@@ -76,25 +77,24 @@ def nine_atomic_families(
     value = vals[0, tid]
     mask = vals[1, tid]
 
-    # **每个操作数都要显式 cast 到目标的 dtype。** `tid + 1` 和 Python 字面量都是 INT64，
-    # 而目标是 INT32：不 cast 的话解析期就被拒（消息见 `test.py` §七）。
+    # 运行时 `tid + 1` 是 INT64，须显式转成目标 INT32；常量也在这里写明类型。
     # `value` / `mask` 从 INT32 张量读出来，已经是 INT32，不用再 cast。
     contribution = pl.simt.cast(tid + 1, I32)
     one = pl.simt.cast(1, I32)
     compare = pl.simt.cast(CAS_COMPARE, I32)
 
-    pl.simt.atomic_add(state[SLOT_ADD, 0], contribution)
-    pl.simt.atomic_sub(state[SLOT_SUB, 0], contribution)
-    pl.simt.atomic_max(state[SLOT_MAX, 0], value)
-    pl.simt.atomic_min(state[SLOT_MIN, 0], value)
-    pl.simt.atomic_and(state[SLOT_AND, 0], mask)
-    pl.simt.atomic_or(state[SLOT_OR, 0], mask)
-    pl.simt.atomic_xor(state[SLOT_XOR, 0], mask)
-    pl.simt.atomic_exch(state[SLOT_EXCH, 0], contribution)
-    pl.simt.atomic_cas(state[SLOT_CAS, 0], compare, contribution)
+    pl.simt.atomic_add(state, [SLOT_ADD, 0], contribution)
+    pl.simt.atomic_sub(state, [SLOT_SUB, 0], contribution)
+    pl.simt.atomic_max(state, [SLOT_MAX, 0], value)
+    pl.simt.atomic_min(state, [SLOT_MIN, 0], value)
+    pl.simt.atomic_and(state, [SLOT_AND, 0], mask)
+    pl.simt.atomic_or(state, [SLOT_OR, 0], mask)
+    pl.simt.atomic_xor(state, [SLOT_XOR, 0], mask)
+    pl.simt.atomic_exch(state, [SLOT_EXCH, 0], contribution)
+    pl.simt.atomic_cas(state, [SLOT_CAS, 0], compare, contribution)
 
     # 每个线程加 1，把"加之前的旧值"记下来——N 个旧值必须是 0..N-1 的一个排列。
-    returns[0, tid] = pl.simt.atomic_add(state[SLOT_ADD_RET, 0], one)
+    returns[0, tid] = pl.simt.atomic_add(state, [SLOT_ADD_RET, 0], one)
 
 
 @pl.jit()
@@ -117,7 +117,7 @@ def simt_nine_atomic_families(
 def _int64_operand(state: pl.Tensor[[SLOTS, 1], I32]):
     """操作数不 cast：`tid + 1` 是 INT64，目标是 INT32。**解析期拒。**"""
     tid = pl.simt.linear_thread_idx()
-    pl.simt.atomic_add(state[SLOT_ADD, 0], tid + 1)
+    pl.simt.atomic_add(state, [SLOT_ADD, 0], tid + 1)
 
 
 @pl.jit()

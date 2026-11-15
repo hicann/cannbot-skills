@@ -46,7 +46,7 @@ pl.gemm() needs 'ac'  declared with compact=1 to take an effective extent
 ``m`` 收窄 ``l0a`` 和 ``acc``，``n`` 收窄 ``l0b`` 和 ``acc``，``k`` 收窄 ``l0a``
 和 ``l0b``。只考虑被切维度对应的 L0 会漏掉累加器。
 
-整除的那个 case 没有任何一步被收窄，所以两块都不要 compact，也不该加。
+整除的 case 没有任何一步被收窄；省略 ``compact`` 沿用默认的 ``compact=1``，不需要额外的收窄设置。
 
 **两个不能做的事.**
 

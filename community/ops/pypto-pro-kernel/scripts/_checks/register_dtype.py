@@ -220,8 +220,10 @@ def check(path: Path) -> list[Finding]:
         for parent in ast.walk(source.tree)
         for child in ast.iter_child_nodes(parent)
     }
-    findings = []
-    for function in vector_functions(source):
+    results = []
+
+    def inspect_function(function):
+        findings = []
         blocked = set()
         scope = function
         while scope is not None:
@@ -244,7 +246,7 @@ def check(path: Path) -> list[Finding]:
             or module_bindings[source.pl.split(".")[0]] > 1
             or module_bindings[source.vf] > 1
         ):
-            continue
+            return findings
         local_findings = []
         broadcast_findings = []
         parameters = {
@@ -380,4 +382,8 @@ def check(path: Path) -> list[Finding]:
             _narrow_store_findings(source, function, dtype, blocked),
             counterexample_claims(function),
         )
-    return findings
+        return findings
+
+    for candidate in vector_functions(source):
+        results += inspect_function(candidate)
+    return results

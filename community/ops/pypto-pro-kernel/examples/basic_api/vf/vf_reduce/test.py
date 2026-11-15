@@ -33,10 +33,10 @@ r"""四个归约：`reduce_sum` `reduce_max` `reduce_min` `pair_reduce_sum`。
 的是对的）。这是这一批第三次撞上「源码 docstring 与官方文档相反」——前两次是 `addc`
 （反方向）和 `pto_assert`。判据已经写进 [skill constraints](../../../../SKILL.md#constraints-and-workspace-policy)。
 
-## 二、`datablock=True` 就是组内归约——一个已记开放项的答案
+## 二、`datablock=True`: reduction within each DataBlock
 
-设计文档 §八点四 把 ascriptor 的 `cgadd` / `cgmax` / `cgmin` 列成「仍然可能是真差异的只剩
-一组」，并写了「做 `vf_reduce` 时查清」。**查清了：不用绕 `squeeze`，它是 `reduce_*` 的一个参数。**
+The native `reduce_*` calls select DataBlock reduction with a parameter;
+this path does not require a squeeze-based emulation.
 
 组大小 **8 个 FP32（32 字节）**，实测：输入 1..64 得到
 `[36, 100, 164, 228, 292, 356, 420, 484, 0, ...]`，正是 1..8 / 9..16 / … 各自求和。

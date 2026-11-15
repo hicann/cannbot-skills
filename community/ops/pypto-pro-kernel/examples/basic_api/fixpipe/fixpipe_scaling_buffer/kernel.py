@@ -6,9 +6,10 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：原始。通过 Scaling Tile 提供每列独立的 Fixpipe 量化参数。
 
-本例 M=N=K=64，FP16 输入、FP32 Acc，输出覆盖 FP16/INT8；FP32→FP32 的带 scale 路径按当前框架契约拒绝。Cube 输入与 Acc 的声明复用
+本例 M=N=K=64，FP16 输入、FP32 Acc，输出覆盖 FP16/INT8。FP32→FP32 的带 scale 路径会静默丢弃缩放，测试要求解析期拒绝；当前官方 master 缺少该 guard，因此相应检查失败。Cube 输入与 Acc 的声明复用
 [riders](../fixpipe_riders/kernel.py) 的同形状生产者。
 
 资源均显式放置并使用 depth=1、``mutex_ids="auto"``。L1 的 A/B 位于 0、0x2000，scale 中转表位于 0x4000，互不重叠。Scaling 表从独立 FB 地址 0 开始，[1,64]
@@ -20,9 +21,10 @@ INT64 占 512B；Left、Right、Acc、Vec 在各自空间从 0 开始。
 INT64 表项的低 32 bit 是 FP32 scale 的 IEEE 位模式，bit46 控制 INT8 的有符号饱和区间。``reference.py`` 编码该位域，并从数学定义独立计算逐列缩放、取整和饱和。scale 使用 2
 的幂，数值对照保持 rtol=atol=0。
 
-表的合法形状为 [1,N]、N 是 16 的倍数且不超过 512，dtype 必须 INT64，空间必须 Scaling。超限的表由 scale 消费操作在解析期拒绝；其余非法形状、类型、GM Tensor 和
+表的合法形状为 [1,N]、N 是 16 的倍数且不超过 512，dtype 必须 INT64，空间必须 Scaling。超限的表在分配或 scale 消费时由解析期拒绝；其余非法形状、类型、GM Tensor 和
 per-channel+atomic 组合也只做解析期验证。
 """
+# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 
@@ -35,7 +37,7 @@ INT64 = pl.DT_INT64
 
 M = N = K = 64
 
-ND = pl.TensorLayout.ND
+ND = pl.ND
 
 
 def _scale_groups():
@@ -71,7 +73,7 @@ def make_per_channel_move(dst_dtype):
 
     | dst | 为什么选它 |
     | --- | --- |
-    | `FP32` | per-tensor 的 `FP32 → FP32` **会静默丢 scale**（见 defect）；per-channel 会不会 |
+    | `FP32` | per-tensor 与 per-channel 均会静默丢弃 scale；仅用于解析拒绝检查 |
     | `FP16` | 降位 + 缩放，最常用的一格 |
     | `INT8` | bit46 那个 signed-int8 标志唯一有意义的地方；顺带验取整与饱和 |
 
@@ -286,8 +288,7 @@ def scale_from_gm_tensor(
 ):
     """直接把 GM 上的 `scales` 当 `scale=` 传——**解析期拒**。
 
-    自动 per-channel 路径（框架替你分配 Mat 中转 + 插同步）**已经删掉了**,
-    所以这条路现在必须手搭。报错文本里就写着那五步。
+    `scale` 接受标量或 Scaling Tile，不接受 GM Tensor。合法逐列路径需要显式准备 Mat 中转、同步和 Scaling Tile。
     """
     a_l1, b_l1, l0a, l0b, acc = _cube_groups()
     with pl.section_cube():

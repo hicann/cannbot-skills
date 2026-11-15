@@ -52,6 +52,33 @@ In a parameter factory, distinguish the preferred tuning step from the actual st
 
 Transpose is represented by a call-site alias using `pl.reinterpret(..., layout=pl.ZN)`; it does not modify the caller's declaration or generate an instruction. Therefore comparing only the op sequence cannot verify transpose; inspect the shape/layout read by `move` and verify the numerical result.
 
+<!-- kernel-query: {"id":"gemm-runtime-transpose","aliases":["GEMM multi-slot transpose","trans_b group.next","GEMM 多槽转置","矩阵乘运行时槽转置"],"term_groups":[["gemm","matmul","矩阵乘"],["transpose","trans_a","trans_b","转置"],["slot","group.next","多槽"]],"when":"Transpose a matrix operand selected from a multi-slot group, especially across a delayed pipeline stage.","missing_facts":["Distinguish a call-site single-Tile transpose from a whole-group view; preserve backing storage, cursor identity, shape/layout and validshape across the producer and consumer."],"example":"algorithms/indexed_batched_gemm_onchip/kernel.py"} -->
+### Transpose aliases on multi-slot operands
+
+On matching source `bca90a6c6e69a1b1111cfe8a43b975ba2bfcf28a`, `_gemm_lowering.py` (`pypto/python/pypto_pro/language/parser/_gemm_lowering.py` in the selected source checkout) rejects `trans_a` / `trans_b` on a runtime-selected Tile from a multi-slot group: a single-Tile alias would take its static address and pin the view to slot zero. A constant-index Tile can be transposed, but fixing the index does not preserve a rotating algorithm's slot ownership.
+
+Build the transpose view at **group level before selecting a slot**. For the verified B-operand path, an NZ `[N,K]` Mat group has a ZN `[K,N]` alias over the same bytes; Cube selects `alias.next()` and calls `pl.gemm` without `trans_b`. A whole-group `pl.reinterpret` retains backing storage and cursor management. Selecting through both aliases advances the shared cursor twice, so each owning stage must select its intended slot once. Reapply the alias's required validshape: reinterpretation does not inherit the original validshape. This metadata view does not perform an ND-to-NZ conversion or establish zero complete-call cost.
+
+Pipeline buffer tracking follows parsed storage origins on this source. `_analyzer.py::probe_kernel_facts` (`pypto/python/pypto_pro/runtime/pipeline/_analyzer.py`) records the declarations reached by each actual operand; `_cross_core_scanner.py` consumes those access facts and their pipe roles. `_buffer_parser.py::_build_reinterpreted_group` (`pypto/python/pypto_pro/language/parser/_buffer_parser.py`) binds a whole-group view to its original buffer and retains its cursor. The stage parameter and local view names need not match the declaration's spelling. The verified form passes the declared group into its consumer and constructs the views there; metadata aliasing still needs a checked producer/consumer graph and emitted synchronization.
+
+A read-only NZ panel `R[N,K]` can feed `S = X @ R.T` and `O = P @ R[:,:D]`, with independent `P` and `0 < D < K`. Inside one Cube consumer stage, `panel` is the declared Mat group, `x` and `p` are named L1 operands, and the caller supplies correctly shaped L0 groups and independent accumulators:
+
+```python
+transpose_group = pl.reinterpret(panel, shape=[K, N], layout=pl.ZN)
+rt = transpose_group.next()
+pl.set_validshape(rt, [K, N])
+pl.gemm(s, x, rt, l0a=left_s, l0b=right_s)
+
+prefix_group = pl.reinterpret(panel, shape=[N, D], layout=pl.NZ)
+rv = prefix_group.current()
+pl.set_validshape(rv, [N, D])
+pl.gemm(o, p, rv, l0a=left_o, l0b=right_o)
+```
+
+The prefix keeps the original aligned NZ row extent, slot addresses and backing pitch; only its feature-column extent shrinks. Both views read the same cursor, advanced once by `next()`. Current native validation covers serial `preload=0`, aligned non-square FP16/BF16 panels and one/two slots with changed inputs through slot wraparound. Keep the shared panel read-only until both L1-to-L0 transfers finish, and place its reverse release on MTE1 after the final reader before producer reuse. These bounds establish neither arbitrary tails or stage fan-out nor overlap or performance gains.
+
+The [complete FP16 dense path](../../examples/algorithms/sparse_attention/kernel.py) loads its key panel once and consumes its transpose and narrower prefix through its own stage/slot schedule. The [native indexed contraction](../../examples/algorithms/indexed_batched_gemm_onchip/kernel.py) supplies a gathered producer: SIMT writes a local Vec tile, conversion and insertion produce the original NZ Mat group, and Cube builds its ZN group view from the declared group argument. Inspect each transformed pipeline's ready and release events against the same logical task/slot; a standalone transpose parse does not establish a correct handover.
+
 ## From Capacity Planning to Performance Candidates
 
 Fitting all of K in L0 is a correctness starting point, not a reason to keep all of K there. Jointly choose `M_b/N_b/K_b`: reducing the K staging block may allow a wider N block or deeper slots, but adds accumulation steps; increasing M changes effective parallel work and tail frequency. Budget each resource by dtype bytes and slot count rather than checking only whether one tile fits:
@@ -82,6 +109,14 @@ After fixing geometry, choose launch candidates around changes in `ceil(T/C)`, i
 
 Retune blocks after choosing ownership and apply this comparison separately to each product in a chain. Use thin-wide, tall-narrow and mixed-tail controls, timing all loads, computation and drains; a valid tile size or a fast square workload does not establish a good mapping for another aspect ratio.
 
+The [configuration comparison procedure](../workflows/optimization.md#choose-configuration-comparisons) combines these grid candidates with worker counts, bounds the screening cost and checks metadata dispatch on additional shapes.
+
+### Fold shared-RHS batch rows when their physical mapping permits it
+
+For `out[..., M, N] = A[..., M, K] @ B[K, N]` with the same B for every batch, compare folding the leading batch axes and M into one row stream: `[batch_product * M, K] @ [K, N]`. This lets an M tile cross batch boundaries and can reduce padding or underfilled tiles when each batch has few rows; merely flattening work-item IDs while retaining one small tile per batch does not test that candidate. Prove the physical row map first: contiguous batch/M rows permit the simple fold, while other layouts need an expressible explicit-stride map or a different path. Restore the original batch-axis order in the public output coordinates and preserve its shape, strides and dtype; folding does not authorize a hidden materializing Host reshape. Use the [GM axis and stride contracts](datamove.md#higher-rank-gm-to-a-two-dimensional-tile-map-axes-first).
+
+Do not use this shared-RHS collapse when B differs by batch. If another consumer uses batch/group-dependent coefficients or validity, recover that metadata from the original logical coordinates; shared B does not erase those boundaries. This is a dataflow candidate, not a newly validated kernel. Compare against explicit batched ownership including operand rereads, physical padding, tails, active owners, the busiest worker's work and all layout/launch costs; a valid algebraic collapse alone does not establish a complete-call gain.
+
 ## Thin-row contractions: compare arithmetic and transport paths
 
 A matrix-shaped expression does not settle which core should execute it. For a very small M and a wide retained N, compare a bounded VF dot-product path with the Cube control. Keep the activation in FP32 registers when the contract requires FP32 intermediates, widen BF16 weights, and accumulate along K with explicitly initialized FMA destinations. A Cube path representing one activation with several BF16 components performs several products against the same weight; those extra compute and L0 staging operations belong in the comparison even when GM weight traffic is unchanged. Revalidate reduction order and cancellation against the original evaluator.
@@ -104,6 +139,7 @@ When testing fusion, establish a small same-execution-group producer/consumer sl
 
 [On-chip grouped W4A16](../../examples/algorithms/quant_gemm_w4a16_onchip/) provides a complete bounded-fragment conversion and same-group L1 handover. Its contract and resource plan live in the kernel header. Its current M-only ownership is a reuse choice with known thin-M underutilization, not a default mapping for every transformed contraction.
 
+<!-- kernel-query: {"id":"grouped-ownership","aliases":["grouped-ownership","nested-worker-restart","grouped work distribution"],"term_groups":[["grouped","分组"],["ownership","balance","分配"]],"example":"algorithms/grouped_gemm_swiglu_quant/kernel.py","candidate":{"id":"nested-worker-restart","title":"Compare continuous ownership across groups","conditions":["Actual per-worker full-call counts show repeated short-group/remainder work on the same workers.","Continuous ownership can preserve disjoint coverage, reuse and empty-consumer slot lifetimes."],"decrease":["The busiest worker's repeated tile/row work and idle-worker tail, if the counts confirm imbalance."],"increase":["Prefix/metadata arithmetic, operand reloads or reduced group-local reuse."],"reject_if":["Measured group lengths already balance the critical work.","Reuse loss or metadata work cancels the tail reduction.","Any group/output loses coverage, empty consumers preload unsafely, or complete-call timing regresses."],"comparison":"Count both Cube and Vector work on every worker across empty, short, concentrated and mixed groups; compare restart versus continuous numbering at fixed geometry/workers before retuning."},"when":"Grouped work restarts ownership; actual full-call per-worker counts must establish imbalance before a partition change.","discovery_terms":[["work","worker","ownership"],["distribution","balance","group","restart"]]} -->
 ## Distribute tiles across runtime groups
 
 Count work across the complete call, not just within one group. Restarting each group's tile loop at `worker_id` assigns short groups and remainders repeatedly to the same low-numbered workers. Sum each worker's tile count and operand transfers over all groups, including empty groups and mixtures of short and long groups; choosing a smaller M block to fill one group can increase calls and reloads across the whole workload.

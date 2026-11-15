@@ -25,6 +25,7 @@ from pypto_pro.language import Vf as vf  # noqa: N813
 
 FP32 = pl.DT_FP32
 I32 = pl.DT_INT32
+U8 = pl.DT_UINT8
 
 VL_FP32 = 64  # 一个 FP32 寄存器 = 256 字节 = 64 个元素
 N = 128  # 两个 VL：双搬入要读 2*VL，双搬出要写 2*VL
@@ -73,9 +74,8 @@ def _load_dist(src, o_norm, o_brc, o_unpk, o_blk):
 def _load_dintlv(src, o_even, o_odd):
     """`dist=DINTLV_B32` 返回**两个**寄存器：偶数下标一个、奇数下标一个。
 
-    这是 `load_align` 的**四参数形式**（两个 dst + ptr + offset）。codegen 按参数个数分派
-    （`backend_cce_vf_ops.cpp:1016`），所以这个形式**不接受** `data_copy_mode` / `block_stride` /
-    `repeat_stride`——传了会报 `INVALID_ARGUMENT`，消息里点名 "4-arg (de-interleave) form"。
+    双返回值会降低成两个 dst、ptr、offset 的四参数 IR 形式。这个形式不接受
+    `data_copy_mode`、`block_stride` 或 `repeat_stride`，其搬运布局由 `DINTLV_B32` 决定。
     """
     preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
     even, odd = vf.load_align(src, 0, dist=pl.LoadDist.DINTLV_B32)
@@ -130,8 +130,7 @@ def _datablock(src, dst):
     **这个模式改变两个参数位置的含义**：
     - `offset` 的位置换成一个**选择用的 mask_reg**——某个 DataBlock 在 mask 里对应的 32 bit
       有任意一位为 1 就搬，全 0 则不搬且目的位置不更新（即使越界也不报错）。
-    - `block_stride` **必须作关键字传**。位置传会让参数个数变成 4，撞上双搬入那个形式并报
-      `INVALID_ARGUMENT`（实测）。
+    - `block_stride` **必须作关键字传**；位置传递在参数检查阶段被拒绝。
 
     `block_stride=2` 即隔一个 block 取一个：输出的第 k 个 block 来自源的第 2k 个 block。
     """
@@ -144,23 +143,15 @@ def _datablock(src, dst):
 
 
 # ---------------------------------------------------------------------------
-# 六、位宽陷阱：DS 在 32 位下静默给零
+# 六、通用 DS：MaskReg 位采样
 # ---------------------------------------------------------------------------
 
 
 @pl.vector_function
-def _width_trap(src, dst):
-    """`LoadDist.DS` 用在 FP32 上**不报错，给全零**（实测 2026-09-27）。
-
-    枚举里只有 `DS` / `DS_B8` / `DS_B16`，**没有 `DS_B32`**；`US` 同理。也就是说下采样/上采样
-    只在 8 位和 16 位宽存在。在 32 位上用它，工具链一路放过，拿到的是一块零。
-
-    这个 kernel 存在的目的是把这件事变成一条会失败的测试——哪天行为变了（无论是改成报错还是
-    改成可用），测试会告诉我们。
-    """
-    preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
-    r = vf.load_align(src, 0, dist=pl.LoadDist.DS)
-    vf.store_align(dst, r, preg, 0)
+def _load_mask_ds(src, dst):
+    """通用 DS 选择 MaskReg：取前64字节位图的偶数位，写出32字节。"""
+    mask = vf.load_align(src, dist=pl.LoadDist.DS)
+    vf.store_align(dst, mask)
 
 
 # ---------------------------------------------------------------------------
@@ -265,14 +256,15 @@ def align_datablock(a: pl.Tensor[[1, N], FP32], out: pl.Tensor[[1, N], FP32]):
         pl.store(out, t0, [0, 0])
 
 
-@pl.jit(auto_mutex=True, name="align_width_trap")
-def align_width_trap(a: pl.Tensor[[1, N], FP32], out: pl.Tensor[[1, N], FP32]):
-    tt = _tile_type(FP32)
+@pl.jit(auto_mutex=True, name="align_load_mask_ds")
+def align_load_mask_ds(a: pl.Tensor[[1, N], U8], out: pl.Tensor[[1, N], U8]):
+    tt = _tile_type(U8)
     ga = pl.make_tile_group(type=tt, addrs=[_A], mutex_ids=[0])
     g0 = pl.make_tile_group(type=tt, addrs=[_O[0]], mutex_ids=[1])
     with pl.section_vector():
         ta = ga.next()
         t0 = g0.next()
         pl.load(ta, a, [0, 0])
-        _width_trap(ta, t0)
+        pl.load(t0, out, [0, 0])
+        _load_mask_ds(ta, t0)
         pl.store(out, t0, [0, 0])

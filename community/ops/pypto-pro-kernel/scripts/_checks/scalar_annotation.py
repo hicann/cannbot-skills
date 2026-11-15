@@ -6,12 +6,15 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Reject proven dtype aliases used as complete JIT scalar annotations."""
+"""Check scalar annotations and review version-bound postponed entry dispatch."""
 
 import ast
+import hashlib
+from functools import lru_cache
 from collections import Counter
 from pathlib import Path
 
+from .paths import PYPTO_ROOT
 from .register_dtype import DTYPES
 from .source import (
     Finding,
@@ -23,9 +26,87 @@ from .source import (
 )
 
 RULE = "jit-scalar-dtype-alias"
+ENTRY_RULE = "jit-postponed-entry"
+# The complete recognizer, not a substring shared by unrelated dispatch paths.
+ENTRY_GUARD_SHA256 = "13e19e83667c3f7171b915363f46ad619a591b4d102485a9187d01e109c19078"
 
 
-def check(path: Path):
+@lru_cache(maxsize=4)
+def entry_guard(payload):
+    try:
+        text = payload.decode("utf-8")
+        tree = ast.parse(text)
+    except (UnicodeError, SyntaxError):
+        return False
+    recognizers = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_is_tile_kernel"
+    ]
+    return (
+        len(recognizers) == 1
+        and hashlib.sha256(
+            ast.get_source_segment(text, recognizers[0]).encode()
+        ).hexdigest()
+        == ENTRY_GUARD_SHA256
+    )
+
+
+def postponed_entry(source, function, arguments, pypto_root):
+    future = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in source.tree.body
+    )
+    strings, tensor_like = [], False
+    for argument in arguments:
+        annotation = argument.annotation
+        if annotation is None:
+            continue
+        if isinstance(annotation, ast.Constant) and isinstance(annotation.value, str):
+            text = annotation.value
+        elif future:
+            text = ast.unparse(annotation)
+        else:
+            # Another eager annotation can select native dispatch on its own.
+            return []
+        strings.append(text)
+        try:
+            expression = ast.parse(text, mode="eval").body
+        except SyntaxError:
+            continue
+        if isinstance(expression, ast.Subscript):
+            tensor_like |= attribute_path(expression.value) in {
+                f"{source.pl}.Tensor",
+                f"{source.pl}.Ptr",
+            }
+    if not tensor_like or any(
+        text.split(".")[-1].startswith("DT_") for text in strings
+    ):
+        return []
+    selected = Path(pypto_root) / "python/pypto_pro/runtime/jit.py"
+    try:
+        verified = entry_guard(selected.read_bytes())
+    except OSError:
+        verified = False
+    if not verified:
+        return []
+    return [
+        Finding(
+            source.path,
+            function.lineno,
+            ENTRY_RULE,
+            f"`{function.name}` 的参数注解均延迟为字符串；所选 JIT 识别器不会把这些 Tensor/Ptr 拼写选为 native 入口 "
+            f"(recognizer SHA256 {ENTRY_GUARD_SHA256})。先检查导入后入口的实际类型与注解，"
+            "再做 native capture；可选用 eager Tensor 注解或显式 pl.DT_* dtype 拼写。"
+            "这不是对 future annotations 或 Tensor 内 dtype 别名的一般禁令；包装器或运行时注解改写需另行验证。",
+            advisory=True,
+        )
+    ]
+
+
+def check(path: Path, *, pypto_root=PYPTO_ROOT):
     source = read(path)
     if not source.pl:
         return []
@@ -62,6 +143,7 @@ def check(path: Path):
         arguments = (
             function.args.posonlyargs + function.args.args + function.args.kwonlyargs
         )
+        findings += postponed_entry(source, function, arguments, pypto_root)
         for argument in arguments:
             annotation = argument.annotation
             if isinstance(annotation, ast.Name) and annotation.id in aliases:

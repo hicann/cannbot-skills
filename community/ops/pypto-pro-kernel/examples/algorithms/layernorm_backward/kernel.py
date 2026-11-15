@@ -6,7 +6,11 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：原始。原生 VF LayerNorm backward，两个归约方向分别分配输出所有权。
+
+机制：[逐输出精度与owner](../../../references/patterns/multi-output-reductions.md#choose-arithmetic-independently-for-each-output)。
+本例提供不同归约方向的原生控制；迁入其他多输出任务时，逐输出重算误差链、表示和近零条件，保留各自独立判据，再比较共享遍历与完整调用。
 
 契约：连续 FP32 x/dy[M,N]、gamma[N]、mean/rstd[M]，输出 dx[M,N]、dgamma/dbeta[N]。
 严格使用传入的 FP32 统计量，不在 kernel 或 Host 重算前向统计量；Host 仅做形状视图与调度。
@@ -14,6 +18,7 @@ dx 按行分工，参数梯度按列块分工。后者一次搬入二维块，�
 这是归约轴驻留版：参数梯度 UB 占 2*M*64*4 + 2*ceil(M/64)*64*4 + 2*64*4 字节；扩大形状前应检查容量或改用行块流式归约。
 验证边界：行为版本 872df763f、CANN 9.2.0、Ascend950PR；同目录测试覆盖传入统计量、不同 worker、重复调用及输入/输出守卫。
 """
+# pylint: enable=line-too-long
 
 from functools import lru_cache
 

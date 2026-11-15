@@ -1,25 +1,26 @@
 # fixpipe: Disposition and Scope
 
-Historical measurements: 2026-09-27, Ascend950PR_957b / CANN 9.2.0 / pypto 0.2.1. Detailed evidence is in each defect page and [fixpipe measurements](../../api/fixpipe.md). Revalidate the relevant boundary against the target installation before treating it as a current defect.
+Target boundary: official PyPTO `bca90a6c6e69a1b1111cfe8a43b975ba2bfcf28a`, Ascend950PR / CANN 9.3.0. Detailed mechanism evidence is in each defect page and [fixpipe measurements](../../api/fixpipe.md). A guard present in another integration branch does not establish protection in the selected official commit.
 
 ## Current disposition
 
 | Issue | Status and maintenance entry point |
 | --- | --- |
-| [Acc→Vec FP32→FP32 drops scale](fixpipe-fp32-to-fp32-drops-scale.md) | CANN PTO mapping defect; pypto's `_reject_fp32_to_fp32_quant` rejects it; per the existing decision, the CANN side will not be fixed. |
-| [dual + relu](fixpipe-dual-dst-plus-relu-faults-aicore.md) | The unsafe combination is rejected during parsing. |
-| dual + scale / dtype conversion / DN destination layout | All have parse-time guards; do not treat only explicit scale as quantization. |
-| [Tuple unpacking flattens memory space](tuple-unpack-collapses-tile-memory-space.md) | `structural_equal` has been fixed; this is no longer a reason to forbid tuple syntax. |
-| fp19 scale and quantization offset | Scale documentation has been added and `quant_offset` exposed; see findings for numerical values/bit fields. |
-| Acc→GM Cols limit, atomic dtype, DN destination for move with offset | Guards were added in `a48c916ec`. |
+| [Acc→Vec FP32→FP32 drops scale](fixpipe-fp32-to-fp32-drops-scale.md) | CANN PTO mapping omits this on-chip quantization mode; no matching frontend guard. Scalar and per-channel `scale=2` both return the unscaled accumulator. The example's rejection checks expose the absent protection. |
+| [dual + relu](fixpipe-dual-dst-plus-relu-faults-aicore.md) | No matching parser or PTO cross-check. Known-invalid combination; verify the missing rejection by parsing only. |
+| dual + scale | Rejected by `_ir_move` during parsing. |
+| dual + dtype conversion / DN destination layout | No parser guard. The PTO `GetDualDstCtl` static assertions require `NoQuant` and forbid NZ→DN; this is a compile-stage boundary. |
+| [Tuple unpacking flattens memory space](tuple-unpack-collapses-tile-memory-space.md) | Different memory spaces remain distinct; tuple syntax is supported. |
+| fp19 scale and quantization offset | Scale uses truncated FP32 bits. No public `quant_offset` keyword; a typed runtime INT64 scale payload carries the signed nine-bit offset. |
+| Acc→GM size, atomic dtype and offset-move layout | Covered by the corresponding positive and rejection examples; retain allocation-time and operation-time checks as distinct boundaries. |
 
-## Why protection is at parse time
+## Required protection and actual rejection layers
 
 Underlying defects can silently produce incorrect results or poison a device process. Known unsupported combinations should be rejected at the DSL layer with a source location and an alternative. FP32 with scale can use `pl.store`, or move to UB without scale and then use `vf.muls`; dual+relu can use single mode or vector relu. Relaxing the combination table does not resolve a hardware limitation.
 
-Dual mode supports only same-type plain copies; the four rejected dimensions are scale, relu, dtype conversion, and DN destination layout. `phase` is conditionally supported and must not be added as a fifth unconditional rejection: the official documentation separately warns that misaligned N in SplitN may hang.
+Dual mode supports same-type plain copies; the restricted dimensions are scale, relu, dtype conversion and DN destination layout. Only the scale case has a frontend guard in this target. The three other parse-only checks report strict XFAIL when protection is absent; an unrelated error still fails, and a passing required guard becomes strict XPASS until its marker is removed. Do not launch relu to turn a missing guard into a device fault. `phase` is conditionally supported and must not be added as a fifth unconditional rejection: the official documentation separately warns that misaligned N in SplitN may hang.
 
-Regressions: `python/tests/ut/pypto_pro/ir/op/test_scale_error_handling.py` and the [fixpipe examples](../../../examples/basic_api/fixpipe/). Preserve positive cases to avoid rejecting legal routes.
+Regressions use the [fixpipe examples](../../../examples/basic_api/fixpipe/). Preserve positive cases to avoid rejecting legal routes, and assert a specific error class and diagnostic at the intended layer. A compile-time rejection does not satisfy a parser-guard assertion.
 
 ## Rule reconciliation method
 

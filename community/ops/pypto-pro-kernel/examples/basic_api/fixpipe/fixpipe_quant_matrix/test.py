@@ -6,10 +6,13 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """Fixpipe quantization across Acc→Vec, Acc→Mat and Acc→GM.
 
 The Vec matrix tests ten accepted dtype combinations with scalar and per-channel scales. Scaled FP32→FP32 has dedicated
-parse-only rejection tests for both encodings and three scale values; it is not skipped or launched. GM tests all eleven
+parse-only tests requiring rejection of this unsafe route. Scalar checks cover three literal scales; the per-channel
+guard must reject the route independently of runtime table contents. The missing guard is a strict expected failure;
+only a missing rejection is accepted as that defect, and the unsafe route is never launched. GM tests all eleven
 combinations in ND/NZ layouts. Mat tests seven q@q numerical readbacks, two UINT8 operand rejections and one HF8
 execution-only case.
 
@@ -23,14 +26,16 @@ values with HF8_MAX_REL=0.125; both hardware units interpret the same bytes, so 
 independent format oracle. The dtype/layout domain is fixed by the case tables.
 
 Additional controls cover scale-free routes, integer saturation and unsigned clamping, per-channel bit46, FP8
-decoder/quantizer consistency, fp19 scale truncation, signed nine-bit offsets, and explicit quant_offset versus packed
-runtime payloads. Source hashes and actual toolchain identity are captured outside the repository by the source-gated
+decoder/quantizer consistency, fp19 scale truncation and signed nine-bit offsets carried by runtime INT64 scale payloads
+on both Acc→Vec and Acc→GM paths. Source hashes and actual toolchain identity are captured outside the repository by the source-gated
 runner.
 """
+# pylint: enable=line-too-long
 
 import numpy as np
 import pytest
 import torch
+import pypto_pro as pp
 from pypto_pro._errors import NotSupported
 
 from . import reference as ref
@@ -43,7 +48,7 @@ from .kernel import (
     make_per_channel_move,
     make_quant_move,
     make_quant_move_to_mat,
-    make_move_with_quant_offset,
+    make_move_with_payload_offset,
     make_quant_store,
     hf8_move_and_decode,
     store_with_runtime_payload_int8,
@@ -280,7 +285,7 @@ def test_a_runtime_scalar_scale_agrees_with_a_compile_time_one(device):
     out = torch.zeros((M, N), dtype=torch.float32, device=device)
     import pypto_pro.language as pl
 
-    make_quant_store(_pl_dtype("FP32"), _pl_dtype("FP32"), pl.TensorLayout.ND)(
+    make_quant_store(_pl_dtype("FP32"), _pl_dtype("FP32"), pl.ND)(
         a, b, out
     )
     torch.npu.synchronize()
@@ -367,12 +372,12 @@ def test_the_payload_layout_agrees_with_the_measured_mantissa_width():
 @pytest.mark.parametrize(
     "quant_offset,want", [(0, 32), (5, 37), (100, 127), (-1, 31), (-256, -128)]
 )
-def test_the_quant_offset_parameter_works_on_the_move_path(quant_offset, want, device):
-    """The quant offset parameter works on the move path."""
+def test_the_payload_offset_works_on_the_move_path(quant_offset, want, device):
+    """All signed offsets and saturation boundaries retain the Acc→Vec move route."""
     a = torch.ones((M, K), dtype=torch.float16, device=device)
     b = torch.ones((K, N), dtype=torch.float16, device=device)
     out = torch.zeros((M, N), dtype=torch.int8, device=device)
-    make_move_with_quant_offset(quant_offset)(a, b, out)
+    make_move_with_payload_offset(quant_offset)(a, b, out)
     torch.npu.synchronize()
     got = out.cpu().numpy().astype(np.int64)
 
@@ -382,13 +387,13 @@ def test_the_quant_offset_parameter_works_on_the_move_path(quant_offset, want, d
     )
 
 
-def test_the_quant_offset_parameter_agrees_with_the_hand_packed_payload(device):
-    """The quant offset parameter agrees with the hand packed payload."""
+def test_the_move_payload_agrees_with_the_independent_packed_control(device):
+    """The move metadata encoder agrees with the independently packed GM-store control."""
     a = torch.ones((M, K), dtype=torch.float16, device=device)
     b = torch.ones((K, N), dtype=torch.float16, device=device)
 
     via_param = torch.zeros((M, N), dtype=torch.int8, device=device)
-    make_move_with_quant_offset(5)(a, b, via_param)
+    make_move_with_payload_offset(5)(a, b, via_param)
     torch.npu.synchronize()
 
     via_payload = _run_payload_int8(ref.encode_quant_payload(0.5, offset=5), device)
@@ -410,7 +415,7 @@ def _run_store(src, dst, carrier, layout_name, device):
     """Run a direct GM output case in the selected physical layout."""
     import pypto_pro.language as pl
 
-    layout = pl.TensorLayout.ND if layout_name == "ND" else pl.TensorLayout.NZ
+    layout = pl.ND if layout_name == "ND" else pl.NZ
     a, b = ref.make_inputs(M, K, N, src)
     out = torch.zeros((M, N), dtype=_DTYPE_OF[carrier], device=device)
     kernel = make_quant_store(_pl_dtype(src), _pl_dtype(dst), layout)
@@ -679,21 +684,24 @@ def test_these_destinations_are_unreachable_without_a_scale(src, dst, carrier, d
 
 @pytest.mark.parametrize("scale", [0.5, 2.0, 0.125])
 @pytest.mark.parametrize("per_channel", [False, True], ids=["scalar", "per-channel"])
-def test_fp32_to_fp32_is_rejected_on_the_move_path(scale, per_channel, device):
-    """Fp32 to fp32 is rejected on the move path."""
+@pytest.mark.xfail(
+    strict=True,
+    raises=pytest.fail.Exception,
+    reason=(
+        "PyPTO bca90a6c lacks the Acc-to-Vec FP32 -> FP32 scale guard; "
+        "CANN 9.3 silently drops scalar and per-channel scaling"
+    ),
+)
+def test_fp32_to_fp32_is_rejected_on_the_move_path(scale, per_channel):
+    """Require a parse guard for the route that silently drops scale; runtime table values cannot make it safe."""
+    if per_channel:
+        kernel = make_per_channel_move(_pl_dtype("FP32"), _pl_dtype("FP32"))
+    else:
+        kernel = make_quant_move(_pl_dtype("FP32"), _pl_dtype("FP32"), scale=scale)
     with pytest.raises(
         NotSupported, match="scale is silently dropped for Acc-to-Vec FP32 -> FP32"
     ):
-        if per_channel:
-            _run_per_channel(
-                "FP32",
-                "FP32",
-                "float32",
-                device,
-                scales=np.full((1, N), scale, dtype=np.float64),
-            )
-        else:
-            _run("FP32", "FP32", "float32", device, scale=scale)
+        kernel.to_kernel_def().parse_target_program(pp.ir.SectionKind.Cube)
 
 
 # ---------------------------------------------------------------------------

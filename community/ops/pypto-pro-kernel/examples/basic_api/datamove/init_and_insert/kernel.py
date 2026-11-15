@@ -6,36 +6,17 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""写法：原始。GM 就地初始化（`pl.init_output`）与小块插进大块（`pl.insert`）。
+"""写法：原始。GM 初始化与 UB 子块插入。
 
-**两个 API 的单位不一样，这是最容易错的地方。**
+init_output 的 offset/size 是按行优先拉平的元素区间，调用必须放在 section_vector 内。
+insert 的偏移是二维元素坐标，搬运范围来自源 Tile 的有效形状。
 
-| | 偏移单位 | 形状从哪来 |
-| --- | --- | --- |
-| `pl.init_output(tensor, offset=, size=, value=)` | **元素**（一维，按行优先拉平） | 没有形状，只有一段 `[offset, offset+size)` |
-| `pl.insert(dst_tile, src_tile, [row, col])` | **二维元素坐标** | `src_tile` 自己的形状 |
+初始化由 V 填充临时 UB，再经 MTE3 写 GM；其 V→MTE3 依赖由该操作生成，跨核消费仍需
+调用方建立核间同步。静态 offset+size 越过 GM 张量元素数时，解析期拒绝。
 
-`init_output` 作用在 **GM 张量**上，`insert` 作用在**片上 tile** 之间（TINSERT）。
-
-**`init_output` 自己插 V→MTE3 的同步**（docstring：「V→MTE3 synchronization is inserted
-automatically」），所以它不需要手工配同步；但它**从不发跨核屏障**，数据要给别的核或 cube 子核
-用时，两侧都得显式 `pl.system.sync_all(core_type=pl.SyncCoreType.MIX)`。这一例是单核，用不上。
-
-**`init_output` 要求 kernel 里有一个 vector section，空的也行。** 它内部用 V 流水填一块临时
-UB 再走 MTE3 搬出去；kernel 里没有 `pl.section_vector()` 时那两条 op 落到一个没有 V 流水的核上，
-报的是 C++ 层的 `PIPE_V` 范围错和 `copy_ubuf_to_gm_align_v2 does not support the given target
-feature`——**看不出和 section 有关**。加一个 `with pl.section_vector(): pass` 就好。实测见
-`test.py` §五。
-
-**文档写了、但解析期不检查的两条**（实测，见 `test.py` §六）：`init_output` 的「必须在 tile
-分配之前调用」，以及 `insert` 的偏移是否让 `src` 落在 `dst` 界内。
-
-**那条「必须在 tile 分配之前」的真正后果：`init_output` 覆写 UB `0x0` 起的 8192 字节。**
-它的临时 tile 在生成的 CCE 里是 `Tile<Vec, T, 1, chunk>` + `TASSIGN(..., 0x0)`,
-`chunk = (256 * 32) / sizeof(T)` 个元素，而 `TEXPANDS` 在 `SetValidShape` **之前**——
-所以填的是整个 chunk，不是 `size` 个元素。**和 `size=` 给多少无关。** 实测见 `test.py` §七。
-
-第一手来源：`pypto/python/tests/st/pypto_pro/frontend/fa/`（36 处）与 `datacopy/`（29 处）。
+本例显式放置 bare Tile 并手工建立流水依赖。初始化的临时 UB 从地址 0 开始，FP32 路径
+覆盖 8192 字节；load→init_output→store 探针用三个地址检查此工具链行为。正常初始化与
+insert 用独立数学参考及区间外哨兵验证。
 """
 
 import pypto_pro.language as pl
@@ -48,8 +29,7 @@ COLS = 16
 SMALL_ROWS = 4
 SMALL_COLS = 8
 
-# 部分初始化的区间：第 32 个元素起 64 个，也就是行优先下的第 2、3、4、5 行前半。
-# **刻意不落在整行边界上**：落在整行上的话「按元素」和「按行」两种理解都对，判据就分不出来。
+# 部分初始化的区间是行优先拉平后的 [32,96)，包含四个完整行。
 INIT_OFFSET = 32
 INIT_SIZE = 64
 INIT_VALUE = 7.5
@@ -84,11 +64,10 @@ def init_whole_tensor(out: pl.Tensor[[ROWS, COLS], FP32]):
     单独留一个"只做初始化"的 kernel：和 `pl.store` 混在一起的话，「是 init 写的还是 store 写的」
     就分不清了。
 
-    **那个空的 `section_vector` 是必需的，不是装饰。** 去掉它编译就失败（`test.py` §五）。
+    `init_output` 是 Vector 操作，调用位于 `section_vector` 内。
     """
-    pl.init_output(out, offset=0, size=ROWS * COLS, value=-1.0)
     with pl.section_vector():
-        pass
+        pl.init_output(out, offset=0, size=ROWS * COLS, value=-1.0)
 
 
 @pl.jit()
@@ -97,9 +76,8 @@ def init_partial_region(out: pl.Tensor[[ROWS, COLS], FP32]):
 
     主机侧先把整张填成哨兵，所以这一例能同时判两件事：该填的填了，**不该动的没动**。
     """
-    pl.init_output(out, offset=INIT_OFFSET, size=INIT_SIZE, value=INIT_VALUE)
     with pl.section_vector():
-        pass
+        pl.init_output(out, offset=INIT_OFFSET, size=INIT_SIZE, value=INIT_VALUE)
 
 
 # `init_output` 覆写的 UB 宽度，从 codegen 算出来并在板上验过边界：
@@ -139,8 +117,8 @@ def make_load_then_init(addr):
             pl.system.sync_dst(
                 set_pipe=pl.PipeType.MTE2, wait_pipe=pl.PipeType.V, event_id=0
             )
-        pl.init_output(scratch, offset=0, size=ROWS * COLS, value=-1.0)
         with pl.section_vector():
+            pl.init_output(scratch, offset=0, size=ROWS * COLS, value=-1.0)
             pl.system.sync_src(
                 set_pipe=pl.PipeType.V, wait_pipe=pl.PipeType.MTE3, event_id=1
             )
@@ -156,58 +134,36 @@ def make_load_then_init(addr):
 def init_after_tile_declaration(
     x: pl.Tensor[[ROWS, COLS], FP32], out: pl.Tensor[[ROWS, COLS], FP32]
 ):
-    """`init_output` 放在 `pl.make_tile` **之后**——docstring 说这不行，实际解析期不拦。
-
-    docstring 原文：「Must be called before Tile buffer allocation (``make_tile_group`` etc.)」。
-
-    **`VA_BIG` 是 `0x0000`，而 `init_output` 的临时 tile 也写死在 `0x0`——两者完全重合。**
-    生成的 CCE 里是两个 `TASSIGN(..., 0x0)`。这个 kernel 的输出仍然对，只是因为 `src`
-    载入之后再没被读过；**不是因为「放后面也行」**。
-
-    而且 `TSTORE`（MTE3 从 UB `0x0` 读）和 `TLOAD`（MTE2 往 UB `0x0` 写）之间**没有同步**,
-    两者都正好是 512 字节、同一个地址。这是一个 WAR 竞争，见 `test.py` §五点二。
-
-    **注意它只证到 `make_tile` 这一档**——`pl.mem_space()` / `allocate_tile_group` 那种真正
-    的自动分配没在这里试，docstring 点名的正是那一类。
-
-    反例：init-output-needs-a-drain —— 这一例的内容就是那个缺屏障的竞争本身
-    """
+    """初始化 GM 后排空流水，再将输入载入 bare Tile，避免临时 UB 的读写重叠。"""
     src = _tile([ROWS, COLS], VA_BIG)
-    pl.init_output(out, offset=0, size=ROWS * COLS, value=-1.0)
     with pl.section_vector():
+        pl.init_output(out, offset=0, size=ROWS * COLS, value=-1.0)
+        pl.system.bar_all()
         pl.load(src, x, [0, 0])
 
 
 @pl.jit()
 def init_int_tensor_with_whole_float(out: pl.Tensor[[ROWS, COLS], I32]):
-    """INT32 张量 + `value=3.0`：浮点字面量，但值是整数，**通过**。
+    """INT32 目标按向零截断转换浮点常量；整数值 3.0 转换为 3。
 
-    规则不是「value 的类型要和 dtype 一致」，而是**转换不能改变值**——生成的 C++ 里那个字面量
-    要过 `-Wliteral-conversion`，它只在值变了的时候报。`value=3.0` 变成 `3` 没丢东西，所以过。
+    正负小数常量的转换分别由相邻的 1.5 和 -1.5 用例检查。
     """
-    pl.init_output(out, offset=0, size=ROWS * COLS, value=3.0)
     with pl.section_vector():
-        pass
+        pl.init_output(out, offset=0, size=ROWS * COLS, value=3.0)
 
 
 @pl.jit()
 def init_int_tensor_with_fraction(out: pl.Tensor[[ROWS, COLS], I32]):
-    """INT32 张量 + `value=1.5`：**编译期被拒**，解析期不拦。
-
-    拒的地方在生成的 C++ 上，`-Werror,-Wliteral-conversion`：
-
-    ```
-    implicit conversion from 'float' to '...::DType' (aka 'int')
-    changes value from 1.5 to 1
-    ```
-
-    **消息很准，但拿不到**：框架抛出来的异常只有 `Failed to compile kernel '<name>'`，
-    上面那行在 `jit.py:1591` 的日志里。`test.py` 用 `caplog` 去抓它——只断言"编译失败"
-    的判据太钝，任何编译错误都会让它绿。
-    """
-    pl.init_output(out, offset=0, size=ROWS * COLS, value=1.5)
+    """INT32 目标把浮点常量 1.5 按向零截断转换为 1。"""
     with pl.section_vector():
-        pass
+        pl.init_output(out, offset=0, size=ROWS * COLS, value=1.5)
+
+
+@pl.jit()
+def init_int_tensor_with_negative_fraction(out: pl.Tensor[[ROWS, COLS], I32]):
+    """负值 -1.5 截断为 -1，区分向零截断与向下取整。"""
+    with pl.section_vector():
+        pl.init_output(out, offset=0, size=ROWS * COLS, value=-1.5)
 
 
 # ---------------------------------------------------------------------------
@@ -296,11 +252,7 @@ def insert_offset_with_one_element(
 def insert_past_the_edge(
     x: pl.Tensor[[ROWS, COLS], FP32], out: pl.Tensor[[ROWS, COLS], FP32]
 ):
-    """偏移 `[5, 8]`：`5 + 4 = 9 > 8`，行方向越界一行。**解析期不拦。**
-
-    **这个 kernel 不上板**：越界的 `insert` 会写到目的 tile 之外的 UB，落在哪儿取决于布局，
-    结果没有判据可写。它只钉住「解析期不拦」这件事——框架哪天加上界检查，那条测试会红。
-    """
+    """源区域越过目的 UB Tile 一行；只解析，不执行可能越界的搬运。"""
     big = _tile([ROWS, COLS], VA_BIG)
     small = _tile([SMALL_ROWS, SMALL_COLS], VA_SMALL)
     with pl.section_vector():
@@ -311,11 +263,6 @@ def insert_past_the_edge(
 
 @pl.jit()
 def init_size_beyond_the_tensor(out: pl.Tensor[[ROWS, COLS], FP32]):
-    """`size` 是张量元素数的 4 倍。**解析期不拦。**
-
-    **这个 kernel 不上板**，而且理由和上面那条不一样：它往 GM 张量之外写，越界的目标不是我们
-    自己的 UB 而是设备内存里别的东西。在共享机上试它不值当——**这是明说跳过**。
-
-    因为只解析不编译，它连那个空的 `section_vector` 都不需要（section 的约束在编译期）。
-    """
-    pl.init_output(out, offset=0, size=ROWS * COLS * 4, value=-1.0)
+    """静态 `size` 是张量元素数的四倍；只验证解析期的越界拒绝，不执行。"""
+    with pl.section_vector():
+        pl.init_output(out, offset=0, size=ROWS * COLS * 4, value=-1.0)

@@ -8,6 +8,8 @@
 
 """写法：原始。超出 UB 容量的一维 INT32 inclusive segmented scan。
 
+example-query: {"aliases": ["流式分段前缀和"]}
+
 契约：连续 x/heads/out[N]，1<=N<=1048576，x 在[-4,4]，heads 为0/1。
 i=0或heads[i]=1时输出x[i]，否则累加前一输出；输入保持不变，输出精确INT32。
 三次原生调用分别扫描独立块、计算块摘要的前缀、补入每块的外部carry。

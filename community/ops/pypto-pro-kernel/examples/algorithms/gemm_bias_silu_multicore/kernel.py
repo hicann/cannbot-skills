@@ -6,6 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：语法糖。八个执行组分担 ``C = silu(A @ B + bias)``。
 
 A 为 [2048,256] FP16，B 为 [256,256] FP16，bias 为 [1,256] FP32，输出为 [2048,256] FP32。每组处理连续 256 行，再切成四条 64 行的带。
@@ -18,12 +19,13 @@ A 为 [2048,256] FP16，B 为 [256,256] FP16，bias 为 [1,256] FP32，输出为
 
 每组的资源布局、双缓冲与 Cube→Vector 交接同 [单组带流水](../gemm_bias_silu_banded/kernel.py)：L1 的 A/B/bias 从 0x00000/0x10000/0x30000 开始；
 Left、Right、Bias、Acc、Vec 各自从 0 开始。局部 L0A/L0B、A 和 Acc 均为 depth=2，跨核 Vec 为 depth=2，使用 ``fwd_ids=[0,1]`` 与
-``bwd_ids=[2,3]``。事件计数器属于各执行组，可在不同组内使用相同编号。核内 mutex ID 由 ``mutex_ids="auto"`` 分配。
+``bwd_ids=[2,3]``。事件计数器属于各执行组，可在不同组内使用相同编号。核内 mutex ID 由 ``mutex_ids="auto"`` 分配。交接槽只读；SiLU 结果写入 0x10000 处的独立单槽 Vec 缓冲，占 32768B。
 
 核内两个 stage 从同一带循环调用，B/bias 在循环外各搬运一次；``DualModeSplitM`` 直接把本带 Acc 交给两个 AIV。1+1 拓扑的 preload=0/2 对照检查同步一致性。
 
 ``reference.py`` 复用未分块的 FP32 数学定义。``test.py`` 保持 rtol=atol=2e-2，覆盖全量输出、preload 与重复调用的逐位一致，以及首/中/末组的首末带边界。
 """
+# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf  # noqa: N813
@@ -47,17 +49,17 @@ VL = 64  # 一个 FP32 寄存器 = 64 个元素；N=256 整除，无尾块
 
 
 @pl.vector_function
-def _silu_half_band(tile):
-    """原地 silu：``tile`` 是 ``[HALF_BAND, N]``，一个 AIV 在一条带里的份额。"""
+def _silu_half_band(src, dst):
+    """读取交接半带，在独立 Vec 输出缓冲中计算 SiLU。"""
     all_lanes = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
     for r in pl.range(HALF_BAND):
         for off in pl.range(0, N, VL):
-            x = vf.load_align(tile, [r, off])
+            x = vf.load_align(src, [r, off])
             neg_x = vf.neg(x, all_lanes)
             exp_neg_x = vf.exp(neg_x, all_lanes)
             denom = vf.adds(exp_neg_x, pl.const(1.0, FP32), all_lanes)
             silu = vf.div(x, denom, all_lanes)
-            vf.store_align(tile, silu, all_lanes, [r, off])
+            vf.store_align(dst, silu, all_lanes, [r, off])
 
 
 @pl.pipeline.stage
@@ -76,14 +78,15 @@ def cube_band(band, a, b_g, bias_g, a_g, l0a, l0b, acc_g, shared_v):
 
 
 @pl.pipeline.stage
-def vector_band(band, out, shared_v):
+def vector_band(band, out, shared_v, output_g):
     """vector stage：消费本带（本 AIV 的半区），VF silu，写回 out 对应偏移。"""
     slot = shared_v.next()
-    _silu_half_band(slot)
+    result = output_g.current()
+    _silu_half_band(slot, result)
     core_id = pl.get_block_idx() // pl.get_subblock_num()
     row_base = core_id * M_PER_CORE + band * BAND_ROWS
     off_m = row_base + pl.get_subblock_idx() * HALF_BAND
-    pl.store(out, slot, [off_m, 0])
+    pl.store(out, result, [off_m, 0])
 
 
 def _make_kernel(preload: int, name: str):
@@ -164,13 +167,22 @@ def _make_kernel(preload: int, name: str):
                 shape=[HALF_BAND, N],
                 dtype=FP32,
                 target_memory=pl.MemorySpace.Vec,
-                layout=pl.TensorLayout.ND,
+                layout=pl.ND,
             ),
             addrs=0,
             mutex_ids="auto",
             depth=2,
             fwd_ids=[0, 1],
             bwd_ids=[2, 3],
+        )
+
+        output_g = pl.make_tile_group(
+            type=pl.TileType(
+                shape=[HALF_BAND, N], dtype=FP32, target_memory=pl.MemorySpace.Vec
+            ),
+            addrs=0x10000,
+            mutex_ids="auto",
+            depth=1,
         )
 
         # 一次性设置：B 与 bias 在本核所有带之间复用，不放进带循环。
@@ -186,7 +198,7 @@ def _make_kernel(preload: int, name: str):
             with pl.section_cube():
                 cube_band(band, a, b_g, bias_g, a_g, l0a, l0b, acc_g, shared_v)
             with pl.section_vector():
-                vector_band(band, out, shared_v)
+                vector_band(band, out, shared_v, output_g)
 
     return kernel
 

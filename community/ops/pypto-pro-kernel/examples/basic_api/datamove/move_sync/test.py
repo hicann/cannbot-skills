@@ -69,7 +69,7 @@ kernel），每种跑三次：
 
 ## 六、为什么这一例不收 `bar_*`（六个屏障）
 
-**`bar_*` 是流水内的屏障，不是跨流水屏障**（用户 2026-09-28 指出）。它排空**一条**流水，
+**`bar_*` 是流水内的屏障，不是跨流水屏障**。它排空**一条**流水，
 用在自动同步分析看不见依赖、需要强制流水内串行的少数场合。
 
 用它做跨流水定序会**静默算错**。同一张表里：
@@ -130,10 +130,12 @@ def _run(kernel, device):
     return out.cpu().numpy(), x
 
 
-def _parse(kernel, kind=pp.ir.SectionKind.Vector):
-    """解析并返回 IR 文本。`parse_target_program` 返回的是二元组，第二项这里用不到。"""
+def _parse(kernel, kind=pp.ir.SectionKind.Vector, *, insert_sync=False):
+    """解析并返回规范 IR 文本，按检查目标显式运行自动同步 pass。"""
     program, _ = kernel.to_kernel_def().parse_target_program(kind)
-    return pp.ir.python_print(program)
+    if insert_sync:
+        program = pp.ir.Pass.insert_sync()(program)
+    return pp.ir.text_dump(program)
 
 
 def test_the_flag_paired_chain_is_correct(device):
@@ -165,7 +167,7 @@ def test_the_two_forms_lower_to_different_ops():
     `auto_mutex` 在组上**确实**生效了——数值判据证不了这一点（缺同步也可能碰巧对）。
     """
     manual = _parse(chain_flag_sync)
-    automatic = _parse(chain_auto_mutex)
+    automatic = _parse(chain_auto_mutex, insert_sync=True)
 
     assert "system.sync_src_dyn" in manual and "system.sync_dst_dyn" in manual
     assert "system.mutex_lock_dyn" not in manual
@@ -202,7 +204,7 @@ def test_a_path_missing_from_the_aiv_table_is_refused():
     with pytest.raises(NotSupported) as raised:
         _parse(unsupported_aiv_path)
     message = str(raised.value)
-    assert "unsupported A5 synchronization path on AIV" in message, message
+    assert "unsupported synchronization path on AIV" in message, message
     for legal in ("PipeType.MTE2", "PipeType.MTE3", "PipeType.S"):
         assert legal in message, message
 

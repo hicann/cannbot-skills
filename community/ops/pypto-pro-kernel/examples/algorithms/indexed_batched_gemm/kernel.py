@@ -6,7 +6,10 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：语法糖。Stage an indexed matrix operand, then consume it with Cube.
+
+example-query: {"aliases": ["row selector matrix product", "行选择矩阵乘积"], "facets": {"source_dtype": ["FP16", "BF16"], "destination_dtype": ["FP32"]}}
 
 C[b, m, j] = dot(X[b, m, :], table[b, indices[b, j], :]).
 X[B,M,K] and table[B,R,K] are contiguous FP16/BF16; indices[B,N] is INT32
@@ -30,6 +33,7 @@ M tails retain physical allocations and narrow compact Left/Acc views.
 Panel scratch is 2*B*N*K bytes. This demonstrates an interface, not a tuned
 configuration or a performance guarantee for every indexed contraction.
 """
+# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 

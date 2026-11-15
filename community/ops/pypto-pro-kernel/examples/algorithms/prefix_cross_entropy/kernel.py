@@ -67,11 +67,7 @@ def _make_kernel(rows: int, cols: int):
         logits_reg = vf.load_align(logits_tile, [0, 0])
         for inner in pl.range(0, valid_cols, VL):
             col = chunk_start + inner
-            active = length - col
-            if active > VL:
-                active = VL
-            if active < 0:
-                active = 0
+            active = pl.min(VL, pl.max(0, length - col))
             prefix = vf.update_mask(active, dtype=FP32)
             values = vf.load_align(tile, [0, inner])
 
@@ -145,16 +141,8 @@ def _make_kernel(rows: int, cols: int):
         label_reg = vf.full(label, all_lanes, dtype=INT32)
 
         for inner in pl.range(0, valid_cols, VL):
-            output_active = valid_cols - inner
-            if output_active > VL:
-                output_active = VL
-            if output_active < 0:
-                output_active = 0
-            active = length - chunk_start - inner
-            if active > output_active:
-                active = output_active
-            if active < 0:
-                active = 0
+            output_active = pl.min(VL, pl.max(0, valid_cols - inner))
+            active = pl.min(output_active, pl.max(0, length - chunk_start - inner))
             write_mask = vf.update_mask(output_active, dtype=FP32)
             prefix = vf.update_mask(active, dtype=FP32)
 

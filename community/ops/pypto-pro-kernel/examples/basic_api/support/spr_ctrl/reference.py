@@ -8,9 +8,8 @@
 
 """CTRL 位域的参考计算。不 import 编译器。
 
-这一份很薄，因为 CTRL 的判据大多是**实测值本身**——没有第三方实现可以对照
-（`saturation` / `spr_ctrl` 在 ascriptor 里对应 `saturation_flags` / `cast_saturation`,
-但 CTRL 的位布局是 A5 特有的）。所以这里只放两样东西：
+CTRL field expectations depend on the selected A5 toolchain and measured
+state. This reference keeps bit extraction separate from observed defaults:
 
 1. 从一个 64 位值里取位区间（判据要能把「整寄存器」和「单个位」对起来）;
 2. 入口值与文档默认值的**差集**——这一例的核心结论就是这个集合非空。

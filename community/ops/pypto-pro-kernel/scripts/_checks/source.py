@@ -18,12 +18,15 @@ from __future__ import annotations
 
 import ast
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 PL_MODULE = "pypto_pro.language"
 VF_CLASS = "Vf"
+_PARSED_SOURCES = ContextVar("parsed_kernel_sources", default=None)
 
 # Counterexample declaration format: `反例：<rule-id> —— <why it remains>`. The dash is two U+2014 characters, matching
 # other repository docs.
@@ -84,11 +87,34 @@ class Source:
 
 
 def read(path: Path) -> Source:
-    text = Path(path).read_text(encoding="utf-8")
+    return parse(path, Path(path).read_text(encoding="utf-8"))
+
+
+@contextmanager
+def reuse_parsed_sources():
+    """Share read-only parses within one rule scan, keyed by path and fresh text."""
+    token = _PARSED_SOURCES.set({})
+    try:
+        yield
+    finally:
+        _PARSED_SOURCES.reset(token)
+
+
+def parse(path: Path, text: str) -> Source:
+    """Inspect an already bounded source snapshot without rereading or executing it."""
+    cache = _PARSED_SOURCES.get()
+    key = (Path(path), text)
+    if cache is not None and key in cache:
+        return cache[key]
     tree = ast.parse(text, filename=str(path))
-    return Source(
+    source = Source(
         path=Path(path), tree=tree, pl=_module_alias(tree), vf=_vf_alias(tree)
     )
+    if cache is not None:
+        if len(cache) >= 8:
+            cache.pop(next(iter(cache)))
+        cache[key] = source
+    return source
 
 
 def _module_alias(tree: ast.Module) -> Optional[str]:

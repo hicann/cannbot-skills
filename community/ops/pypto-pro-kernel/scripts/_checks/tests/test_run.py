@@ -142,3 +142,56 @@ def test_directory_source_detects_new_python_files(tmp_path):
     )
     assert result.returncode == 1
     assert "sources changed" in result.stderr
+
+
+def test_metadata_launch_parameter_is_not_rejected_for_nonliteral_spelling(tmp_path):
+    code = (
+        "WORKERS = 2 * 4\n"
+        "def launch(kernel, x, out, workers=WORKERS):\n"
+        "    return kernel[None, workers](x, out)\n"
+    )
+    _, result = run(tmp_path, code, "from pathlib import Path; Path('started').touch()")
+    assert result.returncode == 0
+    assert (tmp_path / "started").exists()
+
+
+def test_launch_geometry_accepts_evaluated_values():
+    from _checks.evaluation import native_launch_geometry
+
+    assert (
+        native_launch_geometry([(None, 2 * 4)], workers=8, tasks=1)["status"]
+        == "matched"
+    )
+
+
+def test_launch_value_validation_distinguishes_mismatch_and_unavailable():
+    from _checks.evaluation import native_launch_geometry
+
+    assert native_launch_geometry(None, workers=8, tasks=1)["status"] == "unverified"
+    assert native_launch_geometry([], workers=8, tasks=1)["status"] == "mismatch"
+    assert (
+        native_launch_geometry([(None, 9)], workers=8, tasks=1)["status"] == "mismatch"
+    )
+    assert (
+        native_launch_geometry([(object(), 8)], workers=8, tasks=1)["status"]
+        == "mismatch"
+    )
+    assert (
+        native_launch_geometry([(None, True)], workers=8, tasks=1)["status"]
+        == "mismatch"
+    )
+    with pytest.raises(ValueError):
+        native_launch_geometry([], workers=0, tasks=1)
+
+
+def test_native_integer_subclass_is_accepted_as_a_launch_value():
+    from enum import IntEnum
+    from _checks.evaluation import native_launch_geometry
+
+    class Workers(IntEnum):
+        EIGHT = 8
+
+    assert (
+        native_launch_geometry([(None, Workers.EIGHT)], workers=8, tasks=1)["status"]
+        == "matched"
+    )

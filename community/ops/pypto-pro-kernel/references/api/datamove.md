@@ -1,15 +1,81 @@
 # Measured datamove behavior
 
-**All 8 examples ran on hardware** (2026-09-28, Ascend950PR). Examples are in [`examples/basic_api/datamove/`](../../examples/basic_api/datamove/).
+Runnable examples are in [`examples/basic_api/datamove/`](../../examples/basic_api/datamove/). Each example's kernel and test describe its verification scope; historical device observations below do not establish acceptance on a different installation.
 
 The contract table is in [`tooling/example-coverage.md`](../tooling/example-coverage.md).
 
+<!-- kernel-query: {"id":"ub-l1","aliases":["ub-l1","ub_to_l1"],"term_groups":[["ub","vec","vector","vf","向量"],["l1","mat","cube","matmul","gemm","矩阵"]],"symbols":["pl.move","pl.insert"],"example":"basic_api/datamove/ub_l1_handover/kernel.py","candidate":{"id":"ub-l1-extra-layout-move","title":"Compare direct VF-to-NZ production with the aligned conversion control","conditions":["The active producer writes logical ND values and the local ND-to-NZ move feeds this L1 consumer.","The producer can use the complete direct-store recipe with matching physical pitch, dtype, masks and consumer synchronization."],"decrease":["One explicit UB layout conversion per executed producer handover and its temporary live storage, if no other consumer needs it."],"increase":["Strided VF store cost, address generation and padding; bank behavior is toolchain/geometry dependent."],"reject_if":["The conversion is inactive or shared by another necessary consumer.","The direct producer cannot express the required address map or capacity.","Consumer numerical/guard checks fail or complete-call paired timing does not improve."],"comparison":"Keep the aligned move control; compare direct cursor stores through the same L1/Cube consumer at fixed logical rows, workers and arithmetic. Verify changed inputs, tails, ownership and guards before AB/BA timing."},"when":"A Vec producer is handed to a Mat/Cube operand; other move/insert paths have their own contracts.","rules":["ub-l1-layout-mismatch","ub-nz-move-pitch","vf-nz-store-contract"],"discovery_terms":[["nz"],["handover","cursor","block_stride","rowplusone"]],"discovery_aliases":["move","insert"],"facets":{"source_memory":["Vec"],"destination_memory":["Mat"]}} -->
+## UB to L1 handover
 
-## 1. Roles of the eight examples
+Use this recipe when a Vector-produced operand in UB is consumed by Cube through L1. Query it with `check.py query 'UB to L1' --source candidate.py`. The command reads this section and the native example directly; exact API signatures come from the selected source tree, whose identity is distinct from the installed runtime.
 
-`gm_ub_roundtrip` (two transfer API families), `dma_pad` (padding regions), `init_and_insert` (in-place initialization and insertion), `move_sync` (cross-pipe and inter-core synchronization), `mutex_dcci` (manual locking and cache cleanup), `strided_view` (strided views and pointer arithmetic), `tile_view` (three shape layers), and `ssbuf_struct` (passing structured metadata to cube). The sections below follow this order.
+**First choose the physical representation.** UB→L1 is a physical copy, not an ND→NZ layout conversion. For logical ND values feeding an NZ/ZN L1 consumer, either convert ND to NZ inside UB, or write NZ directly from VF with the complete store recipe. A deliberately prepacked ND view requires its own address-map evidence; the descriptor alone cannot establish the bytes. Use coordinate-distinct inputs and consume the result through Cube when verifying the handover.
+
+**Then choose the transfer.** `pl.insert(dst, src, [row, col])` explicitly places a valid source region at a destination offset. `pl.move(dst, src)` supports compatible full-tile paths; the current frontend also dispatches suitable destination-superblock/offset and Vec→Mat fractal-transpose forms to insert. Preserve the actual shape, valid extent and offset instead of replacing every move with insert. Source and destination storage dtype must agree on this path. Native parsing owns the selected version's dtype/layout/shape restrictions; source-only checks do not establish all combinations.
+
+**Keep physical pitch separate from logical rows.** For the ordinary ND→NZ Vec→Vec move path, the selected frontend rejects an NZ destination whose declared rows are not a multiple of 16: the conversion's aligned pitch disagrees with that declaration. Use an aligned conversion backing with a compatible valid extent. An odd-pitch direct VF store is a different producer: its `DATA_BLOCK_COPY` cursor store, declared physical rows and `block_stride` must agree, and it uses no explicit offset. An even pitch is not inherently illegal. Do not change logical rows to satisfy a pitch rule or use an odd-pitch destination for the ordinary conversion move. The complete direct-store geometry, wider-row splitting and measured performance scope belong to [the NZ handover mechanism](crosscore-sync.md#vc-return-path-nz-packing-and-ub-bank-conflicts-row1-pitch-convention-2026-09-29); that mechanism is a conditional optimization, not a universal speedup claim.
+
+<!-- kernel-query: {"id":"compact-layout","aliases":["compact","compact-layout","compact default","compact=0","compact=1","compact=2","NZ pitch","compact 默认值"],"symbols":["pl.TileType","pl.insert"],"when":"A manually packed NZ Vec tile feeds a Mat/Cube consumer; choose compact from the producer and consumer address map.","missing_facts":["Verify the selected framework default, declared shape, valid rows, VF block_stride and emitted TINSERT pitch. Narrowed GEMM operands have a separate compact=1 requirement."]} -->
+### Compact modes and manually packed NZ tiles
+
+**Match the compact mode to the address map.** On official PyPTO `bca90a6c`, the `TileType` default is `compact=1`. The direct FP16 `[9,128]` backing with valid extent `[8,128]` uses `block_stride=9`, cursor advancement and explicit `compact=0`. This makes `TINSERT` consume the declared physical row pitch. Omitting `compact` instead consumes `align16(valid_rows)` rather than the declared odd height; the producer and consumer then disagree. Apply the same rule to other manually packed NZ buffers, including `[65,64]` with `block_stride=65`. Do not change aligned conversion buffers or GEMM operands to noncompact mode merely because another buffer needs it.
+
+For the fixed producer `shape=[9,128]`, `valid_shape=[8,128]` and VF `block_stride=9`, compare the consumer pitch to the producer pitch of 9:
+
+| Compact selection | `TINSERT` consumer pitch | Matches this fixed producer? |
+| --- | ---: | --- |
+| Explicit `compact=0` | 9, from declared rows | Yes |
+| Omitted or explicit `compact=1` | `align16(8) = 16` | No |
+| Explicit `compact=2` | `align16(8)+1 = 17` | No |
+
+Only the `compact=0` row matches this fixed address map. To use another mode, change the backing and VF store geometry together so that producer and consumer pitches agree.
+
+For RowPlusOne (`compact=2`), derive the physical pitch as `align16(valid_rows)+1`, allocate that complete backing, and use the same pitch in the VF cursor stores. With eight valid rows, the matching FP16 NZ backing is `[17,128]` and `block_stride=17`; adding only `compact=2` to the `[9,128]` recipe is inconsistent. The selected source's `TileType` contract and `TINSERT` implementation govern the exact layout. A valid declaration still needs complete producer/consumer numerical and guard checks; it does not establish bank-conflict behavior or a performance gain.
+
+### Validate the complete handover
+
+**Complete the synchronization edge.** The producer runs on AIV; UB→L1 uses MTE3. A Cube consumer moving Mat→Left/Right uses MTE1. Protect local load/VF/transfer dependencies with the selected native group/mutex or explicit-event mechanism, and order the cross-core MTE3 producer before the MTE1 consumer. Subblock offsets must have distinct ownership. Additional loop iterations need a consumer-to-producer reuse edge; a one-shot example does not establish pipelined slot safety.
+
+The [SFA probability publisher](../../examples/algorithms/sparse_attention/kernel.py) exposes `aligned`, `padded` and `row_plus_one` representations through the same Cube consumer. Its explicit ROWPLUSONE route uses `compact=2`, static valid rows and physical NZ pitch `align16(valid_rows)+1`. Its supported valid row counts are multiples of 16, so the VF cursor's `valid_rows+1` agrees. A smaller logical row count does not generally make `valid_rows+1` a legal ROWPLUSONE pitch. The `padded` control instead uses `compact=0` to consume its exact declared rows; the `aligned` control omits the extra row. Neither representation changes the mathematical reference or relaxes precision.
+
+Do not infer insertion stride from an odd shape alone: in the selected PTO implementation, ordinary compact insertion derives source stride from aligned valid rows, ROWPLUSONE adds a row to that aligned extent, and the noncompact path uses declared rows. Verify the emitted Tile type and consumer branch. A UB snapshot can show correct probabilities while the following Cube product is wrong because publication reads a different stride; validate the whole handover with distinct rows and multiple column blocks before profiling it. Equal physical bytes under two compact declarations do not by themselves establish different bank behavior or a speedup.
+
+The [complete native example](../../examples/basic_api/datamove/ub_l1_handover/kernel.py) has an aligned conversion control and a direct VF-to-NZ alternative in one explicitly specialized kernel. Both feed the same GEMM consumer; [its independent reference](../../examples/basic_api/datamove/ub_l1_handover/reference.py) and [tests](../../examples/basic_api/datamove/ub_l1_handover/test.py) cover multiple row extents, changed inputs on repeated calls and output guards. The source provides a template; acceptance still belongs to the actual installation, specialization and workload. Querying the example or passing source checks is not a numerical or performance result.
+
+Official owners: move (`pypto/docs/zh/api/pro_api/SIMD-API/memory_data_movement/move.md` in the matching source checkout), insert (`pypto/docs/zh/api/pro_api/SIMD-API/memory_data_movement/insert.md` in the matching source checkout). The selected Python frontend's `_ir_move`, `_maybe_dispatch_to_insert` and `_ir_insert` and C++ `MakeBlockOutMoveCodegenCCE` / `MakeBlockOutInsertCodegenCCE` determine lowering. The direct-store behavior evidence and its toolchain scope remain in the linked NZ handover mechanism.
+
+
+## 1. Example roles
+
+`gm_ub_roundtrip` (two transfer API families), `dma_pad` (padding regions), `init_and_insert` (in-place initialization and insertion), `move_sync` (cross-pipe and inter-core synchronization), `mutex_dcci` (manual locking and cache cleanup), `strided_view` (strided views and pointer arithmetic), `tile_view` (three shape layers), and `ssbuf_struct` (passing structured metadata to cube). The sections below follow this order. `ub_l1_handover` provides the complete two-path recipe above.
 
 For API coverage per example, see [`tooling/example-coverage.md`](../tooling/example-coverage.md); for the reverse index, run `python scripts/check.py surface`. Current counts come from `pytest examples/basic_api/datamove -q`.
+
+<!-- kernel-query: {"id":"physical-byte-footprint","aliases":["physical byte footprint","guard row calculation","reinterpret byte pitch"],"when":"A dtype view, partial tile or packed load changes the relation between logical elements and touched bytes.","missing_facts":["Derive each view's byte pitch and every issued instruction's interval, including the final row and slot wrap; a later predicate does not bound an earlier access."]} -->
+## Derive physical accesses in bytes
+
+Keep four quantities explicit: mathematical shape, current valid region, physical layout/allocation, and the selected instruction's footprint. A descriptor or a final output mask proves only the part of the path governed by its contract. Reinterpretation changes coordinates over existing bytes; neither a dtype change nor a smaller valid region creates more storage or initializes padding.
+
+For a row-based view with backing base `A`, byte pitch `P`, element width `e` and element offset `c`, a contiguous instruction starting at row `r` touches `[A + r*P + c*e, A + r*P + c*e + F)`, where `F` comes from that instruction's actual distribution/active-access contract. For a noncontiguous instruction, enumerate its intervals instead. Require every interval to lie inside the backing and the current slot's permitted region, and check overlap with other live allocations. Use widened address arithmetic before products that can overflow.
+
+An illustrative address calculation, conditional on a full 256-byte read at each row start:
+
+| View of the same backing | Element width | Elements per physical row | Byte pitch | End of the last read for R rows |
+| --- | ---: | ---: | ---: | --- |
+| Raw 16-bit carrier | 2 | 64 | 128 | `A + (R-1)*128 + 256` |
+| FP32 view | 4 | 32 | 128 | `A + (R-1)*128 + 256` |
+
+Allocating only `R*128` bytes misses 128 touched bytes at the end in this example. One extra 128-byte backing row suffices for these starts, but is not a general guard-row formula: nonzero column offsets, another load distribution, NZ padding or a source-driven FIX transfer change the maximum endpoint. A short computational predicate cannot retroactively narrow a full physical read. Tail values that participate in arithmetic also need their own initialization/neutral-element proof.
+
+Probe safely with a fully sized backing and distinguishable adjacent contents, then observe the complete consumed region; do not create a deliberate undersized allocation. Cover the final row, nonzero storage offset, dtype views, adjacent slots and repeated wraparound. Output canaries detect writes, not an out-of-range read that leaves output unchanged. Connect this calculation to the [consumer address map](#verify-a-vf-consumers-address-map-after-reinterpretation) and [source-driven receiving capacity](crosscore-sync.md#logical-validity-is-not-transfer-capacity).
+
+### Preserve slot geometry when changing a view
+
+Reinterpret a complete TileGroup before selecting a runtime slot when the alias must inherit the group's address list and mutex mapping. Do not assume that reinterpreting `group[slot]` has a compile-time resolvable address on the selected frontend. The alias must keep the original slot pitch even when its valid tail is smaller; apply `valid_shape` in the destination's logical axis order after a transpose or `order=` mapping.
+
+A wider integer carrier is a bit-preserving transport option only when both endpoints' byte geometry is equivalent. Compute source offsets in the original element units before forming the carrier view, and prove the burst length, row pitch and final valid read. Rounding an odd FP16/FP32 tail up to an INT64 word can read beyond the contractual range. A single-row NZ alias is contiguous only when its actual physical NZ row extent is one: `((j // C0) * 1) * C0 + j % C0 == j`. A valid row count of one in a larger physical tile does not establish that identity.
+
+Count transfer and publication operations as well as bytes. Replacing one assembled gather/insert with many small fragments changes SIMT calls, DMA setup, synchronization and last-reader boundaries even if the final byte array agrees. Conversely, static direct aliases can avoid a large runtime descriptor array, but wholesale unrolling can increase code size and register pressure. Keep the original ownership edges and measure the complete consumer before selecting either representation.
 
 ## 2. The two offset APIs differ in units, not age
 
@@ -17,6 +83,7 @@ For API coverage per example, see [`tooling/example-coverage.md`](../tooling/exa
 
 A block index can express only the start of the nth full block. When a tensor does not divide evenly, the last block's start is not a multiple expressible by any block index; use absolute offsets with `set_validshape` there. **Both families must be understood**, which is why `gm_ub_roundtrip` compares them bit for bit: if the framework's multiplication is wrong, the difference is a whole block rather than a few elements, giving an appropriately coarse criterion.
 
+<!-- kernel-query: {"id":"gm-plane-offsets","aliases":["higher-rank GM plane","Tensor axis mapping"],"term_groups":[["gm","tensor","张量"],["2d","tile","offset","offsets","坐标","二维","平面"]],"symbols":["pl.load","pl.store"],"when":"An ordinary higher-rank GM Tensor is loaded or stored through a two-dimensional Tile; MX scale phase axes have a separate contract.","missing_facts":["Map Tensor axes, transfer order and element offsets before adapting the compute axes; preserve actual extents and verify the matching native path."]} -->
 ### Higher-rank GM to a two-dimensional Tile: map axes first
 
 For ordinary GM Tensors, `pl.load/store` `offsets` has length equal to Tensor rank, and each entry is an absolute element coordinate on its axis; the Tile remains two-dimensional. By default, GM's last two axes become Tile rows and columns, while offsets fix the other axes. Specify a plane from other axes explicitly with `order=[row_axis, col_axis]`. First map “GM axis → Tile axis → compute axis”; there is no need to invent a three-dimensional Tile for a batch axis or flatten GM and recompute strides. The MX scale phase axis has its own default rules; this ordinary-Tensor rule does not apply to it.
@@ -29,6 +96,7 @@ Physical capacity, nominal group length, and current actual length are different
 
 Do not run the inner loop to the nominal group length while merely taking min with remaining length inside: the final partial group can keep producing zero or negative active counts alongside out-of-range GM starts. A negative value is not an empty task; do not pass it to valid_shape or a mask. The last store's mask cannot repair earlier illegal transfers. Validation should include an outer group with only a few remaining elements while its nominal length still spans several register blocks.
 
+<!-- kernel-query: {"id":"fillpad-execution","aliases":["fillpad","explicit padding","fillpad EXPAND"],"symbols":["pl.fillpad","pl.set_validshape"],"example":"basic_api/datamove/dma_pad/kernel.py","when":"Padding outside a Tile's valid_shape will be consumed, or EXPAND is proposed.","missing_facts":["Identify the source valid extent, destination fill value, actual filling operation and producer/consumer ordering; verify the full consumed region against deliberately poisoned storage."],"review_symbols":[["pl.fillpad","pl.set_validshape"]],"discovery_terms":[["fillpad","填充"],["valid_shape","validshape","TilePad","EXPAND","边界"]]} -->
 ## 3. `fillpad` requires three pieces in three places; omitting one leaves valid data surrounded by garbage
 
 | | Where to specify it | Responsibility |
@@ -38,6 +106,8 @@ Do not run the inner loop to the nominal group length while merely taking min wi
 | `pl.fillpad(dst, src, mode=...)` | One instruction | Actually write outside the valid region |
 
 `TilePad` alone **does nothing**. The example includes `pad_declared_but_not_filled` as a control: it first fills all UB with known nonzero values, then omits `fillpad`. Without preinitialization, residue that happens to be 0 would match `zero`, letting the test pass for the wrong reason.
+
+For supported rectangular padding, use this bulk path as the first control against a loop issuing `pl.setval` for every padding element. Preserve the source's actual valid rows/columns until `fillpad` consumes them; expanding valid_shape first hides the region that needs filling. Include row tails as well as column tails, and measure the complete reduction. A masked consumer that never uses the padding may avoid the fill entirely; a scalar metadata update or irregular scatter is a different access pattern. Row-major padding rules do not qualify direct NZ/ROWPLUSONE publication.
 
 **`pad=null` with `fillpad` is rejected at parse time** (`out_memory.cpp:66`), consistent with the ISA `static_assert` (`pto/npu/a5/TFillPad.hpp:118`). pypto rejects it earlier and includes a source line. **This is not a defect.**
 
@@ -119,7 +189,7 @@ Real usage appears in `easyasc` (the preceding generation on the same hardware):
 
 ## 9. `init_and_insert`: `init_output` occupies UB `[0, 8K)`
 
-The two APIs use different offset units: `init_output` uses a **one-dimensional element range**, flattened row-major with no shape concept; `insert` uses **two-dimensional element coordinates**. A table of three conditions documented in docstrings but unchecked at parse time, and two explicit reasons for skipping hardware runs, are in [`examples/basic_api/datamove/init_and_insert/`](../../examples/basic_api/datamove/init_and_insert/test.py). For the coordinate system when the destination is declared ZN, see §16: **using destination coordinates compiles but silently computes wrong values**.
+The two APIs use different offset units: `init_output` uses a **one-dimensional element range**, flattened row-major with no shape concept; `insert` uses **two-dimensional element coordinates**. The [init-and-insert tests](../../examples/basic_api/datamove/init_and_insert/test.py) check valid placement and output values, static range rejection and the temporary UB lifetime. For the coordinate system when the destination is declared ZN, see §16: **using destination coordinates compiles but silently computes wrong values**.
 
 The cross-example concern is that **this affects every kernel placing tiles at low UB addresses**:
 
@@ -131,17 +201,9 @@ The cross-example concern is that **this affects every kernel placing tiles at l
 
 Gate: `scripts/_checks/init_output.py`. Mechanism, seven-row measurement table, and framework-side locations: [`diagnostics/validation-traps.md`](../diagnostics/validation-traps.md) #11.
 
-## 10. `init_output` requires a vector section, even an empty one
+## 10. `init_output` must execute inside a Vector section
 
-It internally fills temporary UB via V, then transfers through MTE3. Without `pl.section_vector()` in the kernel, **compilation fails**, reporting a C++ `PIPE_V` range error and `copy_ubuf_to_gm_align_v2 does not support the given target feature`. Both say the core has no V pipe, but **do not reveal the connection to sections**.
-
-| Form | Result |
-| --- | --- |
-| Only `init_output` | **Compilation failure** |
-| `init_output` + empty `section_vector` | Passes |
-| `init_output` + `make_tile` + nonempty section | Passes |
-
-Parsing passes completely, so `parse_target_program` cannot detect it. Both rules are included in `references/api/constraints.md`.
+It fills temporary UB via V and transfers through MTE3. Put the call inside `with pl.section_vector():`; the current parser rejects an unscoped call even when another Vector section exists in the kernel. This placement requirement does not remove the temporary UB lifetime or drain requirements above. The complete [operation constraints](constraints.md#call-plinit_output-inside-a-vector-section) and original example tests keep scope checks separate from numerical verification.
 
 ## 11. `strided_view`: offsets follow strides too, and the sole justified use of `bar_*`
 
@@ -180,7 +242,7 @@ assert out.is_contiguous()
 
 `data_ptr()` already points to the slice's first element; the kernel must not add the guard offset again. Do not enlarge the kernel output shape, introduce border parameters, or rewrite GM offsets just to pass this test: those change the contract under validation. A two-dimensional view with a halo on four sides is a separate stride use case and cannot replace validation of ordinary contiguous output. Prefix/suffix guards detect out-of-range writes, while the mathematical reference detects missing or displaced writes inside the range; both are required.
 
-Evidence: the explicit-stride contract of official make_tensor (`pypto/docs/zh/api/pro_api/SIMD-API/resource_management/make_tensor.md`), argument packing in Python `runtime/jit.py`, and the C++ stride-generation path above. Minimal transfer tests at behavior version `872df763f`, CANN 9.2.0, Ascend950PR verified three cases: ordinary parameters do not inherit host row strides; explicit strides work; contiguous slices with nonzero storage offsets work. This does not mean all noncontiguous views are unsupported.
+Evidence: the explicit-stride contract of official make_tensor (`pypto/docs/zh/api/pro_api/SIMD-API/resource_management/make_tensor.md` in the matching source checkout), argument packing in Python `runtime/jit.py`, and the C++ stride-generation path above. Minimal transfer tests at behavior version `872df763f`, CANN 9.2.0, Ascend950PR verified three cases: ordinary parameters do not inherit host row strides; explicit strides work; contiguous slices with nonzero storage offsets work. This does not mean all noncontiguous views are unsupported.
 
 ## 12. Overlapping writes: program order is not guaranteed even within one pipe
 
@@ -196,6 +258,14 @@ The unbarriered “later write wins” criterion fails in 6 of 20 runs, so a few
 Resolution: **exclude the nondeterministic overlap from the criterion**, asserting only A's exclusive segment, B's exclusive segment, and the tail sentinel. Use a separate kernel with a barrier to assert that the later write wins.
 
 **This also identified the sole justified use of `bar_*` here.** Flags cannot help: `sync_src` / `sync_dst` require `set_pipe != wait_pipe`, so MTE3→MTE3 is rejected during parsing (a dedicated kernel in the example pins this). Thus, `bar_mte3()` is the only choice here, and the requirement is exactly “no parallelism within the pipe.” This agrees with §8: **`bar_*` drains one pipe; flags establish order between two pipes**. Recorded in [validation traps](../diagnostics/validation-traps.md) §9.
+
+### Additive overlap through a native tile store
+
+The native `pl.store` / `pl.store_tile` interface exposes `atomic=pl.AtomicType.AtomicAdd`. A Vec-source tile store uses MTE3; it is a different path from an Acc-source FIX store and from scalar SIMT atomics. Check the exact destination dtype, source path, alignment and option combination against the matching installation before relying on it; a signature or a passing FIX/SIMT example does not validate the Vec path. Compute Vector contributions in VF and preserve their tile lifetime until the store completes.
+
+Define each output's contributor set and its initial value. If accumulation starts at zero, one owner must initialize that region before **all** contributors; an atomic update does not order a concurrent zero fill. A repeated launch must either restore the prescribed initial value first or deliberately add to the previous result, as the contract requires. Keep initialization, accumulation and later reads behind a supported completion boundary.
+
+A useful integrated validation candidate receives a Cube result split across two AIVs, transforms each share in VF, writes their disjoint slabs to an ordinary output, and atomically combines them into a second output. Use distinct, nonzero shares: compare the combined output against their independently computed sum and check that it differs from either share alone. This distinguishes addition from an overwrite while the ordinary output checks both producers. Cover guards, repeated launches and every selected dtype on the target. Floating atomic updates need the original error criterion and [reproducibility contract](numerics.md#6-reproducible-reductions), since atomicity does not fix summation order. This preserves a study's dataflow and discriminating controls, not its old validation stamp; no new Vec-store kernel or current hardware pass is established here.
 
 ## 13. `tile_view`: three shape layers and a shared cursor
 
@@ -269,7 +339,7 @@ Sweeping 5 offsets (4 / 8 / 12 / 16 / 24…) for a three-field struct produced t
 
 **Three explicit skips**: total SSBUF capacity (would require increasing offsets until failure, with unknown consequences of out-of-bounds SSBUF writes), slot width for non-INT32 fields (8 bytes can hold INT64, but it was not verified), and mixed-width structs. The model is established only for INT32.
 
-**Isolate potentially faulting offsets in separate processes.** A device error at one offset can invalidate later cases in that process without executing them. Follow [device-fault isolation](../verification/board-runs.md#isolating-device-faults) and check recovery before continuing; cascade failures are not independent offset results.
+**Isolate potentially faulting offsets in separate processes.** In the ten-case offset sweep, `offset=1` triggered a device error and the remaining nine cases failed without executing. One offset per process produced usable observations. Follow [device-fault isolation](../verification/board-runs.md#isolating-device-faults) and check recovery before continuing; cascade failures are not independent offset results.
 
 ## 15. Transfer-op pipe ownership: the complete table for layer C synchronization
 
@@ -310,5 +380,23 @@ On framework `51d7dab69`, Python `_ir_insert` calls `_validate_offset_bounds` wi
 For the tested FP16/BF16 thin panels (`M < K`), a full-K panel fits in UB: use one `[K, M // 2]` NZ source per AIV and insert at `[0, sub_id * (M // 2)]`. The [make_rectangular_handover example](../../examples/matmul/transpose_reinterpret/kernel.py) keeps Mat declared `[M, K]`, uses B-layer synchronization at `preload=0`, and passes the result to `pl.gemm(..., splitk=64)`. Its producer uses ND→NZ `pl.move`; a fused VF producer must separately establish its register packing, predicates and full physical store footprint before shrinking the allocation. One register's touched bytes do not shrink with logical M.
 
 The [tests](../../examples/matmul/transpose_reinterpret/test.py) cover `M=32/64`, `K=128`, `N=64`, FP16/BF16, using non-square, position-distinct values and both halves of K in the consumer. On Ascend950PR with CANN 9.2.0 and framework `51d7dab69`, the controlled outputs were exact. This establishes a legal rectangular transport/consumer path, not an arbitrary-size guarantee or a performance result for a complete algorithm. If the full panel does not fit, rederive packing and transfer decomposition rather than inferring a universal dimension limit from this one form.
+
+<!-- kernel-query: {"id":"dma-l2-policy","aliases":["DMA L2 cache policy","l2_cache_mode","TLoadL2Hint","TStoreL2Hint","NotAllocKeep","NotAllocClean"],"when":"A GM transfer streams one-use data or competes with reused operands, and a per-transfer L2 hint is being considered.","missing_facts":["Check the selected runtime's directional enum and lowering, then compare each stream independently under an unchanged cache/timing protocol; a flush is not a transfer hint."]} -->
+## Per-stream L2 policy
+
+First check the selected source and installed runtime, rather than treating the bundled API snapshot as a claim about every PyPTO version. PyPTO source `258c9efad8d6e0579508b3879e2b868b6b0dd34d` exposes keyword `l2_cache_mode` on `pl.load`, `pl.load_tile`, `pl.store` and `pl.store_tile`. Reads take `pl.TLoadL2Hint`, writes take `pl.TStoreL2Hint`; omission uses the PTO-ISA default. For example, the selected version can express `pl.load(tile, src, [0, 0], l2_cache_mode=pl.TLoadL2Hint.NotAllocKeep)` and `pl.store(dst, tile, [0, 0], l2_cache_mode=pl.TStoreL2Hint.NotAllocClean)`. These are transfer fragments, retaining the original allocation, extent and synchronization. They are not portable to an older runtime merely because the skill describes them.
+
+Source owners at that revision: `python/pypto_pro/language/_api.py`, `python/pypto_pro/ir/op/block_ops.py::_l2_cache_mode_attr`, `framework/include/ir/op_attr_types.h` and `framework/src/interface/pypto_pro/backend/backend_cce_block_out_ops.cpp`. The parser rejects the wrong enum direction; the backend maps IR enum values to named `TLOAD`/`TSTORE` templates. The two `NotAlloc*` members above have Python ordinal 3; pass the enum member, not a raw DMA encoding copied from another frontend. Upstream `python/tests/st/pypto_pro/frontend/datacopy/test_l2_cache_mode.py` covers Vector round-trip and Cube GM→L1/L0C→GM paths with CCE assertions. Reading those tests establishes source coverage, not a new local hardware pass. Check the target's SDK/architecture support and the actually emitted path before extending to other combinations. If the installed version lacks this interface, report that scoped limitation; do not silently install a framework or patch the shared runtime.
+
+Choose hints by reuse over the complete call:
+
+| Stream | Candidate comparison |
+| --- | --- |
+| Large input consumed once | Default versus a supported no-allocation read hint |
+| Weights, gamma or a lookup table reused by several owners | Preserve the default control; first count consumers and reuse distance |
+| Large output with no near-term consumer | Test its write hint independently of input hints |
+| Intermediate/output consumed immediately | Include the real downstream consumer; a faster isolated store can worsen the chain |
+
+Do not enable the same hint on every stream by analogy. Hold addresses, payload, partitioning, layout, slots and sampling protocol fixed for the first comparison. Use an independent copy oracle for a transfer-only screen, then restore arithmetic and compare the original checker and complete call. A transfer-only winner or its hypothetical benchmark score is not a measured operator gain. Inspect generated templates and, when available, the actual DMA descriptor of the timed artifact; source keywords alone do not prove the option reached the device. Keep the [sampling cache protocol](../verification/native-timing.md#preserve-evaluator-and-cache-protocol-identity) separate from these in-kernel hints. Cache policy also provides no publication/reuse ordering.
 
 ---

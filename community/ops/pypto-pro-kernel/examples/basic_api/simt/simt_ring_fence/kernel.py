@@ -12,20 +12,19 @@
 
 | | 规则 | 第 k 次（0 起）拿到的旧值 |
 | --- | --- | --- |
-| `atomic_inc(t, limit)` | `old >= limit ? 0 : old + 1` | `k mod (limit + 1)` |
-| `atomic_dec(t, limit)` | `old == 0 ? limit : old - 1` | `(-k) mod (limit + 1)` |
+| `atomic_inc(t, [row, col], limit)` | `old >= limit ? 0 : old + 1` | `k mod (limit + 1)` |
+| `atomic_dec(t, [row, col], limit)` | `old == 0 ? limit : old - 1` | `(-k) mod (limit + 1)` |
 
 所以 32 个线程、`limit=6`（周期 7）之后：`inc` 的最终值是 `32 mod 7 = 4`，`dec` 是 `3`。
 **两者的返回值多重集也是确定的**，判据落在那上面——见 `test.py` §三。
 
-**`limit` 的 dtype 必须和目标一致。** 目标是 UINT32 计数器时，直接写 Python 字面量会被拒
-（字面量是 INT64）：
+**运行时 `limit` 的 dtype 必须和目标一致。** UINT32 目标不接受运行时 INT64 表达式：
 
 ```
 simt.atomic_inc operand 0 dtype must match target dtype uint32, but got int64
 ```
 
-所以 `limit` 从一个 UINT32 张量里读，不写成字面量。
+数值常量按目标 dtype 定型；张量 limit 与字面量 limit 都对同一独立参考验证。
 
 **两个栅栏只排序、不等待**（docstring：「does not wait for other threads」）。它们和
 `syncthreads` 不是一回事：后者是**屏障**，所有线程都得到。
@@ -62,16 +61,16 @@ def ring_counters(
 ):
     """两个环形计数器各被 32 个线程打一遍，旧值记下来。
 
-    `limit` 从 `limits` 张量读，**不写字面量**：字面量是 INT64，和 UINT32 的目标不匹配会被拒。
+    `limit` 从 UINT32 的 `limits` 张量读；字面量形式由独立入口验证。
     返回的旧值是 UINT32，存进 INT32 行之前过一次 `cast`。
     """
     tid = pl.simt.linear_thread_idx()
     lim = limits[0, 0]
     ret[RET_INC, tid] = pl.simt.cast(
-        pl.simt.atomic_inc(counter[COUNTER_INC, 0], lim), I32
+        pl.simt.atomic_inc(counter, [COUNTER_INC, 0], lim), I32
     )
     ret[RET_DEC, tid] = pl.simt.cast(
-        pl.simt.atomic_dec(counter[COUNTER_DEC, 0], lim), I32
+        pl.simt.atomic_dec(counter, [COUNTER_DEC, 0], lim), I32
     )
 
 
@@ -84,6 +83,30 @@ def simt_ring_counters(
     """**必须 `[None, 1]`**：累加类的东西，多 block 会各转一遍。"""
     with pl.section_vector():
         ring_counters[THREADS](counter, limits, ret)
+
+
+@pl.vector_function(mode="simt", max_threads=THREADS)
+def ring_counters_literal(
+    counter: pl.Tensor[[COUNTERS, 1], U32],
+    ret: pl.Tensor[[RET_ROWS, THREADS], I32],
+):
+    """常量 limit 按目标 UINT32 定型，与张量 limit 使用相同的环形计数。"""
+    tid = pl.simt.linear_thread_idx()
+    ret[RET_INC, tid] = pl.simt.cast(
+        pl.simt.atomic_inc(counter, [COUNTER_INC, 0], LIMIT), I32
+    )
+    ret[RET_DEC, tid] = pl.simt.cast(
+        pl.simt.atomic_dec(counter, [COUNTER_DEC, 0], LIMIT), I32
+    )
+
+
+@pl.jit()
+def simt_ring_counters_literal(
+    counter: pl.Tensor[[COUNTERS, 1], U32],
+    ret: pl.Tensor[[RET_ROWS, THREADS], I32],
+):
+    with pl.section_vector():
+        ring_counters_literal[THREADS](counter, ret)
 
 
 @pl.vector_function(mode="simt", max_threads=THREADS)
@@ -134,13 +157,13 @@ def simt_fences(out: pl.Tensor[[1, THREADS], I32]):
 
 
 @pl.vector_function(mode="simt", max_threads=THREADS)
-def _limit_as_a_literal(
+def _limit_as_an_int64_expression(
     counter: pl.Tensor[[COUNTERS, 1], U32], ret: pl.Tensor[[RET_ROWS, THREADS], I32]
 ):
-    """`limit` 写成 Python 字面量：字面量是 INT64，和 UINT32 的目标不匹配。"""
+    """运行时 INT64 limit 与 UINT32 目标不匹配，表达式须显式 cast。"""
     tid = pl.simt.linear_thread_idx()
     ret[RET_INC, tid] = pl.simt.cast(
-        pl.simt.atomic_inc(counter[COUNTER_INC, 0], LIMIT), I32
+        pl.simt.atomic_inc(counter, [COUNTER_INC, 0], LIMIT + tid), I32
     )
 
 
@@ -149,7 +172,7 @@ def limit_dtype_mismatch(
     counter: pl.Tensor[[COUNTERS, 1], U32], ret: pl.Tensor[[RET_ROWS, THREADS], I32]
 ):
     with pl.section_vector():
-        _limit_as_a_literal[THREADS](counter, ret)
+        _limit_as_an_int64_expression[THREADS](counter, ret)
 
 
 @pl.vector_function(mode="simt", max_threads=THREADS)

@@ -347,10 +347,14 @@ def upstream_evaluator(device):
     with tempfile.TemporaryDirectory(prefix="qli-evaluator-") as temporary:
         modules = load_upstream(Path(root).resolve(), Path(temporary), workers)
         tests = modules["tests"]
-        tests._load_operators = lambda: (
-            quant_lightning_indexer,
-            modules["metadata"].quant_lightning_indexer_metadata,
-        )
+
+        def load_operators():
+            return (
+                quant_lightning_indexer,
+                modules["metadata"].quant_lightning_indexer_metadata,
+            )
+
+        tests._load_operators = load_operators
         yield tests
 
 

@@ -32,15 +32,15 @@
     },
     {
       "id": 3,
-      "title": "算子包交付物五件套",
+      "title": "算子交付目标与整理策略",
       "config": {
         "ascend_platforms": [
           "A2"
         ],
         "eval_mode": "text"
       },
-      "prompt": "用 pypto-pro-kernel 交付一个算子包时，最终应该包含哪些文件？可以使用 kernel factory 模式吗？",
-      "expected_output": "回复应说明五文件交付格式：README、一个带内部 tiling-key 入口的实现模块、CPU golden、可执行测试、精度比较器（precision comparator）；不允许 kernel factories。",
+      "prompt": "用 pypto-pro-kernel 交付 Python/JIT 源码时默认如何整理？用户能否关闭或替换该整理规范？可以使用 kernel factory 吗？",
+      "expected_output": "回复应说明 Python/JIT 默认使用 内置算子源码交付规范，用户明确要求优先于项目规则和默认规范；用户可以关闭整理或选择替代规范，但仍须保留算子语义、精度和性能验收要求并验证最终公开入口。默认规范包含 README、DESIGN、RESULTS、实现模块、独立 golden、测试和精度校验；最终 kernel 不保留 factory。",
       "files": [],
       "expectations": []
     },

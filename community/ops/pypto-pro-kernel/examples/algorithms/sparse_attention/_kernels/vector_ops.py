@@ -15,11 +15,19 @@ F32, F16, I32, U32 = pl.DT_FP32, pl.DT_FP16, pl.DT_INT32, pl.DT_UINT32
 
 
 def make_softmax(
-    dense, half_rows, heads, key_block, key_rows, query_rows, causal, first_block=False
+    dense,
+    half_rows,
+    heads,
+    key_block,
+    key_rows,
+    query_rows,
+    causal,
+    probability_pitch=None,
 ):
-    pitch = half_rows + 1
+    pitch = half_rows + 1 if probability_pitch is None else probability_pitch
     if dense:
-        assert key_block == 256
+        if key_block != 256:
+            raise AssertionError("dense softmax requires key_block=256")
         mask_width = min(key_rows, 1024)
         mask_parts = mask_width // key_block
 
@@ -36,6 +44,7 @@ def make_softmax(
             block,
             query_position,
             scale,
+            first_block,
         ):
             mask = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=F32)
             half_mask = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=F16)
@@ -80,16 +89,11 @@ def make_softmax(
                             denominators, row, dist=pl.LoadDist.BRC_B32
                         )
                     new_max = vf.max(old_max, block_max, mask)
-                    delta = vf.sub(old_max, new_max, mask)
-                    alpha = vf.exp(delta, mask)
-                    s0 = vf.sub(s0, new_max, mask)
-                    s1 = vf.sub(s1, new_max, mask)
-                    s2 = vf.sub(s2, new_max, mask)
-                    s3 = vf.sub(s3, new_max, mask)
-                    p0 = vf.exp(s0, mask)
-                    p1 = vf.exp(s1, mask)
-                    p2 = vf.exp(s2, mask)
-                    p3 = vf.exp(s3, mask)
+                    alpha = vf.exp_sub(old_max, new_max, mask)
+                    p0 = vf.exp_sub(s0, new_max, mask)
+                    p1 = vf.exp_sub(s1, new_max, mask)
+                    p2 = vf.exp_sub(s2, new_max, mask)
+                    p3 = vf.exp_sub(s3, new_max, mask)
                     p0 = vf.select(p0, zero, valid0)
                     p1 = vf.select(p1, zero, valid1)
                     p2 = vf.select(p2, zero, valid2)
@@ -147,7 +151,8 @@ def make_softmax(
 
         return dense_softmax
 
-    assert key_block in (64, 128)
+    if key_block not in (64, 128):
+        raise AssertionError("indexed softmax requires key_block=64 or 128")
 
     @pl.vector_function
     def indexed_softmax(
@@ -162,6 +167,7 @@ def make_softmax(
         block,
         query_position,
         scale,
+        first_block,
     ):
         mask = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=F32)
         imask = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=I32)
@@ -195,15 +201,12 @@ def make_softmax(
                 old_max = vf.load_align(maxima, row, dist=pl.LoadDist.BRC_B32)
                 old_sum = vf.load_align(denominators, row, dist=pl.LoadDist.BRC_B32)
             new_max = vf.max(old_max, block_max, mask)
-            delta = vf.sub(old_max, new_max, mask)
-            alpha = vf.exp(delta, mask)
-            delta_score = vf.sub(masked, new_max, mask)
-            exponent = vf.exp(delta_score, mask)
+            alpha = vf.exp_sub(old_max, new_max, mask)
+            exponent = vf.exp_sub(masked, new_max, mask)
             exponent = vf.select(exponent, zero, valid)
             sum_lanes = vf.move(exponent, mask)
             if key_block == 128:
-                delta1 = vf.sub(masked1, new_max, mask)
-                exponent1 = vf.exp(delta1, mask)
+                exponent1 = vf.exp_sub(masked1, new_max, mask)
                 exponent1 = vf.select(exponent1, zero, valid1)
                 sum_lanes = vf.add(exponent, exponent1, mask)
             sum_scalar = vf.reduce_sum(sum_lanes, mask)
@@ -238,9 +241,9 @@ def make_softmax(
     return indexed_softmax
 
 
-def make_update(half_rows, value_dim, first_block=False, last_block=False):
+def make_update(half_rows, value_dim):
     @pl.vector_function
-    def update(product, stats, numerator, result):
+    def update(product, stats, numerator, result, first_block, last_block):
         mask = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=F32)
         one = vf.full(1.0, mask, dtype=F32)
         for row in pl.range(half_rows):

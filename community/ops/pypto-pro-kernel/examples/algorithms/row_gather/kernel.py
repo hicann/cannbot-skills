@@ -6,15 +6,17 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：原始。VF 逐行间接读取，包含负索引和尾块。
 
 契约：有限 FP32 x[M,N]，INT32 index[M,K]，索引位于 [-N,N)，负值按 +N 解释，允许重复索引，输出逐位保持输入值。
 已验 M=1/7/33、N=65/257、K=31/80。GM 输入保持紧密布局；X 的物理 UB 行按32B补齐，索引/输出按64-lane寄存器补齐，真实范围用 valid_shape 和 VF mask 表达。
 固定地址：X@0 最大1056B，索引@0x1000 最大512B，输出@0x2000 最大512B；扩大契约须重新规划这些区域，示例未宣称任意宽度。
 同步：三个单槽 tile group 由 auto_mutex 排序；纯 Vector 的行循环使用 get_block_num，不推断双 AIV 数量。gather 的谓词限制实际索引访存，GM store 只写真实 K 列。
-来源：2026-10-06 gpt-6-luna/max 独立 skill 试验产物，入库仅整理说明、相对导入与独立测试，Kernel 实现不变。
+机制：[联合访问范围证明](../../../references/api/vf.md#prove-joint-address-bounds-before-repeated-accesses)。本例分开物理补齐、逻辑索引和实际访问，扩大表容量或前移检查时，须按新的消费者重新证明完整packet与尾部。
 验证边界：行为版本 872df763f、CANN 9.2.0、Ascend950PR；运行 test.py 检查数值与输出守卫。未测硬件性能。
 """
+# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf

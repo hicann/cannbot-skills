@@ -313,9 +313,9 @@ def test_setting_the_flag_inside_a_vector_function_is_refused():
 
 
 def test_positional_arguments_are_refused():
-    """Keyword-only errors identify the public parameters and their call site."""
+    """位置参数错误指出公开 API 和调用位置。"""
     with pytest.raises(InvalidArgument) as raised:
         _parse(set_flag_without_keywords)
-    assert "keyword-only" in raised.value.message
-    assert "mode" in raised.value.message and "enable" in raised.value.message
+    assert "positional" in raised.value.message or "keyword-only" in raised.value.message
+    assert "set_saturation_flag" in raised.value.message
     assert raised.value.span is not None

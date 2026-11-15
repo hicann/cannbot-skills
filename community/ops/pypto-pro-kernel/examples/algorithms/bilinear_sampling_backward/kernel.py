@@ -120,24 +120,24 @@ def _program(bsz, height, width, channels, points):
                         if x0 >= 0:
                             if x0 < width:
                                 pl.simt.atomic_add(
-                                    dx[batch, y0, x0, channel], grad * wx0 * wy0
+                                    dx, [batch, y0, x0, channel], grad * wx0 * wy0
                                 )
                         if x1 >= 0:
                             if x1 < width:
                                 pl.simt.atomic_add(
-                                    dx[batch, y0, x1, channel], grad * fx * wy0
+                                    dx, [batch, y0, x1, channel], grad * fx * wy0
                                 )
                 if y1 >= 0:
                     if y1 < height:
                         if x0 >= 0:
                             if x0 < width:
                                 pl.simt.atomic_add(
-                                    dx[batch, y1, x0, channel], grad * wx0 * fy
+                                    dx, [batch, y1, x0, channel], grad * wx0 * fy
                                 )
                         if x1 >= 0:
                             if x1 < width:
                                 pl.simt.atomic_add(
-                                    dx[batch, y1, x1, channel], grad * fx * fy
+                                    dx, [batch, y1, x1, channel], grad * fx * fy
                                 )
 
                 local_gx = local_gx + grad * ((v01 - v00) * wy0 + (v11 - v10) * fy)

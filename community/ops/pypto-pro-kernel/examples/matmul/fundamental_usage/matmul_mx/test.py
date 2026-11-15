@@ -111,7 +111,7 @@ def _declared_groups() -> dict:
     import pypto_pro as pp
 
     program, _ = matmul_mx.to_kernel_def().parse_target_program(pp.ir.SectionKind.Cube)
-    text = pp.ir.python_print(program)
+    text = program.as_python()
     groups = {}
     for line in text.splitlines():
         stripped = line.strip()

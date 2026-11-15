@@ -15,9 +15,9 @@
 | `reduce_sum(r, preg)` | `vcadd` | 整个寄存器归约成**一个**值，放 lane 0，其余 lane 清零 |
 | `reduce_sum(r, preg, datablock=True)` | `vcgadd` | **每 8 个 FP32 lane（32 字节）一组**各归约一个值，压在 lane 0..7 |
 
-**`datablock=True` 就是组内归约。** 设计文档 §八点四 曾把 ascriptor 的 `cgadd` / `cgmax` /
-`cgmin` 列成「我们可能缺的一组功能」——它们不是缺失的接口，是 `reduce_*` 的一个参数。
-这和 `load_align` 的 `dist=` 是同一个坑：**把一个接口的一个参数当成缺失的接口**。
+**`datablock=True` selects reduction within each DataBlock.** Inspect operation
+parameters as well as API names before concluding that a reduction granularity
+is unavailable; `load_align(dist=...)` has the same discovery requirement.
 
 组大小 8 是实测的（2026-09-27）：输入 1..64，`datablock=True` 得到
 `[36, 100, 164, 228, 292, 356, 420, 484, 0, ...]`，正是 1..8、9..16、…各自求和。
@@ -115,7 +115,7 @@ def reduce_whole(
 def _by_block(src, o_sum, o_max, o_min):
     """同样三个算子，加 `datablock=True`——每 8 个 FP32 一组，结果压在 lane 0..7。
 
-    这就是 ascriptor 的 `cgadd` / `cgmax` / `cgmin`。**不需要绕 `squeeze`。**
+    The native datablock parameter provides grouped sum/max/min without squeeze emulation.
     """
     preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
     a = vf.load_align(src, 0)

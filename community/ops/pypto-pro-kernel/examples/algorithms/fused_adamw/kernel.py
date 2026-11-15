@@ -8,6 +8,9 @@
 
 """写法：原始。原生 VF 融合 AdamW，连续状态向量原地更新。
 
+机制：[旧状态读集与提交](../../../references/workflows/authoring.md#separate-old-state-reads-from-state-commit)。
+本例各元素独立更新，连续调用的 reference 从实际旧状态推进；跨位置或跨chunk读取原输入历史的任务还须证明最后reader及提交边界，本例不提供该历史更新路线。
+
 契约：互不重叠的连续 param/m/v[N] 为 FP32，grad[N] 为 FP16。m'=b1*m+(1-b1)*float32(grad)，v'=b2*v+(1-b2)*float32(grad)^2，
 param'=param*(1-lr*wd)-lr*(m'/(1-b1^step))/(sqrt(v'/(1-b2^step))+eps)。grad 不变；三个状态数组完整更新，不分配额外 GM 工作区。每次参考从实际调用前的状态计算
 FP64 公式，三个输出均使用 atol=rtol=2e-5，不在当前参考公式中额外舍入 m'/v'。

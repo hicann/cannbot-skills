@@ -6,7 +6,10 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：原始。VF 逐列均值与总体方差，每个 lane 对应一个保留的列。
+
+example-query: {"aliases": ["per-column statistics", "逐列统计"], "facets": {"source_dtype": ["FP32"], "destination_dtype": ["FP32"]}, "term_groups": [["per-column", "per-channel", "逐列", "逐通道"], ["across rows", "reduce rows", "outer-axis", "沿行归约", "沿 M 归约"], ["statistics", "mean", "variance", "统计", "均值", "方差"]]}
 
 输入为紧密 FP32 [M,N]，输出为两个 FP32 [N]；沿 M 归约，方差除以 M。
 先相对首行中心化求均值，再累加相对均值的平方偏差。
@@ -14,6 +17,7 @@
 输入 tile 占 M*64*4 字节，输出缓冲紧接其后；容量由框架检查。
 当前验证环境为行为版本 872df763f、CANN 9.2.0；具体数值契约见 test.py。
 """
+# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf

@@ -6,10 +6,11 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：原始。Fixpipe 的标量/逐列量化矩阵与 scale 负载探针。
 
 固定 M=N=K=64。FP16×FP16 产生 FP32 Acc，INT8×INT8 产生 INT32 Acc；目的 dtype、layout 与量化方式在工厂调用时确定。Acc→Vec 的 11 个组合中，带 scale 的
-FP32→FP32 由解析器拒绝，其他组合分别按精确值、取整/饱和或字节载体检查。Acc→Mat 覆盖 10 个组合，Acc→GM 覆盖 11 个组合的 ND/NZ 两种布局。
+FP32→FP32 会静默丢弃缩放，测试要求解析期拒绝；当前官方 master 缺少该 guard，因此相应检查失败。其他组合分别按精确值、取整/饱和或字节载体检查。Acc→Mat 覆盖 10 个组合，Acc→GM 覆盖 11 个组合的 ND/NZ 两种布局。
 
 组深度均为 1，使用显式地址和 mutex_ids="auto"。L1 的 A/B 从 0、0x2000 开始，预留 FP16 最大尺寸；逐列表或量化后的矩阵从 0x4000 开始。两套 Left/Right 缓冲分别从 0、0x2000
 开始，两个 Acc 从 0、0x4000 开始。各内存空间独立。普通 UB 从 0 开始；HF8 解码的 FP32 目标从 Vec 0x1000 开始，避开 4096B 的 HF8 源。固定 FP16→FP32 的生产者复用 riders
@@ -20,6 +21,9 @@ Acc→Vec 是单次 FIX→MTE3 交接；HF8 解码首先由 VF 读取，因此�
 HF8 的 VF 解码只检查前 256 个字节中 stride=4、phase=0 的 64 个值。Acc→Mat 的 HF8 路径仍是运行检查，UINT8 路径只验证读回操作数被拒绝；这些不是独立格式或完整数值验证。参考、判据及这些边界由
 reference.py 与 test.py 说明。
 """
+# pylint: enable=line-too-long
+
+import struct
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf  # noqa: N813
@@ -36,8 +40,8 @@ HF8 = pl.DT_HF8
 
 M = N = K = 64
 
-ND = pl.TensorLayout.ND
-NZ = pl.TensorLayout.NZ
+ND = pl.ND
+NZ = pl.NZ
 
 #: 默认量化比例。取 2 的幂，乘法在浮点里精确，判据不用容差。
 SCALE = 0.5
@@ -129,15 +133,22 @@ def make_quant_move(src_dtype, dst_dtype, *, with_scale=True, scale=SCALE):
     return kernel
 
 
-def make_move_with_quant_offset(quant_offset):
-    """Apply an explicit quant_offset on the Acc-to-Vec INT8 route. Unit inputs produce K*SCALE before offset and
-    saturation.
+def make_move_with_payload_offset(quant_offset):
+    """Pack a signed nine-bit offset into an INT64 scale payload for Acc→Vec INT8.
+
+    Host work only encodes scalar launch metadata. Cube still computes the original GEMM, and
+    pl.move performs scaling, offset addition and saturation on the original output path.
     """
+    if type(quant_offset) is not int or not -256 <= quant_offset <= 255:
+        raise ValueError("require an integer offset in [-256,255]")
+    scale_bits = struct.unpack("<I", struct.pack("<f", SCALE))[0] & 0xFFFFE000
+    payload = scale_bits | ((quant_offset & 0x1FF) << 37)
 
     @pl.jit(auto_mutex=True)
     def kernel(
         a: pl.Tensor[[M, K], FP16],
         b: pl.Tensor[[K, N], FP16],
+        scale_payload: pl.DT_INT64,
         out: pl.Tensor[[M, N], INT8],
     ):
         ub = pl.make_tile_group(
@@ -155,7 +166,7 @@ def make_move_with_quant_offset(quant_offset):
             pl.load(cur_a, a, [0, 0])
             pl.load(cur_b, b, [0, 0])
             pl.gemm(ac, cur_a, cur_b, l0a=l0a, l0b=l0b)
-            pl.move(t, ac, scale=0.5, quant_offset=quant_offset)
+            pl.move(t, ac, scale=scale_payload)
             pl.system.set_cross_core(pipe=pl.PipeType.FIX, event_id=0)
         with pl.section_vector():
             pl.system.wait_cross_core(pipe=pl.PipeType.MTE3, event_id=0)
@@ -163,7 +174,10 @@ def make_move_with_quant_offset(quant_offset):
                 pl.store(out, t, [0, 0])
             pl.system.bar_all()
 
-    return kernel
+    def run(a, b, out):
+        kernel(a, b, payload, out)
+
+    return run
 
 
 def make_per_channel_move(src_dtype, dst_dtype):

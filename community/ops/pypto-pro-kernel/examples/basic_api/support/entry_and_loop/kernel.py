@@ -6,51 +6,15 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""写法：原始。进 kernel 的入口、循环、cube 段，以及自动流水。
+"""写法：原始。kernel 入口、分块循环、Cube section 与自动流水。
 
-四个 API 加一个已废弃的：
+``@pl.jit`` 定义入口，kernel 循环使用 ``pl.range``，``pl.section_cube`` 和
+``pl.section_vector`` 指定执行侧。流水由 ``@pl.pipeline.stage`` 与
+``PipelineConfig(preload=...)`` 共同声明；preload=0 保留串行顺序并插入核间同步。
 
-| API | 是什么 |
-| --- | --- |
-| `@pl.jit(...)` | **唯一**的 kernel 入口装饰器 |
-| `pl.range(...)` | kernel 体里的循环迭代器；**内置 `range` 会被拒** |
-| `pl.section_cube()` | cube 流水的 section 作用域 |
-| `pl.pipeline` | `@pl.pipeline.stage` + `@pl.jit(pipeline=PipelineConfig(preload=n))` |
-| `@pl.inline` | **已废弃**，只报警告后原样返回 |
-
-## `preload` 换了结果必须一样
-
-```python
-@pl.jit(auto_mutex=True, pipeline=pl.pipeline.PipelineConfig(preload=0))
-```
-
-`preload=0` 不把任何 stage 提前拉，等于串行 + 跨核同步；`preload=n` 让上游提前 n 轮。
-**四个 preload（0/1/2/3）实测结果逐位相同**——这是这一例最有分量的判据,
-因为它验的是「流水变换不改变语义」，而那正是整个 `pl.pipeline` 存在的前提。
-
-## 跨核 buffer 的 `target_memory` 必须写成字面量
-
-```python
-sh = pl.make_tile_group(
-    type=pl.TileType(..., target_memory=pl.MemorySpace.Mat, layout=pl.ZN),   # 字面量
-    addrs=[...], mutex_ids=[...], fwd_ids=[...], bwd_ids=[...])
-```
-
-写 `target_memory=MAT`（模块级别名）会被拒：
-`pipeline: cross-core buffer 'sh' has no resolvable memory space`（`_cross_core_scanner.py:775`）。
-**写这一例的探针时四个 preload 因此全红。** 和 `pl.const` 只认字面量是同一类检查
-（见 `support/scalar_const` §六）。
-
-## `pl.pipeline` 不是「没 ST 的 API」
-
-`references/tooling/example-coverage.md` §五 把 `pl.pipeline` 列进「12 个框架自己也没测过」——
-**那是数法假象**：按 `pl.pipeline(` 搜是 0 次，因为它是个**模块**，从不被调用。
-按 `pl.pipeline.` 搜是 **75 次**（`stage` 40、`PipelineConfig` 35），
-`st/.../auto_pipeline/` 整整一组。这一例照它们抄。
-
-第一手来源：`auto_pipeline/test_pipeline_loop_body.py`（stage 的形状、跨核 buffer 的四个 id
-参数）、`runtime/pipeline/config.py`（`preload` 的语义与校验）、
-`language/parser/decorator.py`（`inline` 的废弃）。
+样例覆盖逐块缩放、带步长的部分写出、混合 section，以及 preload=0/1/2/3 的
+相同数学结果。跨核缓冲的 MemorySpace 可直接声明，也可使用解析器能解析的闭包枚举别名。
+``@pl.inline`` 是已废弃的 no-op；普通辅助函数由 JIT 解析器内联。
 """
 
 import pypto_pro.language as pl
@@ -148,7 +112,10 @@ def loop_with_a_step(
 def loop_with_python_range(
     a: pl.Tensor[[FULL_M, TN], FP32], out: pl.Tensor[[FULL_M, TN], FP32]
 ):
-    """反例：内置 `range`。和 `loop_over_blocks` **只差这一个词**。"""
+    """反例：内置 `range`。和 `loop_over_blocks` **只差这一个词**。
+
+    反例：native-loop-iterator —— 原生解析器必须拒绝这里刻意保留的内置 range。
+    """
     with pl.section_vector():
         g = pl.make_tile_group(
             type=pl.TileType(
@@ -276,11 +243,7 @@ def make_pipelined(preload):
 
 
 def make_pipelined_with_an_aliased_memory_space(preload=1):
-    """反例：跨核 buffer 的 `target_memory` 写成模块级别名。
-
-    收这条是因为**别名是很自然的写法**（本仓每个样例顶上都有 `FP32 = pl.DT_FP32` 这类别名）,
-    而它只在跨核 buffer 这一个位置会炸。
-    """
+    """跨核缓冲通过可解析的 MemorySpace 闭包别名声明。"""
     mat = pl.MemorySpace.Mat
 
     @pl.jit(auto_mutex=True, pipeline=pl.pipeline.PipelineConfig(preload=preload))

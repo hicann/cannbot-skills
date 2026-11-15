@@ -8,8 +8,25 @@ Owner: `../pypto/docs/zh/guide/programming_guide/pro/development/kernel_function
 
 - A kernel is a plain Python function under `@pl.jit(...)`, with `import pypto_pro.language as pl`. Tensors appear as typed parameters.
 - The body is sectioned: `with pl.section_vector():` (AIV) / `with pl.section_cube():` (AIC). A kernel with both is a mixed kernel.
-- Loops inside the body use `pl.range(...)` — the builtin `range` is rejected at parse.
-- Key `@pl.jit` kwargs: `auto_mutex` (default True), `pipeline=`, `tiling_key=`, `name=`, `sanitizer=`. Launch is eager `kernel(x, out)`; a bracketed grid form `kernel[grid, cores]` called like a normal function exists (owner: `runtime/jit.py`).
+- Loops inside the body use `pl.range(...)`; `native-loop-iterator` reports a builtin `range` loop under `@pl.jit` before native parsing. Host factory loops remain ordinary Python.
+- Key `@pl.jit` kwargs: `auto_mutex` (default True), `pipeline=`, `tiling_key=`, `name=`, `sanitizer=`. Eager `kernel(x, out)` uses the stream's automatic block budget. Explicit `kernel[stream, cores]` must fit the actual stream budget for the kernel's engine mix; check that limit before tuning workers (owner: `runtime/jit.py`; [launch and ownership](../api/support.md#5-get_subblock_num-depends-on-whether-the-kernel-has-a-cube-section)).
+
+## VF is the shipping form for vector compute
+
+Owners: [api/vf.md](../api/vf.md),
+[api/simt.md](../api/simt.md); policy: SKILL.md.
+
+- Vector-side computation belongs inside `@pl.vector_function`; a `pl.section_vector()` body orchestrates tile allocation, transfers and calls to those VF procedures. The [Vector policy](../../SKILL.md#constraints-and-workspace-policy) applies equally to examples.
+- `pl.simt.*` = thread-style kernels with their own two-bracket launch.
+- Both have example groups under `examples/basic_api/{vf,simt}/`.
+
+Before writing a VF expression, keep three distinctions explicit: result-producing VF instructions need their own assignment before another call consumes them; `vf.select` takes two register sources, so broadcast a scalar with `vf.full` first; and `b = a` aliases a register rather than copying its contents. Give independently updated states fresh destinations with `vf.full` or full-mask `vf.move`. See the [nested-call boundary](../api/constraints.md#result-producing-vf-calls-cannot-be-nested-inside-another-calls-arguments), [selection contract](../api/vf.md#25-combining-masks-with-existing-comparisons-and-selection), and [register identity](../api/vf.md#vf-register-aliasing-and-copying); mask constructors and other return-value APIs are not all subject to the instruction-assignment rule.
+
+A SIMD VF helper is a procedure: keep register values inside the VF and write results through tile parameters. It cannot use `return`, including a bare return, or export a register for JIT code to accumulate; [VF scope and results](../api/constraints.md#simd-vf-functions-communicate-through-tile-parameters) owns this boundary. Several dependent reductions can remain in one VF call, or communicate through explicit UB state between VF calls in one native kernel. A VF helper boundary does not imply another native kernel or GM scratch.
+
+Choose the GM↔UB transfer block independently of the VF register width. When the peak live storage fits, several register iterations can share one DMA and VF call; [streaming granularity and state](../patterns/vf-outer-reduce.md#choose-transfer-and-register-blocks-separately) owns the capacity and lifetime decisions.
+
+Keep runtime scalar names separate from VF destination names: use `indices = vf.full(index, mask, dtype=UINT32)`. Self-rebinding a scalar or scalar parameter can generate an uninitialized register self-broadcast even with an explicit dtype; see [binding identity and the diagnostic](../api/vf.md#vf-register-aliasing-and-copying).
 
 ## Type surface
 
@@ -18,7 +35,7 @@ Owner: `../pypto/python/pypto_pro/language/typing/` and `_api.py`.
 - Signature params: `x: pl.Tensor[[64, 200], pl.DT_FP32]`; scalar parameters spell the dtype as `scale: pl.DT_FP32` or `count: pl.DT_INT64`, not a bare `FP32` alias or `pl.Scalar` ([annotation contract](../api/constraints.md#annotate-scalar-parameters-directly-with-a-dtype)). Dtype aliases inside `Tensor`/`Ptr` are a different case. Pointer parameters use `pl.Ptr[dtype]`; `Input`/`Output` provide direction marks. Dims are literal ints or `pl.DYNAMIC` (runtime); compile-time variants go through `tiling_key`/`datatype` specialization.
 - `pl.TileType(shape=[r, c], ...)` describes a **physical 2-D buffer**, not the logical GM shape. For the ordinary FP32/INT32 row-major Vec tiles used here, physical columns must be a multiple of 8 (32 bytes). Carry the true dimensions in `valid_shape`; it cannot repair an invalid physical declaration. Other layouts/dtypes follow their own TileType alignment contract (`pypto/docs/zh/api/pro_api/SIMD-API/basic_data_structures/TileType.md`).
 - Construct `TileType` during parsing, inside the kernel body or a helper invoked there; do not capture a preconstructed `TileType` in a Python factory closure. Capture shape/count values instead ([rejected form and replacement](../api/constraints.md#tiletype-cannot-be-a-closure-variable)).
-- [Host dtype carriers](../../examples/basic_api/support/dtype_carriers/): the host side does not check dtypes for you.
+- [Host dtype carriers](../../examples/basic_api/support/dtype_carriers/): validate Torch tensor metadata with Torch dtypes such as `torch.float32`; `pl.DT_FP32` is a native annotation enum, not a Torch dtype. The native runtime's byte-count check does not replace this [dtype check](../api/support.md#14-dtype_carriers-dtype-carriers-and-transfer-table).
 
 ## Common language — hardware term ↔ DSL spelling
 
@@ -107,20 +124,6 @@ Owner: [api/crosscore-sync.md](../api/crosscore-sync.md) (decision tree).
 
 - Layer A `auto_mutex`: intra-core, derived from tile groups. Layer B `pipeline=` + `@pl.pipeline.stage`: cross-core, auto-inserted, verified by "results must be identical at every preload". Layer C manual `set/wait_cross_core`: zero framework checks.
 - Per-pipe barriers such as `bar_mte2` drain only that pipe; `bar_all` drains all pipes on the executing core. Cross-core handover still needs the owner's synchronization protocol ([barrier scope](../api/datamove.md#8-why-bar_-is-excluded-it-is-an-intra-pipe-barrier-not-a-cross-pipe-barrier)).
-
-## VF is the shipping form for vector compute
-
-Owners: [api/vf.md](../api/vf.md), [api/simt.md](../api/simt.md); policy: SKILL.md.
-
-- Vector-side computation belongs inside `@pl.vector_function`; a `pl.section_vector()` body orchestrates tile allocation, transfers and calls to those VF procedures. The [Vector policy](../../SKILL.md#constraints-and-workspace-policy) applies equally to examples.
-- `pl.simt.*` = thread-style kernels with their own two-bracket launch.
-- Both have example groups under `examples/basic_api/{vf,simt}/`.
-
-Before writing a VF expression, keep three distinctions explicit: result-producing VF instructions need their own assignment before another call consumes them; `vf.select` takes two register sources, so broadcast a scalar with `vf.full` first; and `b = a` aliases a register rather than copying its contents. Give independently updated states fresh destinations with `vf.full` or full-mask `vf.move`. See the [nested-call boundary](../api/constraints.md#result-producing-vf-calls-cannot-be-nested-inside-another-calls-arguments), [selection contract](../api/vf.md#25-combining-masks-with-existing-comparisons-and-selection), and [register identity](../api/vf.md#vf-register-aliasing-and-copying); mask constructors and other return-value APIs are not all subject to the instruction-assignment rule.
-
-A SIMD VF helper is a procedure: keep register values inside the VF and write results through tile parameters. It cannot use `return`, including a bare return, or export a register for JIT code to accumulate; [VF scope and results](../api/constraints.md#simd-vf-functions-communicate-through-tile-parameters) owns this boundary. Several dependent reductions can remain in one VF call, or communicate through explicit UB state between VF calls in one native kernel. A VF helper boundary does not imply another native kernel or GM scratch.
-
-Keep runtime scalar names separate from VF destination names: use `indices = vf.full(index, mask, dtype=UINT32)`. Self-rebinding a scalar or scalar parameter can generate an uninitialized register self-broadcast even with an explicit dtype; see [binding identity and the diagnostic](../api/vf.md#vf-register-aliasing-and-copying).
 
 ## Anchor kernel (VF, masked tails, runtime worker count)
 

@@ -57,7 +57,7 @@ M=N=512 / K=128 这个形状上不加也全过（2026-09-26 上板）。**没有
 
 **读 IR 时的一个坑.** `program.get_function(name)` 的 `name` 是**被装饰的 Python 函数
 名**，不是 `pl.jit(name=)` 给的名字；名字写错不报错，返回一个一行的空壳。要看全程序就直接
-`pypto_pro.ir.python_print(program)`，别点名。
+`program.as_python()`，别点名。
 """
 
 import pytest
@@ -90,7 +90,7 @@ def _ir_text(key: dict) -> str:
     program, _ = matmul_keyed.to_kernel_def(key).parse_target_program(
         pp.ir.SectionKind.Cube
     )
-    return pp.ir.python_print(program)
+    return program.as_python()
 
 
 def test_the_key_became_a_constant_in_the_ir():

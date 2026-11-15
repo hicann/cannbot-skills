@@ -160,3 +160,115 @@ def test_fresh_register_inside_loop_arm_is_independent(tmp_path):
         "        vf.store_align(tile, seed, mask)",
     )
     assert register_alias.check(path) == []
+
+
+@pytest.mark.parametrize("bound", ["3", "blocks"])
+def test_persistent_seed_read_at_the_next_iteration_is_advisory(tmp_path, bound):
+    path = probe(
+        tmp_path,
+        "seed = vf.full(1.0, mask)\n"
+        f"for block in pl.range({bound}):\n    state = seed\n"
+        "    for step in pl.range(6):\n        state = vf.add(state, value, mask)\n"
+        "    vf.store_align(tile, state, mask)",
+    )
+    findings = register_alias.check(path)
+    assert len(findings) == 1 and findings[0].advisory
+    assert findings[0].lineno == 9
+
+
+@pytest.mark.parametrize("bounds", ["0", "1", "7, 8", "0, 64, 64"])
+def test_at_most_one_iteration_has_no_future_seed_read(tmp_path, bounds):
+    path = probe(
+        tmp_path,
+        "seed = vf.full(1.0, mask)\n"
+        f"for block in pl.range({bounds}):\n    state = seed\n"
+        "    state = vf.add(state, value, mask)\n"
+        "    vf.store_align(tile, state, mask)",
+    )
+    assert register_alias.check(path) == []
+
+
+def test_seed_reinitialized_each_iteration_does_not_need_preservation(tmp_path):
+    path = probe(
+        tmp_path,
+        "for block in pl.range(3):\n"
+        "    seed = vf.full(1.0, mask)\n    state = seed\n"
+        "    for step in pl.range(6):\n        state = vf.add(state, value, mask)\n"
+        "    vf.store_align(tile, state, mask)",
+    )
+    assert register_alias.check(path) == []
+
+
+def test_each_iteration_copies_into_an_independent_destination(tmp_path):
+    path = probe(
+        tmp_path,
+        "seed = vf.full(1.0, mask)\n"
+        "for block in pl.range(3):\n    state = vf.move(seed, mask)\n"
+        "    state = vf.add(state, value, mask)\n"
+        "    vf.store_align(tile, state, mask)",
+    )
+    assert register_alias.check(path) == []
+
+
+def test_unknown_seed_producer_stays_unclassified_across_iterations(tmp_path):
+    path = probe(
+        tmp_path,
+        "seed = helper()\n"
+        "for block in pl.range(3):\n    state = seed\n"
+        "    state = vf.add(state, value, mask)\n"
+        "    vf.store_align(tile, state, mask)",
+    )
+    assert register_alias.check(path) == []
+
+
+@pytest.mark.parametrize("loop", ["for i in pl.range(4):", "while active:"])
+def test_existing_register_name_rebound_across_loop_is_reviewed(tmp_path, loop):
+    path = probe(
+        tmp_path,
+        "state = vf.full(0.0, mask)\n" + loop + "\n"
+        "    next_state = vf.add(state, value, mask)\n    state = next_state\n"
+        "vf.store_align(tile, state, mask)",
+    )
+    findings = register_alias.check(path)
+    assert len(findings) == 1 and findings[0].rule == register_alias.LOOP_RULE
+    assert findings[0].advisory and findings[0].lineno == 8
+
+
+def test_existing_register_updated_with_vf_move_is_not_rebound(tmp_path):
+    path = probe(
+        tmp_path,
+        "state = vf.full(0.0, mask)\n"
+        "for i in pl.range(4):\n    next_state = vf.add(state, value, mask)\n"
+        "    state = vf.move(next_state, mask)\nvf.store_align(tile, state, mask)",
+    )
+    assert register_alias.check(path) == []
+
+
+def test_iteration_local_alias_does_not_create_a_loop_merge(tmp_path):
+    path = probe(
+        tmp_path,
+        "for i in pl.range(4):\n"
+        "    source = vf.load_align(tile)\n    local = source\n"
+        "    local = vf.add(local, value, mask)\n    vf.store_align(tile, local, mask)",
+    )
+    assert register_alias.check(path) == []
+
+
+def test_unknown_initial_binding_is_not_assumed_to_be_a_register_merge(tmp_path):
+    path = probe(
+        tmp_path,
+        "state = helper()\n"
+        "for i in pl.range(4):\n    next_state = vf.full(1.0, mask)\n"
+        "    state = next_state\nvf.store_align(tile, state, mask)",
+    )
+    assert register_alias.check(path) == []
+
+
+def test_plain_alias_after_a_loop_is_not_a_loop_carried_assignment(tmp_path):
+    path = probe(
+        tmp_path,
+        "state = vf.full(0.0, mask)\n"
+        "for i in pl.range(4):\n    next_state = vf.add(state, value, mask)\n"
+        "state = next_state\nvf.store_align(tile, state, mask)",
+    )
+    assert register_alias.check(path) == []

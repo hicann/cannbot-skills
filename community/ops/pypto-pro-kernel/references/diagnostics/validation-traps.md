@@ -14,7 +14,7 @@ Write a test that asserts an error message and it may pass **regardless of what 
 
 `match` was **not skipped**; it ran and **matched successfully** because the regular expression found itself in the message.
 
-`PyptoProError.__str__` (`pypto_pro/_errors.py:560`) returns a rendered form rather than plain diagnostic text: the first line + `--> file:line:col` + **source excerpts spanning two lines before and after the error** (rendered at `_errors.py:606`; the window is defined by `_PRIOR_CONTEXT_LINES` / `_FOLLOWING_CONTEXT_LINES` at `:370-371`). The source comes from `source_lines`, and `runtime/kernel.py:127-129` passes in the **entire file** (`f.read().split("\n")`), not just the lines containing the kernel.
+`PyptoProError.__str__` in `pypto_pro/_errors.py` delegates to `render`, which includes the first line + `--> file:line:col` + **source excerpts spanning two lines before and after the error**. `_append_source_preview` derives the window from `_PRIOR_CONTEXT_LINES` / `_FOLLOWING_CONTEXT_LINES`. The renderer uses the supplied `source_lines`; when absent, `_append_location` loads the span's file through `source_lines_of`. The preview can therefore include neighboring test code rather than only the kernel body. These symbol references match PyPTO `6c254b2e`; the self-matching mechanism still needs the discriminating control below.
 
 When the test's `@pl.jit` kernel is written in the test file, the span's filename is that test file. The ±2-line window can extend beyond the end of the kernel and copy the following line into the message:
 
@@ -108,7 +108,7 @@ collected 5 items
 
 Likewise, an incorrect column-stripe address in split-N does not raise an error; it simply writes somewhere else.
 
-**Recommended form:** directly assert the shape and layout of the tile read by `move` when checking a transpose; validate numerical correctness on the board against a reference. ascriptor recorded the on-board behavior of an incorrect transpose (D-122): the result was **completely unrelated** to the reference, with no error.
+**Recommended form:** directly assert the shape and layout of the tile read by `move` when checking a transpose, then validate the actual consumer against an independent reference. Use a nonsquare coordinate-distinct panel: successful compilation or a matching uniform row cannot establish the axis map.
 
 ---
 
@@ -184,7 +184,7 @@ Also, the parser rejects an explicit `None` in `pl.TileType(..., compact=None)` 
 
 ## 6. The MX Scale Plane Address Is Derived; Scalar `addrs` Can Silently Produce Wrong Results
 
-The tile in `ScaleLeft` / `ScaleRight` (called a **plane** by ascriptor) cannot use an arbitrary address: it must equal the **paired L0 data tile address `>> 4`**. Hardware `mad_mx` does not take scale as an explicit operand; it finds it implicitly through the SFractal layout, which means through the address.
+The scale tile in `ScaleLeft` / `ScaleRight` cannot use an arbitrary address: it must equal the **paired L0 data tile address `>> 4`**. Hardware `mad_mx` does not take scale as an explicit operand; it finds it implicitly through the SFractal layout, which means through the address.
 
 ### Why the Framework Did Not Catch It: the Check Saw Only Slot 0
 
@@ -270,7 +270,7 @@ The related-check scope is in “A multi-slot check cannot use slot 0 as a proxy
 
 ### Discriminating Experiment: Parsed IR, No Device Required
 
-Keep the same load → fillpad → store sequence and change only the synchronization form; after parsing to `ir.SectionKind.Vector`, inspect `@system.*` / `@block.*`:
+Keep the same load → fillpad → store sequence and change only the synchronization form; after parsing to `ir.SectionKind.Vector` and applying the synchronization pass, inspect `system.*` / `block.*`:
 
 | Form | Synchronization ops |
 | --- | --- |
@@ -280,9 +280,12 @@ Keep the same load → fillpad → store sequence and change only the synchroniz
 
 ```python
 program, _ = kernel.to_kernel_def().parse_target_program(ir.SectionKind.Vector)
-text = pypto_pro.ir.python_print(program.get_function(kernel.__name__))
-ops = re.findall(r"@(system\.[\w.]+|block\.[\w.]+)", text)
+program = ir.Pass.insert_sync()(program)
+text = pypto_pro.ir.text_dump(program.get_function(kernel.__name__))
+ops = re.findall(r"\b(system\.[\w.]+|block\.[\w.]+)\(", text)
 ```
+
+`parse_target_program` returns the pre-pass IR. Inspect automatic mutex operations after the same `Pass.insert_sync()` pass used by JIT code generation; raw IR alone cannot establish their absence in the executable. The canonical `text_dump` format uses operation names without an `@` prefix.
 
 ### On-Board Symptom: Stable, Regular, and Wrong
 
@@ -293,7 +296,7 @@ The MTE2 load, V fill, and MTE3 store race; the read sees **bytes left by a prev
 ### Two Correct Forms
 
 ```python
-@pl.jit(auto_mutex=True)                      # Framework-managed: tiles must come from a group
+@pl.jit(auto_mutex=True)                      # Framework-managed handover: use a protected group
 def a(x, out):
     g = pl.make_tile_group(type=t, addrs=[0x0, 0x100], mutex_ids=[0, 1])
 
@@ -307,34 +310,21 @@ def b(x, out):
 
 **`sync_src` / `sync_dst` must be paired and use matching parameters**: the set half goes in the former and the wait half in the latter. Writing only one does not raise an error and prevents nothing. See [`examples/basic_api/datamove/dma_pad`](../../examples/basic_api/datamove/dma_pad). The primary source is `pypto/python/tests/st/pypto_pro/frontend/datacopy/test_pro_fillpad.py`.
 
-**A tool catches this case:** `auto-mutex-needs-tile-group` in `python scripts/check.py rules <path>`.
+`auto-mutex-needs-tile-group` in `python scripts/check.py rules <path>` rejects a source-proved adjacent MTE2→MTE3 handover on the same bare Vec Tile. Declaration, metadata-only and recognized single-pipe controls are not synchronization defects by themselves. More complex use, manual events and unresolved source contracts remain advisory; inspect their generated IR rather than treating a bare allocation as proof of a race. The [checker scope](../tooling/checks.md#scope-and-known-limits) defines that boundary.
 
-### 7.1 A Tile Group May Still Lack Protection: Grouping Uses `mutex_ids`, Not Addresses
+### 7.1 Tile ownership, declaration overlap and phase completion
 
-**First define the mutex domain; the entire argument in §7.1 depends on it:** **the mutex key is the ID itself, across pipes**. `Lock<pipe>(id)` blocks **the instruction queue for the current pipe** while waiting for token `id` to be released; `Unlock<pipe>(id)` releases the token after earlier instructions on that pipe drain. **The pipe identifies which queue is blocked; it is not part of the token** (the Semantics comment in `ir/op/sync_ops/sync.cpp`; ID range 0–31; the original wording is “per Ascend C Mutex ISASI spec”).
+A mutex ID identifies a synchronization resource within one core, shared across pipes. Acquire waits on that resource in the current pipe; release follows the preceding operations on that pipe. The pipe chooses the instruction queue, not a separate mutex namespace. See the semantics in `ir/op/sync_ops/sync.cpp` and the native tile creation API. The sanitizer's `(region, mutex_id, pipe)` key checks matched acquire/release pairs; it does not define a different mutual-exclusion domain.
 
-Four sources of evidence were reconciled on 2026-09-28. This had been an open question (“the sanitizer pairs by `(region, id, pipe)`, suggesting that pipe is part of the key”), but that interpretation is now discarded:
+`auto_mutex` orders uses of a tile slot through those operations. Automatic allocation plans overlapping groups together and validates manual pins within the overlap component; manual-only declarations retain their explicit IDs. Matching IDs do not synchronize Cube with Vector. Shared cross-core buffers need the matching publication and reuse protocol.
 
-| Evidence | What it says |
-| --- | --- |
-| ISA semantics comment (`sync.cpp`) | As above—the token is keyed by ID, and the pipe determines which queue is blocked. |
-| Official documentation `tile_creation_and_operations.md` | “A mutex ID identifies an on-chip buffer mutex synchronization resource, **used to coordinate access to Tiles by different Pipes**.” |
-| Backend behavior | `ShouldSkipVPipeMutex` skips only when an ID is used **exclusively** for `PIPE_V`; **if the same ID is also used by another pipe, it still emits the V lock**. This condition would make no sense if mutexes were pipe-scoped. |
-| On-board measurement | `get_buf(PIPE_MTE2, 0, 0)` from `make_tile_group` blocked the **MTE3** `TSTORE` from `pl.init_output` (both use ID 0): a bare tile failed 6 of 12 times; the group failed 0. **The same ID does provide mutual exclusion across different pipes** (§11). |
+A `MutexMismatch` warning identifies overlapping manual declarations with disjoint IDs. It does not establish simultaneous access: sequential phases may reuse storage after full completion. Conversely, warning-free declarations do not prove that prefetches, asynchronous stores, aliases or GM consumers are correctly ordered. Follow the [allocation and phase-reuse contract](../api/memory-allocation.md#reuse-an-address-range-across-differently-typed-phases), inspect generated synchronization and validate phase transitions with distinguishable data. The [source checker](../tooling/checks.md#scope-and-known-limits) provides a bounded precheck rather than a full lifetime analysis.
 
-**The sanitizer's triple is a pairing key, not a mutual-exclusion key.** The `_check_mutex_pairing` docstring says: "every lock must be matched by an unlock on the same `(region, mutex_id, pipe)` key". This checks whether every lock is released; it says nothing about which operations exclude one another. **The two concepts share an ID field, which makes them easy to confuse.**
-
-`auto_mutex` orders uses of a tile slot through mutex acquire/release operations. The frontend records per-tile runtime IDs and candidate groups; codegen deduplicates cross-tile IDs at runtime while retaining each tile's ownership.
-
-`mutex_ids="auto"` plans overlapping automatic groups together and validates any manual pins in their overlap component. Manual-only declarations retain their explicit IDs. `pipeline` separately checks regions within its analysis scope through `_check_reuse_mutex_ids`; the source rule `overlapping-groups-need-shared-mutex` is a limited manual-layout precheck.
-
-Mutex IDs are per core. Matching IDs do not establish mutual exclusion between Cube and Vector; shared cross-core buffers require event synchronization. See the [allocation contract](../api/memory-allocation.md) for automatic alias rules and explicit placement responsibilities.
-
-**Phase exemptions are a separate case:** `matmul` / `store` / `move` / `insert` with `phase=Partial/Final` **drop the lock on the Acc tile** and let the hardware `unit_flag` take over. This is intentional, and the comments record the real cost: removing the L0A/L0B mutex causes an MTE1→cube RAW (device error 507015, measured 2026-05-29). When using `phase=`, verify that `unit_flag` covers the dependency.
+Accumulator operations using `phase=Partial/Final` delegate the Acc dependency to hardware `unit_flag` rather than its ordinary mutex. Unifying alias IDs therefore does not justify removing the full drain at a phase boundary. Verify the MMA/FIX completion protocol independently from L1/L0 operand ownership and cross-core events.
 
 ## 8. `bar_*` Is an **Intra-Pipeline** Barrier; Using It to Order Across Pipelines Silently Produces Wrong Results
 
-`pl.system.bar_mte2()` sounds like “wait for MTE2 to finish.” It drains **that pipeline itself** and does not establish ordering between MTE2 and V. **The only way to order across pipelines is with a flag:** paired `sync_src` / `sync_dst`.
+`pl.system.bar_mte2()` drains its own pipeline; it does not establish ordering between MTE2 and V. Use a supported producer/consumer dependency such as paired `sync_src` / `sync_dst` or tile mutexes, or a verified full `bar_all` drain when serial phase execution is intended.
 
 A per-pipe barrier drains its own pipeline; it does not establish a dependency on another pipe. Use it when operations within that pipe must not overlap, and use the appropriate cross-pipe synchronization for a producer and consumer on different pipes. `bar_all` has the broader drain scope described below.
 

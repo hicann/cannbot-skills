@@ -221,7 +221,7 @@ def _convert(src, o_astype, o_bitcast, o_trunc, o_mulscast, o_astype_z):
 
     - `astype(src, preg, dtype=I32)`：**真转换**，`1.5 → 2`（默认 round_mode，见下）
     - `bit_cast(src, dtype=I32)`：**只改视图**，`1.5` 的位型 `0x3FC00000` 原样读成整数
-    - `truncate(src, preg)`：向零取整，**结果还是 FP32**（`1.5 → 1.0`，不是整数类型）
+    - `truncate(src, preg, round_mode=CAST_TRUNC)`：显式向零取整，**结果还是 FP32**（`1.5 → 1.0`，不是整数类型）
     - `muls_cast(src, scalar, preg, dtype)`：先乘标量再转，一条指令
 
     `astype` 和 `bit_cast` 的输出放在一起看最能说明问题：同一个输入、同一个目标 dtype，
@@ -250,7 +250,7 @@ def _convert(src, o_astype, o_bitcast, o_trunc, o_mulscast, o_astype_z):
     viewed = vf.bit_cast(a, dtype=I32)
     vf.store_align(o_bitcast, viewed, preg, 0)
 
-    truncated = vf.truncate(a, preg)
+    truncated = vf.truncate(a, preg, round_mode=pl.VFRoundMode.CAST_TRUNC)
     vf.store_align(o_trunc, truncated, preg, 0)
 
     scaled = vf.muls_cast(a, pl.const(4.0, FP32), preg, dtype=FP16)

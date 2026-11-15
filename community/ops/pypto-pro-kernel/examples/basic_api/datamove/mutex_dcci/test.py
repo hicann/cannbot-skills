@@ -116,10 +116,12 @@ def _run(kernel, device):
     return out.cpu().numpy(), x
 
 
-def _parse(kernel):
-    """解析并返回 IR 文本。`parse_target_program` 返回二元组，第二项这里用不到。"""
+def _parse(kernel, *, insert_sync=False):
+    """解析并返回规范 IR 文本，按检查目标显式运行自动同步 pass。"""
     program, _ = kernel.to_kernel_def().parse_target_program(pp.ir.SectionKind.Vector)
-    return pp.ir.python_print(program)
+    if insert_sync:
+        program = pp.ir.Pass.insert_sync()(program)
+    return pp.ir.text_dump(program)
 
 
 def test_the_manual_mutex_chain_is_correct(device):
@@ -145,7 +147,7 @@ def test_both_forms_lower_to_the_mutex_ops():
     最后那条 `not in` 断言才是关键：少了它，这条测试在手工版被悄悄改成 flag 之后仍然会绿。
     """
     manual = _parse(manual_mutex_chain)
-    automatic = _parse(chain_auto_mutex)
+    automatic = _parse(chain_auto_mutex, insert_sync=True)
 
     for text in (manual, automatic):
         assert "system.mutex_lock_dyn" in text

@@ -12,7 +12,7 @@
 BAND_ROWS=64 切成四条带，每带用 splitk=64 的 GEMM 和 VF SiLU。
 
 Cube、Vector 各有一个 ``@pl.pipeline.stage``，从同一个带循环调用。Cube 用 ``DualModeSplitM`` 将 [64,256] FP32 Acc 直接送给两个 AIV，各消费 [32,256]
-FP32 UB tile，不经过 GM。
+FP32 UB tile，不经过 GM。交接槽只读；SiLU 结果写入独立的单槽 Vec 输出缓冲，位于 0x10000，占 32768B。
 
 资源地址与深度：
 
@@ -48,21 +48,17 @@ VL = 64  # 一个 FP32 寄存器 = 64 个元素；N=256 整除，无尾块
 
 
 @pl.vector_function
-def _silu_half_band(tile):
-    """原地 silu：``tile`` 是 ``[HALF_BAND, N]``，一个 AIV 在一条带里的份额。
-
-    与基线 ``_silu_rows`` 逐字同构（只是行数从 ``HALF_M=128`` 换成 ``HALF_BAND=32``）——
-    这一段已经上板验证过，本文件不重新论证它，只论证"分带 + 流水"这个新加的维度。
-    """
+def _silu_half_band(src, dst):
+    """读取交接半带，在独立 Vec 输出缓冲中计算 SiLU。"""
     all_lanes = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
     for r in pl.range(HALF_BAND):
         for off in pl.range(0, N, VL):
-            x = vf.load_align(tile, [r, off])
+            x = vf.load_align(src, [r, off])
             neg_x = vf.neg(x, all_lanes)
             exp_neg_x = vf.exp(neg_x, all_lanes)
             denom = vf.adds(exp_neg_x, pl.const(1.0, FP32), all_lanes)
             silu = vf.div(x, denom, all_lanes)
-            vf.store_align(tile, silu, all_lanes, [r, off])
+            vf.store_align(dst, silu, all_lanes, [r, off])
 
 
 @pl.pipeline.stage
@@ -79,12 +75,13 @@ def cube_band(band, a, b_g, bias_g, a_g, l0a, l0b, acc_g, shared_v):
 
 
 @pl.pipeline.stage
-def vector_band(band, out, shared_v):
+def vector_band(band, out, shared_v, output_g):
     """vector stage：消费本带（本 AIV 的半区），VF silu，写回 out 对应偏移。"""
     slot = shared_v.next()
-    _silu_half_band(slot)
+    result = output_g.current()
+    _silu_half_band(slot, result)
     off_m = band * BAND_ROWS + pl.get_subblock_idx() * HALF_BAND
-    pl.store(out, slot, [off_m, 0])
+    pl.store(out, result, [off_m, 0])
 
 
 def _make_kernel(preload: int, l0_depth: int, name: str):
@@ -170,13 +167,22 @@ def _make_kernel(preload: int, l0_depth: int, name: str):
                 shape=[HALF_BAND, N],
                 dtype=FP32,
                 target_memory=pl.MemorySpace.Vec,
-                layout=pl.TensorLayout.ND,
+                layout=pl.ND,
             ),
             addrs=0,
             mutex_ids="auto",
             depth=2,
             fwd_ids=[0, 1],
             bwd_ids=[2, 3],
+        )
+
+        output_g = pl.make_tile_group(
+            type=pl.TileType(
+                shape=[HALF_BAND, N], dtype=FP32, target_memory=pl.MemorySpace.Vec
+            ),
+            addrs=0x10000,
+            mutex_ids="auto",
+            depth=1,
         )
 
         # B 与 bias 在所有带之间复用，只在带循环外搬运一次。
@@ -192,7 +198,7 @@ def _make_kernel(preload: int, l0_depth: int, name: str):
             with pl.section_cube():
                 cube_band(band, a, b_g, bias_g, a_g, l0a, l0b, acc_g, shared_v)
             with pl.section_vector():
-                vector_band(band, out, shared_v)
+                vector_band(band, out, shared_v, output_g)
 
     return kernel
 

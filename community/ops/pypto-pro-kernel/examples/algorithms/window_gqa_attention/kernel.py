@@ -22,6 +22,12 @@ Host 只消费形状与 worker 元数据；输出不依赖原值，不分配 GM 
 每个查询块独占输出行，K/V 驻留 UB；每行沿有效区间在线更新 FP32
 最大值、分母与完整 V 累加器。worker 足够少时整头复用，较多时切查询
 行以增加独立工作项；这会重载 K/V，分块选择须随形状和设备重新测量。
+该 VF 路径为每个 query/key 更新最大值、分母和输出，包含逐 key 重定标。
+调优前先选择指数参考和状态，参见
+[指数参考](../../../references/patterns/normalized-contractions.md#choose-the-exponential-reference-and-state)
+中的固定参考、双遍或在线条件，再比较查询分块。完整 score 行可驻留时，
+比较该文的常驻/物化控制；分数有界不等于任意消费者精度都安全。
+分别计数非线性运算、数据复用和发布成本；较少 launch 不等于较低原生耗时。
 LSE 的物理 UB 列宽按8元素补齐，与逻辑输出列数分开。
 
 验证身份：行为基线 872df763f，CANN 9.2.0，Ascend950PR，torch_npu

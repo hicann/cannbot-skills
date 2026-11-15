@@ -60,10 +60,11 @@ pl.gemm_mx(acc, l1a, l1b, l1a_scale, l1b_scale,      # 调用方已经 load 好�
 - `k` 必须是 64 的倍数，这条是**硬件要求**：实测 `k=32` 和 `k=96`（都是整数个组）各自把设备打成
   **AICore trap 507015**，而 64 和 128 逐位相等。所以单位是 64，不是组。
 
-**四条 move 成对相邻.** 数据那条和它 plane 那条在硬件上是**同一条** `dma.l1_to_l0.mx`
-（ascriptor 的 `mx.py` 模块 docstring），所以拆开写等于把一条指令的操作数散在两处。Pro 手写
-惯例发的是「Left 数据、Right 数据、Left plane、Right plane」，糖改成成对——**这是个顺序改动，
-所以上板验了**（见下）。
+**Keep each data/scale transfer pair adjacent.** The MX operand and its scale
+plane share a pairing contract. Compare the emitted operand addresses and
+synchronization when changing move order; neither adjacency nor successful
+compilation alone establishes numerical correctness. The controls below
+compare the sugar lowering with the manual native chain.
 
 **如何独立验证.**
 
@@ -152,35 +153,72 @@ def _cube_ir(kernel):
     import pypto_pro as pp
 
     program, _ = kernel.to_kernel_def().parse_target_program(pp.ir.SectionKind.Cube)
-    return pp.ir.python_print(program.get_function(kernel.__name__))
+    program = pp.ir.Pass.insert_sync()(program)
+    return program.get_function(kernel.__name__).as_python()
 
 
 def _op_sequence(text):
-    """block op 与同步操作的顺序，去掉操作数名。
+    """Compare native operations and mutex ownership, allowing numeric ID renaming.
 
-    忽略暂存变量、地址和进程内递增的 `memref_id`。自动规划与手动 ID 允许重命名，
-    比较每条同步指令的 pipe、分组候选 ID 和共享关系。
+    Scalar mutex IDs resolve through the selected tile's candidate slots. Full-shape
+    setters are checked against their declarations before normalization.
     """
     sequence = []
     canonical_ids = {}
+    candidates, shapes, mutex_values = {}, {}, {}
 
-    def normalize_ids(value):
-        if isinstance(value, list):
-            return tuple(normalize_ids(item) for item in value)
-        return canonical_ids.setdefault(value, len(canonical_ids))
+    def normalize_ids(ids):
+        return tuple(canonical_ids.setdefault(value, len(canonical_ids)) for value in ids)
 
     for line in text.splitlines():
-        lock = re.search(r"@(system\.mutex_(?:un)?lock)_dyn\(", line)
+        allocation = re.search(
+            r"^\s*(\w+) = ir\.call @block\.make_mutex_tile\("
+            r"(\[[^\]]*\]), \[[^\]]*\], (\[[^\]]*\])", line
+        )
+        if allocation:
+            name, shape, ids = allocation.groups()
+            candidates[name] = [ast.literal_eval(ids)]
+            shapes[name] = ast.literal_eval(shape)
+            continue
+        group = re.search(r"^\s*(\w+):.* = \[(\w+(?:, \w+)*)\]$", line)
+        if group and all(name in candidates for name in group.group(2).split(", ")):
+            name, members = group.groups()
+            members = members.split(", ")
+            candidates[name] = [candidates[member][0] for member in members]
+            assert all(shapes[member] == shapes[members[0]] for member in members)
+            shapes[name] = shapes[members[0]]
+            continue
+        pick = re.search(r"^\s*(\w+) = (\w+)\[([^\]]+)\]$", line)
+        if pick and pick.group(2) in candidates:
+            name, group, slot = pick.groups()
+            candidates[name] = (
+                [candidates[group][int(slot)]] if slot.isdecimal() else candidates[group]
+            )
+            shapes[name] = shapes[group]
+            continue
+        mutex = re.search(
+            r"^\s*(\w+):.* = ir\.call @block\.tile_mutex_id\((\w+), (\d+)\)", line
+        )
+        if mutex:
+            name, tile, index = mutex.groups()
+            mutex_values[name] = [ids[int(index)] for ids in candidates[tile]]
+            continue
+        lock = re.search(r"@(system\.mutex_(?:un)?lock)_dyn\((\w+), pipe=\"pipe\": (\d+)\)", line)
         if lock:
-            pipe = re.search(r'pipe="pipe": (\d+)', line)
-            ids = re.search(r", (\[\[[0-9,\s\[\]]*\]\]), pipe=", line)
-            assert ids is not None, f"Unrecognized grouped mutex operands: {line}"
-            normalized = normalize_ids(ast.literal_eval(ids.group(1)))
-            sequence.append(f"{lock.group(1)} pipe={pipe.group(1)} ids={normalized}")
+            operation, operand, pipe = lock.groups()
+            ids = [int(operand)] if operand.isdecimal() else mutex_values[operand]
+            sequence.append(f"{operation} pipe={pipe} ids={normalize_ids(ids)}")
+            continue
+        shape = re.search(r"@block\.set_validshape\((\w+), (\d+), (\d+)\)", line)
+        if shape:
+            tile, rows, cols = shape.groups()
+            assert [int(rows), int(cols)] == shapes[tile], line
             continue
         block = re.search(r"@(block\.[a-z_0-9]+)\(", line)
         if block and not block.group(1).startswith("block.make_tile"):
             sequence.append(block.group(1))
+    assert any(item.startswith("system.mutex_lock") for item in sequence)
+    assert "block.matmul_mx" in sequence and "block.matmul_mx_acc" in sequence
     return sequence
 
 
@@ -224,13 +262,15 @@ def test_only_m_narrows_three_tiles_and_the_group_axis_stays_whole():
         r"@block\.set_validshape\([^,]+, ([^)]*)\)", _cube_ir(mx_sugar_m_tail)
     )
 
-    assert len(shapes) == 6  # 两臂各三块
-    assert shapes[:3] == [
+    assert len(shapes) == 10  # 两臂各设置五块，只有三块的有效范围被收窄。
+    assert shapes[:5] == [
         f"{M_TAIL}, {TILE}",  # l0a：k 取声明值
+        f"{TILE}, {TILE}",  # l0b：保持完整有效形状
         f"{M_TAIL}, {TILE}",  # acc：n 取声明值
         f"{M_TAIL}, {SCALE_K}",  # plane_a：收行，组轴仍是 SCALE_K=2
+        f"{SCALE_K}, {TILE}",  # plane_b：保持完整有效形状
     ]
-    assert shapes[3:] == shapes[:3]  # 另一臂一样
+    assert shapes[5:] == shapes[:5]  # 另一臂一样
 
 
 def test_the_plane_pairing_is_still_checked_through_the_sugar():
@@ -511,7 +551,7 @@ def test_a_k_that_is_not_a_multiple_of_64_is_refused():
     import pypto_pro.language as pl
     from pypto_pro._errors import InvalidVal
 
-    from .kernel import E8M0, FP8, GROUP_SIZE
+    from .kernel import E8M0, FP8
 
     @pl.jit(arch="a5", auto_mutex=True, name="gemm_mx_k_not_64")
     def bad(

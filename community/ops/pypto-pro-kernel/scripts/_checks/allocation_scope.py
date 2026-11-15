@@ -36,7 +36,7 @@ def inspect(path: Path):
         if isinstance(node, ast.Call) and attribute_path(node.func) in allocations
     }
     checked = set()
-    findings = []
+    results = []
     # Module/closure rebinding can change the meaning of the imported namespace.
     rebound = any(
         isinstance(node, ast.Name)
@@ -44,15 +44,17 @@ def inspect(path: Path):
         and node.id == source.pl
         for node in ast.walk(source.tree)
     )
-    for function in ast.walk(source.tree):
+
+    def inspect_function(function):
+        findings = []
         if rebound or not has_decorator(function, source.pl, "jit"):
-            continue
+            return findings
         arguments = (
             function.args.posonlyargs + function.args.args + function.args.kwonlyargs
         )
         arguments += [arg for arg in (function.args.vararg, function.args.kwarg) if arg]
         if any(arg.arg == source.pl for arg in arguments):
-            continue
+            return findings
         found = []
 
         class Visitor(ast.NodeVisitor):
@@ -84,7 +86,11 @@ def inspect(path: Path):
         findings += apply_claim(
             source, function, RULE, found, counterexample_claims(function)
         )
-    return findings, (len(checked), len(calls - checked))
+        return findings
+
+    for candidate in ast.walk(source.tree):
+        results += inspect_function(candidate)
+    return results, (len(checked), len(calls - checked))
 
 
 def check(path: Path):

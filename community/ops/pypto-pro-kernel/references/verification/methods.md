@@ -17,5 +17,6 @@
 - Read actual text before bulk replacement; verify all intended matches are unique before writing. Review the diff afterwards rather than treating replacement counts as correctness evidence.
 - Match syntax checks to the target Python version. A newer local interpreter accepting the file does not prove remote collection works; avoid relying on newer f-string syntax.
 - For Markdown edits, check relative paths, anchors and tool-consumed tables as well as rendering.
+- For parallel changes to a shared reference or registry, reconcile against the actual merge base and retain distinct additions and amendments. Taking the longer file or one side of an append conflict can silently discard guidance. Verify the merged content and its incoming routes; a successful textual merge does not prove that every contribution survived. This does not require a new experiment ledger.
 
 A new method needs a real counterexample and an executable action. Prefer adding a test for a new instance of an existing method instead of creating another narrative document.

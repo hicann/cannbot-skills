@@ -8,7 +8,8 @@
 
 """Independent NumPy references and expected Fixpipe case classifications.
 
-MATRIX classifies Acc→Vec as exact, rounded/saturated, byte-carried or rejected. MAT_MATRIX separates q@q numerical
+MATRIX defines expected Acc→Vec checks: exact, rounded/saturated, byte-carried or required parse rejection. A rejection
+expectation does not establish that the current framework implements the guard. MAT_MATRIX separates q@q numerical
 readback, HF8 execution-only checks and UINT8 readback rejection. Acc→GM has an explicit outcome override for scaled
 FP32 output. These tables define expectations; runtime source and toolchain identity belong to the source-gated device
 runner.
@@ -188,9 +189,7 @@ QUANT_SIGNED_SHIFT = 46
 
 
 def encode_quant_payload(scale, *, offset=0, is_signed=False):
-    """Pack fp19 scale, signed nine-bit offset and bit46. The explicit quant_offset parameter is tested
-    independently.
-    """
+    """Independently pack fp19 scale, signed nine-bit offset and bit46 for the hardware control word."""
     bits = struct.unpack("!I", struct.pack("!f", float(scale)))[0]
     payload = bits & 0xFFFFE000
     payload |= (int(offset) & QUANT_OFFSET_MASK) << QUANT_OFFSET_SHIFT

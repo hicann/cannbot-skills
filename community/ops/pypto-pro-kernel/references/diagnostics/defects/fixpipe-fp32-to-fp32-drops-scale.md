@@ -2,12 +2,12 @@
 
 | | |
 | --- | --- |
-| Status | The root cause is in the CANN PTO header and is **not being fixed for now** (user decision, 2026-09-27); **pypto now rejects it during parsing**. See “Why protection is at parse time” in [`diagnostics/defects/fixpipe-overview.md`](fixpipe-overview.md). |
+| Status | Open on official PyPTO `bca90a6c` / CANN 9.3.0: no matching parser guard, and scalar/per-channel `scale=2` both return the unscaled accumulator. The CANN PTO on-chip mapping lacks the FP32 destination branch. See [current disposition](fixpipe-overview.md). |
 | Impact | **Silently returns a wrong answer**: parsing, compilation, and execution succeed, but the output is the unscaled accumulation result. |
 | Scope | Only the `pl.move` (Acc→**Vec**) path; the same case in `pl.store` (Acc→**GM**) is correct. |
-| Toolchain | Ascend950PR_957b / CANN 9.2.0 / pypto 0.2.1 / torch 2.10.0 |
-| Source | `pypto` @ `integration/pro-surface`, `arch35/copy_l0c_to_ub_impl.h` |
-| Reproduction | `examples/basic_api/fixpipe/fixpipe_quant_matrix`, `test_fp32_to_fp32_silently_drops_the_scale`; for the per-channel path see `fixpipe_scaling_buffer::test_per_channel_fp32_to_fp32_also_drops_the_scale`. |
+| Toolchain | Ascend950PR / CANN 9.3.0 / official PyPTO `bca90a6c6e69a1b1111cfe8a43b975ba2bfcf28a` / torch and torch_npu 2.10.0. Detailed mapping excerpts below also describe the CANN 9.2.0 path. |
+| Source | Python `python/pypto_pro/ir/op/block_ops.py`; CANN PTO `pto/npu/a5/common.hpp` and `TStore.hpp`. |
+| Reproduction | Missing-guard checks: `fixpipe_quant_matrix::test_fp32_to_fp32_is_rejected_on_the_move_path` and `fixpipe_scaling_buffer::test_per_channel_fp32_to_fp32_is_rejected`. A numerical probe must compare the move output to the independent `scale * acc` golden, rather than accepting successful launch. |
 
 ## 1. Symptom
 
@@ -187,6 +187,6 @@ The enum values already exist, the store path already uses them, and the hardwar
 
 1. In the quantization branch of `_check_layout_dtype`, reject **Acc→Vec / Acc→Mat `FP32 → FP32` with scale**. Explain in the error that this case works with store but not move, and why; provide the two workarounds (store directly / move to UB and then use `vf.muls`). **Do not reject Acc→GM**—that case works.
 2. Remove `DT_FP32 → DT_FP32` from the table in the official `docs/zh/api/pro_api/SIMD-API/memory_data_movement/move.md`, or annotate it as ineffective when used with scale. Leave the table in `store.md` unchanged.
-3. After the ISA is fixed, remove the rejection and restore the documentation together—**keep a test that pins down the current behavior** (`fixpipe_quant_matrix::test_the_store_path_keeps_the_scale_that_the_move_path_drops` is that test; it asserts both that store works and move is wrong, so a change to either side makes it fail).
+3. If the underlying mapping is fixed, validate the actual scaled-move result against an independent golden before relaxing the rejection checks and documentation. Keep the positive store control `fixpipe_quant_matrix::test_the_store_path_keeps_the_scale_that_the_move_path_cannot`, since a rejection on the move path must not remove legal scaled stores.
 
 The `INT32 → INT32` case is **a separate issue**: the enum has no corresponding mode (there is no `QS322S32_PRE`, for example), and the Python side already rejects it during parsing, which is correct.

@@ -74,7 +74,8 @@ def make_paged(
     has_offset=False,
     return_values=False,
 ):
-    assert paged and page_size == 128 and tile_n == 256
+    if not paged or page_size != 128 or tile_n != 256:
+        raise AssertionError("paged layout requires page_size=128 and tile_n=256")
     topk = 512
     preload = 0
     handover_depth = 2
@@ -89,7 +90,8 @@ def make_paged(
     total_tiles = (max_k + tile_n - 1) // tile_n
     parts = (total_tiles + shard_tiles - 1) // shard_tiles
     merge_width = parts * topk
-    assert merge_width <= shard_width
+    if merge_width > shard_width:
+        raise AssertionError("partial top-k lists must fit in the merge shard")
     kr = 128
     kn = 256
 
@@ -445,7 +447,7 @@ def make_paged(
                     part * shard_width,
                     False,
                     0,
-                    True,
+                    True, 0, True,
                 )
                 pl.store(out_idx, oi, [qbase + sub * 3 + r, part * topk])
                 pl.store(out_val, ov, [qbase + sub * 3 + r, part * topk])
@@ -970,12 +972,12 @@ def make_paged(
                 pl.load(val, out_val, [row, 0])
                 pl.load(idx, out_idx, [row, 0])
                 keys_from_scores(val, sk, merge_width, merge_width)
-                histograms_high_vf(ht, sk, merge_width // 256)
+                histograms_high_vf(ht, sk, merge_width // 256, 0)
                 find_high_bin_and_histograms_low(
-                    lt, it, ht, sk, bt, nt, merge_width - topk + 1, merge_width // 256
+                    lt, it, ht, sk, bt, nt, merge_width - topk + 1, merge_width // 256, 0
                 )
                 find_kth_vf(tt, lt, it, bt, nt)
-                collect_indices_gt_eq_vf(xt, sk, tt, 0, merge_width // 128)
+                collect_indices_gt_eq_vf(xt, sk, tt, 0, merge_width // 128, 0)
                 row_offset = 0
                 if has_offset:
                     row_offset = pl.getval(offsets, row)

@@ -6,13 +6,17 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：混合。两个M块复用同一L0B，与两次pl.gemm保留数值对照。
 
 契约：A[128,128]、B[128,128] FP16，C[128,128] FP32；一次单Cube核调用。每次计算64行，两个Acc槽互不覆盖。资源：L1 A/B各16/32 KiB、L0A双槽合计32 KiB、L0B单槽32
 KiB、Acc双槽合计64 KiB。B只读且在两个matmul间不被覆盖，tile-group IDs让auto_mutex看见全部真实读写。
 手写链仅用于gemm-desugar的“保留L0操作数”例外：reuse=True在循环前move B一次；False每次gemm都重新搬B。A搬运、两个matmul、drain和算术完全相同。生成代码中的B搬运次数是结构证据，数值测试或减
 少一次move都不代表硬件加速。
+
+example-query: {"aliases":["L0 operand reuse","保留L0操作数"],"term_groups":[["L0B reuse","L0 operand reuse","retained L0B","retain L0B","复用L0B","保留L0B"]],"facets":{"source_dtype":["FP16"],"destination_dtype":["FP32"]}}
 """
+# pylint: enable=line-too-long
 
 from functools import lru_cache
 

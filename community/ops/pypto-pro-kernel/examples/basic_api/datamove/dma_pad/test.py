@@ -94,9 +94,8 @@ PadValue::Zero>` 也是 0。于是写成了「根因在 ISA 头的映射与硬�
 
 留下三样东西：
 
-1. **`check.py` 的第五条规则** `auto-mutex-needs-tile-group`——`auto_mutex=True` 的 kernel
-   里出现裸 `pl.make_tile` 而没有 `make_tile_group`，静态就能判。文档纠正不了这类错误，
-   因为它的症状会伪装成别的东西（按 [skill constraints](../../../../SKILL.md#constraints-and-workspace-policy) 的判据，这该落在工具里）。
+1. `auto-mutex-needs-tile-group`: its hard findings and unresolved cases follow the
+   [current checker scope](../../../../references/tooling/checks.md#scope-and-known-limits).
 2. **`references/verification/board-runs.md` §五点十一**：UB 不是零初始化的，"数值不重要"这句话在你
    把数值打印出来的那一刻就不再成立。
 3. **`references/verification/evidence.md` #16**：四次一致的测量不构成可重复性证据——四次里如果每次

@@ -15,6 +15,21 @@ The following measurements are from 2026-09-25, pypto `db7ca64b2`, CANN 9.2.0, A
 
 At the time, the batch result for datacopy/reinterpret was contaminated by cascading device failures, and other unrun directories had no reliable baseline. Historical counts were removed; do not turn “not fully tested yet” into a request to scan the entire repository on the board.
 
+## Conditional frontend and lowering leads
+
+Earlier investigations also recorded the following signatures. They are useful ways to split a reproducer, not assertions that the present installation has the same defect. Establish the exact overload and toolchain, inspect the generated source and compare isolated baseline/candidate processes under the [evidence rules](../verification/evidence.md) before choosing a workaround.
+
+| Signature | Discriminating control |
+| --- | --- |
+| Tiling-array selection rejects an index | Compare a literal, loop index and runtime selector through the installed parser. Source unrolling is a candidate only after identifying which forms fail; preserve the selected values and code-size cost. |
+| A VF comparison emits a scalar mnemonic for carried state | Compare ordinary and loop-carried operands, and each operand position. Reordering needs equivalent ordered/NaN semantics; replacing comparison with subtraction additionally needs a range and overflow proof. |
+| A rounding mode fails to lower, or an unaligned-load form crashes compilation | Preserve the exact overload, mode, compile command and generated instruction. Check aligned/unaligned or rounding siblings separately; one passing sibling does not validate the failing form. |
+| Generated declarations or constants fail at names such as `half` or `inff` | Inspect the actual emitted identifier, type and literal. Reduce the spelling/conversion failure separately from kernel arithmetic; do not invent a blanket identifier or nonfinite-value ban. |
+
+Keep parser/lowering failures separate from numerical failures and device faults. A documented operation that cannot be reached may instead have a wrong namespace, operand order, selector or call signature; inspect bindings and official call sites before reporting missing support.
+
+If a keyword appears in the Python signature but lowering rejects it, probe that operation and its exact binding on the installed build. A successful call through a different binding only verifies that path.
+
 ## Declaration Overlap Checks
 
 Manual-only tile groups retain their explicit mutex IDs. Inspect their physical intervals and actual access sections when diagnosing races. Automatic groups additionally receive native overlap-component validation; see [allocation](../api/memory-allocation.md#aliasing-and-mutual-exclusion). Source prechecks and historical numerical results do not replace validation after changing the framework or toolchain.

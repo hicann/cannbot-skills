@@ -96,10 +96,10 @@ def load_datablock(x, n, block_stride=2, block_elems=8):
     return out
 
 
-def load_ds_on_fp32(n):
-    """**陷阱**：`LoadDist.DS` 用在 32 位上不报错，给全零。
-
-    枚举里只有 `DS` / `DS_B8` / `DS_B16`，没有 `DS_B32`；`US` 同理。这个参考记录的是**当前的
-    错误行为**，不是正确语义——它存在是为了让行为一旦改变（改成报错或改成可用）测试立刻失败。
-    """
-    return np.zeros((1, n), dtype=np.float32)
+def load_mask_ds(x, sentinel):
+    """MaskReg DS 从512个源bit中抽取偶数位，尾部保持原始哨兵。"""
+    bits = np.unpackbits(x.reshape(-1)[:64], bitorder="little")
+    sampled = np.packbits(bits[::2], bitorder="little")
+    out = np.full_like(x, sentinel)
+    out.reshape(-1)[: sampled.size] = sampled
+    return out

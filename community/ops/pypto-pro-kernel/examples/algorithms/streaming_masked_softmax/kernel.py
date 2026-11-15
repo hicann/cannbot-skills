@@ -56,11 +56,7 @@ def make_kernel(m_rows: int, n_cols: int):
         sum_reg = vf.load_align(sum_tile, [0, 0])
         for inner in pl.range(0, CHUNK, VL):
             col = chunk_start + inner
-            active = length - col
-            if active > VL:
-                active = VL
-            if active < 0:
-                active = 0
+            active = pl.min(VL, pl.max(0, length - col))
             prefix = vf.update_mask(active, dtype=FP32)
             values = vf.load_align(tile, [0, inner])
 
@@ -100,16 +96,8 @@ def make_kernel(m_rows: int, n_cols: int):
 
         for inner in pl.range(0, CHUNK, VL):
             col = chunk_start + inner
-            output_active = valid_cols - inner
-            if output_active > VL:
-                output_active = VL
-            if output_active < 0:
-                output_active = 0
-            active = length - col
-            if active > output_active:
-                active = output_active
-            if active < 0:
-                active = 0
+            output_active = pl.min(VL, pl.max(0, valid_cols - inner))
+            active = pl.min(output_active, pl.max(0, length - col))
             write_mask = vf.update_mask(output_active, dtype=FP32)
             prefix = vf.update_mask(active, dtype=FP32)
 

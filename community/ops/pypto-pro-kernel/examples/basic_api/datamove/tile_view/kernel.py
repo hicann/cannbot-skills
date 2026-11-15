@@ -20,7 +20,7 @@
 收窄放在 `pl.load` 前面就少搬进来，放在 `pl.store` 前面就少搬出去。
 
 **`pl.reinterpret` 是编译期的视图声明**，官方 docstring 原话「not a conversion — no
-load/move/store/cast instruction is generated」。它在**原地址、原大小**重新声明一个 handle，
+load/move/store/cast instruction is generated」。它在原地址重新声明一个 handle，不分配新的存储；调用方必须保证物理 backing 足够大。
 继承 memory space / fractal / pad / compact / mutex 映射，**但不继承 valid_shape**——
 新 handle 从动态有效区开始，要窄就再调一次 `set_validshape`。原 handle 不变。
 
@@ -245,7 +245,7 @@ def reinterpret_a_whole_group(
 
 
 # ---------------------------------------------------------------------------
-# 只解析、不上板：reinterpret 的三条检查
+# 容量由调用方保证；超出已保留空间的别名只解析、不上板。
 # ---------------------------------------------------------------------------
 
 
@@ -253,12 +253,36 @@ def reinterpret_a_whole_group(
 def reinterpret_beyond_the_buffer(
     x: pl.Tensor[[ROWS, COLS], FP32], out: pl.Tensor[[ROWS, COLS], FP32]
 ):
-    """`16 × 16` FP32 = 1024 字节，原 buffer 只有 512。**解析期拒。**"""
+    """扩大别名不分配存储；本入口没有保留所需容量，所以只解析、不执行。"""
     tile = _tile(VA_FIRST)
     with pl.section_vector():
         pl.load(tile, x, [0, 0])
         view = pl.reinterpret(tile, shape=[TOO_MANY_ROWS, COLS])
         pl.store(out, view, [0, 0])
+
+
+@pl.jit(auto_mutex=True)
+def reinterpret_over_complete_backing(
+    x: pl.Tensor[[TOO_MANY_ROWS, COLS], FP32],
+    out: pl.Tensor[[TOO_MANY_ROWS, COLS], FP32],
+):
+    """先保留完整容量，收窄逻辑别名后再扩大，在同一已初始化物理存储上搬运。"""
+    group = pl.make_tile_group(
+        type=pl.TileType(
+            shape=[TOO_MANY_ROWS, COLS],
+            dtype=FP32,
+            target_memory=pl.MemorySpace.Vec,
+        ),
+        addrs=VA_FIRST,
+        mutex_ids="auto",
+        depth=1,
+    )
+    backing = group.current()
+    with pl.section_vector():
+        pl.load(backing, x, [0, 0])
+        narrow = pl.reinterpret(backing, shape=[ROWS, COLS])
+        wide = pl.reinterpret(narrow, shape=[TOO_MANY_ROWS, COLS])
+        pl.store(out, wide, [0, 0])
 
 
 @pl.jit()

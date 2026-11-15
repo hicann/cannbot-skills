@@ -6,79 +6,11 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-r"""22 个 `DT_*`：位宽、host 载体、进不了搬运通道的那 5 个，以及两个静默坑。
+"""22 个导出 dtype 的位宽、host 载体与逐字节搬运验证。
 
-**写法：原始。** 这一例是 `vf.astype` 的前置——转换的两端各用什么载体，先在这里定清楚。
-
-## 一、22 个 dtype 的形状
-
-| 位宽 | 个数 | 成员 |
-| --- | --- | --- |
-| 4 | 6 | `FP4` `FP4E1M2` `FP4E2M1` `HF4` `INT4` `UINT4` |
-| 8 | 7 | `BOOL` `FP8E4M3FN` `FP8E5M2` `FP8E8M0` `HF8` `INT8` `UINT8` |
-| 16 | 4 | `BF16` `FP16` `INT16` `UINT16` |
-| 32 | 3 | `FP32` `INT32` `UINT32` |
-| 64 | 2 | `INT64` `UINT64` |
-
-**其中 5 个根本进不了搬运通道**：`BOOL` `FP4` `HF4` `INT4` `UINT4`。板上报
-`load: unsupported layout/dtype combination src=GM(ND,DT_X) -> dst=Vec(ND,DT_X)`。
-剩下 17 个参与搬运，GM(ND)→Vec(ND) 共 **69** 条组合 = 2² + 6² + 4² + 3² + 2²
-——**同位宽任意配对，不跨位宽**。所以 GM 声明 `INT8`、Tile 声明 `HF8` 是合法的，
-不需要 `reinterpret`（`test_same_width_cross_dtype_movement_is_allowed`）。
-
-## 二、载体：只有 11 个 dtype 的 host 张量 dtype 被检查
-
-`runtime/jit.py` 的 `_PL_DTYPE_TO_TORCH` 只有 11 条，而检查是
-`if expected_dtype is not None and arg.dtype != expected_dtype`。所以：
-
-- **有映射的 11 个**（`FP16` `BF16` `FP32` `INT8` `INT16` `INT32` `INT64` `UINT8` `UINT64`
-  `BOOL` `HF8`）：host dtype 严格对齐，错了立刻报 `dtype mismatch`。
-  注意 `HF8` 映射到 **`uint8`**——torch 没有 hif8，传的是裸字节。
-- **没映射的 11 个**：**完全不检查**。传 `torch.float32` 给一个 8 位参数会跑通、不报错、
-  数据错（`test_an_unmapped_dtype_takes_any_host_dtype_and_goes_silently_wrong`）。
-
-## 三、4 bit 张量形状按逻辑元素计数
-
-固定声明 `[1, 64]` 对应 host `(1, 32)` 字节载体；冷调用与缓存命中使用同一口径。
-`test_static_fp4_width_is_independent_of_call_order` 覆盖两种 FP4 和错误调用前后的状态。
-动态末轴仍可使用，但调用方须自行确认 carrier 宽度足够且符合算法约定。
-
-## 四、两个静默坑
-
-| 坑 | 症状 |
-| --- | --- |
-| 没映射的 dtype 传错位宽的 host 张量 | 跑通，不报错，**只搬了声明位宽那么多字节**，尾部没动 |
-| 动态末轴的 4 bit host 按逻辑元素数给（而不是字节数） | 跑通，不报错，**只搬了前一半** |
-
-两个都钉了测试。共同点是**第二道检查被跳过时，第一道和第三道都能被形状「蒙对」**。
-
-## 五、`pl.reinterpret`：8 位的退路，4 位没有
-
-`DT_BOOL` 进不了搬运通道，但它是 8 位：声明 `DT_UINT8` 搬进来，片上
-`pl.reinterpret(t, dtype=pl.DT_BOOL, shape=[1, N])` 换视图。**换 dtype 时必须同时给 `shape=`**
-（`block_ops.py:3835`），即使同位宽、形状不变。
-
-同样的路子对 `DT_INT4` **编译失败**。所以那 5 个里只有 `DT_BOOL` 有退路。
-
-**`INT4` / `UINT4` / `FP4` / `HF4` 在 A5 上没有路径，因为硬件没有这些 4 位元素类型。**
-三处相互独立地印证：搬运表里 4 位只有 `FP4E2M1` / `FP4E1M2`；`DT_INT4` 在整个
-`pypto_pro.language` 面（`_api.py` / `_vf_api.py` / `_simt_api.py`）一次都没出现；
-ascriptor（同一块硬件的上一代编译器）的 a5 dtype 表也只有 `fp4_e2m1` / `fp4_e1m2`，它的
-`int4` 只作为塞在 int32 里的位负载存在，配套的是 `pack_int4_to_int32` / `unpack_int32_to_int4`，
-不是可搬运的元素类型。
-
-所以这 4 个 dtype 在枚举里是**占位**，不是能用的类型。要在 A5 上用 4 位数据，用
-`FP4E2M1` / `FP4E1M2`。
-
-## 六、torch_npu 的一个限制（不是 pypto 的）
-
-`uint32` / `uint64` / `float8_e8m0fnu` 三种 dtype **在卡上建不出张量**：
-`zeros_like` 和 `zeros(device=)` 都报 `ZerosLikeKernelNpuOpApi.cpp:26 ... error code is 161002`。
-办法是在 CPU 上建好再 `.to(device)`。`test_three_torch_dtypes_cannot_be_created_on_the_device`
-钉住这条，因为它会让「照常写 `torch.zeros_like(a)`」在这三个 dtype 上莫名失败。
-
-判据：这一例不比数值，比**字节**——`a.view(torch.uint8) == out.view(torch.uint8)` 全等，
-`rtol/atol` 无意义。搬运是逐字节的，任何一位不同都是错。
+GM→Vec→GM 的正向路径按原始字节比较，固定 FP4 形状按两个逻辑元素一个字节校验。
+FP8 参数拒绝错误位宽的 host 载体；动态 FP4 的具体算法宽度仍由调用方约束。
+不受支持的数据通道和 reinterpret 路径保留负例，torch_npu 的创建限制单独验证。
 """
 
 import numpy as np
@@ -86,6 +18,7 @@ import pytest
 import torch
 
 import pypto_pro.language as pl
+from pypto_pro._errors import InvalidType
 
 from . import reference as ref
 from .kernel import (
@@ -269,27 +202,17 @@ def test_a_mapped_dtype_refuses_the_wrong_host_dtype(device):
         kernel(a, out)
 
 
-def test_an_unmapped_dtype_takes_any_host_dtype_and_goes_silently_wrong(device):
-    """`DT_FP8E4M3FN` 不在映射表里 → host dtype 不检查。
-
-    传 `torch.float32`（4 字节/元素）给一个 8 位参数：形状 64 == 64 蒙对了第一道，
-    第二道跳过，第三道 pack 因子是 1 也蒙对——于是跑通，**只搬了前 64 字节**。
-    这是本例第一个静默坑，也是这一整例存在的理由。
-    """
+def test_fp8_refuses_a_host_carrier_with_the_wrong_width(device):
+    """FP8 参数接受对应 torch FP8 或 uint8 载体，拒绝四字节的 float32 载体。"""
     kernel = make_static_copy(pl.DT_FP8E4M3FN)
     a = torch.arange(1, N + 1, dtype=torch.float32).reshape(1, N).to(device)
     out = torch.zeros((1, N), dtype=torch.float32).to(device)
-    kernel(a, out)  # 不报错
-    torch.npu.synchronize()
-
-    assert not _same_bytes(a, out), (
-        "位宽差 4 倍居然搬对了——那这个坑不存在了，本例这条结论要重测"
-    )
-    moved = out.cpu().view(torch.uint8).reshape(-1).numpy()
-    assert (moved[:N] != 0).any(), "前 64 字节应该搬过去了"
-    assert (moved[N:] == 0).all(), (
-        f"64 字节之后应该没动，实际有 {(moved[N:] != 0).sum()} 个非零"
-    )
+    with pytest.raises(InvalidType) as rejected:
+        kernel(a, out)
+    message = str(rejected.value)
+    assert "dtype mismatch" in message, message
+    assert "torch.uint8" in message and "torch.float8_e4m3fn" in message, message
+    assert "got torch.float32" in message, message
 
 
 # ---------------------------------------------------------------------------

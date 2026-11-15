@@ -82,6 +82,8 @@ Change one independent variable per comparison. Do not attribute `init_output` s
 
 `pl`, `vf` and `pl.simt` are different namespaces. Before claiming absence, search the repo's executed examples, then Python/C++ registrations and lowerings.
 
+Verify the search traversed the intended source and example roots. A supplied SDK/sample directory may be a symlink; resolve its target or use a traversal that follows it, and check the files actually examined against the expected manifest or known sample. Zero hits from an empty traversal do not establish that an API or composition is absent. Record the resolved root and search scope with the capability conclusion.
+
 ## 21. Missing an existing gated parser check because its name differs from the guessed name
 
 Search predicate structure and call paths, not only guessed feature names. A gated check and a completely missing check require different fixes. See the [allocation contract](../api/memory-allocation.md) for overlap-check coverage.

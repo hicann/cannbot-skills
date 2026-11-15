@@ -222,12 +222,14 @@ def check(path: Path, *, pypto_root: Path = PYPTO_ROOT):
     source = read(path)
     if not source.pl:
         return []
-    findings = []
-    for function in ast.walk(source.tree):
+    results = []
+
+    def inspect_function(function):
+        findings = []
         if _simd_vf(function, source.pl):
             findings += _procedure_findings(source, function, pypto_root)
         if not has_decorator(function, source.pl, "jit"):
-            continue
+            return findings
         arguments = (
             function.args.posonlyargs + function.args.args + function.args.kwonlyargs
         )
@@ -239,7 +241,7 @@ def check(path: Path, *, pypto_root: Path = PYPTO_ROOT):
             if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)
         )
         if source.pl in bound:
-            continue
+            return findings
         prefixes = {f"{source.pl}.Vf"}
         if source.vf and source.vf not in bound:
             prefixes.add(source.vf)
@@ -274,4 +276,8 @@ def check(path: Path, *, pypto_root: Path = PYPTO_ROOT):
         findings += apply_claim(
             source, function, RULE, found, counterexample_claims(function)
         )
-    return findings
+        return findings
+
+    for candidate in ast.walk(source.tree):
+        results += inspect_function(candidate)
+    return results

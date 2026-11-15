@@ -6,7 +6,7 @@ These restrictions are easy to work around, but each encounter costs a compilati
 
 ---
 
-## Type aliases cannot be used as annotations
+## Spell out complete Tensor annotations
 
 ```python
 T_A = pl.Tensor[[M, K], pl.DT_FP16]
@@ -15,7 +15,7 @@ T_A = pl.Tensor[[M, K], pl.DT_FP16]
 def kernel(a: T_A):          # InvalidType: Unsupported type annotation
 ```
 
-Annotations must spell out `pl.Tensor[[...], ...]` literally. **Module-level int constants can** appear in shapes (`[M, 2 * K]` works); the alias itself is what gets rejected.
+The selected parameter parser requires the complete `pl.Tensor[[...], ...]` form rather than a name holding that Tensor declaration. **Module-level int constants can** appear in shapes (`[M, 2 * K]` works). This does not reject aliases inside the Tensor's dtype position; [scalar annotations and dtype subexpressions](#annotate-scalar-parameters-directly-with-a-dtype) have different resolution paths. First establish that the selected callable reached this parser.
 
 ## Inline helpers accept only positional arguments
 
@@ -42,7 +42,7 @@ Similarly, forms such as `dict(**kw)` do not work (`Unsupported function call: d
 NotSupported: For loop must use pl.range()
 ```
 
-Built-in `range()` is allowed only in the Python layer **outside** the kernel, such as in a factory function. The rejection is at `_control_flow_parser.py:988`; the three-argument form `pl.range(start, stop, step)` is available. **Iterating over a static Python list (`for off in [0, 64, 128, 192]`) is also rejected**, even when its contents are compile-time constants. Every `for` in a kernel body must use `pl.range` (measured on 2026-09-28; also applies inside `@pl.vector_function`; nested `pl.range` has hardware evidence).
+Built-in `range()` is allowed only in the Python layer **outside** the kernel, such as in a factory function. The diagnostic is defined by `ControlFlowParserMixin._ITERATOR_ERROR` in `_control_flow_parser.py`; the three-argument form `pl.range(start, stop, step)` is available. **Iterating over a static Python list (`for off in [0, 64, 128, 192]`) is also rejected**, even when its contents are compile-time constants. Every `for` in a kernel body must use `pl.range` (measured on 2026-09-28; also applies inside `@pl.vector_function`; nested `pl.range` has hardware evidence).
 
 Keep VF loop counters separate from logical coordinates. The official range contract (`pypto/docs/zh/api/pro_api/SIMD-API/controlflow/range.md`) requires VF start/stop values in `[0,65535]`, a positive step, and no overflow even on the final increment; ranges outside VF differ. The installed parser's `_control_flow_parser.py::_check_range_bound` and `_check_range_overflow` at behavior version `872df763f` match this restriction. A negative start produced `pl.range() start must be in [0,65535]`. For negative neighborhood offsets, enumerate nonnegative indices and derive signed logical offsets from them; do not use mathematical coordinates directly as VF loop counters. Callers must also guarantee the range of dynamic bounds; absence of a static rejection does not establish validity.
 
@@ -64,11 +64,15 @@ Precompute reciprocals or normalization coefficients for static dimensions in th
 
 Keep register initialization, arithmetic, reductions and register load/store inside the default SIMD `@pl.vector_function`. The enclosing `@pl.jit` function handles tiles, transfers and VF calls; `section_vector()` alone does not establish VF scope. A SIMD VF procedure writes through its tile parameters and contains no `return`, even a bare return. Keep dependent register calculations within the procedure, or explicitly store state to a tile for the next VF call. Returning a `RegTensor` to JIT code is not a way to carry reduction state across those scopes.
 
-The official Reg computation guide (`pypto/docs/zh/guide/programming_guide/pro/development/vector_computation/reg_computation.md`) defines the scope and procedure-shaped examples. `_control_flow_parser.py::parse_return` rejects a return while `inline_vf_depth` is nonzero; `_call_parser.py::_implicit_func_call` inlines VF procedures without ordinary-helper return lowering. The parser rejection was reproduced on behavior `872df763f`. This boundary is specific to SIMD VF: ordinary inline helpers and `vector_function(mode="simt")` have separate return contracts and must not inherit this restriction.
+The official Reg computation guide (`pypto/docs/zh/guide/programming_guide/pro/development/vector_computation/reg_computation.md`) defines the scope and procedure-shaped examples. The current SIMD parser rejects VF returns and calls to ordinary inline helpers from a VF. Ordinary inline helpers outside VF and `vector_function(mode="simt")` have separate return contracts and must not inherit this restriction.
 
-## Do not pass `compact=None` explicitly
+On official PyPTO `bca90a6c`, nested VF calls lower to separate callees. Rebinding a register parameter inside the callee creates a local result; it does not automatically write the caller's register, even when the emitted parameter is a C++ reference. Keep page-index or other dependent register calculations in the consuming VF, or explicitly communicate through tile storage. Inspect both the callee's writes and the caller's subsequent operands before using register parameters as output channels. The [quantized sparse indexer](../../examples/algorithms/quant_sparse_lightning_indexer/kernel.py) keeps page-address calculations at their consuming VF sites.
 
-`pl.TileType(..., compact=None)` is rejected (`InvalidType`), even though omitting this kwarg is equivalent to `None`. Consequently, **a helper cannot simply forward `compact` as a parameter**: write two versions (`_left` / `_left_c`), or inline the declaration in the kernel.
+When several variants share one VF body, pass static flags or widths as explicit constant arguments to that single native VF. The framework specializes its external name by the constant values. Separate factory closures with the same Python function name can instead conflict during external-function registration; changing `__name__` after construction can also break source lookup. See the [MLA prolog](../../examples/algorithms/mla_prolog/kernel.py) and [sparse attention](../../examples/algorithms/sparse_attention/_kernels/vector_ops.py) forms.
+
+## Choose compact from the physical address map
+
+On official PyPTO `bca90a6c`, omitting `TileType.compact` selects `compact=1`. A helper that writes a declared physical NZ pitch must choose its mode explicitly: `compact=0` preserves that pitch, while the ordinary compact and RowPlusOne insertion paths derive pitch from aligned valid rows. Do not use omission or `None` to mean noncompact. Keep narrowed GEMM operands on their separate `compact=1` contract. The [compact layout contract](datamove.md#compact-modes-and-manually-packed-nz-tiles) owns the address-map examples and producer/consumer checks.
 
 ## NZ Acc tile column counts must be multiples of 16
 
@@ -79,6 +83,7 @@ inner box cols (16), got remainder 8. Pad Cols to a multiple of 16.
 
 When slicing an accumulator into strips by address, **round the last strip's width up to 16** rather than declaring the exact remaining column count. Extra columns outside the valid region do not affect the result: store reads the narrowed parent handle.
 
+<!-- kernel-query: {"id":"jit-annotation-types","aliases":["jit-annotation-types","JIT scalar annotation","scalar parameter annotation"],"when":"The selected parser reports an unsupported or incomplete parameter annotation.","rules":["jit-scalar-dtype-alias","jit-annotation-type"]} -->
 ## Annotate scalar parameters directly with a dtype
 
 Use a concrete dtype for `@pl.jit` scalar parameters, such as `scale: pl.DT_FP32` or `count: pl.DT_INT64`. `pl.Scalar` is the DSL scalar value class; using it alone as a parameter annotation raises `Incomplete type annotation: pl.Scalar`. Do not change it to `pl.Scalar[...]` either. Tensor and Ptr parameters use complete declarations of `pl.Tensor[[shape], dtype]` and `pl.Ptr[dtype]`, respectively.
@@ -86,6 +91,17 @@ Use a concrete dtype for `@pl.jit` scalar parameters, such as `scale: pl.DT_FP32
 Distinguish the complete parameter annotation from its dtype subexpression: even if `FP32 = pl.DT_FP32` is defined, `epsilon: FP32` still raises `Unsupported type annotation: FP32`; write `epsilon: pl.DT_FP32`. In contrast, the alias in `pl.Tensor[[M,N], FP32]` is resolved by `resolve_dtype` and is supported. At behavior version `872df763f`, `resolve_type` requires a dtype attribute expression for a complete scalar annotation; the two entry points are not equivalent. Named TilingData classes follow a separate path, so this rule must not reject all name annotations.
 
 The official kernel parameter documentation (`pypto/docs/zh/guide/programming_guide/pro/development/kernel_function.md`) shows the dtype form. The installed parser's `_type_resolver.py::resolve_type` at behavior version `872df763f` agrees with actual parameter calls. Scalar values produced inside a kernel by `getval`, shape, or block APIs are a different use case and do not replace parameter declarations for caller-supplied scalars.
+
+<!-- kernel-query: {"id":"jit-entry-kind","aliases":["jit-entry-kind","jit-postponed-entry","native entry classification","postponed Tensor annotations","legacy JIT entry"],"symbols":["pl.jit"],"when":"Native capture rejects the imported entry's kind; inspect its observed callable type and annotation values.","rules":["native-entry-kind","jit-postponed-entry"]} -->
+## Check the imported entry before changing its layout
+
+`Expected a native @pl.jit Pro kernel` is an entry-classification boundary. Inspect the reported callable type, selected declaration and `string_annotations`; a host wrapper or legacy dispatch is not a native capture result. Native preflight preserves the source module's own future flags and reads fresh source bytes, so the inspection must have the same annotation semantics as ordinary Python loading.
+
+`declaration` identifies the selected callable's own code, while `wrapped_declaration`, when available, identifies its separately unwrapped function. Each available declaration binds its original file SHA. A wrapper's `__wrapped__` or copied annotations do not change which object was selected for capture. Native preflight reports this rejection as `entry_classification` with native parsing `not_established`; an entry-import or argument-binding failure must be resolved before a kernel-body parser or layout hypothesis. Plain output logs retain an unknown stage unless the caller supplies separate stage evidence.
+
+`jit-postponed-entry` brings this entry check forward when all supplied parameter annotations are strings and the selected recognizer cannot identify their Tensor/Ptr spellings. It is an advisory bound to the complete `_is_tile_kernel` source SHA256; changed or missing recognizers remain outside the check. Another recognized dtype parameter, eager annotation, wrapper or annotation rewrite has a different dispatch boundary. The check does not import the candidate or prove native parsing.
+
+On the selected `cbd3c4a778` frontend, CPU capture accepted eager Tensor annotations containing a dtype alias and accepted postponed Tensor annotations spelling `pl.DT_FP32` explicitly. Postponed Tensor annotations containing the alias instead produced a plain function rejected by native capture. Current JIT recognition (`pypto/python/pypto_pro/runtime/jit.py` in the matching source checkout) and a minimal paired probe establish this boundary; it is not an unconditional prohibition of `from __future__ import annotations` or of aliases inside Tensor/Ptr dtype positions. Inspect current installed behavior before choosing an eager annotation form or an explicit dtype spelling, then revalidate the unchanged numerical contract. A successful CPU capture is neither compilation nor numerical/performance evidence.
 
 ## Bind `pl.gemm` operands to variables first
 
@@ -183,17 +199,7 @@ The first entry in the official `wait_cross_core.md` parameter table defines `pi
 
 The [INT8/INT16 probe in Fixpipe §15](fixpipe.md#15-the-hf8-cell-neither-of-two-failures-was-an-hf8-problem) observed zeros for nonzero layouts, but its recorded conditions do not establish a general layout restriction. Check the supported conversion pair, loaded register arrangement and selected predicate bits before diagnosing unavailable lanes.
 
-For narrowed outputs, choose the store from its physical container map: [port packing](vf.md#distinguish-numerical-conversion-from-port-bit-packing-first) can emit dense ND output directly, while [de-interleave packing](vf.md#210-narrowing-astype-occupies-only-half-the-width-pair-two-chunks-and-de_interleave-before-storing) serves consumers needing a dense register. A valid layout selector alone does not establish a dense write.
-
-## Kernel definition modules cannot use `from __future__ import annotations`
-
-```python
-from __future__ import annotations   # ✗ Turns every annotation into a string
-...
-kernel[None, 1](a, b, out)           # TypeError: 'function' object is not subscriptable
-```
-
-`pl.jit` identifies Tile kernels through **actual objects** in parameter annotations (`_is_tile_kernel`'s isinstance check). Once future annotations turn them into strings, jit **silently returns an ordinary function wrapper** through the legacy path; only bracket launch fails. The symptom and root cause are one layer apart; hardware evidence dated 2026-09-29. It is fine in test/bench files, but **not in modules defining `@pl.jit` kernels**.
+For narrowed outputs, choose the store from its [physical container map](vf.md#210-narrowing-fp32-to-fp16-choose-port-packing-or-a-dense-register): port packing can emit dense ND output directly, while de-interleave packing serves consumers needing a dense register. A valid layout selector alone does not establish a dense write.
 
 ## Variable names inside `@pl.vector_function` have a single type environment; masks and data cannot share names
 
@@ -218,7 +224,7 @@ Applying `pl.reinterpret` to an **individual tile** obtained from `group.next()/
 
 ## Feeding VF results to cube (v→c return path): cursor vsstb scatter to NZ with row+1 pitch
 
-Teaching recipe (hardware evidence, example [examples/algorithms/mm_softmax_mm](../../examples/algorithms/mm_softmax_mm/kernel.py)): register an NZ declaration of `[rows+1, 128]` for each 128 columns. Inside the VF row loop, issue one `vf.store_align(nz, reg, full_width_mask, data_copy_mode=DATA_BLOCK_COPY, block_stride=rows+1, repeat_stride=1, post_update=True)` for each dense FP16 register. **Do not supply an explicit offset**: that combination is a framework gap causing compilation errors or silently incorrect instructions. In the stage, call `pl.set_validshape(nz, [rows, 128])` and then `pl.insert` with column offsets. Compared with the three-step “ND store → `pl.move` → insert” path, this saves one intermediate group and an entire move; the odd pitch separates UB banks. Cursor semantics, gap details, and tested-and-rejected alternatives are in the “row+1 pitch convention” section of [api/crosscore-sync.md](crosscore-sync.md), which owns the mechanism explanation.
+Teaching recipe (hardware evidence, example [examples/algorithms/mm_softmax_mm](../../examples/algorithms/mm_softmax_mm/kernel.py)): register an NZ declaration of `[rows+1, 128]` with explicit `compact=0` for each 128 columns. Inside the VF row loop, issue one `vf.store_align(nz, reg, full_width_mask, data_copy_mode=DATA_BLOCK_COPY, block_stride=rows+1, repeat_stride=1, post_update=True)` for each dense FP16 register. **Do not supply an explicit offset**: that combination is a framework gap causing compilation errors or silently incorrect instructions. In the stage, call `pl.set_validshape(nz, [rows, 128])` and then `pl.insert` with column offsets. Compared with the three-step “ND store → `pl.move` → insert” path, this saves one intermediate group and an entire move; bank behavior and performance still require measurement. Cursor semantics, gap details, and tested-and-rejected alternatives are in the “row+1 pitch convention” section of [api/crosscore-sync.md](crosscore-sync.md), which owns the mechanism explanation.
 
 ## `vf.astype` requires `dtype` as a keyword argument
 
@@ -315,22 +321,23 @@ Schema construction **does not raise an error**: it binds the method without cal
 
 For `scale=0.1`, hardware actually uses `0.0999755859375`, a relative difference of 2.4e-5. **This error is introduced by fixpipe, not accumulation**. Choosing powers of 2 for scale in test criteria permits `atol=0`; for high-precision scaling, move to UB and use `vf.muls`. See [api/fixpipe.md](fixpipe.md) §17 for two independent sources of evidence (a hardware sweep of `1 + 2^-k` and the ISA's `& 0xFFFFE000u`) and the measurement method.
 
-## Besides `scale`, `quant_offset` adds an offset before saturation
+## Encode a quantization offset in a runtime INT64 scale payload
 
 ```python
-pl.store(out, ac, [0, 0], scale=0.5, quant_offset=5)    # Scaled value 32 becomes 37
-pl.store(out, ac, [0, 0], scale=0.5, quant_offset=100)  # 132 exceeds range → 127
+import struct
+
+scale_bits = struct.unpack("<I", struct.pack("<f", 0.5))[0] & 0xFFFFE000
+payload = scale_bits | ((5 & 0x1FF) << 37)
+
+# Pass payload through a kernel parameter annotated pl.DT_INT64.
+pl.move(ub_int8, ac, scale=scale_payload)
 ```
 
-It shares the configuration word with scale (bit37..45, **9-bit two's complement**), so:
+Official PyPTO `bca90a6c` has no public `quant_offset` keyword on move/store. The runtime INT64 `scale` form carries the configuration word unchanged; a Python integer literal is not a substitute for that typed runtime parameter. The [quantization example](../../examples/basic_api/fixpipe/fixpipe_quant_matrix/) keeps Acc→Vec move and direct GM store controls for this payload.
 
-- Its range is `[-256, 255]`; out-of-range values raise `InvalidVal`.
-- **It works only with a compile-time `float` / `int` scale**. For a runtime Scalar or per-channel Tile, OR the offset into the integer yourself, or write it into every Tile element. The framework rejects unsupported combinations instead of silently ignoring them.
-- **It affects integer destinations only**; floating-point destinations raise an error.
+The offset occupies bits 37–45 as a signed nine-bit two's complement value. Validate `[-256, 255]` before encoding, since masking an out-of-range value would wrap it. It is added after scaling and before integer saturation: with `acc=64` and `scale=0.5`, offsets 5 and 100 produce INT8 values 37 and 127. Floating-point destinations ignore these offset bits; the field does not provide floating-point addition or an automatic rejection.
 
 Do not confuse it with `pl.store` `offsets` or `pl.move` `offset`: those are **Tensor/Tile coordinates**.
-
-Before 2026-09-27, this field had no API; callers had to construct the entire uint64 payload and pass it as a runtime scalar. It now has a parameter; measurements are in `pypto/python/tests/st/pypto_pro/frontend/datacopy/test_quant_offset.py`.
 
 ## Dual-destination `acc_to_vec_mode` supports only trivial copies of the same type
 
@@ -341,16 +348,16 @@ pl.move(ub, acc, acc_to_vec_mode=..., relu_pre_mode=pl.ReluPreMode.NormalRelu) #
 pl.move(ub_fp16, acc_fp32, acc_to_vec_mode=...)                                # ✗ Narrowing
 ```
 
-The hardware rule is simple: **dual-destination mode supports neither requant nor relu**. It has three forms; the third is easy to miss: **`FP32 → FP16` is itself a QuantMode (`F322F16`) in the ISA**, so “only changing dtype, without scale” also counts as requant. All three are now rejected at parse time:
+The hardware rule is simple: **dual-destination mode supports neither requant nor relu**. **`FP32 → FP16` is itself a QuantMode (`F322F16`) in the ISA**, so changing dtype without an explicit scale still selects a quantized path. Hardware illegality and frontend rejection are different contracts. In official PyPTO `bca90a6c6e69a1b1111cfe8a43b975ba2bfcf28a`:
 
-| Combination | Error |
+| Combination | Current validation boundary |
 | --- | --- |
 | dual + `scale` (scalar or Scaling Tile) | `scale cannot be combined with dual-mode acc_to_vec_mode` |
-| dual + `relu_pre_mode` | `relu_pre_mode cannot be combined with dual-mode acc_to_vec_mode` |
-| dual + narrowing / any dtype conversion | `dual-mode acc_to_vec_mode cannot convert ... -> ...` |
-| dual + `DN` destination layout | `does not support a DN destination layout (nz2dn)` |
+| dual + `relu_pre_mode` | No corresponding parse guard was found; the known hardware-invalid combination must not be launched as a routine test |
+| dual + narrowing / dtype conversion selecting QuantMode | Parsing does not reject this cross-combination; the selected A5 PTO `GetDualDstCtl` requires `NoQuant` at C++ compilation |
+| dual + `DN` destination layout | Parsing does not reject this cross-combination; the selected A5 PTO `GetDualDstCtl` rejects `nz2dn` at C++ compilation |
 
-When several apply, they are reported in this order: fixing one reveals the next, providing step-by-step guidance. The first three are forms of the same ISA rule (`quantPre == NoQuant`); the fourth is a separate `GetDualDstCtl` static_assert.
+The example keeps the missing frontend guards visible with parse-only probes marked `xfail(strict=True, raises=pytest.fail.Exception)`. Only the missing rejection is expected; a different exception or mismatched diagnostic still fails. Once the required guard passes, strict XPASS fails the test until the marker is removed. A successful parse is not evidence of supported hardware execution, and a generic compiler failure is not a substitute for the specific unsupported-combination diagnostic.
 
 **Only `FP32 → FP32` and `INT32 → INT32` are valid, and the destination layout must be `ND` or `NZ`**. For conversion or `DN`, use `SingleModeVec0` / `SingleModeVec1`, or transfer in the source dtype and apply `vf.astype` afterward.
 
@@ -484,41 +491,25 @@ bisheng: error: clang frontend command failed due to signal
 
 Check this rule first for that signature. The four measured forms are in `references/tooling/example-coverage.md` §8.6. **A tool blocks this**: `unalign-reg-budget` in `python scripts/check.py rules <path>`.
 
-## `pl.init_output` requires a vector section in the kernel, even an empty one
+## Call `pl.init_output` inside a Vector section
 
 ```python
 @pl.jit()
 def k(out: pl.Tensor[[8, 16], pl.DT_FP32]):
-    pl.init_output(out, offset=0, size=128, value=-1.0)     # ✗ This statement alone → compilation failure
-```
-
-Internally, it uses the V pipe to fill temporary UB, then MTE3 to transfer it to GM. Without `pl.section_vector()` in the kernel, those two ops land on a core with no V pipe. The two C++ errors **do not reveal the connection to sections**:
-
-```
-kernel.cpp:23:13: error: the ranges of 1st parameter must be [0, 0], [2, 5], [10, 10]
-    get_buf(PIPE_V, 0, 0);
-arch_cce_intrinsic.hpp:306:5: error: function type '...' of 'copy_ubuf_to_gm_align_v2'
-    does not support the given target feature
-```
-
-Adding an empty section is sufficient:
-
-```python
-    pl.init_output(out, offset=0, size=128, value=-1.0)
     with pl.section_vector():
-        pass
+        pl.init_output(out, offset=0, size=128, value=-1.0)
 ```
 
-**Parsing succeeds completely**, so `parse_target_program` cannot detect this. See `examples/basic_api/datamove/init_and_insert/test.py` §3 for four measured forms.
+The operation fills temporary UB on V and transfers it to GM on MTE3. The current frontend requires the call itself to be inside `pl.section_vector()`; an empty Vector section elsewhere does not establish the call's execution scope. The [init-and-insert tests](../../examples/basic_api/datamove/init_and_insert/test.py) use legal placement for device numerics and check static GM range rejection separately.
 
 ## UB tiles beside `pl.init_output`: use `make_tile_group` or add `bar_all()`
 
 ```python
 @pl.jit()
 def k(x, out):
-    pl.init_output(out, offset=0, size=N, value=-1.0)
-    src = pl.make_tile(tt, addr=0x0)         # ✗ Received x elements instead of -1.0 in 6 of 12 runs
     with pl.section_vector():
+        pl.init_output(out, offset=0, size=N, value=-1.0)
+        src = pl.make_tile(tt, addr=0x0)     # No ownership edge protects overlapping temporary UB.
         pl.load(src, x, [0, 0])
 ```
 
@@ -527,58 +518,56 @@ The temporary UB tile in `init_output` is **hardcoded at `0x0` and occupies `(25
 Two fixes have different costs:
 
 ```python
-    pl.init_output(out, offset=0, size=N, value=-1.0)
-    pl.system.bar_all()                      # ✓ 0/12; costs a full-pipeline drain
-    src = pl.make_tile(tt, addr=0x0)
+    with pl.section_vector():
+        pl.init_output(out, offset=0, size=N, value=-1.0)
+        pl.system.bar_all()                  # Complete the temporary UB transfer before reuse.
+        src = pl.make_tile(tt, addr=0x0)
 ```
 
 ```python
-    pl.init_output(out, offset=0, size=N, value=-1.0)
-    g = pl.make_tile_group(type=tt, addrs=0x0, mutex_ids=[0])   # ✓ 0/12; serializes only the same buffer id
+    with pl.section_vector():
+        pl.init_output(out, offset=0, size=N, value=-1.0)
+        g = pl.make_tile_group(type=tt, addrs=0x0, mutex_ids=[0])
 ```
 
 Tiles declared with `make_tile_group` acquire `get_buf(PIPE_MTE2, 0, 0)`, using **the same buffer id** as `init_output`'s `get_buf(PIPE_MTE3, 0, 0)`, which serializes them. The cpp generated for bare `make_tile` contains **no `get_buf` at all**.
 
-**`auto_mutex=True` is not a fix**: adding it to bare tiles produces byte-for-byte identical cpp and still fails 6/12 on hardware. `bar_mte3()` does not work either (an **intra-pipe** barrier; see `references/diagnostics/validation-traps.md` §8).
+`auto_mutex=True` does not give a bare tile a mutex ID. A per-pipe barrier such as `bar_mte3()` is also not a cross-pipe ownership handover; see `references/diagnostics/validation-traps.md` §8.
 
-**Ordering is not the issue.** The docstring requires “Must be called before Tile buffer allocation,” yet following that still fails 6/12. What matters is whether addresses overlap and which declaration path the tile uses.
+Source order alone does not establish MTE3→MTE2 completion. Check overlapping addresses and the actual native buffer ownership protocol before reusing the temporary UB range.
 
 Gate: `init-output-needs-a-drain` in `python scripts/check.py rules`. Full measurements and framework-side locations are in `references/diagnostics/validation-traps.md` #11.
 
-## `pl.init_output` `value` must not change value during conversion
+## `pl.init_output` converts `value` to the output dtype
 
 ```python
-pl.init_output(int32_tensor, offset=0, size=128, value=1.5)      # ✗ Compilation failure
+pl.init_output(int32_tensor, offset=0, size=128, value=1.5)      # ✓ Fills 1 (truncation toward zero)
 pl.init_output(int32_tensor, offset=0, size=128, value=3.0)      # ✓ Passes; fills 3
 pl.init_output(int32_tensor, offset=0, size=128, value=5)        # ✓
 ```
 
-The docstring says value “must be type-compatible with tensor's dtype”; **the actual rule is broader and more precise**: the literal in generated C++ must pass `-Werror,-Wliteral-conversion`, which reports an error only when **the value changes**.
-
-```
-implicit conversion from 'float' to '...::DType' (aka 'int') changes value from 1.5 to 1
-```
-
-**This message is unavailable from the exception**: `_compile_for_key` in `jit.py` raises an exception containing only `Failed to compile kernel '<name>'`; `_run_bisheng` in the same file logs the detailed compiler output above. To pin it in a test, capture logs with `caplog`. Matching the exception message only asserts that something failed.
+The current operation contract converts a floating constant to an integer output dtype by truncation toward zero. Verify the resulting integer values exactly; a fractional value is not, by itself, a compilation-error case. Check unsupported dtypes, invalid ranges and execution-scope restrictions through their own diagnostics rather than using an unrelated compiler failure as their acceptance criterion.
 
 ## SIMT atomic operand dtype must exactly match the target
 
 ```python
 tid = pl.simt.linear_thread_idx()
-pl.simt.atomic_add(state[0, 0], tid + 1)                    # ✗ tid + 1 is INT64
-pl.simt.atomic_add(state[0, 0], pl.simt.cast(tid + 1, pl.DT_INT32))     # ✓
-pl.simt.atomic_inc(counter[0, 0], 6)                        # ✗ The literal is INT64
+pl.simt.atomic_add(state, [0, 0], tid + 1)                    # ✗ tid + 1 is INT64
+pl.simt.atomic_add(state, [0, 0], pl.simt.cast(tid + 1, pl.DT_INT32))     # ✓
+pl.simt.atomic_inc(counter, [0, 0], 6)                        # ✓ Numeric constants adapt to the target dtype
 ```
+
+Pass the target Tensor and its per-axis offsets separately; an indexed scalar such as `state[0, 0]` is not the target argument of the current atomic API. Offsets describe coordinates, not a flattened address. Preserve that address map when adapting another API spelling.
 
 ```
 simt.atomic_add operand 0 dtype must match target dtype int32, but got int64
 ```
 
-`simt_ops.py:578`. **Arithmetic on `tid` and Python literals are both INT64 in SIMT**, so any scalar operand not sourced from a tensor needs an explicit `pl.simt.cast`. Values read from INT32 / UINT32 tensors need no further cast.
+Arithmetic on `tid` yields INT64 in SIMT, so a runtime expression used with an INT32 or UINT32 target needs an explicit `pl.simt.cast`. The current atomic handler adapts numeric constants to the target dtype; this does not convert a runtime scalar of the wrong dtype. Values read from a tensor of the target dtype need no further cast.
 
-The same applies to `atomic_inc` / `atomic_dec` `limit`: it is operand 0, and the target is usually a UINT32 counter, so read `limit` from a UINT32 tensor or cast it.
+The same applies to a runtime `atomic_inc` / `atomic_dec` limit: read it from a tensor of the counter dtype or cast it. Preserve a genuine runtime dtype mismatch in a rejection test rather than expecting an adapted numeric constant to fail.
 
-Remember the symptom: **the error points to the first atomic call**, while the actual cause is `+ 1`. All 10 criteria failed together when writing `examples/basic_api/simt/simt_atomic`, each for this reason.
+A dtype diagnostic can point at the atomic call even when the mismatched runtime value originates in an earlier `+ 1` expression.
 
 ## `pl.simt.syncthreads()` cannot appear in runtime control flow (**no check blocks it; the symptom is a hang**)
 
@@ -615,18 +604,15 @@ def kernel(...):
 
 `_expr_evaluator.py:266`. **Construct TileType inside the kernel body**. Calling a helper from the body is valid (`support/dtype_carriers` does so). The distinction is whether TileType is constructed while parsing the kernel body or already exists before parsing starts.
 
-## Cross-core buffer `target_memory` must be the literal `pl.MemorySpace.X`
+## Cross-core buffer `target_memory` must resolve to a memory space
 
 ```python
 MAT = pl.MemorySpace.Mat
 sh = pl.make_tile_group(type=pl.TileType(..., target_memory=MAT), fwd_ids=[...], bwd_ids=[...])
-# InvalidVal: pipeline: cross-core buffer 'sh' has no resolvable memory space.
-#             ... must set target_memory to a literal pl.MemorySpace.<X>.
+# A closure enum alias is valid when the parser resolves it to MemorySpace.Mat.
 ```
 
-`_cross_core_scanner.py:775`. **Aliases are a natural pattern** (every example in this repository has such aliases at the top), yet they fail specifically in this cross-core buffer position.
-
-This is the same kind of check as `pl.const` above: it reads AST rather than evaluating values. **This repository has encountered it three times**. The third was a constant name bypassing the `pl.gemm_mx` `k % 64` guard: that caused a false negative, whereas these two caused false positives.
+The native pipeline path obtains resolved tile-group metadata from `probe_kernel_facts`; `scan_buffer_decls` can use that memory-space result when the declaration is not a literal attribute. The [entry-and-loop example](../../examples/basic_api/support/entry_and_loop/test.py) verifies the closure-alias form against the same independent numerical reference as its literal form. An unresolved value still needs a diagnostic; a parser-only AST scan without resolved metadata does not establish the native pipeline's alias support. This is separate from the literal-only argument contract of `pl.const`.
 
 ## A `Bias` tile must have exactly one row
 

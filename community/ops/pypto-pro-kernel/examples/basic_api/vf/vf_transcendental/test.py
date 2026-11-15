@@ -167,8 +167,8 @@ def test_log_and_ln_are_separate_ops_with_identical_results():
     program, _ = transcendental.to_kernel_def().parse_target_program(
         pp.ir.SectionKind.Vector
     )
-    text = pp.ir.python_print(program)
-    ops = re.findall(r"@(vf\.[\w]+)\(", text)
+    text = pp.ir.text_dump(program)
+    ops = re.findall(r"\b(vf\.[\w]+)\(", text)
 
     assert ops.count("vf.ln") == 1, f"vf.ln 应出现一次，实际 {ops.count('vf.ln')}"
     assert ops.count("vf.log") == 1, (
@@ -182,8 +182,8 @@ def test_the_precision_flag_reaches_the_ir():
     program, _ = precision_pairs.to_kernel_def().parse_target_program(
         pp.ir.SectionKind.Vector
     )
-    text = pp.ir.python_print(program)
-    marker = 'precision="precision": True'
+    text = pp.ir.text_dump(program)
+    marker = "precision=true"
     assert marker in text, (
         "IR 里找不到 precision=True，说明前端把这个参数丢了——那下一条测试的解释就不同了"
     )

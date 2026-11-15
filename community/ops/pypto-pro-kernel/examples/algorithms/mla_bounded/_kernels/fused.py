@@ -73,7 +73,8 @@ def make_fused(
         raise ValueError("resident prefix omits visible keys")
     if not causal and key_block != keys:
         raise ValueError("noncausal rows require all keys")
-    assert not causal or queries <= keys
+    if causal and queries > keys:
+        raise AssertionError("causal query count must not exceed key count")
     while causal and rows > (queries if bnsd else heads):
         rows //= 2
     while (
@@ -87,8 +88,10 @@ def make_fused(
         rows //= 2
     if rows < 16 or (causal and bnsd and (query_start % rows or local_queries % rows)):
         raise ValueError("query interval must contain complete native row blocks")
-    assert flat_rows % rows == 0 and keys % key_block == 0
-    assert key_block in (128, 256) and rows in (16, 32, 64, 128)
+    if flat_rows % rows or keys % key_block:
+        raise AssertionError("row and key ranges must contain complete native blocks")
+    if key_block not in (128, 256) or rows not in (16, 32, 64, 128):
+        raise AssertionError("unsupported native row or key block size")
     half = rows // 2
     pitch = half + 1
     parts = 1
@@ -98,10 +101,11 @@ def make_fused(
         width -= 16
     scale = 1 / math.sqrt(nope + rope)
     shift = -math.sqrt(nope + rope)
-    assert (
+    if (
         2 * (rows * (nope + rope) + key_block * (nope + rope) + rows * key_block)
-        <= 512 * 1024
-    )
+        > 512 * 1024
+    ):
+        raise AssertionError("fused matrix storage must fit in 512 KiB")
 
     @pl.vector_function
     def normalize(src, lo, hi, length0, row_step):
@@ -350,6 +354,7 @@ def make_fused(
             dtype=dtype,
             target_memory=pl.MemorySpace.Vec,
             layout=pl.NZ,
+            compact=0,
         )
         lo = pl.make_tile_group(
             type=lo_type, addrs=8 * half * key_block, mutex_ids="auto", depth=1
@@ -359,6 +364,7 @@ def make_fused(
             dtype=dtype,
             target_memory=pl.MemorySpace.Vec,
             layout=pl.NZ,
+            compact=0,
         )
         hi = pl.make_tile_group(
             type=hi_type,

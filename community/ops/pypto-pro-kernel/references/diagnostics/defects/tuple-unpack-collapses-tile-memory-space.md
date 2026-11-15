@@ -47,7 +47,7 @@ def repro(a: pl.Tensor[[64, 64], pl.DT_FP16], scales: pl.Tensor[[1, 64], pl.DT_I
           out: pl.Tensor[[64, 64], pl.DT_FP16]):
     mat = pl.make_tile_group(
         type=pl.TileType(shape=[1, 64], dtype=pl.DT_INT64, target_memory=pl.MemorySpace.Mat,
-                         layout=pl.TensorLayout.ND),
+                         layout=pl.ND),
         addrs=0x0000, mutex_ids="auto", depth=1)
     fb = pl.make_tile_group(
         type=pl.TileType(shape=[1, 64], dtype=pl.DT_INT64, target_memory=pl.MemorySpace.Scaling),

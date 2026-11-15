@@ -16,8 +16,8 @@ r"""环形计数（`atomic_inc` / `atomic_dec`）与两个内存栅栏。
 
 | | 规则 | 第 k 次（k 从 0 起）拿到的旧值 |
 | --- | --- | --- |
-| ``atomic_inc(t, limit)`` | `old >= limit ? 0 : old + 1` | `k mod (limit + 1)` |
-| ``atomic_dec(t, limit)`` | `old == 0 ? limit : old - 1` | `(-k) mod (limit + 1)` |
+| ``atomic_inc(t, [row, col], limit)`` | `old >= limit ? 0 : old + 1` | `k mod (limit + 1)` |
+| ``atomic_dec(t, [row, col], limit)`` | `old == 0 ? limit : old - 1` | `(-k) mod (limit + 1)` |
 
 `limit=6`、32 个线程（周期 7）实测：`inc` 最终值 **4** = `32 mod 7`，`dec` 最终值 **3**。
 **这一组参数能把两种候选规则分开**：周期 7 给 4，周期 6 给 2。`limit` 取成和线程数互素
@@ -25,13 +25,13 @@ r"""环形计数（`atomic_inc` / `atomic_dec`）与两个内存栅栏。
 
 ## 二、`limit` 的 dtype 必须和目标一致
 
-目标是 UINT32 计数器时，`limit` 写成 Python 字面量会被拒（字面量是 INT64）：
+目标是 UINT32 计数器时，运行时 INT64 limit 表达式会被拒；数值常量按目标 dtype 定型：
 
 ```
 simt.atomic_inc operand 0 dtype must match target dtype uint32, but got int64
 ```
 
-所以这一例的 `limit` 从一个 UINT32 张量里读。**这条消息很准**，撞上不用猜。
+张量 limit 与字面量 limit 使用同一周期、多重集和最终值参考。运行时 INT64 表达式保留为类型失败对照。
 
 ## 三、判据落在返回值的**多重集**上
 
@@ -52,7 +52,7 @@ simt.atomic_inc operand 0 dtype must match target dtype uint32, but got int64
 3. `inc` 的 32 个返回值排序后等于 `[k mod 7 for k in 0..31]` 排序。
 4. `dec` 的 32 个返回值排序后等于 `[(-k) mod 7 for k in 0..31]` 排序。
 5. 两个栅栏加进一条正确的链里，结果不变。
-6. `limit` 写成字面量被解析期拒（dtype 不匹配）。
+6. 运行时 INT64 `limit` 被解析期拒；字面量 limit 必须通过相同数值判据。
 7. `syncthreads` 放在运行期 `if` 里**不被拒**（见 §六）。
 8. `threadfence_block` 放在运行期 `if` 里**允许**（docstring 说的）。
 
@@ -106,7 +106,7 @@ import pytest
 import torch
 
 import pypto_pro as pp
-from pypto_pro._errors import CommonExternal
+from pypto_pro._errors import InvalidType
 
 from . import reference as ref
 from .kernel import (
@@ -122,11 +122,12 @@ from .kernel import (
     limit_dtype_mismatch,
     simt_fences,
     simt_ring_counters,
+    simt_ring_counters_literal,
     syncthreads_inside_a_branch,
 )
 
 
-def _run_ring(device):
+def _run_ring(device, literal=False):
     counter = torch.zeros((COUNTERS, 1), dtype=torch.int32, device=device).to(
         torch.uint32
     )
@@ -134,7 +135,10 @@ def _run_ring(device):
         torch.uint32
     )
     ret = torch.full((RET_ROWS, THREADS), -1, dtype=torch.int32, device=device)
-    simt_ring_counters[None, 1](counter, limits, ret)
+    if literal:
+        simt_ring_counters_literal[None, 1](counter, ret)
+    else:
+        simt_ring_counters[None, 1](counter, limits, ret)
     torch.npu.synchronize()
     return counter.cpu().to(torch.int32).numpy().ravel(), ret.cpu().numpy()
 
@@ -163,13 +167,16 @@ def test_the_decrement_wraps_the_other_way(device):
     )
 
 
-def test_the_returned_old_values_form_the_expected_multiset(device):
+@pytest.mark.parametrize("literal", [False, True])
+def test_the_returned_old_values_form_the_expected_multiset(device, literal):
     """验证 3 / 4，**这一例最有力的判据**。
 
     线程完成的顺序不确定，所以比的是**多重集**而不是逐位。它要求 32 次操作每一次都真的发生过、
     而且每次都看到了上一次的结果——只看最终值证不到这一步。
     """
-    _, ret = _run_ring(device)
+    counter, ret = _run_ring(device, literal=literal)
+    assert int(counter[COUNTER_INC]) == ref.inc_final()
+    assert int(counter[COUNTER_DEC]) == ref.dec_final()
     np.testing.assert_array_equal(np.sort(ret[RET_INC]), ref.inc_returns())
     np.testing.assert_array_equal(np.sort(ret[RET_DEC]), ref.dec_returns())
 
@@ -186,12 +193,12 @@ def test_adding_fences_does_not_break_a_correct_chain(device):
     np.testing.assert_array_equal(out.cpu().numpy()[0], ref.rotated(THREADS))
 
 
-def test_a_literal_limit_is_refused():
-    """验证 6。字面量是 INT64，和 UINT32 的目标不匹配。
+def test_an_int64_limit_is_refused():
+    """验证 6。运行时 INT64 limit 与 UINT32 目标不匹配。
 
     判据匹配规则文本里的 dtype 名字，**不匹配错误码**。
     """
-    with pytest.raises(CommonExternal) as raised:
+    with pytest.raises(InvalidType) as raised:
         _parse(limit_dtype_mismatch)
     message = str(raised.value)
     assert "must match target dtype uint32" in message, message

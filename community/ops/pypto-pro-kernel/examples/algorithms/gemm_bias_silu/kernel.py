@@ -114,7 +114,7 @@ def gemm_bias_silu(
             shape=[HALF_M, N],
             dtype=FP32,
             target_memory=pl.MemorySpace.Vec,
-            layout=pl.TensorLayout.ND,
+            layout=pl.ND,
         ),
         addrs=0,
         mutex_ids="auto",

@@ -346,6 +346,7 @@ def _addr_reg_into_store_unalign(src, dst):
     接口、官方 store_unalign 示例和后端都包含该组合；本探针只保证解析接受，
     不提供实际写入范围或数值的验收。文档冲突与当前证据见 references/api/vf.md。
     """
+    _preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
     reg = vf.load_align(src, 0)
     areg = vf.unalign_reg_for_store()
     addr = vf.create_addr_reg(N, dtype=FP32)

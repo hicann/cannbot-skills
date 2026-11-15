@@ -6,86 +6,24 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""Rule: two TileGroups whose address ranges overlap must use the same `mutex_id` for the overlapping slots.
+"""Inspect manual TileGroup aliases without executing a kernel.
 
-| Rule | Evidence | What happens if missed |
-| --- | --- | --- |
-| `overlapping-groups-need-shared-mutex` | Keyed by mutex ID across pipes. | **Silently** timing-dependent garbage. |
+Compare overlapping slots within one memory space, using resolved shapes, byte
+extents and explicit IDs. Unknown declarations and automatically assigned IDs
+remain outside this rule's coverage. A finding establishes disjoint mutex IDs,
+not an observed race or a complete lifetime proof.
 
-## Why This Is a Gap
+Direct accesses in explicit Cube/Vector sections allow two bounded reviews:
+separate same-core phases divided by unconditional bar_all, and accesses in
+different core domains. Both remain advisories requiring native evidence.
+Conditional/partial barriers, loops, escaped aliases and unresolved helpers do
+not establish this phase separation. Cross-core ownership needs a real handover;
+using equal per-core mutex IDs does not provide it.
 
-`auto_mutex` orders work by “same slot → same mutex → serialization.” Groups are assembled by
-`_group_refs_by_mutex_overlap`, whose criterion is **whether `mutex_ids` intersect**—not whether addresses do. Two
-groups with overlapping address ranges but disjoint `mutex_ids` therefore receive **two different locks**: **two locks
-protecting the same memory is equivalent to no protection**, and no error is reported.
-
-The `mutex_lock` mutual-exclusion domain is **keyed by ID across pipes** (the Semantics comment in
-`ir/op/sync_ops/sync.cpp`: `Lock<pipe>(id)` blocks the current pipe's queue until token `id` is released; pipe specifies
-only which queue is blocked). So “different IDs” means “not mutually exclusive,” with no other safeguard. The complete
-evidence chain is in §7.1 of `references/diagnostics/validation-traps.md`.
-
-The native automatic-ID planner validates overlap components containing automatic groups. Manual-only groups retain
-explicit IDs; pipeline analysis has a separate `_check_reuse_mutex_ids`. This source rule checks manual layouts without
-a framework installation. Automatic groups are skipped because their IDs are resolved by the native planner.
-
-## Scope: Everything Except Explicit `auto_mutex=False`
-
-**`auto_mutex` defaults to `True`** (signature `auto_mutex: bool = True` in `runtime/jit.py`), so bare `@pl.jit()` also
-inserts locks automatically. Only explicit `auto_mutex=False` disables the locks; in that case, different IDs on two
-overlapping groups are not a defect under this rule.
-
-`synchronisation.py` likewise assumes the default is enabled for bare Tiles, but does not interpret an unknown switch
-expression.
-
-## Known Boundary: Sections Are Not Considered
-
-**The 32 mutex IDs are per core**, but the exact dimension is **section**, not `target_memory` (see
-`references/api/memory-allocation.md`: FA's `qk_vec_db` is a Vec group using a cube-section ID because the `pl.move`
-that touches it is in the cube section). This rule compares groups by `target_memory`, which is an **approximation**:
-groups accessed from different sections use different ID pools, so even the same ID does not make them mutually
-exclusive. That case needs `fwd_ids` / `bwd_ids`; this rule instead says “give them the same ID,” and **that fix
-recommendation is wrong**.
-
-This was not changed because the declaration site may not know which section accesses the group (declarations are often
-outside sections), and no such shape exists in the example library (a scan of `examples/` produced zero findings). **If
-you encounter it, read this section before following the suggested fix.**
-
-## Criterion: Compare Per Slot, Not Per Group
-
-Comparing whole groups can miss a case: A has IDs `[0, 1]`, B has IDs `[1, 2]`, so their ID sets intersect; but if A's
-slot 0 (ID 0) overlaps B's slot 1 (ID 2) in address, those two slots are still not mutually exclusive. Therefore compare
-**slot by slot**:
-
-> If the byte ranges of slot i in A and slot j in B overlap, require `A.ids[i] == B.ids[j]`; otherwise report.
-
-Mirror the framework's slot-size and address rules (`_cross_core_scanner._tile_type_slot_size` and
-`scan_buffer_addr_ranges`) or the two tools will disagree:
-
-- `slot_size = prod(shape) * ceil(dtype_bits / 8)`.
-- `addrs=<scalar>` → contiguous slots at `base + i * slot_size`; `addrs=[...]` → one explicit address per slot.
-- Slot count is `depth`, or `len(mutex_ids)` when `depth` is absent.
-
-**Never compare two groups with different `target_memory`.** Vec / Mat / L1 are independent address spaces; the same
-numeric address refers to different memory in each. Comparing them together would flood the entire example library with
-false positives.
-
-## The Real Risk Is Failing to Parse Inputs, Not False Positives
-
-The initial version recognized only literal `type=pl.TileType(...)` and achieved **11% parse coverage** on
-`examples/`—it reported zero violations, which was equivalent to having no rule (the `init_output` rule hit the same
-trap). After adding real forms from examples, coverage reached **84%**: module-level tuple unpacking, dict/list address
-tables, `range` comprehensions, local `tt = ...` bindings, and module-level helpers (including default arguments and
-calls bound to local variables). The remaining 16% are cross-file constants and genuinely dynamic shapes.
-
-**When changing this module, first measure parseable groups / total groups, then inspect the violation count**;
-maintenance principles are in `references/tooling/checks.md`.
-
-## If It Cannot Be Determined, Do Not Report
-
-This is a gate; false positives cost trust and mean “no one will look at it later.” If any constant (`target_memory` /
-`shape` / `dtype` / `addrs` / `mutex_ids`) cannot be resolved, skip the whole group, matching the framework (docstring
-of `scan_buffer_addr_ranges`: *"Buffers whose addrs/shape/dtype cannot be statically resolved are skipped"*). Also skip
-groups without `mutex_ids`; they belong to `auto-mutex-needs-tile-group` (§7), not this rule.
+Within a group, compare slots individually. Whole-group ID intersection can
+hide two overlapping slots protected by different IDs. Constant evaluation
+supports the source forms below; measure declaration coverage when extending it
+and never turn an unresolved layout into a successful alias proof.
 """
 
 from __future__ import annotations
@@ -518,16 +456,125 @@ def _groups(source: Source, function: ast.AST, env: dict[str, object]) -> list[G
     return [group for group in found if group is not None]
 
 
+def _access_phases(source: Source, function: ast.AST, groups: list[Group]):
+    """Track only direct, non-escaping accesses in unconditional native sections."""
+    declarations = {group.call.node for group in groups}
+    bindings, targets, invalid = {}, set(), set()
+    for node in ast.walk(function):
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.value in declarations
+        ):
+            name = node.targets[0].id
+            if name in bindings:
+                invalid.update((bindings[name], node.value))
+            bindings[name] = node.value
+            targets.add(node.targets[0])
+    accesses = {call: set() for call in declarations}
+    for node in ast.walk(source.tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id == source.pl:
+            invalid.update(declarations)
+        if (isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del))
+                and (attribute_path(node) or "").startswith(source.pl + ".")):
+            invalid.update(declarations)
+    for node in ast.walk(function):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            if node.id in bindings and node not in targets:
+                invalid.add(bindings[node.id])
+            if node.id == source.pl:
+                invalid.update(declarations)
+        if isinstance(node, ast.arg) and node.arg == source.pl:
+            invalid.update(declarations)
+
+    def referenced(node):
+        return {
+            bindings[item.id]
+            for item in ast.walk(node)
+            if isinstance(item, ast.Name) and item.id in bindings
+        }
+
+    operations = {
+        source.pl + "." + name
+        for name in ("load", "store", "move", "insert", "set_validshape", "gemm",
+                     "gemm_mx", "matmul", "matmul_acc", "matmul_mx", "matmul_mx_acc")
+    }
+    epochs = {"cube": 0, "vector": 0}
+
+    def visit(body, section=None):
+        for statement in body:
+            if isinstance(statement, ast.Assign) and statement.value in declarations:
+                continue
+            refs = referenced(statement)
+            if isinstance(statement, ast.With) and len(statement.items) == 1:
+                item = statement.items[0]
+                expr = item.context_expr
+                name = attribute_path(expr.func) if isinstance(expr, ast.Call) else None
+                if (name in {source.pl + ".section_cube", source.pl + ".section_vector"}
+                        and not expr.args and not expr.keywords and item.optional_vars is None):
+                    visit(statement.body, name.rsplit("_", 1)[-1])
+                    continue
+            call = statement.value if isinstance(statement, ast.Expr) else None
+            if isinstance(call, ast.Call):
+                name = attribute_path(call.func)
+                if (section and name == source.pl + ".system.bar_all"
+                        and not call.args and not call.keywords):
+                    epochs[section] += 1
+                    continue
+                if section and name in operations:
+                    escaped = any(
+                        isinstance(child, ast.Call) and child is not call and referenced(child)
+                        and not (
+                            isinstance(child.func, ast.Attribute)
+                            and isinstance(child.func.value, ast.Name)
+                            and child.func.value.id in bindings
+                            and child.func.attr in {"next", "current", "previous"}
+                        )
+                        for child in ast.walk(call)
+                    )
+                    if not escaped:
+                        for ref in refs:
+                            accesses[ref].add((section, epochs[section]))
+                        continue
+            invalid.update(refs)
+            if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+                break
+
+    visit(function.body)
+    return {call: uses for call, uses in accesses.items() if uses and call not in invalid}
+
+
+def _phase_review(a: Group, b: Group, accesses) -> str:
+    left, right = accesses.get(a.call.node), accesses.get(b.call.node)
+    if not left or not right:
+        return ""
+    sections = {section for section, _ in left | right}
+    if len({section for section, _ in left}) == 1 and len({section for section, _ in right}) == 1 and len(sections) > 1:
+        return "直接访问涉及不同核心段；相同 mutex ID 也不能跨核心互斥，须核对实际物理归属与跨核交接。"
+    if len(sections) != 1:
+        return ""
+    before, after = {phase for _, phase in left}, {phase for _, phase in right}
+    if max(before) < min(after) or max(after) < min(before):
+        return (
+            "直接访问分属同一核心段内由无条件 bar_all 分隔的阶段；"
+            "须核对生成代码的 PIPE_ALL、预取完成、数据初始化和所有消费者，不能仅凭该提示认定竞态。"
+        )
+    return ""
+
+
 def _conflicts(
     source: Source, function: ast.AST, env: dict[str, object]
 ) -> list[Finding]:
     groups = _groups(source, function, env)
+    accesses = _access_phases(source, function, groups)
     findings = []
     for outer in range(len(groups)):
         for inner in range(outer + 1, len(groups)):
             a, b = groups[outer], groups[inner]
             if a.memory != b.memory:
                 continue
+            review = _phase_review(a, b, accesses)
             for i, slot_a in enumerate(a.slots):
                 for j, slot_b in enumerate(b.slots):
                     if not _overlaps(slot_a, slot_b) or a.ids[i] == b.ids[j]:
@@ -540,8 +587,9 @@ def _conflicts(
                             f"这个 group 的第 {j} 槽 `[{slot_b[0]:#x}, {slot_b[1]:#x})` "
                             f"与 {a.call.lineno} 行那个 group 的第 {i} 槽 "
                             f"`[{slot_a[0]:#x}, {slot_a[1]:#x})` 重叠（都在 `{a.memory}`），"
-                            f"但 mutex_id 分别是 {b.ids[j]} 和 {a.ids[i]}"
-                            f"——两把锁保护同一块内存，等于没保护，而且不报错",
+                            f"但 mutex_id 分别是 {b.ids[j]} 和 {a.ids[i]}。"
+                            + (review or "auto_mutex 不会仅凭地址重叠建立依赖；需统一同期别名的锁所有权，或证明独立的完整交接。本扫描未证明实际并发访问。"),
+                            advisory=bool(review),
                         )
                     )
     return findings

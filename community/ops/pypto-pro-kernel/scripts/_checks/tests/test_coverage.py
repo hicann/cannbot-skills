@@ -188,6 +188,21 @@ def test_surface_indexes_both_namespaces(tmp_path):
     assert index["pl"]["make_tile"] == ["written"]
 
 
+def test_surface_and_assignment_share_explicit_alias_and_nested_call_analysis(tmp_path):
+    kernel = """from pypto_pro.language import Vf as vector, make_tile as tile
+from pypto_pro.language import simt as gpu
+@tile
+def sample(x):
+    return vector.alpha(x), vector.beta(x), gpu.atomic_add(x)
+"""
+    root = _repo(tmp_path, {"written": kernel})
+    assert not _collect(root).problems()
+    index = coverage.surface(root / "examples")
+    assert index["vf"] == {"alpha": ["written"], "beta": ["written"]}
+    assert index["pl"] == {"make_tile": ["written"]}
+    assert index["pl.simt"] == {"atomic_add": ["written"]}
+
+
 def test_a_bare_decorator_counts_as_usage(tmp_path):
     """`@pl.vector_function` has no parentheses, so the AST contains an `Attribute`, not a `Call`; accepting only `Call`
     would miss it. `@pl.jit()` has parentheses and was already included. This test pins that fix.

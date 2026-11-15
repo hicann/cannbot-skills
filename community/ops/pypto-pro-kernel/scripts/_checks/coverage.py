@@ -22,23 +22,54 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .source import read, used_names
+import ast
+
+from .source import PL_MODULE, VF_CLASS, attribute_path, read
 from .paths import COVERAGE_DOC, EXAMPLES_ROOT
 
-NAMESPACES = ("vf", "pl", "pl.system")
-"""Namespaces to index. `pl.system.*` must be listed separately: examples make 56 such calls, and indexing only the
-two-level prefix would miss them all."""
+NAMESPACES = ("vf", "pl", "pl.system", "pl.simt")
+"""Keep public namespace prefixes distinct; nested calls must not become top-level names."""
 
 
-def _prefix(source, namespace: str):
-    """Replace namespace names with the import aliases actually used in this file."""
-    if namespace == "vf":
-        return source.vf
-    if source.pl is None:
-        return None
-    return (
-        source.pl if namespace == "pl" else f"{source.pl}.{namespace.split('.', 1)[1]}"
-    )
+def api_uses(source):
+    """Canonical calls and bare decorators, including explicit import aliases.
+
+    This is static source presence, not proof that a branch runs or an API is supported.
+    """
+    aliases = {}
+    for node in ast.walk(source.tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == PL_MODULE or alias.name.startswith(PL_MODULE + "."):
+                    aliases[alias.asname or alias.name] = (
+                        "pl" + alias.name[len(PL_MODULE):]
+                    )
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            if node.module == PL_MODULE or node.module.startswith(PL_MODULE + "."):
+                for alias in node.names:
+                    if alias.name != "*":
+                        aliases[alias.asname or alias.name] = (
+                            "pl" + node.module[len(PL_MODULE):] + "." + alias.name
+                        )
+    targets = []
+    for node in ast.walk(source.tree):
+        if isinstance(node, ast.Call):
+            targets.append(node.func)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            targets.extend(
+                item for item in node.decorator_list if not isinstance(item, ast.Call)
+            )
+    result = {}
+    for node in targets:
+        path = attribute_path(node)
+        for alias in sorted(aliases, key=len, reverse=True):
+            if path == alias or path and path.startswith(alias + "."):
+                name = aliases[alias] + path[len(alias):]
+                if name == "pl." + VF_CLASS or name.startswith("pl." + VF_CLASS + "."):
+                    name = "vf" + name[len("pl." + VF_CLASS):]
+                result.setdefault(name, set()).add(node.lineno)
+                break
+    return {name: sorted(lines) for name, lines in sorted(result.items())}
 
 
 RULE = "api-coverage"
@@ -127,23 +158,26 @@ def collect(root: Path = EXAMPLES_ROOT, *, document: Path = COVERAGE_DOC) -> Cov
     )
     for name, path in kernels(root).items():
         source = read(path)
-        result.used[name] = used_names(source.tree, source.vf)
+        result.used[name] = {
+            symbol[3:]
+            for symbol in api_uses(source)
+            if symbol.startswith("vf.") and symbol.count(".") == 1
+        }
     return result
 
 
 def surface(root: Path = EXAMPLES_ROOT) -> dict[str, dict[str, list[str]]]:
     """Build a reverse index: `{"vf": {api: [examples...]}, "pl": {...}, "pl.system": {...}}`, sorted by API name.
 
-    This answers the question represented by the `surface` field in ascriptor's `metadata.json`: “I want to use an API;
-    which example should I inspect?” The table in the design document is only forward (example → API), while an agent
-    needs the reverse direction.
+    This maps a requested native API to the examples that use it. Forward example-to-API coverage and
+    reverse API-to-example discovery serve different lookup directions.
     """
     index: dict[str, dict[str, set[str]]] = {namespace: {} for namespace in NAMESPACES}
     for name, path in kernels(root).items():
         source = read(path)
-        for namespace in NAMESPACES:
-            prefix = _prefix(source, namespace)
-            for api in used_names(source.tree, prefix):
+        for symbol in api_uses(source):
+            namespace, _, api = symbol.rpartition(".")
+            if namespace in index:
                 index[namespace].setdefault(api, set()).add(name)
     return {
         namespace: {api: sorted(examples) for api, examples in sorted(apis.items())}

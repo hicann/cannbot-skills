@@ -2,13 +2,16 @@
 
 Mat→Scaling and its quantized consumer use FIX. Establish the MTE2→FIX dependency before moving a scale table from Mat into Scaling. Verify the installed framework’s pipe assignment when composing synchronization; an MTE1→FIX handover does not establish this dependency.
 
-**All five examples were run on board** (2026-09-27, Ascend950PR). The examples are in [`examples/basic_api/fixpipe/`](../../examples/basic_api/fixpipe/).
+The five examples are in [`examples/basic_api/fixpipe/`](../../examples/basic_api/fixpipe/). Their current API target is official PyPTO `bca90a6c` on Ascend950PR / CANN 9.3.0. Known invalid routes remain explicit rejection checks. Missing guards use strict expected-failure markers, which retain the checks and expose a repaired guard as strict XPASS; they do not establish support for the unsafe route.
 
 Defect and gap dispositions for fixpipe are in [`diagnostics/defects/fixpipe-overview.md`](../diagnostics/defects/fixpipe-overview.md) (status table, where each item is blocked, and why some are not fixed); this page records only “what measurement showed.” The contract table is in [`tooling/example-coverage.md`](../tooling/example-coverage.md).
 
+<!-- kernel-query: {"id":"acc-final-output","aliases":["acc-final-output","final output dtype","final FP16 output","store output conversion","最终输出转换"],"symbols":["pl.store","pl.move"],"when":"A GEMM accumulator dtype differs from final storage dtype; inspect Acc-to-GM conversion before adding a cast kernel.","missing_facts":["Verify the actual accumulator/output dtypes, rounding contract, path and matching installed capability; unrelated Vec stores need their own contract."],"term_groups":[["acc","accumulator","累加器","accumulation"],["fp16","bf16","output","输出","gm"]],"discovery_terms":[["acc","accumulator","accumulation","gemm","cube","final"],["output","storage","gm","destination"],["fp16","dtype","half","conversion","convert"]],"discovery_aliases":["FP32 to FP16","FP32 narrowing","dense FP16 store","move"],"facets":{"source_memory":["Acc"],"destination_memory":["GM"]}} -->
 ## Choose the final output path before adding a conversion kernel
 
 Separate accumulation dtype from storage dtype. When a completed GEMM result is in FP32 Acc and its only remaining operation is conversion to FP16 or BF16, declare the GM output in that final dtype and probe `pl.store(out, acc, offsets)` directly. The A5 Acc→GM path infers conversion from the destination dtype; it does not require an intermediate FP32 GM tensor, a VF cast, or a `scale=1.0` argument. The official store table (`pypto/docs/zh/api/pro_api/SIMD-API/memory_data_movement/store.md`) and installed `pypto_pro.ir.op.block_ops::_A5_STORE_COMBOS` own the accepted layout/dtype combinations. `scale=None` does not imply that source and destination must have the same dtype.
+
+`query acc-final-output` also returns `selected_frontend_store`: the Acc→GM rows read from the selected Python source's non-quantized table, with its source hash, declaration line and matching `row_lines`. The reference starts at the first matching row; use the corresponding row line when inspecting a particular layout/dtype combination. It checks the literal `store/a5` table binding without importing the framework. These are source declarations, not an installation or native-execution probe; an unfamiliar or unavailable declaration remains unverified.
 
 Choose the path from the last unfinished operation:
 
@@ -22,13 +25,19 @@ Do not apply the Acc rule to Vec→GM: that transfer does not provide the same n
 
 Validate the complete result at the original tolerance, including output rounding and tails. When replacing a standalone cast, compare against the existing path on the same inputs and inspect the native task sequence: eliminating that launch and its intermediate traffic is the hypothesis, while the measured complete-call difference determines its value. This output-path decision applies to every terminal contraction, independently of the surrounding algorithm.
 
+### Pair accumulator phases with the actual drain
+
+When enabling the hardware unit-flag protocol, match the last matrix write's `AccPhase.Final` to the last drain's `STPhase.Final`; earlier writes or drains use their documented partial phases. The selected official `AccPhase.md` and `STPhase.md` contracts under `pypto/docs/zh/api/pro_api/SIMD-API/basic_data_structures/` include `store`, `store_tile`, `move` and `insert` as possible drains. Confirm the exact source/destination, dtype, layout and phase combination on the target; an older deployment lacking `move(phase=...)` does not establish a permanent API restriction. The official `memory_data_movement/move.md` also warns about `DualModeSplitN` with phase and an N extent not aligned to 32.
+
+Do not enable the producer half while leaving the drain unspecified. When phase is unused, preserve the ordinary M→FIX dependency instead; increasing buffer depth does not repair an unbalanced flag protocol. Inspect generated code and existing fault evidence before attempting another device reproduction, following the [board discipline](../verification/board-runs.md).
+
 ## 1. Why It Has Its Own Chapter
 
-**Fixpipe adds no API**; it is a set of keyword arguments on `pl.store` / `pl.store_tile` / `pl.move` / `pl.insert`. Therefore, the example table counted by API calls records fixpipe as **zero items**—this is why the initial accounting “197 items → 37 examples” missed the entire topic.
+Fixpipe controls are keyword arguments on `pl.store` / `pl.store_tile` / `pl.move` / `pl.insert`. API-name coverage alone does not establish coverage of their combinations.
 
 Its bugs are in **combinations**: dual destination excludes quantization and relu; `offset` excludes `scale`; per-channel requires the caller to provide a Tile in the Fixpipe Buffer and establish MTE2→FIX before Mat→Scaling; `phase` must pair with the producer's `AccPhase`; INT8 output requires bit46. The parameter surface is 3 destinations × 3 layouts × 11 dtype combinations × {scalar, per-channel} × {relu, none} × {phase, none} × {atomic, none}; sampling needs 4–6 examples.
 
-Home: `examples/basic_api/fixpipe/`, with a minimal built-in `pl.gemm` producer (user decision, 2026-09-27).
+Home: `examples/basic_api/fixpipe/`, with a minimal built-in `pl.gemm` producer.
 
 ## 2. The Actual Fixpipe Parameter Surface (PTO ISA)
 
@@ -42,7 +51,7 @@ template <LayoutMode_t layoutMode = NZ2ND, QuantMode_t quantMode = NoQuant,
 struct FixpipeParams
 ```
 
-Eight orthogonal controls. **The “three L0C-to-UB modes” are actually two different groups of three**, and neither group had been covered:
+Distinguish layout selection from dual-destination selection:
 
 | Group | Values | Python side |
 | --- | --- | --- |
@@ -73,7 +82,7 @@ Measured each cell on board on 2026-09-27 (`fixpipe_quant_matrix`, 30 cases):
 
 **All 11 cases ran, 10 were correct, and 1 silently dropped scale** (a [defect](../diagnostics/defects/fixpipe-fp32-to-fp32-drops-scale.md) is open). The same 11 per-channel cases had **identical outcomes, cell for cell** (§13); only the `FP32 → FP32` cell differs for Acc→GM—**store does not drop scale** (§14).
 
-FP32→FP32 Acc→Vec with scale has since been rejected during PyPTO parsing; the table's result is historical evidence from before the guard was added. The root cause is a missing branch in the CANN A5 on-chip quantization mapping; do not predict this route using a predicate template from another path. See [fixpipe disposition](../diagnostics/defects/fixpipe-overview.md) for current handling and API scope.
+Official PyPTO `bca90a6c` does not reject FP32→FP32 Acc→Vec with scale. On CANN 9.3.0, both scalar and per-channel `scale=2` still return the unscaled accumulator. The rejection checks therefore report strict XFAIL on this target, without launching the unsafe route. The root cause is a missing branch in the CANN A5 on-chip quantization mapping; do not predict this route using a predicate template from another path. See [fixpipe disposition](../diagnostics/defects/fixpipe-overview.md) for current handling and API scope.
 
 ⚠️ **The comment block at the top of `fixpipe.hpp` is outdated**; do not use it as a checklist: it lists `QF162*` (half source), `REQ4`/`QF162S4_PRE` (int4), `DEQS16`/`QF162S16_PRE` (int16), none of which exist in the actual enum, while omitting `QF322F32_PRE` / `QF322F16_PRE` / `QS322BF16_PRE` from the real enum—the comment and the 20 lines of code below it disagree. The real list with hardware encoding values is in §16.
 
@@ -87,22 +96,22 @@ FP32→FP32 Acc→Vec with scale has since been rejected during PyPTO parsing; t
 
 ### 3.2 Not Yet Measured / Cannot Be Measured
 
-The dtype axis is complete for all three quantization tables (Acc→Vec / Acc→Mat / Acc→GM). The five remaining items and their blockers are in §5 of [`diagnostics/defects/fixpipe-overview.md`](../diagnostics/defects/fixpipe-overview.md)—that page covers disposition. Two criteria there: **instrument limitations are not findings** (`UINT8`'s two Acc→Mat cells can never be measured because UINT8 in L1 has no way out), and **a criterion should not be stricter than the repeatability of the measurement** (do not require bitwise equality for HF8).
+The dtype axis is represented in all three quantization tables (Acc→Vec / Acc→Mat / Acc→GM), with distinct numerical, execution-only and rejection criteria. The remaining measurement boundaries are in [`diagnostics/defects/fixpipe-overview.md`](../diagnostics/defects/fixpipe-overview.md). An instrument limitation does not establish a defect: the two UINT8 Acc→Mat cells have no supported numerical readback in this example. HF8 likewise needs its stated evidence-based criterion rather than a general bitwise assertion.
 
-## 4. Two Riders Present in ascriptor but Not pypto_pro
+## 4. Additional Fixpipe Payload Controls
 
-ascriptor's `_FIX_COMMON` (`library/ascriptor/ir/ops/dma.py`): `M, N, M_src, relu, scale, offset, hif8_hybrid, atomic`.
+Check on-path quantization payload fields separately from public move/store keywords. The source searches and probes below have their own version scope; a missing parameter does not establish that a payload field is unusable.
 
 | Rider | pypto_pro | Search evidence |
 | --- | --- | --- |
-| `offset` (requantization bias term) | **No parameter, but the field can be used** (changed 2026-09-27). | Searched Python and C++ for `quant_offset` `quantOffset` `preQuantOffset` `deq_offset` `deqOffset` `requantOffset` `QuantPreOffset` `offset_scalar`; only a same-named variable for dump coordinates in `debug_ops.cpp` matched. **But failure to find it by name does not mean it cannot be used**: it is a 9-bit field in the scale payload and can be set by constructing a uint64 manually; it was measured on board. The `quant_offset` parameter was added on 2026-09-27. See §18. |
+| `offset` (requantization bias term) | No public `quant_offset` keyword on official PyPTO `bca90a6c`; the field is usable through runtime INT64 `scale`. | The move/store signatures and implementation accept a packed scalar configuration word. Acc→Vec and Acc→GM controls verify signed nine-bit offsets and saturation; see §18. |
 | `hif8_hybrid` | **Absent**. | Searched `hif8_hybrid` `hifHybrid` `HIF8Hybrid` `hybrid`; only the FA hybrid mask and `CAST_HYBRID` rounding mode matched. |
 
 Do not confuse this with `pl.quant` / `pl.dequant`, which are **vector-side** tile ops (with `QuantMode.SYM/ASYM` and their own `offset` Tile); they are separate from on-path fixpipe quantization. The two pages under the official `SIMD-API/quantization/` discuss the former.
 
 ## 5. Dual Supports Only Trivial Same-type Copies
 
-**The complete four-rule contract and maintenance location are in §2.5 of [`diagnostics/defects/fixpipe-overview.md`](../diagnostics/defects/fixpipe-overview.md)**—that page has one more rule than the three recorded here at the time (dual + `DN` destination layout, found during reconciliation); it also records where each form is blocked before and after the fix.
+The restrictions and their actual rejection layers are maintained in [`diagnostics/defects/fixpipe-overview.md`](../diagnostics/defects/fixpipe-overview.md). Check scale, relu, dtype conversion and `DN` destination separately; the current official parser guards only the scale combination.
 
 A broad `RuntimeError` match containing `507015` cannot distinguish an AICore fault from a parser guard: `NotSupported` inherits from `RuntimeError`, and a guard diagnostic may quote that code. Assert the expected layer and diagnostic body; see [`verification/evidence.md`](../verification/evidence.md) #14.
 
@@ -138,11 +147,11 @@ This example pins three related facts:
 | --- | --- | --- |
 | `store(..., order=[0, 2])` to axes 0/2 of a 3D ND Tensor | Accepted; offset on the omitted Tile axis is treated as an index. | Measured; page 0 remains 0. |
 | `store(..., order=[2, 0])` descending | Rejected during parsing. | `block_ops.py:347`. |
-| NZ destination + non-final two axes | Rejected during parsing (a separate rule). | `_validate_nz_transfer_axes`, `block_ops.py:142`. |
+| NZ destination + non-final two axes | Rejected during parsing (a separate rule). | `block_ops.py::_validate_nz_transfer_axes`. |
 
 **There is no ascending-order check on the `load` side**—official ST `test_cube_datacopy_api_basic.py:416` uses `pl.load(cur_k, k, [0, 0], order=[1, 0])`. So transpose may be available on load but not store. This example did not test load; it records only this asymmetry.
 
-**2. The default `block_dim` uses all cores, exposed by `AtomicAdd`.** The initial direct call to `store_atomic_add(...)` first produced `28 × scale × acc`. The root cause was not fixpipe: direct `kernel(...)` uses `_AUTO_BLOCK_DIM = 0` (`jit.py:1883`), resolved by native code to the full budget of the current stream; these kernels do not partition work by `get_block_idx()`, so every block computes the same value and adds it into the same GM region.
+**2. The default `block_dim` uses all cores, exposed by `AtomicAdd`.** The initial direct call to `store_atomic_add(...)` first produced `28 × scale × acc`. The root cause was not fixpipe: direct `kernel(...)` uses `_AUTO_BLOCK_DIM = 0` (`runtime/jit.py::_AUTO_BLOCK_DIM`), resolved by native code to the full budget of the current stream; these kernels do not partition work by `get_block_idx()`, so every block computes the same value and adds it into the same GM region.
 
 **This is invisible in overwrite tests**—every block writes identical bytes, so the 39 tests in `fixpipe_paths` / `fixpipe_quant_matrix` did not reveal it. `AtomicAdd` is the only case where the output reveals the block count.
 
@@ -162,7 +171,7 @@ Board run on 2026-09-27, 14 checks passed. All four `AccToVecMode` values work, 
 | dual + lower-precision dtype (FP32→FP16, no scale) | **C++ compilation** | `static_assert(quantPre == NoQuant, "Quant is not support in dual Dst Mode.")` |
 | dual + `relu_pre_mode` | **Not blocked at any layer** | Runtime **AICore exception** (`507015`), leaving the device state unusable for the process. |
 
-The second row explains ascriptor's statement that “even floating-point narrowing without `deqScalar` is unsupported”: **FP32 → FP16 is itself a QuantMode in the ISA (`F322F16`)**, so it hits the same “dual requires `NoQuant`” check. The Python guard checks only the `scale` argument and cannot see the QuantMode inferred from dtype, so it reaches C++ compilation.
+The second row follows from the dtype-selected mode: **FP32 → FP16 is itself a QuantMode in the ISA (`F322F16`)**, so even without `deqScalar` it hits the same “dual requires `NoQuant`” check. The Python guard checks only the `scale` argument and cannot see the QuantMode inferred from dtype, so it reaches C++ compilation.
 
 The third row is a real gap, documented in the [defect](../diagnostics/defects/fixpipe-dual-dst-plus-relu-faults-aicore.md): `TMov.hpp:233` passes `dualDstCtl` and `reluMode` side by side to `pto_copy_matrix_cc_to_ub`; neither layer cross-checks them. **`unitFlagCtrl` (`phase`) is beside it and equally unchecked**—same shape, but not measured because an unbalanced UF chain “hangs the AI Core” instead of throwing, and the already-readable source evidence did not justify occupying a shared card for another cell.
 
@@ -185,13 +194,13 @@ Acc→Vec move uses `TMovCcToUb`, which accepts and forwards `reluMode` unchange
 
 ## 10. Toolchain Identity in Child Processes
 
-`PYTHONPATH` was appended instead of replaced, so child processes imported an older `pypto_pro` from conda site-packages—**evidence was collected on the wrong toolchain**. Both `debug_probe` and `dual_dst` were fixed so the child process reports `pypto_pro.__file__` for comparison.
+Check subprocess import precedence explicitly. A child can import an older conda `pypto_pro` when its `PYTHONPATH` or interpreter differs from the parent. Compare `pypto_pro.__file__` and loaded native-library paths with the selected environment before interpreting a subprocess failure.
 
 Bind every evidence item to a toolchain identity. See [`verification/board-runs.md`](../verification/board-runs.md) §5.5 for operating instructions.
 
 ## 11. `fixpipe_scaling_buffer` Measurements: bit46 Changes the Saturation Range
 
-**1. Per-channel numerics.** FP32 → FP16 / FP32 → INT8 are bitwise exact on the controlled power-of-two scales and integer products used by the example. FP32 → FP32 with scale on Acc→Vec is rejected during parsing; the unsupported PTO quantization mapping is described in the [defect](../diagnostics/defects/fixpipe-fp32-to-fp32-drops-scale.md). The FB bitfield encoding is distinct from a per-tensor instruction immediate.
+**1. Per-channel numerics.** FP32 → FP16 / FP32 → INT8 are bitwise exact on the controlled power-of-two scales and integer products used by the example. FP32 → FP32 with scale on Acc→Vec silently ignores scaling on the current target, and its required parser rejection is absent; see the [defect](../diagnostics/defects/fixpipe-fp32-to-fp32-drops-scale.md). The FB bitfield encoding is distinct from a per-tensor instruction immediate.
 
 **2. bit46 (called `FP_SCALE_SIGNED_INT8_FLAG` in the official ST) selects the saturation range.** With the bit clear, INT8 output is **bitwise equal** to:
 
@@ -203,7 +212,7 @@ That means saturation to `[0, 255]`, then reading the bytes as int8. Negative va
 
 **3. All six shape/type constraints are checked during parsing**, with distinct diagnostics from the scale consumer in `block_ops.py`. With the example's explicit Tile groups, an INT64 table `[1, 1024]` reaches the consumer's `N must be <= 512` check and raises `OutOfRange` before launch. The limit follows from the 4 KiB Fixpipe Buffer.
 
-**4. Per-channel + `atomic` is rejected** (`block_ops.py:367`), while per-tensor + atomic works (§8). This is a per-channel restriction, not an atomic restriction.
+**4. Per-channel + `atomic` is rejected** (`block_ops.py::_ir_store` / `_ir_store_tile`, after `_resolve_scale_param`), while per-tensor + atomic works (§8). This is a per-channel restriction, not an atomic restriction.
 
 ## 12. Tile Types and Closure Values
 
@@ -211,7 +220,7 @@ Tuple-unpacking Tiles that differ only in memory space is supported; see [constr
 
 ## 13. Completing the Three Quantization Tables: Per-channel, Acc→Mat, and a More Accurate Instrument
 
-In the second round on 2026-09-27, `fixpipe_quant_matrix` grew from 29 to 54 checks (82 after rounds 3 and 4 completed Acc→GM and HF8; **99** after adding scale precision and payload bitfields).
+`fixpipe_quant_matrix` covers scalar and per-channel scales, Acc→Mat readback, direct Acc→GM stores, HF8 execution and decoding, scale precision and packed payload fields. Each route retains its own numerical or rejection criterion.
 
 **1. The same 11 per-channel cells have outcomes identical to per-tensor, cell for cell.** This includes the dropped scale in `FP32 → FP32`. So this is a table of “dtype combinations,” not “dtype combinations × scale forms”—the test reuses `outcome` from `MATRIX` to run the second scale route and **asserts equivalence between the routes**.
 
@@ -383,9 +392,9 @@ Measured in `fixpipe_quant_matrix`, `store_with_runtime_payload_int8`, `scale=0.
 
 With an **FP32** destination, the same payload has no effect (control case)—offset applies only to integer destinations.
 
-**Conclusion: `offset` can already be used; Pro lacked only an interface.** Hardware supports it, and PyPTO's existing code path can carry it (because it does not interpret the integer); what was missing was an offset form of `scale=` and documentation of the field. Do not confuse this with `offsets` in `store.md:41` or `offset` in `move.md:40`—those are **Tensor/Tile coordinates**, unrelated to quantization bias. The matching name is a coincidence and a naming pitfall to avoid.
+Official PyPTO `bca90a6c` exposes this capability through the runtime INT64 `scale` payload, with no `quant_offset` keyword. Validate the signed offset range before encoding it, pack the FP32 scale bits with `& 0xFFFFE000`, and put `(offset & 0x1FF) << 37` into the same word. Pass that word through a `pl.DT_INT64` kernel parameter. The [example](../../examples/basic_api/fixpipe/fixpipe_quant_matrix/kernel.py) performs only metadata encoding on the host; the original GEMM and Acc→Vec move perform the computation. Independent reference encoding and GM-store controls check the same five offset settings.
 
-**Added** (user decision, 2026-09-27: “add documentation and an interface”): `pl.move` / `pl.store` / `pl.store_tile` / `pl.insert` now all have a `quant_offset` parameter, deliberately not called `offset` to avoid the collision above. Six board tests matched the hand-constructed payload at every setting. See §19.
+Do not confuse this field with `offsets` in `store.md:41` or `offset` in `move.md:40`: those are Tensor/Tile coordinates, unrelated to quantization bias.
 
 **Also pinned down bit46.** It behaves **differently** on the two routes:
 
@@ -396,21 +405,10 @@ With an **FP32** destination, the same payload has no effect (control case)—of
 
 Official `store.md:43` / `move.md:43` scope this bit to **Tile form**, consistent with measurement. Their INT8 example does not exclude UINT8: the measured Tile-form selector also affects a `UINT8` destination. Preserve the route distinction when interpreting the parameter description.
 
-## 19. Guard disposition and regression scope
+## 19. Guard disposition and validation boundary
 
-The authoritative current disposition is in [`diagnostics/defects/fixpipe-overview.md`](../diagnostics/defects/fixpipe-overview.md), including dual + dtype conversion and dual + DN. It owns the cause, status and guard-versus-fix rationale for each path. The measurements below identify the historical regression scope only; they do not establish acceptance of the current checkout.
+The authoritative disposition is in [`diagnostics/defects/fixpipe-overview.md`](../diagnostics/defects/fixpipe-overview.md), including dual + dtype conversion and dual + DN. It owns the cause, rejection layer and safe alternatives for each route.
 
-**Verification (all run on board, 2026-09-27):**
+Keep rejection tests separate from numerical controls. On official PyPTO `bca90a6c`, the FP32→FP32 scaled-move checks and three dual-destination checks expose absent parser guards through strict XFAIL markers. Only the missing-rejection outcome is expected; other errors remain failures, and a passing required guard becomes strict XPASS. Do not launch dual + relu to test that absence, or accept an unrelated compiler error as a parser diagnostic. A direct numerical probe of scaled FP32 move must compare against `scale * acc`, since successful compilation and a nonzero result do not establish that scaling occurred.
 
-| Scope | Result |
-| --- | --- |
-| Full `ut/pypto_pro` | **2520 passed** (baseline 2501; one existing test had to be updated for the additional `pl.insert` parameter name). |
-| 18 `datacopy` scale-related files (run file by file) | **175 passed + 1 xfailed, 0 failed**. |
-| Entire `matmul` ST directory | **290 passed / 1 failed**, and **`507014` appeared 0 times** (the one failure was the existing flaky `test_t25_per_channel_scale_phase`). |
-| `pypto-pro-kernel` fixpipe chapter | **161 passed + 2 skipped** (the two skips are the `rejected` cell, once per-tensor and once per-channel). |
-
-`quant_offset` was measured separately on **both codegen paths**: `pl.store` (`TStore`) and `pl.move` (`TMovCcToUb`), five settings each, all matching the hand-constructed payload from §18—**the new interface does not change hardware behavior; it only makes the parameter expressible.**
-
-**The `507014 = 0` figure for `matmul` is the only reliable evidence here that unrelated tests were not broken.** Running the entire `frontend` directory twice contaminated both runs with AICore hangs (1143 failed / 454 passed, `507014` appeared 1854 times), so this environment could not provide a usable baseline; details and a usable way to run tests are in §2 of [`diagnostics/regressions.md`](../diagnostics/regressions.md).
-
-**Guard precedence is part of the diagnostic contract.** Check dual-mode restrictions before `_reject_fp32_to_fp32_quant`: for `dual + scale` with FP32→FP32, reporting only the FP32 restriction suggests that changing to FP16 might work, although the dual restriction still rejects it. The unit regression pins this ordering.
+For a framework guard implementation, check dual-mode restrictions before the FP32 scaled-move restriction. A dual + scale diagnostic should identify the dual restriction even when FP32→FP32 is also invalid, so changing only the output dtype cannot appear to make that route legal. Keep Acc→GM scaled-store positive controls, since that route preserves scaling.

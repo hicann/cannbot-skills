@@ -7,3 +7,10 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 """Independent mathematical references for every variant."""
+
+__all__ = ["reference_nn", "reference_nt", "reference_tn", "reference_tt"]
+
+from ._references.nn import reference_nn
+from ._references.nt import reference_nt
+from ._references.tn import reference_tn
+from ._references.tt import reference_tt

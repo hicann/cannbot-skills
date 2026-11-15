@@ -68,22 +68,26 @@ def prose_lines(text: str):
             yield lineno, line
 
 
-def anchors(text: str) -> set[str]:
-    """Collect ATX heading slugs, duplicate suffixes and explicit HTML anchors."""
-    found: set[str] = set()
+def inline_targets(line: str):
+    """Yield raw inline-link targets outside code spans, without angle brackets."""
+    for match in _LINK.finditer(_CODE.sub("", line)):
+        yield match["target"].strip("<>")
+
+
+def heading_locations(text: str):
+    """Keep the link checker's heading slugs and their original source lines."""
+    found = []
     used: set[str] = set()
-    for _, line in prose_lines(text):
-        visible = _CODE.sub("", line)
-        found.update(html.unescape(value) for value in _ANCHOR.findall(visible))
+    for lineno, line in prose_lines(text):
         heading = _HEADING.match(line)
         if not heading:
             continue
         title = re.sub(r"[ \t]+#+[ \t]*$", "", heading[1]).strip()
         title = _LINK.sub(lambda match: match["label"], title)
-        title = html.unescape(re.sub(r"<[^>]*>", "", title)).lower()
+        title = html.unescape(re.sub(r"<[^>]*>", "", title))
         slug = "".join(
             char
-            for char in title
+            for char in title.lower()
             if char in " _-" or unicodedata.category(char)[0] in "LNM"
         )
         slug = slug.replace(" ", "-")
@@ -92,8 +96,75 @@ def anchors(text: str) -> set[str]:
             suffix += 1
             slug = f"{base}-{suffix}"
         used.add(slug)
-        found.add(slug)
+        found.append(
+            {
+                "title": title,
+                "fragment": slug,
+                "line": lineno,
+                "level": len(line.lstrip().split()[0]),
+            }
+        )
     return found
+
+
+def anchors(text: str) -> set[str]:
+    """Collect ATX heading slugs, duplicate suffixes and explicit HTML anchors."""
+    found = {heading["fragment"] for heading in heading_locations(text)}
+    for _, line in prose_lines(text):
+        found.update(
+            html.unescape(value) for value in _ANCHOR.findall(_CODE.sub("", line))
+        )
+    return found
+
+
+class FragmentError(ValueError):
+    def __init__(self, reason, fragment):
+        self.reason = reason
+        super().__init__(f"{reason}: {fragment}")
+
+
+def fragment_range(text: str, fragment: str):
+    """Locate a heading subtree or explicit anchor without rendering Markdown."""
+    if not isinstance(fragment, str) or not fragment or len(fragment) > 2048:
+        raise ValueError("Expected a nonempty Markdown fragment up to 2048 characters")
+    fragment = unquote(fragment.removeprefix("#"))
+    headings = heading_locations(text)
+    locations = [dict(heading) for heading in headings if heading["fragment"] == fragment]
+    for lineno, line in prose_lines(text):
+        if fragment not in {
+            html.unescape(value) for value in _ANCHOR.findall(_CODE.sub("", line))
+        }:
+            continue
+        if not any(item["line"] == lineno for item in locations):
+            following = next(
+                (item for item in headings if item["line"] >= lineno), None
+            )
+            lines = text.splitlines()
+            adjacent = following and not any(
+                part.strip() for part in lines[lineno: following["line"] - 1]
+            )
+            locations.append(
+                {
+                    "line": lineno,
+                    "level": following["level"] if adjacent else 6,
+                    "heading_line": following["line"] if adjacent else lineno,
+                }
+            )
+    if not locations:
+        raise FragmentError("fragment_missing", fragment)
+    if len(locations) != 1:
+        raise FragmentError("fragment_ambiguous", fragment)
+    location = locations[0]
+    end = next(
+        (
+            item["line"] - 1
+            for item in headings
+            if item["line"] > location.get("heading_line", location["line"])
+            and item["level"] <= location["level"]
+        ),
+        len(text.splitlines()),
+    )
+    return {"fragment": fragment, "start_line": location["line"], "end_line": end}
 
 
 def collect(targets: tuple[Path, ...] | list[Path] = DOC_ROOTS) -> LinkReport:
@@ -127,8 +198,8 @@ def collect(targets: tuple[Path, ...] | list[Path] = DOC_ROOTS) -> LinkReport:
             findings.append(Finding(document, 1, RULE, f"Cannot read document: {exc}"))
             continue
         for lineno, line in prose_lines(text):
-            for match in _LINK.finditer(_CODE.sub("", line)):
-                target = html.unescape(match["target"].strip("<>"))
+            for target in inline_targets(line):
+                target = html.unescape(target)
                 target = re.sub(
                     r"\\([!\"#$%&'()*+,\-./:;<=>?@\[\]^_`{|}~\\])", r"\1", target
                 )

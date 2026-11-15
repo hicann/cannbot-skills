@@ -155,9 +155,11 @@ def _source_files(root: Path) -> dict[str, list[str]]:
 def collect(
     docs: list[Path],
     root: Path = PYPTO,
-    verified: set[tuple[str, str, int]] = VERIFIED,
+    verified: set[tuple[str, str, int]] | None = None,
 ) -> tuple[list[Suspect], int, int, int]:
     """Return `(suspects, references_checked, skipped_due_to_duplicate_or_missing_files, manually_verified_waivers)`."""
+    if verified is None:
+        verified = VERIFIED
     if not root.is_dir():
         raise SystemExit(
             f"{root} 不存在——`srcrefs` 要源码树才能核，请用 --pypto-root 指定"

@@ -58,11 +58,14 @@
 `rtol=0, atol=0`。直方图是计数；`mem_bar` 那条的算术是 `a+a` 再 `+a`，输入取整数。
 """
 
+import logging
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
+
+from pypto_pro._errors import RuntimeFailure
 
 from . import reference as ref
 from .kernel import (
@@ -289,27 +292,32 @@ def test_masked_out_lanes_do_not_count(device):
 # ---------------------------------------------------------------------------
 
 
-def test_clear_spr_does_not_reset_the_addr_reg_loop_offset(device):
+@pytest.mark.xfail(
+    strict=True,
+    raises=RuntimeFailure,
+    reason="CANN 9.3 VAG rejects the i += 1 loop emitted by PyPTO bca90a6c, including with clear_spr",
+)
+def test_clear_spr_does_not_reset_the_addr_reg_loop_offset(device, caplog):
     """**`clear_spr()` 不清 `create_addr_reg` 的循环偏移。**
 
     和 [`vf_gather_scatter`](../vf_gather_scatter/kernel.py) 的 `addr_reg_walk` 逐行对照,
     只差循环体开头多一个 `vf.clear_spr()`——**结果逐位相同**：两轮照样搬
     `[0:64]` 和 `[64:128]`，输出等于输入。
 
-    写这一版时我的假设是反的（以为偏移会回到起点，两轮搬同一段），实测推翻了。
-
-    合理的解释：`create_addr_reg` 的偏移**不是一个运行期可清的累加器**，它绑在循环轴上，
-    每轮的值在 codegen 期就定了，`clear_spr` 没有可清的东西。
-
-    那它清的是什么？[`vf_unalign`](../vf_unalign/kernel.py) 给了另一半答案：那边
-    **漏掉 `clear_spr()` 就会静默出错**，所以它确实清了 squeeze / 非对齐搬运用的 AR 状态。
-
-    **两处在文档里都叫「AddrReg」，实际是两个不同的东西。** 这是文档的命名问题，
-    不是本例的实现问题——已报到 pypto 侧。
+    `create_addr_reg` 的地址依赖循环轴，squeeze / 非对齐搬运的 AR 则是运行时状态。
+    原始数值判据完整保留；当前 CANN 的 VAG 编译错误只有匹配具体诊断才记为已知失败。
     """
     a = ref.make_fp32_data(2 * N_FP32)
     out = _fp32(device, cols=2 * N_FP32)
-    addr_reg_cleared_each_round(_dev(a, device), out)
+    with caplog.at_level(logging.ERROR):
+        try:
+            addr_reg_cleared_each_round(_dev(a, device), out)
+        except RuntimeFailure:
+            assert (
+                "Failed to capture the expected i16 canonical induction variable for VAG intrinsic!"
+                in caplog.text
+            ), "Unexpected compilation failure; only the diagnosed VAG induction-variable error is expected"
+            raise
     torch.npu.synchronize()
 
     flat = out.cpu().numpy().reshape(-1)

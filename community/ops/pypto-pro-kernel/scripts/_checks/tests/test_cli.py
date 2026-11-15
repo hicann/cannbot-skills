@@ -153,7 +153,7 @@ def test_relocated_skill_uses_its_contract_and_the_selected_examples(bundle, tmp
             assert "1 项 ↔ 1 个样例，0 处对不上" in result.stdout
 
 
-def test_default_command_gates_the_bundled_catalog_against_selected_examples(
+def test_default_command_keeps_catalog_and_rejects_incomplete_admission_scope(
     bundle, tmp_path
 ):
     examples = tmp_path / "custom library"
@@ -178,8 +178,14 @@ def test_default_command_gates_the_bundled_catalog_against_selected_examples(
             result = run(
                 entry, "--examples-root", "../custom library", *command, cwd=caller
             )
-            assert result.returncode == status, result.stdout + result.stderr
-            assert "catalog：1 个样例" in result.stdout
+            assert result.returncode == (status if command else 1), (
+                result.stdout + result.stderr
+            )
+            if command:
+                assert "catalog：1 个样例" in result.stdout
+            else:
+                assert "knowledge_admission: failed" in result.stdout
+                assert "knowledge-missing-program-role" in result.stdout
             assert ("Example not indexed: algorithms/alpha" in result.stdout) == bool(
                 status
             )

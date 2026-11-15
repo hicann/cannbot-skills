@@ -1,10 +1,26 @@
-# Measured Quantization Paths (Board Evidence: 2026-09-29, pypto `8faa85389`, Ascend950PR)
+# Quantized computation: contracts and measured paths
 
-This support map and recipe starts from weight-only quantization (W8A16). In-repository anchor: [examples/algorithms/quant_gemm_w8a16](../../examples/algorithms/quant_gemm_w8a16/) (44 tests). Evidence discipline: report official documentation, installed source, and minimal probes as separate evidence; do not turn “not found” into “does not exist.”
+The W8A16 support map and measurements below retain their board-evidence scope: 2026-09-29, pypto `8faa85389`, Ascend950PR. In-repository anchor: [examples/algorithms/quant_gemm_w8a16](../../examples/algorithms/quant_gemm_w8a16/) (44 tests). Evidence discipline: report official documentation, installed source, and minimal probes as separate evidence; do not turn “not found” into “does not exist.” The integer-to-floating epilogue section is contract guidance, not a newly validated transfer recipe.
 
 For integer weights with group parameters and explicit FP16 intermediate rounding, see [quant_gemm_w4a16_grouped](../../examples/algorithms/quant_gemm_w4a16_grouped/). Before choosing where to dequantize, prove numerical equivalence: a scale that varies along the reduction axis cannot directly use the output per-column scaling below, and specified intermediate rounding must not be silently moved past GEMM. Register types for compressed bytes, physical containers, and masks are covered together in [VF composite conversions](vf.md#map-physical-containers-before-composing-conversions); the example does not change the toolchain boundaries attached to each entry in the existing tables.
 
 When planning fusion or avoiding a full floating-point GM intermediate, apply [transformed-operand planning](gemm.md#transformed-operands-format-residency-and-repeated-work) before copying that example's separate-call dataflow; [quant_gemm_w4a16_onchip](../../examples/algorithms/quant_gemm_w4a16_onchip/) demonstrates a bounded Vec→L1→Cube path under its own shape and resource contract.
+
+## Integer contraction followed by a floating epilogue
+
+Distinguish three contracts before reusing a quantized example: floating-input weight-only quantization with contractual dequantization/scaling (W8A16); integer multiplication followed by integer-output rounding/clamping; and integer multiplication accumulated in INT32 through the full K reduction, followed by a floating epilogue. Their references and legal conversion points differ. An FP16/BF16 output does not imply an integer-output round/clamp stage.
+
+Write the exact equation and dtype at every epilogue edge from the executed golden. One possible contract is **integer pre-bias -> conversion to FP32 -> scale -> offset -> per-token scale -> floating post-bias -> final cast**; use that order only when the task specifies it. Moving integer pre-bias after widening can change large-integer rounding, and moving post-bias before scaling changes the equation. Bound the full integer accumulation and pre-bias against overflow; do not infer safety from the final floating output.
+
+For each coefficient/bias, identify scalar, per-row, per-column or along-K indexing, including batch/group offsets. A scale varying along K cannot generally be applied once after the contraction. Test the optional branches with distinct rows/columns, nonzero biases and nonuniform scales: scalar or uniform controls can hide a wrong broadcast axis or reordered epilogue. Preserve the final cast's rounding and output contract.
+
+Then select a supported [Acc drain and conversion path](fixpipe.md#choose-the-final-output-path-before-adding-a-conversion-kernel) and perform remaining Vector arithmetic in VF. Establish the integer handover and floating conversion on the target; this equation does not establish a direct INT32-Acc-to-FP32-Vec conversion. Compare fused and staged complete calls only after their outputs meet the original criterion.
+
+## Dynamic per-row scales
+
+When a row reduction produces both quantized values and a published scale, name the two directions explicitly. For a symmetric example with integer limit `Q` and `a = max(abs(x)) > 0`, the dequantization scale is `s = a / Q`, while the multiplier used to form integers is `1 / s = Q / a`. Returning that multiplier as the scale computes the wrong public interface even if the integers look correct. The task may instead prescribe a scale floor, asymmetric offset, different clipping endpoints or a special zero-row result; derive the exact order from its reference rather than imposing this example's convention.
+
+Keep the internal normalization state distinct from the externally rounded scale. Use the [normalized-ratio criteria](numerics.md#2-small-magnitudes-in-normalized-ratios) for underflow and the final discrete outputs, and the [small-result transport](../patterns/vf-small-results.md) for the scale's dense public layout. [Residual RMS quantization](../../examples/algorithms/residual_rms_quant/) is a runnable VF example with its own intermediate rounding and zero-row convention; it does not establish a universal scale floor or output formula.
 
 ## 1. Where to Dequantize: Path Map
 

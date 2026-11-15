@@ -119,13 +119,13 @@ def astype_to_int32(a):
     """`vcvt` 的默认取整：`VFRoundMode.CAST_RINT`——**就近、平局取偶**。
 
     实测 `1.5 2.5 3.5 4.5 → 2 2 4 4`。`np.rint` 用的是同一条规则，所以直接拿它当参考。
-    **不是向零取整**，和 `truncate` 不同——写这一版时我先按截断写，被这条测出来了。
+    这与本例显式使用 `CAST_TRUNC` 的浮点截断路径不同。
     """
     return np.rint(a.astype(np.float64)).astype(np.int32)
 
 
 def astype_toward_zero_to_int32(a):
-    """`round_mode=VFRoundMode.CAST_TRUNC` 的结果：向零取整，和 `truncate` 同规则。"""
+    """`CAST_TRUNC` 向零取整，与显式使用该模式的浮点truncate同规则。"""
     return np.trunc(a.astype(np.float64)).astype(np.int32)
 
 
@@ -135,7 +135,7 @@ def bit_cast_to_int32(a):
 
 
 def truncate(a):
-    """向零取整，**结果仍是 FP32**。"""
+    """`truncate(round_mode=CAST_TRUNC)` 向零取整，结果仍是 FP32。"""
     return np.trunc(a.astype(np.float64)).astype(np.float32)
 
 

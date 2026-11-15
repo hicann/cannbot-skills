@@ -58,6 +58,7 @@ positional arguments」）。`_tile_type(FP32, 1, 2 * N)` 才行。这条和
 给出同一个结果。
 """
 
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -65,6 +66,7 @@ import pytest
 import torch
 
 import pypto_pro as pp
+from pypto_pro._errors import RuntimeFailure
 
 from . import reference as ref
 from .kernel import (
@@ -284,7 +286,12 @@ def test_a_non_unit_step_needs_a_following_muls(device):
 # ---------------------------------------------------------------------------
 
 
-def test_the_addr_reg_offset_accumulates_across_iterations(device):
+@pytest.mark.xfail(
+    strict=True,
+    raises=RuntimeFailure,
+    reason="CANN 9.3 VAG rejects the i += 1 loop emitted by PyPTO bca90a6c",
+)
+def test_the_addr_reg_offset_accumulates_across_iterations(device, caplog):
     """**这一例的重点**：两轮循环，偏移每轮加 64 个元素，输入输出逐位相同。
 
     输入 128 个元素（两个寄存器长）。如果偏移没累加，第 1 轮会重搬 `[0:64]`，
@@ -292,7 +299,15 @@ def test_the_addr_reg_offset_accumulates_across_iterations(device):
     """
     a = ref.make_data(2 * N)
     out = _out(device, cols=2 * N)
-    addr_reg_walk(_dev(a, device), out)
+    with caplog.at_level(logging.ERROR):
+        try:
+            addr_reg_walk(_dev(a, device), out)
+        except RuntimeFailure:
+            assert (
+                "Failed to capture the expected i16 canonical induction variable for VAG intrinsic!"
+                in caplog.text
+            ), "Unexpected compilation failure; only the diagnosed VAG induction-variable error is expected"
+            raise
     torch.npu.synchronize()
 
     got = out.cpu().numpy()
@@ -314,10 +329,10 @@ def test_an_addr_reg_reaches_store_unalign_at_parse_time():
     program, _ = addr_reg_into_store_unalign.to_kernel_def().parse_target_program(
         pp.ir.SectionKind.Vector
     )
-    text = pp.ir.python_print(program)
+    text = pp.ir.text_dump(program)
 
-    assert "@vf.create_addr_reg(" in text, "IR 里没有 create_addr_reg"
-    assert "@vf.store_unalign(" in text, "IR 里没有 store_unalign"
+    assert "vf.create_addr_reg(" in text, "IR 里没有 create_addr_reg"
+    assert "vf.store_unalign(" in text, "IR 里没有 store_unalign"
 
 
 # ---------------------------------------------------------------------------

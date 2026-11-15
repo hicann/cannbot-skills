@@ -99,6 +99,7 @@ def load_chain(a: pl.Tensor[[1, N], FP32], out: pl.Tensor[[1, N], FP32]):
 
 @pl.vector_function
 def _store_chain(src, dst):
+    _preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
     """两次 `store_unalign` 各写 `CHUNK_BYTES`，最后 `store_unalign_post` 冲零头。
 
     **`post` 不是可选的。** 前面两次写的是「凑满整块的部分」，不满一块的尾巴留在

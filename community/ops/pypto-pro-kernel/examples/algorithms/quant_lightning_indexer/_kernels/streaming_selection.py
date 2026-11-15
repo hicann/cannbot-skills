@@ -72,7 +72,7 @@ def collect_keys(src, index_tile, count_tile, active, threshold, equal):
         counts = vf.add(counts, increment, p)
         index = vf.arange(c, dtype=U16)
         compact = vf.squeeze(
-            index, selected, gather_mode=pl.SqueezeMode.STORE_REG, dtype=U16
+            index, selected, gather_mode=pl.SqueezeMode.STORE_REG
         )
         vf.squeeze_store_unalign(index_tile, compact, ar)
     vf.squeeze_store_unalign_post(index_tile, ar)
@@ -210,7 +210,7 @@ def make_streaming_select(has_offset=False):
                                     start,
                                     local,
                                     False,
-                                    offset,
+                                    offset, True,
                                 )
                                 pl.set_validshape(oi, [1, count])
                                 pl.set_validshape(ov, [1, count])

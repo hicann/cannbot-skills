@@ -6,57 +6,11 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-"""fixpipe 的三个目的地 × 三种布局，不带 rider 的基线。
+"""Fixpipe 的 Acc→GM、Acc→Vec→GM 与 Acc→Mat→GEMM 验证。
 
-**写法：原始。** 这是 fixpipe 这一章的第一例，后面四例都在它的骨架上加 rider。
-机制在 [`kernel.py`](kernel.py) 的模块 docstring 里；设计文档 §十四 讲为什么 fixpipe
-单独成章。
-
-## 一、为什么 `pl.store` 和 `pl.move` 在这里是「同一个接口的两件事」
-
-源在 `Acc` 时，`pl.store` / `pl.move` 发的是 **fix 流水**（`TSTORE` / `TEXTRACT`）；
-源在 `Vec` 时发的是 MTE3 / v 流水。**同一个 Python 调用，不同的硬件单元。**
-
-这一例把三条出路摆在一起，就是为了让这件事看得见：
-
-| 出路 | 调用 | 流水 |
-| --- | --- | --- |
-| Acc → GM | `pl.store(out, acc, [0, 0])` | **fix** |
-| Acc → Vec | `pl.move(ub, acc)` | **fix** |
-| Acc → Mat | `pl.move(l1, acc)` | **fix** |
-| Mat → Left/Right | `pl.move(l0a, l1)` | MTE1（**不是** fixpipe） |
-| Vec → GM | `pl.store(out, ub, [0, 0])` | MTE3（**不是** fixpipe） |
-
-**Acc→Mat 的结果只有一条出路**：进 L0A/L0B 当下一次乘法的操作数。
-`Mat→Vec` 不在 `move` 的合法路径里，`Mat→GM` 不在 store 的组合表里
-——而 `move` 的 docstring 把 `Mat → Vec` 列成走 v 流水，**与实现不符**（已报 pypto）。
-
-## 二、三种布局只差目的 Tile 的一个 `layout=`
-
-ISA 侧是 `LayoutMode_t` 的 `NZ2ND` / `NZ2DN` / `NZ2NZ`，**Python 侧没有这个参数**
-——它由目的操作数的 `layout=` 推断。所以 `make_acc_to_vec` 是个工厂，三个变体只差一个枚举。
-
-**GM 侧的 Tensor 必须声明成同一个 layout**（`pl.Tensor[[M, N], FP32, layout]`）：
-Vec→GM 的组合表只有 `ND→ND` / `DN→DN` / `NZ→NZ` 三对，**跨布局的 store 不存在**
-——布局转换是 fixpipe 那一步做的，MTE3 不做。
-
-Acc→GM 的组合表只有 `NZ→ND` 和 `NZ→NZ` 两对，**没有 `NZ→DN`**。
-
-## 四、DN 这一支这一版走不通，钉成边界
-
-`NZ2DN` 的两步在 Python 侧都合法，但 codegen 发的 `GlobalTensor` 是 `Layout::ND`，
-被 A5 的 `TStore.hpp:169` 拦。**全仓 ST 里 DN 的 Vec Tile 一律是 `[N,1]` 单列**——
-正好落在那个 static_assert 的 `Rows == 1 || Cols == 1` 例外里，2-D 的 DN 一个先例都没有。
-`test_a_two_dimensional_dn_tile_has_no_store_path` 把这件事钉成 `pytest.raises`，
-细节和两条旁证在那条测试的 docstring 里。
-
-## 三、判据：`rtol=0, atol=0`
-
-FP16 输入取小整数，K=128 下最大累加 1024，FP32 精确。**这一例不需要容差**——
-有差异就只可能是搬运或布局错了，不用分辨「是精度还是 bug」。
-
-数值正确性之外还断言排布：三种 layout 的输出**不能三个都相同**，否则 `layout=`
-没起作用，三个变体就退化成同一个测试。
+FP16 小整数输入使独立 NumPy 数学参考保持 rtol=atol=0。ND/NZ 输出同时检查数据和物理排布，
+链式 GEMM 使用显式 FP16 中间舍入。GM Tensor 注解仅接受 ND/NZ，DN 反例只检查解析期拒绝，
+不编译或执行不受支持的落盘路径。
 """
 
 from pathlib import Path
@@ -64,6 +18,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+
+import pypto_pro as pp
+from pypto_pro._errors import InvalidArgument
 
 from . import reference as ref
 from .kernel import (
@@ -191,33 +148,11 @@ def test_nd_and_nz_differ(device):
     )
 
 
-def test_a_two_dimensional_dn_tile_has_no_store_path(device):
-    """**边界：2-D 的 `NZ2DN` 在这一版走不通。** 这条把它钉成事实，不是留个注释。
-
-    Python 侧两步都合法（否则会在解析期被拦，而它没有）：
-    `Acc(NZ)→Vec(DN)` 在 `move` 的表里，`Vec(DN)→GM(DN)` 在 `store` 的表里。
-    但 codegen 发出的 `GlobalTensor` 是 `Layout::ND`，被 A5 的 `TStore.hpp:169`
-    的 static_assert 拦住：**"Src and dst layout must be same"**。
-
-    两条旁证说明这不是我写错了：
-
-    - **全仓 ST 里 DN 的 Vec Tile 一律是 `[N, 1]` 单列**（`test_histogram.py`、
-      `test_softmax.py`、`test_layernorm.py`、`test_reduce_expand_fp32.py`），
-      正好落在那个 static_assert 的 `Rows == 1 || Cols == 1` 例外里。
-      **2-D 的 DN 一个先例都没有。**
-    - 给 GM Tensor 注解 layout 本身是可行的——`test_nz_datacopy.py` 用
-      `pl.Tensor[[...], pl.DT_FP16, pl.NZ]`，本例的 NZ 变体也跑通了。
-      **只有 DN 这一支落不下去。**
-
-    还没分清的是：codegen 丢了 DN 这个注解，还是 A5 本来就不支持 2-D 的 DN store。
-    记在设计文档 §十四点八，待确认。
-
-    如果哪天这条不再抛异常，说明修了——那时把它改回正常的布局对照测试。
-    """
-    a, b = ref.make_operands(M, K, N)
-    out = _out(device)
-    with pytest.raises(Exception, match=r"(?s)Failed to compile|layout must be same"):
-        acc_to_vec_dn(_dev(a, device), _dev(b, device), out)
+def test_a_two_dimensional_dn_tile_has_no_store_path():
+    """DN Tensor 注解在解析期拒绝，并指出支持的 ND/NZ 布局。"""
+    with pytest.raises(InvalidArgument, match="Unknown layout: DN") as raised:
+        acc_to_vec_dn.to_kernel_def().parse_target_program(pp.ir.SectionKind.Cube)
+    assert "Tensor only supports pl.ND and pl.NZ" in str(raised.value)
 
 
 # ---------------------------------------------------------------------------

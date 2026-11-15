@@ -82,3 +82,68 @@ def test_explicit_parse_negative_can_be_waived(tmp_path):
         f'    """反例：{RULE} —— 仅解析验证拒绝，不上板。"""\n    pass',
     )
     assert len(found) == 1 and found[0].waived
+
+
+def entry_source(
+    tmp_path, arguments="x: pl.Tensor[[1,64], FP32]", future=True, extra=""
+):
+    path = tmp_path / "entry.py"
+    path.write_text(
+        ("from __future__ import annotations\n" if future else "")
+        + "import pypto_pro.language as pl\nFP32 = pl.DT_FP32\n"
+        + extra
+        + f"@pl.jit()\ndef kernel({arguments}):\n    pass\n"
+    )
+    return path
+
+
+@pytest.mark.parametrize("annotation", ["pl.Tensor[[1,64], FP32]", "pl.Ptr[FP32]"])
+def test_postponed_tensor_alias_is_a_version_bound_advisory(tmp_path, annotation):
+    from _checks.scalar_annotation import ENTRY_RULE, ENTRY_GUARD_SHA256
+
+    findings = check(entry_source(tmp_path, "x: " + annotation))
+    assert (
+        len(findings) == 1 and findings[0].rule == ENTRY_RULE and findings[0].advisory
+    )
+    assert ENTRY_GUARD_SHA256 in findings[0].message
+
+
+@pytest.mark.parametrize(
+    "arguments,future",
+    [
+        ("x: pl.Tensor[[1,64], FP32]", False),
+        ("x: pl.Tensor[[1,64], pl.DT_FP32]", True),
+        ("x: pl.Ptr[pl.DT_FP32]", True),
+        ("x: pl.Tensor[[1,64], FP32], count: pl.DT_INT64", True),
+        ('x: "pl.Tensor[[1,64], FP32]", count: pl.DT_INT64', False),
+        ("x: CustomType", True),
+        ("x", True),
+    ],
+)
+def test_recognized_or_unresolved_annotation_kinds_stay_distinct(
+    tmp_path, arguments, future
+):
+    assert check(entry_source(tmp_path, arguments, future)) == []
+
+
+def test_quoted_alias_has_the_same_entry_boundary_without_future(tmp_path):
+    from _checks.scalar_annotation import ENTRY_RULE
+
+    assert [
+        f.rule
+        for f in check(entry_source(tmp_path, 'x: "pl.Tensor[[1,64], FP32]"', False))
+    ] == [ENTRY_RULE]
+
+
+def test_changed_or_missing_recognizer_does_not_inherit_the_old_boundary(tmp_path):
+    path = entry_source(tmp_path)
+    root = tmp_path / "framework"
+    assert check(path, pypto_root=root) == []
+    selected = root / "python/pypto_pro/runtime/jit.py"
+    selected.parent.mkdir(parents=True)
+    selected.write_text("def _is_tile_kernel(func):\n    return True\n")
+    assert check(path, pypto_root=root) == []
+
+
+def test_language_shadowing_is_not_an_entry_type_fact(tmp_path):
+    assert check(entry_source(tmp_path, extra="pl = custom_language\n")) == []

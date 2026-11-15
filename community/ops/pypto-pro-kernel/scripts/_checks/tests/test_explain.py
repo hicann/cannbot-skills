@@ -45,6 +45,41 @@ def test_rank_error_points_to_declaration_and_allocation_without_importing(tmp_p
     )
 
 
+def test_quoted_rank_control_is_not_an_observed_failure(tmp_path):
+    path = tmp_path / "candidate.py"
+    path.write_text(SOURCE)
+    log = tmp_path / "error.txt"
+    log.write_text(
+        f"  12 | assert {ERROR!r} in result\nE       assert {ERROR!r} in result\n"
+    )
+    result = report(path, error_log=log)
+    assert result["runtime_symptoms"][0]["status"] == "unrecognized"
+    assert result["diagnostics"] == [] and result["context"] == []
+
+
+def test_original_log_feedback_binds_the_matching_transfer(tmp_path):
+    from .test_ub_l1 import source
+
+    path = tmp_path / "candidate.py"
+    path.write_text(source(src_layout="NZ", api="insert"))
+    log = tmp_path / "error.txt"
+    from _checks import ub_l1
+
+    _, sites, _ = ub_l1.inspect(path)
+    line = sites[0]["line"]
+    log.write_text(
+        f"RuntimeError: insert: offset must contain exactly 2 elements\n  --> {path}:{line}:0\n"
+    )
+    result = report(path, error_log=log)
+    assert result["diagnostics"][0]["rule"] == "native-transfer-contract"
+    assert (
+        result["diagnostics"][0]["evidence"]["condition_status"]
+        == "source_site_matched"
+    )
+    assert result["context"][0]["id"] == "ub-l1"
+    assert result["current"]["sha256"] and result["error_log"]["sha256"]
+
+
 def test_shared_load_and_new_compute_are_distinguished(tmp_path):
     baseline = tmp_path / "baseline.py"
     current = tmp_path / "current.py"

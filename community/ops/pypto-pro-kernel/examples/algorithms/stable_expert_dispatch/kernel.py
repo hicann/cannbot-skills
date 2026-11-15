@@ -8,6 +8,9 @@
 
 """写法：原始。按 expert 稳定打包连续 FP32 token 行。
 
+机制：[设备元数据计划](../../../references/patterns/stable-placement.md#separate-reusable-metadata-from-payload-execution)。
+本例共享区间计数，每个 token 仍自行累加位置并串行搬运 payload；扩展设备计划或协作搬运时，应分别比较计划、消费网格和完整调用成本。
+
 两个 SIMT 任务先初始化输出并计数，再由唯一 token owner 求位置及复制 payload。
 同 Stream 的任务顺序保护 counts/offsets；区间编号源于输入位置，与 worker 调度无关。
 每个 token 串行复制连续列，是元数据复用的简单参考；是否优于协作搬运需按形状和 worker 数测量。

@@ -242,14 +242,14 @@ def test_two_squeezes_in_a_row_are_not_rejected_at_parse_time():
     program, _ = two_squeezes_in_a_row.to_kernel_def().parse_target_program(
         pp.ir.SectionKind.Vector
     )
-    text = pp.ir.python_print(program)
+    text = pp.ir.text_dump(program)
 
-    assert text.count("@vf.squeeze(") == 2, (
-        f"IR 里应该有两个 vf.squeeze，实际 {text.count('@vf.squeeze(')} 个"
+    assert text.count("vf.squeeze(") == 2, (
+        f"IR 里应该有两个 vf.squeeze，实际 {text.count('vf.squeeze(')} 个"
     )
     # 两次 squeeze 之间没有 squeeze_store_unalign —— 解析器照样放行
-    first = text.index("@vf.squeeze(")
-    second = text.index("@vf.squeeze(", first + 1)
+    first = text.index("vf.squeeze(")
+    second = text.index("vf.squeeze(", first + 1)
     between = text[first:second]
     assert "squeeze_store_unalign" not in between, (
         "两次 squeeze 之间出现了 store，那这条负面用例的形状就不对了"

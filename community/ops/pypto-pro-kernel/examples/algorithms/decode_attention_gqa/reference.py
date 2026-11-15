@@ -135,7 +135,8 @@ def make_inputs(seed: int = 0, kind: str = "normal"):
     前七类语义同 flash_attention.make_inputs（rescale 路径覆盖：growing 每块更新 max、
     first/last_block_max 只在首/末块更新、all_negative 守 m 初值、large 守上/下溢）；
     ``group_distinct``：每个 KV 头的 K/V 带头编码的直流偏置、每组 q 对齐自己头的编码——
-    组映射错一头，分数与 V 都错，输出可见地偏离（ascriptor head_distinct 的 GQA 版）。
+    A wrong query-to-KV-head mapping changes both scores and payloads, so this
+    head-distinct input discriminates a grouping error from a shared-head case.
     """
     g = torch.Generator().manual_seed(seed)
     q = torch.randn([B, HQ, 1, D], generator=g)

@@ -20,6 +20,8 @@ import re
 from collections import Counter
 from pathlib import Path
 
+from . import runtime_diagnostics, ub_l1
+from .paths import EXAMPLES_ROOT, PYPTO_ROOT
 from .source import attribute_path, read
 
 
@@ -260,7 +262,12 @@ def _signature(site):
 
 def rank_diagnostics(current, text):
     symptoms = []
-    for message in dict.fromkeys(m.group(0) for m in _RANK.finditer(text)):
+    messages = []
+    for body in runtime_diagnostics.bodies(text):
+        diagnostic = runtime_diagnostics.explain_message(body)
+        if diagnostic and diagnostic["rule"] == "tensor-rank-mismatch":
+            messages.append(_RANK.search(body).group(0))
+    for message in dict.fromkeys(messages):
         match = _RANK.search(message)
         parameter, expected, actual = (
             match.group(1),
@@ -293,6 +300,8 @@ def report(
     baseline: Path | None = None,
     error_log: Path | None = None,
     function: str | None = None,
+    pypto_root=PYPTO_ROOT,
+    examples_root=EXAMPLES_ROOT,
 ) -> dict:
     current = inspect(path, function)
     result = {
@@ -319,10 +328,18 @@ def report(
             "path": str(error_log.resolve()),
             "sha256": hashlib.sha256(data).hexdigest(),
         }
+        _, transfers, _ = ub_l1.inspect(path, pypto_root=pypto_root)
+        if hashlib.sha256(path.read_bytes()).hexdigest() != current["sha256"]:
+            raise ValueError("Source changed during diagnostic inspection")
+        result["diagnostics"], result["context"] = runtime_diagnostics.from_output(
+            data.decode(errors="replace"),
+            examples_root=examples_root,
+            transfers=transfers,
+        )
         result["runtime_symptoms"] = rank_diagnostics(
             current, data.decode(errors="replace")
         )
-        if not result["runtime_symptoms"]:
+        if not result["runtime_symptoms"] and not result["diagnostics"]:
             result["runtime_symptoms"].append(
                 {
                     "status": "unrecognized",
@@ -380,6 +397,8 @@ def report(
             "comparison",
             "limits",
             "next_evidence",
+            "diagnostics",
+            "context",
             "error_log",
             "baseline",
             "current",

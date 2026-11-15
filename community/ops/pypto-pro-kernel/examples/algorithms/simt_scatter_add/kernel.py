@@ -13,7 +13,7 @@ INT32 base[N]、index[U]、value[U]，index 在 [-N,N) 内；输出从任意内�
 物理尺寸按工厂参数特化，两个 kernel 均按实际 grid 跨步覆盖工作。
 索引规范化保持 INT32，要求 0<N<2**31；调用者保证累加结果不溢出 INT32。
 显式 grid 必须位于当前 Stream 预算内，也可直接调用使用自动预算。
-验证边界：行为版本 872df763f、CANN 9.2.0；数值、冲突与守卫检查见 test.py。
+原子更新显式接收目标容器与逐轴元素坐标；数值、冲突与守卫检查见 test.py。
 """
 
 import pypto_pro.language as pl
@@ -52,7 +52,7 @@ def make_scatter_add(n, updates):
             dst = index[pos]
             if dst < zero:
                 dst = dst + n_i32
-            pl.simt.atomic_add(out[dst], value[pos])
+            pl.simt.atomic_add(out, [dst], value[pos])
 
     @pl.jit()
     def accumulate(

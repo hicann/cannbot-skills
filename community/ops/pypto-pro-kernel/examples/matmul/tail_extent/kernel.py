@@ -7,3 +7,30 @@
 # See LICENSE in the root of the software repository for the full text of the License.
 
 """写法：语法糖。Native variants with explicit addresses and automatic mutex IDs."""
+
+from ._kernels.k import EM, EN, EK, K, M, N, OM, ON, OK, tail_k
+from ._kernels.m import tail_m
+from ._kernels.n import tail_n
+from ._kernels.mnk import tail_mnk
+from ._kernels.odd import tail_odd
+from ._kernels import k, m, n
+
+__all__ = [
+    "EM",
+    "EN",
+    "EK",
+    "K",
+    "M",
+    "N",
+    "OM",
+    "ON",
+    "OK",
+    "tail_k",
+    "tail_m",
+    "tail_n",
+    "tail_mnk",
+    "tail_odd",
+    "k",
+    "m",
+    "n",
+]

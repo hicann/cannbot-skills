@@ -6,149 +6,11 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-r"""kernel 入口、循环、cube 段与自动流水。
+"""kernel 入口与流水的独立数值和接口验证。
 
-**写法：原始。**
-
-## 一、五个东西
-
-| API | 是什么 | ST |
-| --- | --- | --- |
-| ``@pl.jit(...)`` | **唯一**的 kernel 入口 | 到处都是 |
-| ``pl.range(...)`` | kernel 体里的循环迭代器 | `control_flow`:385 |
-| ``pl.section_cube()`` | cube 流水的 section | `matmul`:495 |
-| ``pl.pipeline`` | `@pl.pipeline.stage` + `PipelineConfig(preload=n)` | **75 次**，见 §五 |
-| ``@pl.inline`` | **已废弃**，只报警告后原样返回 | ut 里 1 条，断言它报警告 |
-
-## 二、如何独立验证
-
-1. ``loop_over_blocks``：第 k 块乘 `k + 1`，四块全对。
-2. ``loop_with_a_step``：`pl.range(0, 4, 2)` 只碰 0、2 号块，1、3 号仍是哨兵。
-3. ``loop_with_python_range``：内置 `range` 被解析期拒。
-4. ``make_pipelined(p)``：`p` 取 0/1/2/3，**四个结果两两逐位相同**，且都等于参考。
-5. ``cube_section_moves_through_l1``：混合 kernel 跑通，vector 段的搬运对得上。
-6. ``make_pipelined_with_an_aliased_memory_space``：跨核 buffer 的 `target_memory`
-   写成别名被拒。
-7. ``PipelineConfig`` 的四种非法 `preload`：`-1`、`1.5`、`True`、`()`。
-8. ``@pl.inline`` 报 `DeprecationWarning`，**而它指的替代品 `pl.fn` 不存在**。
-
-判据 1 乘的是**轮次号**而不是常数：常数的话循环跑错次数、跑错顺序都看不出来。
-判据 2 靠哨兵——不填哨兵只能证「碰到的对」，证不到「没碰的没动」。
-
-## 三、`preload` 换了结果必须一样（判据 4）
-
-| `preload` | 语义 | 实测 |
-| ---: | --- | --- |
-| 0 | 不提前拉任何 stage，串行 + 跨核同步 | 对 |
-| 1 / 2 / 3 | 上游提前 n 轮 | 对，且**和 0 逐位相同** |
-
-`config.py` 的 docstring 说「Zero pulls no stage ahead of any other……Start there to confirm
-the serial kernel is correct, then raise it」。**判据 4 把这句话变成一条会红的测试**:
-四个 `preload` 的结果两两逐位相同。
-
-为什么这是这一例最有分量的判据：它验的不是某个 API 的返回值，而是**流水变换不改变语义**——
-而那正是整个 `pl.pipeline` 存在的前提。逐位相同而不是 `allclose`：`preload` 改的是指令排布,
-不是算术，有任何数值差都说明语义被改了。
-
-`preload=3` 也在里面（`NT` 只有 4）：它让填充和排空占掉大半个循环,
-是边界最紧的那一档。
-
-流水 stage 里的 `scale` 是 kernel 体按轮次算的（`scale = ki + 2`），
-所以判据同时在验「第 k 轮看到的是为第 k 轮算的那个 scale」，不是别的节拍的。
-
-## 四、跨核 buffer 的 `target_memory` 必须是字面量
-
-```
-pipeline: cross-core buffer 'shared' has no resolvable memory space. Its
-make_tile_group(type=pl.TileType(..., target_memory=pl.MemorySpace.X)) must set
-target_memory to a literal pl.MemorySpace.<X>.
-```
-
-`_cross_core_scanner.py:775`。**写这一例的探针时四个 `preload` 因此全红**,
-因为探针顶上有 `MAT = pl.MemorySpace.Mat` 这样的别名——而本仓每个样例顶上都有这类别名,
-所以这是个会反复踩的坑。
-
-**这是本仓第三次撞到「检查只认 AST 字面量」**：
-
-| 位置 | 症状 |
-| --- | --- |
-| `pl.gemm_mx` 的 `k % 64` 守卫 | 写成常量名**绕过**检查（假阴性） |
-| `pl.const` 的第一个参数 | 常量名**被拒**（假阳性，见 `support/scalar_const` §六） |
-| 跨核 buffer 的 `target_memory` | 别名**被拒**（假阳性） |
-
-同一个实现习惯（`isinstance(node, ast.Constant)` / 读 AST 而不是求值），两种相反的后果。
-
-## 五、`pl.pipeline` 不是「没 ST 的 API」——那是数法假象
-
-`references/tooling/example-coverage.md` §五 原来把 `pl.pipeline` 列进「12 个 API 框架自己也没测过」,
-数法是 `grep -rho 'pl\.pipeline('`。**那个数法对模块不成立**：`pl.pipeline` 是
-`pypto_pro.runtime.pipeline` 这个**模块**，从来不被当函数调用。
-
-| 搜法 | 命中 |
-| --- | ---: |
-| `pl.pipeline(` | **0** |
-| `pl.pipeline.` | **75**（`stage` 40、`PipelineConfig` 35） |
-
-`st/.../auto_pipeline/` 整整一组十来个文件都在用它。这一例照它们抄。
-
-**[skill constraints](../../../../SKILL.md#constraints-and-workspace-policy) 那条「同一侧换名字搜也算一次独立搜索」在这里又对了一次**,
-而且这次的变形不是前缀后缀，是「它是模块不是函数」。同一次复核还改掉了 `pl.inline`
-那条（4 次 ut 用量，见 §六），留下 `pl.get_spr` 那条（见 `support/spr_ctrl` §六:
-名字相近的 ST 其实在测 `vf.get_mask_spr`）。**三条里两条是数错的。**
-
-## 六、`@pl.inline` 已废弃，而它指的替代品不存在
-
-```
-@pl.inline is deprecated and will be removed.
-Use @pl.fn with type annotations, or pass the function as an annotated callable.
-```
-
-`decorator.py:30`。装饰器本身是个 no-op：报完警告原样返回 `fn`。
-
-**`pl.fn` 不存在**（2026-09-28 核）：
-
-| 搜法 | 结果 |
-| --- | --- |
-| `pl.__all__` 198 项里有 `fn` 吗 | **没有**；f 开头的只有 `fillpad` / `fused_mul_add` / `fused_mul_add_relu` / `fill_index` |
-| `_api.py` 里有 `def fn` 吗 | 没有 |
-| 整个树里 `pl.fn` 出现在哪 | **只有那条废弃消息自己**（`decorator.py:31`） |
-| C++ 侧、`docs/` 侧 | 无 |
-
-所以跟着这条消息走会拿到 `AttributeError`。消息的后半句（「pass the function as an
-annotated callable」）是真的——普通函数在 kernel 体里调用就是现在的写法,
-本仓每个样例的 `_tile_type()` 之类辅助函数都是。**按 [skill constraints](../../../../SKILL.md#constraints-and-workspace-policy)，这条落在
-`pypto/`**:
-废弃消息指向一个不存在的 API 是基建问题。
-
-**已在 `pypto/` 侧改掉**（`dev/pro-agentkit-build`）：新消息是
-
-```
-@pl.inline is deprecated and will be removed; it is already a no-op.
-Drop the decorator: a plain function called from a @pl.jit kernel body is inlined
-by the parser. Use @pl.vector_function for a vf/SIMT body.
-```
-
-并在 `test_decorator.py` 补了两条 UT：一条断言消息里不再出现 `@pl.fn`、
-提到的名字都真实存在，一条断言装饰器是 no-op。
-
-判据 8 只断言消息**以「@pl.inline is deprecated」开头**、以及 `pl.fn` 不存在,
-所以改完之后它照样绿（实测）。**故意不断言整句**：整句会随措辞变,
-而这条判据要守的是「不指向不存在的 API」这个性质。
-
-## 七、这一例不讲什么
-
-- **`pl.jit` 的全部参数**——`arch=` / `auto_mutex=` / `tiling_key` / `compile_config` 那一堆。
-  这里只用到 `auto_mutex=` 和 `pipeline=`。`auto_mutex` 的边界在
-  `references/diagnostics/validation-traps.md` #7 和 `scripts/_checks/synchronisation.py`。
-- **跨核同步的语义**——`fwd_ids` / `bwd_ids` 传给 `make_tile_group` 之后流水自己排同步,
-  手工的那套在 `datamove/move_sync` 和 `references/api/crosscore-contract.md`。
-- **`preload` 的性能效果**——**只验了数值不变，没测快了多少**。要测得先证明仪器能分辨
-  （`references/verification/board-runs.md` §七），而这一例的 kernel 小到流水填充占大头,
-  量出来的数说明不了什么。**这是明说跳过。**
-- **多个流水循环时 `preload` 给元组**——`PipelineConfig` 支持一个循环一个值,
-  这一例只有一个循环，**没测**元组形式的分配规则。
-
-设计依据见 [tooling/example-coverage.md](../../../../references/tooling/example-coverage.md) §二 四节。
+逐块缩放使用独立 NumPy 参考；带步长的循环必须保留未访问块的哨兵值。
+四种 preload 分别通过同一参考，并要求输出逐位相同。可解析的 MemorySpace
+闭包别名须保持同样的数值结果。非法 range、preload 与弃用装饰器按当前接口契约验证。
 """
 
 import warnings
@@ -159,7 +21,7 @@ import torch
 
 import pypto_pro as pp
 import pypto_pro.language as pl
-from pypto_pro._errors import InvalidArgument, InvalidVal, NotSupported, OutOfRange
+from pypto_pro._errors import InvalidArgument, NotSupported, OutOfRange
 
 from .kernel import (
     FULL_M,
@@ -311,23 +173,21 @@ def test_every_preload_gives_the_same_bits(device):
     )
 
 
-def test_an_aliased_memory_space_is_refused_on_a_cross_core_buffer(device):
-    """验证 6。跨核 buffer 的 `target_memory` 写成别名被拒。
-
-    **别名是很自然的写法**（本仓每个样例顶上都有 `FP32 = pl.DT_FP32` 这类），
-    而它只在这一个位置会炸。消息里会直接说「must set target_memory to a literal」。
-
-    这条要走一遍编译（流水变换在 jit 里做，不在 `parse_target_program` 里）。
-    """
+def test_an_aliased_memory_space_keeps_the_pipeline_result(device):
+    """可解析的 MemorySpace 闭包别名与字面量声明使用相同的流水契约。"""
     a = make_input_fp16(FULL_M, TN)
     out = torch.zeros((FULL_M, TN), dtype=torch.float16, device=device)
-    with pytest.raises(InvalidVal) as raised:
-        make_pipelined_with_an_aliased_memory_space()[None, 1](
-            torch.from_numpy(a).to(device), out
-        )
-    message = str(raised.value)
-    assert "no resolvable memory space" in message, message
-    assert "literal pl.MemorySpace" in message, message
+    make_pipelined_with_an_aliased_memory_space()[None, 1](
+        torch.from_numpy(a).to(device), out
+    )
+    torch.npu.synchronize()
+    expected = scaled_by_block_index(a, TM, NT, base=PIPELINE_BASE)
+    np.testing.assert_allclose(
+        out.cpu().numpy().astype(np.float32),
+        expected.astype(np.float32),
+        rtol=1e-3,
+        atol=1e-3,
+    )
 
 
 @pytest.mark.parametrize(

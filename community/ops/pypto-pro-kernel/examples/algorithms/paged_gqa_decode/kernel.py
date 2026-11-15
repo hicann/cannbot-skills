@@ -57,6 +57,7 @@ def _make_page_kernels(
         q_tile, k_tile, v_tile, partial_out, partial_den, query_row, key_count
     ):
         vec_mask = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
+        _first_mask = vf.update_mask(1, dtype=FP32)
         den8_mask = vf.update_mask(8, dtype=FP32)
         q0h = vf.load_align(q_tile, [query_row, 0], dist=pl.LoadDist.UNPK)
         q0 = vf.astype(q0h, vec_mask, dtype=FP32, layout=pl.CastLayout.ZERO)

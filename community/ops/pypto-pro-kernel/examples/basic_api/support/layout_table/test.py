@@ -18,7 +18,7 @@ r"""六个布局在各存储空间的合法组合，以及 `set_mm_layout_transf
 | --- | --- | --- | --- |
 | 1. 算子操作数 | `block_ops.py:1388` / `:559` | `load` 的 dst、`store` 的 src 在哪个空间 | `load` 直进 L0A |
 | 2. tile 声明 | `block_ops.py:1995` / `:3829` | 这个空间能不能声明成这个布局、这个形状 | `Mat(NN)` + FP16 |
-| 3. 数据通路 | `_A5_LOAD_COMBOS` 等三张表 | (空间, 布局, dtype) 组合能不能搬 | `GM(ND) → Mat(ZN)` |
+| 3. 数据通路 | `_3510_LOAD_COMBOS` 等三张表 | (空间, 布局, dtype) 组合能不能搬 | `GM(ND) → Mat(ZN)` |
 
 **写这一例时是一层一层撞出来的**，顺序恰好是倒着的：先按压掉 dtype 的通路表选布局,
 撞第 3 层；改对之后撞第 2 层（`Mat(NN)` 根本声明不出来）；最后两条反例撞第 1 层
@@ -53,7 +53,7 @@ r"""六个布局在各存储空间的合法组合，以及 `set_mm_layout_transf
 
 1. 每个空间：缺省布局能声明、许可集里的能声明、不在许可集里的被拒。
 2. `Mat(ZZ)` / `Mat(NN)`：`FP16` **被拒**，`FP8E8M0` **通过**。
-3. 两种拒绝消息分开：`Left(ZZ)` 说 "do not support ZZ layout on 'a5'",
+3. 两种拒绝消息分开：`Left(ZZ)` 说 "do not support ZZ layout on '3510'",
    `Left(ND)` 说 "require layout in {NZ}"。
 4. `SPACE_LAYOUTS` / `OP_SPACE_PAIRS` / `FP16_LAYOUT_PAIRS` 与三张组合表逐项相等。
 5. ``make_gm_to_l1(NZ)`` 跑得通；`ZN` **被拒**（第二层）。
@@ -89,7 +89,7 @@ load: unsupported layout/dtype combination src=GM(ND,DT_FP16) -> dst=Mat(ZN,DT_F
 改成「按 FP16 的通路表选布局」之后，`Mat(NN)` 那条又红了，但报错换了个地方：
 
 ```
-Mat tiles require layout in {DN, ND, NZ, ZN}, got NN. Default for 'a5' is NZ.
+Mat tiles require layout in {DN, ND, NZ, ZN}, got NN. Default for '3510' is NZ.
 ```
 
 `block_ops.py:1995`——**这是 tile 声明那一层**，跟搬运没关系。通路表里确实有
@@ -102,7 +102,7 @@ Mat tiles require layout in {DN, ND, NZ, ZN}, got NN. Default for 'a5' is NZ.
 
 | 情形 | 消息 | 规则 |
 | --- | --- | --- |
-| `Left`/`Right`/`Acc` 的 `ZZ`/`NN` | `tiles do not support ZZ layout on 'a5'; ...` | `_REJECTED_LAYOUTS_ON_A5` 那条单独的 |
+| `Left`/`Right`/`Acc` 的 `ZZ`/`NN` | `tiles do not support ZZ layout on '3510'; ...` | `_REJECTED_LAYOUTS_ON_A5` 那条单独的 |
 | 其余不在许可集里的 | `tiles require layout in {NZ}, got ND.` | 许可集那条 |
 
 为什么分两条：`Left` 的许可集算出来是 `{ZZ, NZ}`（**A3 的缺省是 `ZZ`**，A5 是 `NZ`,
@@ -111,7 +111,7 @@ Mat tiles require layout in {DN, ND, NZ, ZN}, got NN. Default for 'a5' is NZ.
 而它的可观测后果就是消息不一样。
 
 判据 3 分别断言两段文本。合成一条「反正会拒」会丢掉这个区别,
-而下一个人看到 "do not support ... on 'a5'" 时最想知道的正是「那 A3 上行吗」。
+而下一个人看到 "do not support ... on '3510'" 时最想知道的正是「那 A3 上行吗」。
 
 ## 七、`set_mm_layout_transform` 只验到「被接受」
 
@@ -158,7 +158,7 @@ ST 里的用法都是**开了再关**，这一例照做。**不关会不会影�
 - **dtype 维的全貌**——三张表的每一行还带源／目的 dtype，`load` 那张 477 行里绝大部分
   差别在 dtype。dtype 面在 ``support/dtype_carriers``。这一例只取 FP16 一个切片,
   **外加 `Mat(ZZ/NN)` 需要 FP8E8M0 这一条**。
-- **`quant` 那张额外的 store 表**——`_A5_STORE_QUANT_COMBOS` 没进这一例，量化的 store
+- **`quant` 那张额外的 store 表**——`_3510_STORE_QUANT_COMBOS` 没进这一例，量化的 store
   在 fixpipe 一章。
 - **A3 上的规则**——只验 A5。`Left` 的 A3 缺省是 `ZZ` 这件事从源码读到,
   **没有 A3 机器可测**。
@@ -223,20 +223,24 @@ def _rows(space_name):
 
 
 def _tables():
-    """三张表，一起取。**这是能力探针**：取不到就说明内部接口变了。"""
-    return {
-        "load": block_ops._A5_LOAD_COMBOS,
-        "store": block_ops._A5_STORE_COMBOS,
-        "move": block_ops._A5_MOVE_COMBOS,
-    }
+    """从当前架构登记入口读取普通搬运表，单独校验内部接口形状。"""
+    registry = getattr(block_ops, "_LAYOUT_DTYPE_COMBOS", None)
+    assert isinstance(registry, dict), "框架未提供布局/dtype 登记入口，需核对当前内部接口"
+    tables = {}
+    for op in ("load", "store", "move"):
+        by_arch = registry.get(op)
+        assert isinstance(by_arch, dict), f"{op} 未提供按架构登记的组合表"
+        selected = [pair for arch, pair in by_arch.items() if getattr(arch, "name", None) == "DAV_3510"]
+        assert len(selected) == 1, f"{op} 应恰好登记一份 DAV_3510 普通/量化组合表"
+        pair = selected[0]
+        assert isinstance(pair, tuple) and len(pair) == 2, f"{op} 的普通/量化表登记格式发生变化"
+        tables[op] = pair[0]
+    return tables
 
 
 def _layout_name(value):
-    """把表里的布局值变成名字。通配项（`_ANY_LAYOUT`，一个裸 `object()`）返回 None。"""
-    text = str(value)
-    if "TensorLayout" not in text:
-        return None
-    name = text.split(".")[-1].split(":")[0].strip("<>")
+    """读取布局枚举的成员名；没有成员名的通配项返回 None。"""
+    name = getattr(value, "name", None)
     return name if name in LAYOUTS else None
 
 
@@ -265,7 +269,7 @@ def _project_fp16_pairs():
     found = defaultdict(set)
     for op, table in _tables().items():
         for row in table:
-            if str(row[4]) != "fp16" or str(row[5]) != "fp16":
+            if row[4] != pl.DT_FP16 or row[5] != pl.DT_FP16:
                 continue
             src, dst = _layout_name(row[2]), _layout_name(row[3])
             if src is not None and dst is not None:
@@ -360,7 +364,7 @@ def test_the_two_refusal_messages_are_different():
         _parse(
             make_declaration_probe(pl.MemorySpace.Left, pl.ZZ), pp.ir.SectionKind.Vector
         )
-    assert "do not support ZZ layout on 'a5'" in str(rejected.value), str(
+    assert "do not support ZZ layout on '3510'" in str(rejected.value), str(
         rejected.value
     )
     assert refusal_kind("Left", "ZZ") == "rejected-on-a5"

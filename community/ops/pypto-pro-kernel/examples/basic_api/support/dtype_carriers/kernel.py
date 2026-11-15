@@ -111,13 +111,9 @@ def int4_via_reinterpret(
 ):
     """同样的路子对 4 位的 `DT_INT4` **走不通**：编译失败（`jit.py:2465`）。
 
-    **原因是硬件没有 int4**，不是框架少了一条路。三处独立印证：搬运表里 4 位只有
-    `FP4E2M1` / `FP4E1M2`；`DT_INT4` 在整个 `pypto_pro.language` 面一次都没出现；
-    ascriptor（同一块硬件的上一代编译器）的 a5 dtype 表同样只有 `fp4_e2m1` / `fp4_e1m2`,
-    它的 `int4` 只是塞在 int32 里的位负载（`pack_int4_to_int32` / `unpack_int32_to_int4`）。
-
-    所以 `INT4` / `UINT4` / `FP4` / `HF4` 在枚举里是占位。A5 上要用 4 位数据就用
-    `FP4E2M1` / `FP4E1M2`。
+    The selected transfer path admits FP4E2M1/FP4E1M2 and rejects the legacy
+    INT4 reinterpretation. This probe establishes that path and toolchain
+    boundary, not a general impossibility of packed integer payloads.
     """
     g = pl.make_tile_group(type=_tile_type(pl.DT_FP4E2M1), addrs=_A, mutex_ids=[0])
     with pl.section_vector():

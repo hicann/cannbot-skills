@@ -15,6 +15,7 @@ from _checks.api_policy import (
     TILE_RULE,
     VF_RULE,
     VF_UNAVAILABLE,
+    LOOP_RULE,
     check,
     inspect,
 )
@@ -24,6 +25,43 @@ def write(tmp_path, code):
     path = tmp_path / "probe.py"
     path.write_text(code)
     return path
+
+
+@pytest.mark.parametrize("decorator", ["@pl.jit", "@pl.jit(arch='a5')", "@compiled(arch='a5')"])
+def test_native_python_range_is_diagnosed_without_rejecting_factory_loops(tmp_path, decorator):
+    source = write(tmp_path,
+        "import pypto_pro.language as pl\n"
+        "from pypto_pro.language import jit as compiled\n"
+        "def factory():\n"
+        "    for value in range(2):\n"
+        "        pass\n"
+        f"    {decorator}\n"
+        "    def kernel():\n"
+        "        for value in range(2):\n"
+        "            pass\n"
+        "        for value in pl.range(2):\n"
+        "            pass\n"
+        "    return kernel\n"
+        "def host_again():\n"
+        "    for value in range(2):\n"
+        "        pass\n")
+    findings = check(source, pypto_root=tmp_path / "unavailable")
+    assert [(finding.rule, finding.lineno) for finding in findings] == [(LOOP_RULE, 8)]
+
+
+@pytest.mark.parametrize("iterator,waived", [("range", True), ("pl.range", False)])
+def test_native_loop_counterexample_claim_requires_a_real_violation(tmp_path, iterator, waived):
+    source = write(tmp_path,
+        "import pypto_pro.language as pl\n"
+        "@pl.jit\n"
+        "def kernel():\n"
+        '    """反例：native-loop-iterator —— Intentional parser rejection."""\n'
+        f"    for value in {iterator}(2):\n"
+        "        pass\n")
+    findings = check(source, pypto_root=tmp_path / "unavailable")
+    assert len(findings) == 1
+    assert findings[0].rule == LOOP_RULE
+    assert findings[0].waived is waived
 
 
 @pytest.mark.parametrize(
@@ -194,3 +232,61 @@ def bad():
 """,
     )
     assert not check(source)[0].waived
+
+
+@pytest.fixture
+def macro_registry(tmp_path):
+    stub = tmp_path / "python/pypto_pro/language/_vf_api.py"
+    stub.parent.mkdir(parents=True)
+    stub.write_text(
+        "raise RuntimeError('source inspection must not import')\nclass Vf:\n"
+        "    def full(): pass\n    def load_align(): pass\n"
+    )
+    registry = tmp_path / "framework/src/interface/ir/op/vf_ops.cpp"
+    registry.parent.mkdir(parents=True)
+    registry.write_text(
+        '#include "ir/reg_op.h"\nREGISTER_OP(VF_FULL)\n'
+        'REGISTER_OP(VF_LOAD_ALIGN)\nREGISTER_OP(VF_CPP_ONLY)\n'
+        '// REGISTER_OP(IGNORED_COMMENT)\n'
+    )
+    header = tmp_path / "framework/include/ir/reg_op.h"
+    header.parent.mkdir(parents=True)
+    header.write_text(
+        '#define VF_FULL "vf.full"\n#define VF_LOAD_ALIGN "vf.load_align"\n'
+        '#define VF_CPP_ONLY "vf.cpp_only" // registered outside Python stub\n'
+    )
+    return tmp_path, registry, header
+
+
+@pytest.mark.parametrize("operation,expected", [("cpp_only", []), ("subs", [VF_RULE])])
+def test_macro_registry_checks_real_membership(macro_registry, operation, expected):
+    root, _, _ = macro_registry
+    source = write(root, f"from pypto_pro.language import Vf as vf\nvf.{operation}()\n")
+    findings, counts = inspect(source, pypto_root=root)
+    assert [item.rule for item in findings] == expected
+    assert counts["unverified"] == 0
+    if findings:
+        assert "C++ macros=" in findings[0].message
+
+
+@pytest.mark.parametrize("argument", ["VF_UNKNOWN", "MAKE_OP(VF_FULL)"])
+def test_unresolved_macro_registry_does_not_claim_absence(macro_registry, argument):
+    root, registry, _ = macro_registry
+    registry.write_text(registry.read_text() + f"REGISTER_OP({argument})\n")
+    source = write(root, "from pypto_pro.language import Vf as vf\nvf.subs()\n")
+    findings, counts = inspect(source, pypto_root=root)
+    assert [item.rule for item in findings] == [VF_UNAVAILABLE]
+    assert findings[0].advisory and counts["unverified"] == 1
+    assert "unresolved registrations=" in findings[0].message
+
+
+@pytest.mark.parametrize("header_state", ["missing", "ambiguous"])
+def test_incomplete_macro_definitions_remain_unverified(macro_registry, header_state):
+    root, _, header = macro_registry
+    if header_state == "missing":
+        header.unlink()
+    else:
+        header.write_text(header.read_text() + '#define VF_CPP_ONLY "vf.other"\n')
+    source = write(root, "from pypto_pro.language import Vf as vf\nvf.subs()\n")
+    findings = check(source, pypto_root=root)
+    assert [item.rule for item in findings] == [VF_UNAVAILABLE]

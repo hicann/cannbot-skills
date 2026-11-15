@@ -17,13 +17,13 @@ r"""``vf.load_align`` / ``vf.store_align``：两个 API 名，一整个模式面
 （一条指令读 2*VL 拆成两个寄存器）、双搬出（两个寄存器交错写 2*VL）。多数取值是同一机制的位宽变体
 （`_B8` / `_B16` / `_B32`），所以这一例按**机制**组织。
 
-这也是为什么 ascriptor 那边看起来「有我们没有的接口」：它的 `ub_to_reg` / `load_cont` /
-`load_interleave` / `store_cont` / `store_interleave` 全是这两个 API 的模式。设计文档 §八点四 里
-记了这个认错的过程。
+Contiguous, interleaved and distributed transfers are modes of the native
+load/store API families. Inspect `dist` and copy-mode parameters before
+concluding that a separate transfer API is missing.
 
-## 二、实测能用的机制（FP32）
+## 二、搬运机制
 
-每一条都是 2026-09-27 在 A5 上逐个试出来的：
+以下机制均由本例在 A5 上逐项验证：
 
 | 机制 | `dist=` | 结果 |
 | --- | --- | --- |
@@ -35,31 +35,22 @@ r"""``vf.load_align`` / ``vf.store_align``：两个 API 名，一整个模式面
 | 只写首元素 | `FIRST_ELEMENT`（store） | 只有 lane 0 被写 |
 | **双搬出** | `INTLV_B32`（store） | `1,65,2,66,...` —— 要传**两个** src |
 | **非连续** | `data_copy_mode=DATA_BLOCK_COPY` | 隔 `block_stride` 个 block 取一个 |
+| MaskReg 位采样 | `DS` | 512bit 位图抽取偶数位，写出32字节 |
 
 ## 三、三条实测出来的坑
 
-### 3.1 `US` / `DS` 在 32 位下静默给错
+### 3.1 通用 `DS` 采样的是 MaskReg 位图
 
-枚举里只有 `US` / `US_B8` / `US_B16` 和 `DS` / `DS_B8` / `DS_B16`——**没有 `*_B32`**。也就是说
-上采样/下采样只在 8 位和 16 位宽存在。
+通用 `US` / `DS` 选择 MaskReg 搬入路径，采样的是原始位图，不是浮点元素。MaskReg 写出只有32字节；不能把其余未写的 UB 字节当成完整 FP32 输出，也不能假设它们为零。
 
-在 FP32 上用 `DS`：**不报错，拿到一块零**。验证 6 把这件事钉成一条会失败的测试——哪天行为变了
-（改成报错也好，改成可用也好），它会立刻告诉我们。
-
-**这是本例最值得记的一条**：其余机制用错了会给出看得出来的怪结果，这一条给出的是「看起来像没算」
-的零，最容易被当成别处的问题。
+本例只验证通用 `DS` 的 MaskReg 路径：原始位图逐字节对照独立位运算参考，写出之外的字节保留哨兵；不把位图解释为 FP32 数值，也不推断其他采样枚举的可用性。
 
 ### 3.2 `block_stride` 必须作关键字传
 
-`vf.load_align` 的 codegen **按参数个数分派**（`backend_cce_vf_ops.cpp:1016`）：四个参数的形式是
-**双搬入**（两个 dst + ptr + offset）。把 `block_stride` 当位置参数传会凑成四个，撞上那条路径并报：
-
-```
-vf.load_align 4-arg (de-interleave) form does not support data_copy_mode
-```
-
-注意官方文档说 `block_stride`「可作位置参数（第 4 个）」——那是对 `store_align` 说的。load 侧受
-双搬入形式挤占。**这条是实测踩出来的，文档读不出来。**
+`vf.load_align` 的 `block_stride`、`repeat_stride`、`data_copy_mode` 等可选参数是 keyword-only。
+把 `block_stride` 当位置参数传会在参数检查阶段以 `ValueError` 拒绝，消息指出
+`vf.load_align() too many positional arguments`。双搬入通过 `dist=DINTLV_B32` 选择，不能把
+可选的位置参数当成普通搬入的步长。
 
 ### 3.3 DataBlock 模式改变两个参数位置的含义
 
@@ -88,10 +79,10 @@ vf.load_align 4-arg (de-interleave) form does not support data_copy_mode
 4. `store_align` 的 `NORM` 只写 preg 选中的 32 个，其余保持哨兵；`FIRST_ELEMENT` 只写 lane 0。
 5. DataBlock 模式在 `block_stride=2` 下等于隔块抽取——**用 stride=2 而不是 1**，因为 stride=1
    等于连续，测不出非连续。
-6. `DS` 在 FP32 下给全零（钉住当前的错误行为）。
-7. 把 `block_stride` 当位置参数传，必须被拒且消息里点名 "4-arg"。
+6. 通用 `DS` 的位图采样通过独立参考、尾部哨兵及输出守卫。
+7. 把 `block_stride` 当位置参数传，必须被参数检查拒绝并指出位置参数过多。
 
-第 5 条那个「stride 不能取 1」和第 6 条的「钉错误行为」是这一例里两个刻意的选择，不是随手写的。
+第 5 条使用非单位 stride，第 6 条同时验证写入内容和未写范围，分别排除空测与未初始化数据。
 
 ## 六、这一例不讲什么
 
@@ -127,7 +118,7 @@ from .kernel import (
     align_load_dist,
     align_store_dist,
     align_store_intlv,
-    align_width_trap,
+    align_load_mask_ds,
 )
 
 FP32 = pl.DT_FP32
@@ -229,37 +220,37 @@ def test_the_datablock_mode_skips_blocks_by_stride(device):
     assert not np.array_equal(want[0, :VL_FP32], x[0, :VL_FP32]), "stride 没起作用"
 
 
-def test_downsample_on_32_bit_silently_gives_zeros(device):
-    """验证 6。钉住一个**当前的错误行为**：`LoadDist.DS` 在 FP32 上不报错，给全零。
-
-    枚举里没有 `DS_B32`——上采样/下采样只在 8 位和 16 位宽存在。这条测试不是在说「零是对的」，
-    是在说「现在是零」：行为一旦变成报错或变成可用，它会立刻失败，那时回来改。
-    """
-    x = ref.make_input(N)
-    out = _outs(device, 1)[0]
-    align_width_trap(_dev(x, device), out)
-    torch.npu.synchronize()
-
-    got = out.cpu().numpy()[0, :VL_FP32]
-    np.testing.assert_array_equal(got, ref.load_ds_on_fp32(N)[0, :VL_FP32])
-    # 说清「静默」：没有任何异常抛出，而结果显然不是下采样该有的样子
-    assert not np.array_equal(got, x[0, slice(0, VL_FP32 * 2, 2)][:VL_FP32]), (
-        "如果这里相等，说明 DS 其实生效了"
-    )
+@pytest.mark.parametrize("pattern", ["ramp", "alternating"])
+def test_mask_downsample_preserves_bits_and_the_unwritten_tail(device, pattern):
+    """通用 DS 按bit采样，MaskReg写出之外的输出和守卫不得改变。"""
+    if pattern == "ramp":
+        source = np.arange(N, dtype=np.uint8).reshape(1, N)
+    else:
+        source = np.resize(
+            np.array([0x00, 0xFF, 0xAA, 0x55, 0xF0, 0x0F, 0xCC, 0x33], dtype=np.uint8),
+            (1, N),
+        )
+    x = _dev(source, device)
+    backing = torch.full((N + 128,), 0xE5, dtype=torch.uint8, device=device)
+    out = backing[64:-64].view(1, N)
+    for sentinel in (0xE5, 0x5A):
+        out.fill_(sentinel)
+        align_load_mask_ds(x, out)
+        torch.npu.synchronize()
+        np.testing.assert_array_equal(out.cpu().numpy(), ref.load_mask_ds(source, sentinel))
+        np.testing.assert_array_equal(backing[:64].cpu().numpy(), 0xE5)
+        np.testing.assert_array_equal(backing[-64:].cpu().numpy(), 0xE5)
+    np.testing.assert_array_equal(x.cpu().numpy(), source)
 
 
 def test_block_stride_as_a_positional_argument_is_refused():
-    """验证 7。`block_stride` 位置传会撞上双搬入形式。
-
-    不需要卡——这是 codegen 期的检查，但 codegen 要走到编译。所以这里只断言「被拒」，
-    用解析 + 编译触发。
-    """
+    """验证 7。参数检查拒绝用位置参数传 keyword-only 的 `block_stride`。"""
 
     @pl.vector_function
     def _bad(src, dst):
         preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
         select = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
-        # block_stride 当第 3 个位置参数 -> 凑成四参数 -> 被当成双搬入
+        # block_stride 必须显式命名；这里故意传成位置参数。
         r = vf.load_align(
             src, select, 2, data_copy_mode=pl.DataCopyMode.DATA_BLOCK_COPY
         )
@@ -278,10 +269,9 @@ def test_block_stride_as_a_positional_argument_is_refused():
             pl.store(out, to, [0, 0])
 
     x = ref.make_input(N)
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(ValueError) as raised:
         bad(torch.from_numpy(x), torch.zeros([1, N]))
 
     text = str(raised.value)
-    assert "4-arg" in text or "de-interleave" in text or "INVALID_ARGUMENT" in text, (
-        text
-    )
+    assert "vf.load_align() too many positional arguments" in text, text
+    assert "block_stride" in text and "passed by keyword" in text, text

@@ -300,10 +300,11 @@ def get_spr_inside_a_vector_function(
 
 @pl.vector_function
 def _squeeze_result_discarded(src, dst):
-    """反例：`vf.squeeze` 的返回值不接。"""
+    """反例：squeeze 的 value-form 结果未赋值，CCE 代码生成阶段拒绝。"""
     preg = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=FP32)
     a = vf.load_align(src, 0)
     cond = vf.gt(a, pl.const(0.0, FP32), preg)
+    vf.clear_spr()
     vf.squeeze(a, cond, gather_mode=pl.SqueezeMode.NO_STORE_REG)
     vf.store_align(dst, a, preg, 0)
 
@@ -312,11 +313,7 @@ def _squeeze_result_discarded(src, dst):
 def squeeze_without_assignment(
     a: pl.Tensor[[1, N], FP32], out: pl.Tensor[[1, N], FP32]
 ):
-    """反例：写 `vf.squeeze(a, cond)` 当语句。解析期拒，要求赋值形式。
-
-    收在这一例是因为**它正是想「只为副作用（写 AR）调 squeeze」时的第一反应**——
-    那条路连语法都不成立。
-    """
+    """反例：value-form squeeze 缺少赋值目标，在真实编译路径检查拒绝。"""
     ga = pl.make_tile_group(type=_tile_type(), addrs=_A, mutex_ids=[0])
     go = pl.make_tile_group(type=_tile_type(), addrs=_B, mutex_ids=[1])
     with pl.section_vector():

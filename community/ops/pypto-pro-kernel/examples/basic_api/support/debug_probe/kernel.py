@@ -140,7 +140,7 @@ def probe_scalar_gm_writes(out: pl.Tensor[[128], I32]):
 
 
 # ---------------------------------------------------------------------------
-# 六、pto_assert：条件不成立就中止
+# 6. pto_assert: logging and subsequent control flow
 # ---------------------------------------------------------------------------
 #
 # **接口名是 `pl.pto_assert`，不是 `assert_` 也不是 `assert`**（`assert` 是 Python 关键字，
@@ -170,8 +170,8 @@ def _assert_failing_kernel(out: pl.Tensor[[1], I32], offset: pl.DT_INT32):
     设备日志打的是**条件的源码文本**：`Assertion failed: offset == 12345`，随后是格式化消息。
     每个核各打一份。
 
-    `_api.py` 的 docstring 说 *"abort if condition is false"*，那句是错的；官方文档
-    `pto_assert.md:20` 和框架自己的 ST 都写明只打日志、不中止。要真的停用 `pl.trap()`。
+    The current assertion contract and installation boundaries belong to `references/api/support.md`.
+    This probe writes only valid output addresses to observe continuation; it does not guard indexed access.
     """
     with pl.section_vector():
         out[0] = 7

@@ -6,6 +6,7 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
+# pylint: disable=line-too-long
 """写法：原始。带运行期有效长度的逐行 VF softmax。
 
 契约：FP32 x[M, N]，INT32 lengths[M]，0 <= lengths[i] <= N。
@@ -18,7 +19,10 @@
 
 验证边界：行为版本 872df763f，CANN 9.2.0，Ascend950PR。
 容差与边界由 test.py 固定，不代表性能已优化。
+
+example-query: {"aliases":["runtime prefix softmax","运行期前缀softmax"],"term_groups":[["softmax"],["runtime prefix","prefix length","runtime length","有效前缀","有效长度"]],"facets":{"source_dtype":["FP32"],"destination_dtype":["FP32"]}}
 """
+# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf  # noqa: N813
@@ -45,11 +49,7 @@ def make_masked_softmax(n_cols):
 
         for block in pl.range(0, blocks, 1):
             offset = block * VL
-            active = length - offset
-            if active > VL:
-                active = VL
-            if active < 0:
-                active = 0
+            active = pl.min(VL, pl.max(0, length - offset))
             prefix = vf.update_mask(active, dtype=FP32)
             values = vf.load_align(tile, [0, offset])
             safe_values = vf.select(values, neg_inf, prefix)
@@ -60,11 +60,7 @@ def make_masked_softmax(n_cols):
         row_sum = vf.full(0.0, all_lanes)
         for block in pl.range(0, blocks, 1):
             offset = block * VL
-            active = length - offset
-            if active > VL:
-                active = VL
-            if active < 0:
-                active = 0
+            active = pl.min(VL, pl.max(0, length - offset))
             prefix = vf.update_mask(active, dtype=FP32)
             values = vf.load_align(tile, [0, offset])
             safe_values = vf.select(values, max_broadcast, prefix)
@@ -78,11 +74,7 @@ def make_masked_softmax(n_cols):
         denominator_broadcast = vf.full(denominator, all_lanes)
         for block in pl.range(0, blocks, 1):
             offset = block * VL
-            active = length - offset
-            if active > VL:
-                active = VL
-            if active < 0:
-                active = 0
+            active = pl.min(VL, pl.max(0, length - offset))
             prefix = vf.update_mask(active, dtype=FP32)
             values = vf.load_align(tile, [0, offset])
             safe_values = vf.select(values, max_broadcast, prefix)

@@ -29,7 +29,7 @@ r"""CTRL 位域的读改复位，与 `pl.get_spr()`（AR）。
 4. ``clear_bit48_then_read`` 连启动三次：每次读到的入口值都是 `1`。
 5. ``ar_around_squeeze`` 与 ``ar_without_any_vf``：AR 的所有读数**彼此相等**——
    四个有效计数 × section 前后，加上完全不带 vf 的控制项。**不断言具体值。**
-6. 四条被拒的写法：不可写位、两个未定义原子编码、`get_spr` 进 vf 体、`squeeze` 不接返回值。
+6. 被拒的写法：不可写位、两个未定义原子编码、`get_spr` 进 vf 体。value-form squeeze 未赋值的写法在 CCE 代码生成阶段被拒绝，测试走真实编译路径。
 
 **判据 1 的写法值得说**：整寄存器和单个位**都是实测量**，判据比的是这两个实测量彼此一致，
 而不是拿它们去对一个我猜的默认值。猜错默认值不会让这条红——那件事由判据 1 的**第二半**
@@ -155,7 +155,7 @@ import pytest
 import torch
 
 import pypto_pro as pp
-from pypto_pro._errors import InvalidVal, NotSupported
+from pypto_pro._errors import InvalidOperation, InvalidType, NameNotFound, NotSupported
 
 from .kernel import (
     DOCUMENTED_DEFAULT,
@@ -364,7 +364,7 @@ def test_the_undefined_atomic_dtype_encoding_is_refused(device):
     **这条被拒是好事**：C++ 注释说这个编码会让设备 fault，守卫把它挡在编译期,
     而且消息把合法取值列了出来（0-6 = none/float/half/int16/int32/int8/bfloat16）。
     """
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(InvalidType) as raised:
         _compile(write_undefined_atomic_dtype, device)
     message = str(raised.value)
     assert "undefined atomic operand dtype" in message, message
@@ -381,7 +381,7 @@ def test_the_undefined_atomic_op_encoding_is_refused(device):
     **绕过的那一版刻意不写**——在共享机上试一个已知会 fault 的写法不值当。
     这是明说跳过，不是「验过没问题」。
     """
-    with pytest.raises(RuntimeError) as raised:
+    with pytest.raises(NameNotFound) as raised:
         _compile(write_undefined_atomic_op, device)
     assert "undefined atomic op type" in str(raised.value), str(raised.value)
 
@@ -398,11 +398,11 @@ def test_get_spr_inside_a_vector_function_is_refused():
     ), str(raised.value)
 
 
-def test_a_squeeze_whose_result_is_discarded_is_refused():
-    """验证 6 之五。`vf.squeeze(a, cond)` 当语句写会被拒，要求赋值形式。
-
-    收这条是因为它正是「只为副作用调 squeeze」的第一反应——那条路连语法都不成立。
-    """
-    with pytest.raises(InvalidVal) as raised:
-        _parse(squeeze_without_assignment)
-    assert "must use the assignment form" in str(raised.value), str(raised.value)
+def test_a_squeeze_whose_result_is_discarded_is_refused(device):
+    """真实编译路径拒绝 value-form squeeze 缺少赋值目标，不只检查解析阶段。"""
+    host = np.linspace(-2.0, 2.0, N, dtype=np.float32).reshape(1, N)
+    out = torch.full((1, N), float("nan"), dtype=torch.float32, device=device)
+    with pytest.raises(InvalidOperation) as rejected:
+        squeeze_without_assignment[None, 1](torch.from_numpy(host).to(device), out)
+    assert "vf.squeeze value-form call requires an assignment target" in str(rejected.value)
+    assert rejected.value.span is not None

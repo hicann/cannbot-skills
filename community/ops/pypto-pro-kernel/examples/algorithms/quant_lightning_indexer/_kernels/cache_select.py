@@ -52,11 +52,11 @@ def emit_cached(
     topk,
     base,
     begin,
-    mapped=False,
-    mapping=0,
-    permuted=False,
-    offset=0,
-    write_values=True,
+    mapped,
+    mapping,
+    permuted,
+    offset,
+    write_values,
 ):
     p = vf.create_mask(pattern=pl.MaskPattern.ALL, dtype=U32)
     zero = vf.full(0, p, dtype=U32)

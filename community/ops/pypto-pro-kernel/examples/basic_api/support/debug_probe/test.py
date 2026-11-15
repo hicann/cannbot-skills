@@ -94,7 +94,7 @@ def _run_child(case, expect_zero_exit=True):
 
 
 # ---------------------------------------------------------------------------
-# printf
+# Device printf output checks.
 # ---------------------------------------------------------------------------
 
 
@@ -301,7 +301,6 @@ def run_case(case: str) -> None:
     由 test.py 以 `python -c "...run_case('printf')"` 的形式在子进程里调。
     """
     import numpy as np
-    import torch
     import torch_npu  # noqa: F401
 
     # 报回工具链身份：子进程如果 import 到另一个 pypto_pro，这一格的结论就不是

@@ -38,10 +38,12 @@ def _names(node):
 
 def check(path: Path) -> list[Finding]:
     source = read(path)
-    findings = []
-    for function in vector_functions(source):
+    results = []
+
+    def inspect_function(function):
+        findings = []
         if not _simd_vf(function, source.pl):
-            continue
+            return findings
         nodes = list(_body_nodes(function))
         runtime = {
             a.arg
@@ -117,4 +119,8 @@ def check(path: Path) -> list[Finding]:
         visitor = Visitor()
         for statement in function.body:
             visitor.visit(statement)
-    return findings
+        return findings
+
+    for candidate in vector_functions(source):
+        results += inspect_function(candidate)
+    return results
