@@ -51,6 +51,19 @@ GM 中间张量及显式 shape/dtype/layout 分派。只在用户明确要求单
 `single_kernel`：只声明一个 `@tla.kernel`、每次 `run` 只 launch 一个 kernel，不得为编译期
 变体声明独立 kernel。
 
+`single_kernel` 模式写代码前先读 DESIGN 的「融合与合并」（`performance` 模式没有这一节，
+直接跳过）：
+
+- `structural_verdict=single`：按普通单 kernel 实现。
+- `structural_verdict=multi` 且 `merge_required: true`：以多 kernel 版本作为语义与性能
+  基线（已有可运行的当前版本就直接复用，没有才先写一版），再按边界清单逐条加栅栏合并；
+  原语与 pipe 直接查
+  [`knowledge/optimization/multi-kernel-to-single-kernel.md`](../../knowledge/optimization/multi-kernel-to-single-kernel.md)
+  的判定表选型，不重新调研同步 API；该条未覆盖的边界才补查一次，并把结论回写该条。
+  合并后与基线做逐位对比与同进程配对计时，两项结果都记入 `ITERATIONS.md`。
+- 合并不可行（DESIGN 已给容量账与候选方案）时按候选方案执行，不得为了"单 kernel"改数学
+  语义或降低精度。
+
 每个 kernel 保持自包含：固定配置在函数内定义，运行时配置走形式参数或 tensor metadata；
 host 不通过 `global`、模块级可变状态或 closure 注入语义。
 
@@ -58,6 +71,21 @@ host 不通过 `global`、模块级可变状态或 closure 注入语义。
 `skeleton`：有真实环境时立即运行并记 `passed` / `failed`，附命令与日志路径；纯本地生成
 模式记 `blocked` / `not_run`，写好编译与最小 shape 运行命令，留作远端第一个执行动作。在这条记录
 产生前，禁止写实现文件、禁止写探针、禁止编译。
+
+**骨架是独立产物。** 骨架 kernel 固定落在 `tools/skeleton_gemm.py`（多 GEMM 时
+`tools/skeleton_<gemm-id>.py`），与主实现文件分开落盘、互不覆盖；
+`tools/skeleton_profile.py` 只 import 它构造输入并计时，不复制 kernel 代码。`skeleton` 行的
+Kernel SHA256 填骨架脚本的摘要，Evidence 填日志路径，远端跑的必须是本地冻结的这份骨架，而不是
+从已扩展的主实现里临时摘出来的近似物。骨架判定选中的 `BM/BN/BK/SK` 与块映射回写 `DESIGN.md`，
+主实现照抄这组常量；两份代码允许重复，tile 不许各自演化。
+
+**`remote-detached` 的首跑顺序。** 远端连上后先原样运行 DESIGN 登记为 `not_run` 的参考样例
+（不改源码，覆盖其关键机制，如 scatter 需 S>0），把结果回填 DESIGN 的「参考样例可运行性」；
+样例失败时按 DESIGN 写明的降级方案执行，再跑骨架脚本。骨架判定
+`passed` / `passed (waived)` / `bandwidth-bound` 之后才允许跑主实现的 focused test；骨架
+`failed` 时先改骨架再重跑，不得跳过判定直接验主实现。补跑后原地把 `skeleton` 行的 `blocked`
+改成实际判定、回填 Skeleton Performance 表，`implement` 行写明骨架判定结论与骨架脚本 SHA-256。
+本地生成阶段骨架与主实现可以一起写完，但验证顺序仍固定为样例基线、骨架先行。
 
 **先生成、再推进**：一开始就拿到服务器信息，或本来就在服务器上，也要先完成设计与代码
 生成再进入编译、上板等动作；不得先做环境探测、装环境或跑标杆。
@@ -98,16 +126,44 @@ CV 融合算子拆成独立 Cube / Vector kernel 的理由；最终交付结构�
 
 禁止的反模式：
 
-- 单缓冲 + 每个 `copy` 紧跟 `set_flag/wait_flag`（强制 MTE2→MTE1→CUBE 串行）；
+- 单缓冲 + 每个 `copy` 紧跟 lock/unlock（强制 MTE2→MTE1→CUBE 串行）；
 - `BK == SK`（MTE1 与 CUBE 无法交错）；
-- 多个 ready flag 共享同一个 MTE1→CUBE 对（会死锁）；
+- 多个缓冲共享同一个 mutex（依赖对合并，会死锁）；
 - 只做 L1 双缓冲、L0 仍单缓冲（单独收益只有 3%~5%，拿不到第 3 级的 20%~30%）。
 
-要偏离模板，必须在 `ITERATIONS.md` 写清“为什么双缓冲 / `auto_sync` 在此不可用”，否则
-skeleton 不计通过。目标 DSL 版本不支持 `auto_sync` 时，按官方 flag-sync 样例
-（`examples/python/tla_dsl/` 下的 `basic_matmul.py`）实现等价双缓冲，结构不变，并在
-账本记录样例路径。各级判据见
+骨架的核内同步只允许用 `tla.mutex` 显式同步，结构照
+`examples/python/tla_dsl/experimental/kernel/matmul/matmul_row_exp_scatter_add/` 的 GEMM 段。
+骨架脚本里不得出现 `auto_sync`、`tla.flag` / `set_flag` / `wait_flag`、`tla.pipe_barrier`
+与 `cross_flag`；出现即 skeleton 不通过（自检第 8 项）。
+
+唯一豁免：主参考样例本身不使用 mutex，且与目标结构高度匹配时，可按该样例的同步原语实现；
+必须在 `DESIGN.md` 与 `ITERATIONS.md` 写明样例路径、所用原语与豁免理由。除此之外没有其他
+豁免。各级判据见
 [`knowledge/dsl/pattern-gemm-optimization-ladder`](../../knowledge/dsl/pattern-gemm-optimization-ladder.md)。
+
+**脚本骨架随模板发布，不要现写驱动器**
+
+复制三份模板后只填配置：
+
+- `templates/skeleton_gemm.py` → `tools/skeleton_gemm.py`，只改 kernel 体；缓冲份数、mutex
+  配对与双缓冲嵌套保持模板原样；
+- `templates/skeleton_profile.py` → `tools/skeleton_profile.py`，逻辑不改；
+- `templates/skeleton_spec.json` → `tools/skeleton_spec.json`，每个 GEMM 一条
+  `name / m / n / k / layout_a / source`。
+
+驱动器已实现本节全部约束：设备容量与核数读取（失败时回退并标注来源）、硬约束预筛、整除
+块映射候选、时间模型与标定缓存（`.catlass-dsl/skeleton_calibration.json`）、`--dummy`
+排序后用 randn 主判、profile 按 `Step Id` 分轮取数，以及 `--ledger-row` 直接输出账本两行。
+
+三份模板不绑定 SoC 与算子：容量 / 核数 / L2 从设备读，峰值与带宽来自标定缓存，tile 由设备
+容量反推（`--tile` 留空即自动，不要从别的实验里照抄固定 tile）；算子相关的只有 spec 的
+stage 与 `skeleton_gemm.py` 的 kernel 体。spec 的 `layout_a` / `layout_b` 可取 `row` 或 `col`
+（`col` 即零拷贝转置视图，A 物理 K×M、B 物理 N×K），kernel 内不用加转置分支，C 固定 row。
+编译选项同理留空，走运行时默认目标，不要硬编码 `--npu-arch`。骨架脚本仍要记 SHA256；对模板做
+任何修改都要在 `ITERATIONS.md` 写明原因。**骨架是测量工件，不是实现起点**：它只提供流水段
+（搬运 / MMAD / 写回）的结构，epilogue、散写合并、mask、索引、舍入与累加边界都要从 DESIGN
+登记的主参考样例和 golden / `reference.py` 来；`tools/skeleton_gemm.py` 不得直接拷进 `src/`
+演进成交付 kernel，交付实现的每个语义段都要能对应到主参考样例或写明改写理由。
 
 ### skeleton 性能 DoD
 
@@ -117,7 +173,7 @@ skeleton 不计通过。目标 DSL 版本不支持 `auto_sync` 时，按官方 f
 
 **默认判据**
 
-- GEMM kernel 时间 ≤ `1.05 ×` 同 shape、同输入 dtype 的 `torch.mm`；
+- GEMM kernel 时间 ≤ `1.08 ×` 同 shape、同输入 dtype 的 `torch.mm`；
 - 不出现串行特征：不得同时满足 `mac < 0.45`、`0.80 < mte2 < 0.95`、`overlap < 1.30`。
 
 **参考线（写入账本用于归因，不单独判失败）**
@@ -128,19 +184,52 @@ skeleton 不计通过。目标 DSL 版本不支持 `auto_sync` 时，按官方 f
 | `aic_mte2_ratio` | 带宽主导时 ≥ 0.90 |
 | `overlap = mac + mte2` | 计算主导时 ≥ 1.30 |
 
-**tile 对照（必做，不是可选优化）**
+**tile 选择：先解析预筛，再实跑不超过 3 组（必做，不是可选优化）**
 
-骨架阶段的旋钮只有 `BM/BN/BK/SK`、dtype 与块映射，这三项必须在记账前扫过，不能测一组就
-下结论。每个 GEMM 至少测 3 组配置，主 GEMM 必须包含一组 `BM=256` 量级的大 tile；缓冲
-数量、同步顺序与 MMAD 结构在这一步不动。
+骨架阶段的旋钮只有 `BM/BN/BK/SK`、dtype 与块映射；缓冲数量、同步顺序与 MMAD 结构在这一步
+不动。禁止直接枚举式扫描：上板前必须先完成一次解析预筛，用算术淘汰明显不可行的组合。
 
-`ITERATIONS.md` 的 Skeleton Performance 表每组一行，写全 `BM/BN/BK/SK`、块映射、
-`gemm_ms`、`mac`、`mte2` 与名义搬运下界，并标出选中组。判定取三组中最好的一组：
-达标记 `passed` / `bandwidth-bound`；三组都超 1.05× 才考虑豁免，且豁免必须附这三组数据。
-只测一组就写豁免的，骨架不计通过。
+预筛的容量与核数从设备读取，不写死型号常量：`tla.arch.get_capacity_in_bytes(...)` 取
+L1/L0A/L0B/L0C/UB，`tla.arch.block_num()` 取核数，ACL 的 `ACL_DEV_ATTR_L2_CACHE_SIZE`
+取 L2 容量；读取失败时才回退 90% 的保守常量，并把回退路径写进账本。下文 `b` 为输入
+dtype 字节数，`Mp/Np/Kp` 为 M/N/K 向上取整到 tile 的尺寸。
+
+**硬约束（不满足即淘汰，不占实跑名额）**
+
+- `BM·BN·4 ≤ L0C`；
+- `2·BM·SK·b ≤ L0A`、`2·SK·BN·b ≤ L0B`；
+- `2(BM·BK + BK·BN)·b ≤ 0.9 × L1`（顶满 L1 会让同步配对失败挂起）；
+- `BM % 16 == 0`、`BN % 16 == 0`、`BK > SK`、`BK % SK == 0`；
+- 流水强度 `2·BM·BN/(BM+BN) ≥ 峰值/BW_mte2`，不满足时双缓冲也遮不住 MTE2。
+
+**块映射按整除关系算，不占实跑名额**
+
+默认 `sm = sn = 8`；当 `ceil(nn/8)·8/nn − 1 > 25%` 时，`sn` 改取能整除 `nn` 的因子，
+上限放宽到 `sn ≤ nn`（`nn ≤ 16` 时把 `sn = nn` 一并纳入候选），行方向对 `nm` 对称处理
+`sm`。例：`nn = 10` 时 `sn = 10` 与 `sn = 5` 都整除，两者都要实测，不能只取 5；`nn = 486`
+时浪费不足 1%，保持 8。
+
+**时间模型（只用于排序，不作最终判据）**
+
+`t = max(t_mac, t_mte1, t_mte2, t_fix)`，其中 `t_mac = 2·Mp·Np·Kp/峰值`；`t_mte2` 与
+`t_mte1` 用名义搬运量 `nn·Mp·Kp·b + nm·Kp·Np·b` 除以各自有效带宽；`t_fix = Mp·Np·输出
+字节/BW_fix`。峰值与三条有效带宽一律标定，不查型号表：用 `mac_ratio ≈ 1` 的实跑反推峰值，
+用 `mte2_ratio ≥ 0.95` 的实跑反推有效带宽，按 `(SoC 名, CANN 版本, dtype, 映射档)` 缓存。
+标定不成立时这些常数只用于排序，不得用于淘汰。
+
+**实跑名额与记账**
+
+每个 GEMM 实跑不超过 3 组：预测最优组、方向对照族（如 `BK` 加倍或 `BM/BN` 互换）、映射
+固定值。`ITERATIONS.md` 的 Skeleton Performance 表每组一行，写全 `BM/BN/BK/SK`、块映射、
+预测 `ms`、预测比值、`gemm_ms`、`mac`、`mte2` 与名义搬运量，并标出选中组；块映射列必须
+按整除规则填写并注明依据（如 `nn=10 → sn=5`），与实际运行值一致；被硬约束淘汰
+的组合用一行汇总写明淘汰依据。判定取实跑三组中最好的一组：达标记 `passed` /
+`bandwidth-bound`；三组都超 `1.08×` 才考虑豁免，且豁免必须附这三组数据；`mac ≥ 0.99`
+且比值 ≤ `1.15` 的组按计算饱和记 `passed`，不算豁免。没有任何实跑
+数据的骨架不计通过。
 
 选中组的 tile 写回 `DESIGN.md` 并带进 implement，主实现不得退回未选中的配置。`mte2` 已
-接近 1 而时间仍落后时，先怀疑 tile 过小导致 A/B 重读，按本节扫参数，不要先归因于流水。
+接近 1 而时间仍落后时，先怀疑 tile 过小导致 A/B 重读，按本节预筛调整，不要先归因于流水。
 
 **豁免（有理由即可通过）**
 
@@ -159,12 +248,15 @@ skeleton 不计通过。目标 DSL 版本不支持 `auto_sync` 时，按官方 f
 判定顺序：
 
 1. **带宽受限**：`mte2 ≥ 0.95` 且 `gemm_ms ≤ torch.mm` 时记 `bandwidth-bound` 通过，
-   不要求 `mac` 与 `overlap`；账本写明算术强度与带宽下界。
-2. **串行特征**：命中 `mac < 0.45`、`0.80 < mte2 < 0.95`、`overlap < 1.30` 时，默认
+   不要求 `mac` 与 `overlap`；账本写明算术强度与按有效 MTE2 带宽折算的搬运下界。
+2. **计算饱和**：`mac ≥ 0.99` 且 `gemm_ms ≤ 1.15 × torch.mm` 时记 `passed`——计算管已
+   打满，时间差来自标定峰值与实测可达峰值的固有差距，不再按 1.08 要求；账本写明
+   `mac` 与两个峰值口径。
+3. **串行特征**：命中 `mac < 0.45`、`0.80 < mte2 < 0.95`、`overlap < 1.30` 时，默认
    先修流水；若确认是尾块、波次不足、shape 过小或 profiler 口径等结构性原因，按上面的
    豁免记录后通过。
-3. **时间**：`gemm_ms ≤ 1.05 × torch.mm` 记 `passed`；超过时同样可走豁免。
-4. **证据**：Skeleton Performance 表缺失或没有数字时不能通过；`passed` /
+4. **时间**：`gemm_ms ≤ 1.08 × torch.mm` 记 `passed`；超过时同样可走豁免。
+5. **证据**：Skeleton Performance 表缺失或没有数字时不能通过；`passed` /
    `bandwidth-bound` / `passed (waived)` 必须附 `kernel_details.csv` 路径。
 
 证据按 GEMM 分目录：`evidence/skeleton/<gemm-id>/profile/kernel_details.csv`（只有一个
@@ -176,21 +268,58 @@ CV 融合算子即使 vector 段占比更高，也要逐个 matmul 阶段评测�
 用例，多 GEMM 时逐个各测一次；该 shape 运行成本过高时，可用各维不小于原值 50% 的
 合成 shape；shape 过小导致单次 kernel <100µs 时，可等比放大到 ≥100µs。两种替换都要在
 账本记录原 shape、替换后 shape 与原因。同时记录块映射参数 `nm = ceil(M/BM)`、
-`nn = ceil(N/BN)`、A/B 名义重读倍数（A 为 `nn`、B 为 `nm`）与按 HBM 带宽折算的搬运
-下界时间；`mte2` 偏高时先用这组数区分“块映射重读”和“流水缺失”，再决定改 swizzle
-还是修流水。
+`nn = ceil(N/BN)`、A/B 名义重读倍数（A 为 `nn`、B 为 `nm`）与名义搬运量。名义搬运量默认
+命中 L2，折算时除以标定的有效 MTE2 带宽，不得用 HBM 带宽当分母：同一平台上 swizzle 与
+行优先的有效带宽可差 45% 以上（实测 2.85 TB/s vs 1.95 TB/s），按 1.6 TB/s 折算会得到比
+实测大 3 倍的假下界。`mte2` 偏高时先用这组数区分“块映射重读”和“流水缺失”，再决定改
+swizzle 还是修流水。
 
 骨架的网格和结论只在其自身任务分解下成立，不代表最终 kernel。若最终 kernel 改变了任务
 映射、归约范围或同步方式，必须在 DESIGN 里重新评估受影响的结构指标（并发度、数据复用、
 每块工作量、跨核 / 跨引擎同步开销等），不得直接沿用骨架或样例的结论；评估项按偏离类型
 选择，不设固定清单。
 
-CV 融合算子光有设计评估不够，implement 收敛后要实测回测一次：从最终 kernel 的 profile
-里取 GEMM 段的实际耗时（按 kernel 名取单轮行；多轮采集按 `Step Id` 分组，取该 kernel
-齐全的一轮），折算有效算力 `2·M·N·K / 该段耗时`，与骨架同 shape 的 GEMM 时间
-对比。偏差超过 15% 时在 `ITERATIONS.md` 写归因——UB / L1 被 epilogue 挤占导致 tile 退化、
-跨核交棒插入额外等待、还是流水被 vector 段打断——并说明该损失是否可以接受。结构属于
-CV 融合却没有这项回测记录的，implement 不算完成。
+含 MMAD 的算子光有设计评估不够，implement 收敛后要实测回测一次：从最终 kernel 的
+profile 里取 GEMM 段的实际耗时（按 kernel 名取单轮行；多轮采集按 `Step Id` 分组，取该
+kernel 齐全的一轮，不得对全部行求和），折算有效算力 `2·M·N·K / 该段耗时`，与骨架同
+shape 的 GEMM 时间对比。偏差超过 15% 时在 `ITERATIONS.md` 写归因——UB / L1 被 epilogue
+挤占导致 tile 退化、跨核交棒插入额外等待、还是流水被 vector 段打断——并说明该损失是否
+可以接受。本轮未做或 profile 不可用时记 `not_run` 并写明原因：optimize 入口会用 baseline
+的 device profile 重算，漏做不会导致永久失去豁免，但不得虚构比值。
+
+回测同时按下面的口径算一次**骨架达成率**并写入 `ITERATIONS.md`：
+
+- `skeleton_ratio = Σ 有实测的骨架 gemm_ms ÷ Σ 全部 GEMM 实现段耗时`；
+- 映射按 `DESIGN.md` 的 matmul 清单建立，必须覆盖全部登记阶段；分子与分母逐段配对，某
+  GEMM 的骨架 `gemm_ms` 只与该 GEMM 在同一用例 profile 里的实现段耗时相比；各 GEMM 的
+  最大 dev 用例不同时按各自用例取值后再求和，不得跨用例混算或事后挑选组合；
+- 单 kernel 或多段共用一个 kernel 导致 profile 拆不开时，实现侧取该 kernel 单轮 task
+  duration 总量，并在账本写明按什么区分不同 launch；
+- `waived` 组按实测计入分子，但必须写了饱和理由（`mac ≥ 0.99` 或对应带宽管 `≥ 0.95`）；
+  `failed` 组分子记 0，其实现段仍计入分母；
+- 实现侧只取 device 口径的 kernel 时间，不得用 `end2end_ms` 或 `mean_ms`；
+- 记录当前 kernel 的 SHA-256 与 `kernel_details.csv` 路径；profile 采集失败或 kernel 名
+  对不上时记 `not_run`，禁止估算、禁止用骨架预测值代替实测。
+
+本阶段只负责如实记录，不得为凑豁免调高比值或挑选有利的采集轮次。
+
+**host 固定开销自检**（implement 收敛后做一次，与算子类型无关）：
+
+1. 度量：取一份 profile 与端到端计时，逐用例给出 `device_ms / end2end_ms` 与 host 占比，
+   按耗时列出 host 侧 top-k 动作（名称 + 占该例 end2end 的比例）。触发条件：任一用例
+   host 占比 > 10%，或 `device_ms / end2end_ms < 0.5`。
+2. 归类：每个 host 动作必须落到一类——（a）语义必需，依赖 host 数据且 kernel 内无法表达；
+   （b）可消除，纯搬运/塑形/初始化，可由零拷贝视图表达或下沉到 kernel；（c）可摊销，
+   同一形状或同一调用内重复的分配与重复计算，可池化或复用。
+3. 处置：按占比降序处理 (b)(c) 两类——同类动作多次出现合并为一次；形状一致的中间缓冲
+   复用同一块；能用视图表达的布局变换不下发搬运；只依赖 kernel 内部数据的计算下沉。
+   收口要同时看单项与合计：剩余单项低、且这些项的合计不再主导 host 时间（合计与单项同一
+   量级，或剩余项全部归入 (a) 并写明原因）才可停止。出现「项数多、单项都低、合计仍大」的
+   形态时（典型是几十个同量级的 dispatch），必须做一次聚合评估——同类小 op 合并、重复
+   dispatch 下沉或复用是否值得做，写清整体收益与代价后再决定是否收口，不得只凭单项占比
+   收口，也不追求小 shape 追平 reference。
+4. 记账：`ITERATIONS.md` 记录逐例 host 占比、top-k 动作及归类、处置前后 Σ、剩余项与原因，
+   并把证据路径写入 `host_selfcheck`（optimize 的 `early_stop` 会校验它存在）。
 
 MAC/MTE2 占比只从 `kernel_details.csv` 同一行的 `aic_*` 列读取（字段名随版本
 可能是 `aic_mac_ratio` / `aic_cube_ratio`，以实际列为准并把列名写入账本）；`overlap` 为
@@ -204,7 +333,8 @@ skeleton。
 骨架的 host 侧用一次性脚本 `tools/skeleton_profile.py`：按 DESIGN 冻结的 M/N/K/dtype
 直接构造 A/B/C，编译并 launch 骨架 kernel，同时计时同 shape `torch.mm`；脚本路径、命令
 与结果写入 `ITERATIONS.md`。该脚本只服务 skeleton 验证，不进入主实现文件，也不改变
-`solution.json` 的交付约束。
+`solution.json` 的交付约束。脚本必须提供 `--dry-run`：只读设备容量、核数与 L2，打印每个
+候选组的容量占用、名义搬运量、预测时间与预测比值，不编译、不上板，供解析预筛使用。
 
 ### skeleton 自检（记 `passed` 前逐项确认）
 
@@ -213,18 +343,40 @@ skeleton。
 3. 是否满足 `BK > SK` 且 `BK % SK == 0`？
 4. 四项数值是否来自同一次 fresh profile 的 `kernel_details.csv` 同一行，并已写入
    Skeleton Performance 表？shape、列名、命令与证据路径是否齐全？
-5. 时间超过 `1.05 × torch.mm` 或出现串行特征时，是否先扫过至少 3 组 tile / 块映射并按
-   阶梯修流水；仍不达标时，是否写清了可核对的豁免理由（未达判据、原因、三组对照数据、
-   optimize 补偿计划）？
+5. 时间超过 `1.08 × torch.mm` 或出现串行特征时，是否先做过解析预筛、实跑不超过 3 组且
+   包含预测最优组，并按阶梯修流水；仍不达标时，是否写清了可核对的豁免理由（未达判据、
+   原因、三组对照数据、optimize 补偿计划）？
 6. DESIGN 列出的每个 GEMM 是否都有各自的 Skeleton Performance 行与 evidence 目录，没有
    用“结构与主 GEMM 相同”或“占比小”跳过？单 GEMM 算子此项直接答“是”。
+7. 每次 `skeleton_profile.py` 是否都用 `timeout -k 5 60s` 包裹，超时的配置是否直接判不可
+   用并记录，没有加时重跑？
+8. 骨架脚本是否只出现 `tla.mutex`，未出现 `auto_sync` / `flag` / `pipe_barrier` / `cross_flag`？
+   若出现其他原语，是否属于“主参考样例本身不用 mutex”的唯一豁免，且已在 `DESIGN.md` /
+   `ITERATIONS.md` 记录样例路径、原语与理由？
+9. 块映射是否按整除规则算出 `sn`/`sm`（如 `nn=10 → sn=5`），且与实际运行的映射一致、已写入
+   Skeleton Performance 表？
+10. `layout_a=col` 时 K 是否已按 `BK` 对齐（`ceil(K/SK) % (BK/SK) == 0`），结果里的
+    `k_raw` / `k_pad` 与 Skeleton Performance 表是否一致？未验证过的子块相位不得直接上板。
+11. `single_kernel` 且 `merge_required: true` 时，DESIGN 边界清单里的每条边界是否都有对应
+    栅栏与原语，栅栏是否写在 per-task 循环之外（空核同样到达），并且合并版与多 kernel
+    基线的输出逐位一致？
 
-六项都答“是”才记 `passed`；未达默认判据但第 5 项给出了可核对豁免理由的记
+十一项都答“是”才记 `passed`；未达默认判据但第 5 项给出了可核对豁免理由的记
 `passed (waived)`；其余记 `failed` 并先修。
 
 骨架判定通过（含 `passed (waived)`）后再做**最小 focused 验证**（编译 + 最小 shape 运行），
 随后进入 `implement`，按「正确性 → 边界 → 性能细节」增量扩展。每次扩展都必须重新通过
 编译与 focused test，全部 focused cases 通过后才进入 optimize。
+
+实现起点是 DESIGN 登记的主参考样例与 `reference.py` / golden，骨架只提供流水结构：每增加一个
+语义段（epilogue、散写合并、mask、索引、舍入、累加边界），都要在 `ITERATIONS.md` 指出它对应
+主参考样例的哪一段，或写明改写理由与对照依据；不允许只凭骨架模板补语义。
+
+进入 implement 后，核内同步沿用骨架的 `tla.mutex` 结构，不换回 flag 或 `auto_sync`；出现
+C→V 或 AIC↔AIV 交棒时用 `cross_flag`（mode 2 / 4），mutex 只在单核内有效、不能替代它。
+SIMD/SIMT 交界的 `pipe_barrier` 与 SIMT 内的 `sync_threads()` 不受骨架限制。唯一豁免与骨架
+相同：主参考样例本身不使用 mutex 且结构高度匹配时，按样例原语实现并在 `ITERATIONS.md`
+记录样例路径、原语与理由。
 
 保持一个主实现文件；`solution.json` 随每次增量同步更新，不做“攒到最后一次性生成”。
 
@@ -371,16 +523,41 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
 ## 开发循环
 
 进入 focused test 前先做一次契约核对：逐项对照 `DESIGN.md` 的「数值契约」，确认实现里的
-中间量存储 dtype、累加 dtype、窄化/舍入位置、归约顺序与 padding 语义和契约一致。发现
-不一致时，先在 `ITERATIONS.md` 记录差异、实测影响和判断依据，再决定改实现还是修订契约；
-修订契约按“设计修订”记录，不要用放宽容差代替。
+中间量存储 dtype、累加 dtype、窄化/舍入位置、归约顺序与 padding 语义和契约一致。实现精度
+高于契约时，累加顺序、分块方式与舍入位置的变化不按不一致处理，记 deviation 后继续；只有
+精度降低或数学语义变化才算不一致。发现不一致时，先在 `ITERATIONS.md` 记录差异、实测影响
+和判断依据，再决定改实现还是修订契约；修订契约按“设计修订”记录，不要用放宽容差代替。
 
-数值不匹配时先对标杆、再谈容差：确认存储/累加 dtype、舍入位置与模式、归约顺序是否与
-reference 一致；对齐之前不得把“在容差内”当作结论，也不得先改容差。容差只吸收完全对齐
-后仍然存在的浮点尾差。中间量精度高于标杆（dtype/累加/舍入逐项不低于标杆，且至少一项
-更高）时属于豁免情形，直接按用例容差判定，并在 DESIGN 的 deviation 项补齐实测偏差量级；
-容差判定不过时豁免不成立，回到 design 按误差分析重新推导容差并记录，不得在调试中放宽；
-重推后的容差仍不过，按精度 bug 处理。
+数值不匹配时先对标杆、再谈容差。**数学语义必须一致**：算子定义、输入输出关系、mask 与
+索引、归并/散写（如 scatter）的合并关系（哪些元素合并、重复索引是否累加、越界如何处理），
+以及 softmax 等非线性步骤的数学定义（如 max 减法、归一化形式），必须与 reference 表达
+同一个数学过程；不一致按精度 bug 处理，不适用任何豁免。softmax 的 online / 两遍式等实现
+顺序属于精度实现，按升档规则处理。**精度不降即可自由实现**：存储/累加 dtype、归约与
+累加顺序、分块方式、舍入位置与模式属于精度实现；实现精度严格不低于标杆——dtype 与累加
+dtype 逐项不低于且至少一项更高，舍入不按模式名排序，以同一输入下该步的误差界不劣于标杆
+为准（给出推导或对照实验）——时，不再要求逐项复现标杆，顺序、分块、舍入位置都可按实现
+需要选择，只需在 DESIGN 的 deviation 项补齐偏差量级。**同精度与降精度**：与标杆同精度
+时，顺序重排与分块方式变化只产生浮点尾差，允许；但不得增加舍入次数或提前舍入。精度低于
+标杆、增加或提前舍入、引入额外低精度落盘，按精度 bug 处理。**容差只用于判定**：只吸收
+数学语义一致后的浮点尾差，不得用于规避语义一致性，也不得在调试阶段先改容差；判定不过时
+回到 design 按误差分析重推容差并记录，重推仍不过按精度 bug 处理。
+
+fp32 单链替代标杆的分段低精度累加、减少中间舍入次数属于精度升档；引入额外低精度落盘、
+增加舍入次数，或改变 softmax 的数学定义 / 归并散写等合并关系，仍按精度 bug 处理。
+
+偏差/容差实测与样例 probe 同口径：只允许在 NPU 上跑 1~2 个最大用例，单例
+`timeout -k 5 60s`；禁止 CPU 全尺寸复现标杆分块（例如按 chunk 循环 `addmm_` 复现
+96 段 bf16 累加）。design 只写容差公式与解析上界，实测在本阶段首跑完成。
+
+标杆把同一 matmul 的 K 维按外部预算分段、逐段累加到同一输出时，先看 `DESIGN.md` 的
+「分段判定」：判定成立则实现必须是完整 matmul 形态——单个输出 tile 的全部 K 贡献在同一次
+launch 内完成、K 单链、最高可用精度（默认 fp32 L0C）累加、写回输出 dtype 时舍入一次。
+这条结构约束优先于精度升档规则，精度更高也不例外。
+累加器不得跨 launch 落在 GM：出现 `atomic` 跨 chunk 累加、GM 读改写或 fp32 中间缓冲回读
+时，不论 deviation 是否已记录，一律按「分段实现」处理，先回 design 补「完整 matmul 不可行」
+的显存实测与降级对照（提预算 → 改布局/复用 → 实测不可行），证明后才可保留。发现实现按段
+复现却没有 DESIGN 判定与 deviation 依据时，按契约不一致处理，先回 design 补判定、deviation
+与对照实验，再继续；不得用「更接近标杆」为由直接改成逐段 RMW。
 
 1. **Validate.** 完整首版生成后，执行 focused cases，覆盖完整计算链路及受影响用例。
    没有独立 focused 命令时执行 full test 命令，不跳过首轮验证。正确性判据按
@@ -402,9 +579,10 @@ reference 一致；对齐之前不得把“在容差内”当作结论，也不�
 ### 多 kernel 精度定位
 
 算子包含 ≥2 个 kernel、跨 kernel 中间张量或 C→V→C 交棒，且 focused/full test 出现数值
-不匹配时，先按通用规则对齐每条边的中间量：存储 dtype、内部累加 dtype、layout/shape/
-stride、有效区、舍入位置、归约/重复 ID/chunk 顺序都要与标杆一致；代数等价不等于数值
-等价。然后完整读取
+不匹配时，先按通用规则核对每条边的中间量：数学语义（合并关系、mask/索引、非线性步骤）必须
+一致；存储 dtype、内部累加 dtype、舍入位置与归约顺序按精度不降原则判定——实现精度更高时，
+这些变化记 deviation 后继续，不按不一致处理；精度降低或增加/提前舍入才按 bug。layout/shape/
+stride、有效区必须一一对应；代数等价不等于数值等价。然后完整读取
 [`knowledge/debug/multi-kernel-precision-localization.md`](../../knowledge/debug/multi-kernel-precision-localization.md)，
 按“阶段契约 → 局部检查 → 真实链路 → 双向替换 → 首错定位 → 单因素修复 → 原判据复测”
 推进。局部 kernel 检查必须用标杆中间量作输入；下游 GEMM 用候选中间量算得对，不能证明
@@ -454,7 +632,8 @@ stride、有效区、舍入位置、归约/重复 ID/chunk 顺序都要与标杆
 `full test #1` 通过后恒进入 optimize，不因“是否有性能目标”而跳过：
 
 - **模式 A（target）**：design 冻结了性能目标与 threshold，达到目标后至少完成 1 轮。
-- **模式 B（explore）**：没有性能目标时至少完成 **3 轮**并逐轮记录。
+- **模式 B（explore）**：没有性能目标时完成 **2~3 轮**（上限 3 轮）并逐轮记录；
+  baseline 之后重算的 `skeleton_ratio ≥ 0.80` 时按 `early_stop` 记 0 轮。
 
 评测口径：
 

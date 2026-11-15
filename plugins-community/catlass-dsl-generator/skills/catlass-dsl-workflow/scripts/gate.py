@@ -264,6 +264,115 @@ def deferred_row(rows, prefixes, context, exclude=()):
     return None
 
 
+def _norm_name(value):
+    return re.sub(r"[^0-9a-z]", "", str(value).lower())
+
+
+def design_has_mmad(ws):
+    path = ws / "DESIGN.md"
+    if not path.is_file():
+        return False
+    text = path.read_text(encoding="utf-8")
+    match = re.search(r"含\s*MMAD[：:]\s*`?\s*(是|否)", text, re.IGNORECASE)
+    return bool(match and match.group(1) == "是")
+
+
+MATMUL_LIST_PATTERNS = (
+    # 「包含的 matmul 阶段」是概览，「全部 matmul 阶段清单」是逐行明细；
+    # 两处都读，任一处漏写阶段都能被发现，避免清单缩水把达到率分母做小。
+    r"包含的\s*matmul\s*阶段[^\n]*[:：]\s*(.+)",
+    r"全部\s*matmul\s*阶段清单[^\n]*[:：]\s*(.+)",
+)
+
+STAGE_NAME = re.compile(r"^([A-Za-z][A-Za-z0-9_\-]*)\s*[`*。.,，；;:：]*$")
+
+
+def _stage_names_from_line(line):
+    """从清单行里取阶段名。
+
+    两种写法都要支持：
+    - 明细行：每项是 `名称 / 所在 kernel / 占比 / shape / 来源`，取第一个 `/` 前；
+    - 概览行：可能整行就是 `QK / PV / dK / dV` 或 `a、b、c`，直接按名字切。
+    模板把整行包在一个反引号里、内部用 `；` 分隔多项，所以先整行切分再剥反引号；
+    行尾说明文字不算阶段名。
+    """
+    parts = re.split(r"[、；;]", line)
+    detailed = len(parts) > 1 or any(ch in line for ch in "%(=≈")
+    names = []
+    if detailed:
+        for part in parts:
+            part = part.strip().strip("`").strip()
+            if not part or part.startswith("<"):
+                continue
+            head = part.split("/")[0].strip().strip("`").strip()
+            match = STAGE_NAME.match(head)
+            if match:
+                names.append(match.group(1))
+        return names
+    for token in re.split(r"/", line):
+        token = token.strip().strip("`").strip()
+        match = STAGE_NAME.match(token) if token and not token.startswith("<") else None
+        if match:
+            names.append(match.group(1))
+    return names
+
+
+def design_matmul_names(ws):
+    """取 DESIGN 登记的 matmul 阶段名（概览行与逐行清单合并去重）。"""
+    path = ws / "DESIGN.md"
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding="utf-8")
+    names = []
+    seen = set()
+    for pattern in MATMUL_LIST_PATTERNS:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            for name in _stage_names_from_line(match.group(1)):
+                key = _norm_name(name)
+                if key and key not in seen:
+                    seen.add(key)
+                    names.append(name)
+    return names
+
+
+def check_matmul_spec_coverage(ws):
+    """DESIGN 的 matmul 清单必须与骨架 spec 一一对应，避免分母被漏登记的阶段缩小。"""
+    if not design_has_mmad(ws):
+        return
+    spec_path = ws / "tools" / "skeleton_spec.json"
+    if not spec_path.is_file():
+        fail(
+            "DESIGN 声明含 MMAD，但缺少 tools/skeleton_spec.json（每份 GEMM 骨架的清单）"
+        )
+    data = load_json(spec_path)
+    stages = [item for item in (data or {}).get("stages", []) if isinstance(item, dict)]
+    names = [item.get("name") for item in stages if item.get("name")]
+    if not names:
+        fail("tools/skeleton_spec.json 没有有效的 stage name")
+    design_text = (ws / "DESIGN.md").read_text(encoding="utf-8")
+    design_lower = design_text.lower()
+    missing = [name for name in names if name.lower() not in design_lower]
+    if missing:
+        fail(
+            "骨架 spec 的 stage 未在 DESIGN 登记：{}；DESIGN 的「全部 matmul 阶段清单」"
+            "要逐行列出每个 matmul，名称与 spec 一致".format("、".join(missing))
+        )
+    spec_norms = [_norm_name(name) for name in names]
+    extra = [
+        name
+        for name in design_matmul_names(ws)
+        if _norm_name(name)
+        and not any(
+            _norm_name(name) in item or item in _norm_name(name) for item in spec_norms
+        )
+    ]
+    if extra:
+        fail(
+            "DESIGN 登记的 matmul 阶段没有对应的骨架 spec：{}；每个 matmul 都要各自跑一次"
+            "骨架评测，否则达成率的分母会被漏测阶段缩小".format("、".join(extra))
+        )
+
+
 def check_design(ws):
     missing = [name for name in DESIGN_FILES if not (ws / name).is_file()]
     if missing:
@@ -396,6 +505,8 @@ def check_develop(ws):
     if not any(stage == "skeleton" for _, stage, _, _, _ in stages):
         fail("ITERATIONS.md 缺少 skeleton 里程碑")
 
+    check_matmul_spec_coverage(ws)
+
     focused = [
         (index, cells)
         for index, stage, recorded, result, cells in stages
@@ -403,6 +514,25 @@ def check_develop(ws):
         and result == "passed"
         and sha_match(recorded, digest)
     ]
+    if focused and read_mode(ws) == REMOTE_DETACHED:
+        skeleton_cells = []
+        for _, stage, _, _, cells in stages:
+            if stage == "skeleton":
+                skeleton_cells.append(cells)
+        waived = any(
+            "不适用" in strip_ticks(cells[4]) or "n/a" in strip_ticks(cells[4]).lower()
+            for cells in skeleton_cells
+        )
+        if not waived and not any(
+            status_of(cells) == "passed" for cells in skeleton_cells
+        ):
+            fail(
+                "remote-detached 下 skeleton 未 passed（当前 {}），却已有当前源码的 focused test "
+                "passed 记录；远端首跑必须先执行 tools/skeleton_gemm.py，把判定与 Skeleton "
+                "Performance 表回填后再验主实现".format(
+                    " / ".join(status_of(cells) or "空" for cells in skeleton_cells)
+                )
+            )
     if not focused:
         if fulltest_rows(rows, digest, SECOND_FULLTEST):
             return "{}；当前源码已有 full test #2 记录".format(note)
@@ -414,7 +544,9 @@ def check_develop(ws):
         fail(
             "缺少当前源码（{}）的 focused test passed 记录；只有 remote-detached 模式可在代码生成"
             "完成后把 focused test 记为 deferred（Command 列附精确重跑命令）。Result 列须以状态"
-            "裸词开头（passed / failed / blocked / not_run / deferred）".format(digest[:8])
+            "裸词开头（passed / failed / blocked / not_run / deferred）".format(
+                digest[:8]
+            )
         )
     require_evidence(ws, focused[-1][1][5], "focused test")
     return "{}；focused test 通过".format(note)
@@ -492,8 +624,7 @@ def check_optimize(ws):
     baseline = [
         (index, cells)
         for index, cells in rows
-        if normalize_stage(cells[1]) in FIRST_FULLTEST
-        and status_of(cells) == "passed"
+        if normalize_stage(cells[1]) in FIRST_FULLTEST and status_of(cells) == "passed"
     ]
     if not baseline:
         fail("缺少 full test #1 passed 记录；optimize 必须在 full test #1 通过后开始")
@@ -501,11 +632,38 @@ def check_optimize(ws):
     opt_mode = optimization_mode(text)
 
     rounds = optimization_rounds(sections)
-    required = 1 if opt_mode == "target" else 3
+    required = 1 if opt_mode == "target" else 2
+    early_stop = re.search(
+        r"^[-*]\s*early_stop\s*:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE
+    )
+    if early_stop:
+        if "skeleton_ratio" not in early_stop.group(1).lower():
+            fail(
+                "early_stop 只支持 skeleton_ratio 口径，当前为: {}".format(
+                    early_stop.group(1).strip()
+                )
+            )
+        threshold = re.search(
+            r"skeleton_ratio\s*>=\s*([0-9.]+)", early_stop.group(1), re.IGNORECASE
+        )
+        if not threshold:
+            fail(
+                "early_stop 必须写成 `skeleton_ratio >= 0.80` 的形式，当前为: {}".format(
+                    early_stop.group(1).strip()
+                )
+            )
+        if float(threshold.group(1)) < 0.80:
+            fail(
+                "early_stop 门槛不能低于 0.80（当前 {}）；门槛由 skill 固定，"
+                "不得按实验情况自行降低".format(threshold.group(1))
+            )
+        required = 0
     if len(rounds) < required:
         fail(
             "模式 {} 需要至少 {} 轮已记录优化，当前 {} 轮；optimize 必须在远端/本机真实执行，"
-            "remote-detached 模式不得推迟".format(opt_mode, required, len(rounds))
+            "remote-detached 模式不得推迟（命中 early_stop: skeleton_ratio 时该下限为 0）".format(
+                opt_mode, required, len(rounds)
+            )
         )
     for _, cells, _ in rounds:
         require_evidence(ws, cells[6], "优化轮次 {}".format(strip_ticks(cells[0])))

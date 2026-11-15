@@ -53,6 +53,15 @@ host 侧耗时是算子实现的一部分：能优化就优化，不得从计时
 `host_gap_ms / end2end_ms > 5%`、或小 shape `device_ms / end2end_ms < 50%` 时，账本必须
 写明归因；后者的 speedup 只作为端到端结论，不能当作 kernel 性能结论。
 
+**劣化用例必须逐条入账。** 合并结果里 `speedup < 1.0` 的用例，无论差多少，都要在
+`ITERATIONS.md` 的「Benchmark 劣化用例」表逐条登记：uuid、`speedup`、`device_ms`、
+`end2end_ms`、归因、结论。结论只有三种：`保留`（已知取舍，写明为什么接受）、`已解释`
+（归因到具体成本项，如 padding、launch 次数、host 固定开销，并指向证据）、
+`tiny-shape-exempt`（单例 `end2end_ms < 1 ms` 且 `device_ms` 同量级）。小 shape 端到端
+慢于 reference 但 `device_ms / end2end_ms < 50%` 时，按 host 固定开销归因并引用
+`host_selfcheck` 证据，不得笼统写成"小 shape 天然慢"。清单缺项、只列部分用例、或用一句
+整体结论代替逐条登记时，benchmark 不得记为 `passed`。
+
 ### 超大 shape 的显存预算
 
 以下各条只针对测试/对比脚本：
@@ -291,8 +300,9 @@ def timed(run, args, trials):
 - `performance.candidate.mean_ms` 是统一性能指标路径；它是 trials 次算术平均，
   `median_ms` 与 `all_ms` 只用于噪声判断，不得替代 `mean_ms` 写结论。
 - `device_ms` / `host_gap_ms` 在 profiling 成功时至少对最大用例必填，其余用例可选；
-  未做 profiling 的用例可省略这两个字段。若 `性能要求：none` 且计划按 MFU 收口，参与
-  判定的每个用户用例都必须逐例具备这两个字段，缺失时该例外不成立。
+  未做 profiling 的用例可省略这两个字段。若 optimize 计划按骨架达成率收口
+  （`early_stop: skeleton_ratio`），回测涉及的用例必须逐例具备 `device_ms` 且
+  `host_gap_ms / end2end_ms ≤ 5%`，缺失时该例外不成立。
 - `selection.paired` 必须为 `true`（有对标实现时）。
 - `profiling.status` 只有在每例都产出当前 `kernel_sha256` 对应、且通过上述断言的 CSV
   时才写 `passed`。

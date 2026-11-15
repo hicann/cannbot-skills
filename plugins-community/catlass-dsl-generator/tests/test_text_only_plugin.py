@@ -67,7 +67,12 @@ def test_only_gate_script_remains_under_skills():
     python_files = sorted(
         path.relative_to(ROOT).as_posix() for path in (ROOT / "skills").rglob("*.py")
     )
-    assert python_files == ["skills/catlass-dsl-workflow/scripts/gate.py"]
+    # 只有门禁脚本会自动执行；templates 下的骨架脚本是待复制模板，不参与自动执行。
+    assert python_files == [
+        "skills/catlass-dsl-develop/templates/skeleton_gemm.py",
+        "skills/catlass-dsl-develop/templates/skeleton_profile.py",
+        "skills/catlass-dsl-workflow/scripts/gate.py",
+    ]
 
 
 @pytest.mark.parametrize("name", SKILLS)
@@ -113,11 +118,92 @@ def test_bench_skill_requires_self_written_measurement_script():
 def test_optimize_skill_uses_text_ledger():
     text = skill_text("catlass-dsl-optimize")
     assert "Performance Rounds" in text
-    assert "至少三轮" in text or "至少 3 轮" in text
+    assert "2~3 轮" in text
+    assert "上限 3 轮" in text
+    assert "至少三轮" not in text
+    assert "early_stop: skeleton_ratio >= 0.80" in text
+    assert "MFU ≥ 90%" not in text
     assert "required_improvement" in text
     assert "Stall 与停止条件" in text
     assert "知识沉淀" in text
     assert "Gotchas" in text
+
+
+def test_entry_docs_share_early_stop_exception():
+    for path in (
+        ROOT / "AGENTS.md",
+        ROOT / "skills" / "catlass-dsl-workflow" / "SKILL.md",
+    ):
+        text = path.read_text(encoding="utf-8")
+        assert "skeleton_ratio" in text, path.name
+
+
+def test_optimize_skill_requires_structural_delta():
+    text = skill_text("catlass-dsl-optimize")
+    assert "结构差异对照" in text
+    assert "原始 golden" in text
+    assert "单变量消融" in text
+    assert "not measured" in text
+    assert "骨架 GEMM 的比值" in text
+
+    template = (ROOT / "skills/catlass-dsl-optimize/templates/ITERATIONS.md").read_text(
+        encoding="utf-8"
+    )
+    assert "## Structural Delta" in template
+    assert "Golden / 主参考样例" in template
+    assert "不得作为优化轴依据" in template
+
+
+def test_design_and_develop_cover_single_kernel_merge():
+    design = skill_text("catlass-dsl-design")
+    assert "structural_verdict" in design
+    assert "merge_required" in design
+    develop = skill_text("catlass-dsl-develop")
+    assert "merge_required" in develop
+    assert "multi-kernel-to-single-kernel" in develop
+
+    knowledge = ROOT / "knowledge" / "optimization" / "multi-kernel-to-single-kernel.md"
+    assert knowledge.is_file()
+    text = knowledge.read_text(encoding="utf-8")
+    assert "cross_flag" in text
+    assert "空核必须到达每个栅栏" in text
+    assert "SyncAll<false>()" in text
+
+
+def test_develop_skill_prescreens_tiles_before_measuring():
+    text = skill_text("catlass-dsl-develop")
+    assert "解析预筛" in text
+    assert "实跑不超过 3 组" in text
+    assert "至少测 3 组" not in text
+    assert "--dry-run" in text
+    assert "有效 MTE2 带宽" in text
+
+    template = (
+        ROOT / "skills/catlass-dsl-develop/templates/gemm_pipelined.md"
+    ).read_text(encoding="utf-8")
+    assert "预测比值" in template
+    assert "至少扫 3 组" not in template
+
+
+def test_skeleton_template_uses_explicit_mutex():
+    template = (
+        ROOT / "skills/catlass-dsl-develop/templates/gemm_pipelined.md"
+    ).read_text(encoding="utf-8")
+    assert "tla.mutex" in template
+    assert 'auto_sync="v0"' not in template
+    assert "matmul_row_exp_scatter_add" in template
+
+    text = skill_text("catlass-dsl-develop")
+    assert "只允许用 `tla.mutex`" in text
+    assert "自检第 8 项" in text
+    assert "核内同步沿用骨架的 `tla.mutex`" in text
+    assert "cross_flag" in text
+    assert "块映射是否按整除规则算出" in text
+    assert "时把 `sn = nn` 一并纳入候选" in text
+    assert "唯一豁免：主参考样例本身不使用 mutex" in text
+
+    optimize = skill_text("catlass-dsl-optimize")
+    assert "不得更换同步原语" in optimize
 
 
 def test_knowledge_bundle_is_intact():
@@ -132,6 +218,9 @@ def test_templates_for_text_workflow_exist():
     expected = (
         "skills/catlass-dsl-design/templates/DESIGN.md",
         "skills/catlass-dsl-develop/templates/ITERATIONS.md",
+        "skills/catlass-dsl-develop/templates/skeleton_gemm.py",
+        "skills/catlass-dsl-develop/templates/skeleton_profile.py",
+        "skills/catlass-dsl-develop/templates/skeleton_spec.json",
         "skills/catlass-dsl-optimize/templates/ITERATIONS.md",
         "skills/catlass-dsl-bench/templates/workload.jsonl",
         "skills/catlass-dsl-bench/templates/definition.json",
@@ -142,6 +231,43 @@ def test_templates_for_text_workflow_exist():
     )
     for relative in expected:
         assert (ROOT / relative).is_file(), relative
+
+
+def test_skeleton_runner_is_shipped_as_template():
+    runner = (
+        ROOT / "skills/catlass-dsl-develop/templates/skeleton_profile.py"
+    ).read_text(encoding="utf-8")
+    assert "--dry-run" in runner
+    assert "--ledger-row" in runner
+    assert "skeleton_spec.json" in runner
+    assert "skeleton_calibration.json" in runner
+    assert "def _pick_round" in runner
+    assert "Step Id" in runner
+    assert "fallback" in runner
+    assert "--dummy" in runner
+    # 驱动器必须自带 profile 匹配、四段时间模型、流水强度淘汰与 DoD 判定。
+    assert "--kernel-hint" in runner
+    assert "hint_hit" in runner
+    assert "pred_mte1_ms" in runner
+    assert "流水强度不足" in runner
+    assert "bandwidth-bound" in runner
+    assert "failed (serial pipeline)" in runner
+    # A/B 转置视图由 spec 的 layout_a / layout_b 驱动，kernel 不加分支。
+    assert "layout_b" in runner
+    assert "ColumnMajor" in runner
+
+    kernel = (ROOT / "skills/catlass-dsl-develop/templates/skeleton_gemm.py").read_text(
+        encoding="utf-8"
+    )
+    assert "tla.mutex" in kernel
+    assert "auto_sync=" not in kernel
+    assert "cross_flag(" not in kernel
+    assert "pipe_barrier(" not in kernel
+
+    text = skill_text("catlass-dsl-develop")
+    assert "脚本骨架随模板发布" in text
+    assert "skeleton_profile.py" in text
+    assert "skeleton_spec.json" in text
 
 
 def test_no_gate_only_templates_remain():
@@ -475,13 +601,162 @@ def test_gate_develop_requires_focused_test_record(tmp_path):
     assert "focused test" in result.stdout
 
 
-def test_gate_optimize_requires_three_rounds_in_explore_mode(tmp_path):
+def test_gate_optimize_requires_two_rounds_in_explore_mode(tmp_path):
     build_workspace(tmp_path)
-    add_rounds(tmp_path, rounds=2)
+    add_rounds(tmp_path, rounds=1)
 
     result = run_gate("optimize", tmp_path)
     assert result.returncode == 1
-    assert "至少 3 轮" in result.stdout
+    assert "至少 2 轮" in result.stdout
+
+
+def test_gate_optimize_allows_zero_rounds_with_skeleton_early_stop(tmp_path):
+    build_workspace(tmp_path)
+    path = tmp_path / "ITERATIONS.md"
+    text = path.read_text(encoding="utf-8")
+    text += (
+        "\n## Optimization Policy\n"
+        "- mode: explore\n"
+        "- early_stop: skeleton_ratio >= 0.80\n"
+    )
+    write(path, text)
+
+    result = run_gate("optimize", tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def build_mmad_design(workspace, stages, listed):
+    design = (workspace / "DESIGN.md").read_text(encoding="utf-8")
+    design += "\n是否含 MMAD：是\n\n- 全部 matmul 阶段清单（逐行）：{}\n".format(listed)
+    write(workspace / "DESIGN.md", design)
+    (workspace / "tools").mkdir(exist_ok=True)
+    write(
+        workspace / "tools" / "skeleton_spec.json",
+        json.dumps(
+            {
+                "dtype": "bf16",
+                "stages": [
+                    {"name": name, "m": 1024, "n": 1024, "k": 1024, "layout_a": "row"}
+                    for name in stages
+                ],
+            }
+        ),
+    )
+
+
+def test_gate_develop_rejects_matmul_without_skeleton_spec(tmp_path):
+    build_workspace(tmp_path)
+    build_mmad_design(
+        tmp_path,
+        stages=["logits"],
+        listed=(
+            "logits / k1 / 60% / 1024,1024,1024,bf16 / case-0000；"
+            "dh / k2 / 40% / 1024,1024,1024,bf16 / case-0000"
+        ),
+    )
+
+    result = run_gate("develop", tmp_path)
+    assert result.returncode == 1
+    assert "没有对应的骨架 spec" in result.stdout
+
+
+def test_gate_develop_rejects_spec_stage_missing_from_design(tmp_path):
+    build_workspace(tmp_path)
+    build_mmad_design(
+        tmp_path,
+        stages=["logits", "dw"],
+        listed="logits / k1 / 100% / 1024,1024,1024,bf16 / case-0000",
+    )
+
+    result = run_gate("develop", tmp_path)
+    assert result.returncode == 1
+    assert "未在 DESIGN 登记" in result.stdout
+
+
+def test_gate_develop_accepts_matching_matmul_lists(tmp_path):
+    build_workspace(tmp_path)
+    build_mmad_design(
+        tmp_path,
+        stages=["logits", "dh"],
+        # 模板的真实写法：整行包在一个反引号里，多项用 `；` 分隔
+        listed=(
+            "`logits / k1 / 60% / 1024,1024,1024,bf16 / case-0000；"
+            "dh / k2 / 40% / 1024,1024,1024,bf16 / case-0000`"
+        ),
+    )
+
+    result = run_gate("develop", tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_gate_develop_rejects_partially_registered_matmul_spec(tmp_path):
+    """整行反引号的清单必须逐项解析，否则 spec 少登记阶段会被漏掉。"""
+    build_workspace(tmp_path)
+    build_mmad_design(
+        tmp_path,
+        stages=["logits"],
+        listed=(
+            "`logits / k1 / 60% / 1024,1024,1024,bf16 / case-0000；"
+            "dh / k2 / 20% / 1024,1024,1024,bf16 / case-0000；"
+            "dw / k3 / 20% / 1024,1024,1024,bf16 / case-0000`"
+        ),
+    )
+
+    result = run_gate("develop", tmp_path)
+    assert result.returncode == 1
+    assert "没有对应的骨架 spec" in result.stdout
+
+
+def test_gate_develop_accepts_overview_when_detail_list_shrinks(tmp_path):
+    """概览行与明细清单合并解析：明细缩水但概览齐全时不误判。"""
+    build_workspace(tmp_path)
+    build_mmad_design(
+        tmp_path,
+        stages=["logits", "dh", "dw"],
+        listed="`logits / k1 / 100% / 1024,1024,1024,bf16 / case-0000`",
+    )
+    design = (tmp_path / "DESIGN.md").read_text(encoding="utf-8")
+    design += (
+        "\n- 包含的 matmul 阶段：`logits`、`dh`、`dw`；纯 vector 算子不适用。\n"
+        "\n其他阶段 dh 与 dw 的流水与 logits 同构。\n"
+    )
+    write(tmp_path / "DESIGN.md", design)
+
+    result = run_gate("develop", tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_gate_optimize_rejects_non_skeleton_early_stop(tmp_path):
+    build_workspace(tmp_path)
+    path = tmp_path / "ITERATIONS.md"
+    text = path.read_text(encoding="utf-8")
+    text += "\n## Optimization Policy\n- mode: explore\n- early_stop: mfu >= 0.90\n"
+    write(path, text)
+
+    result = run_gate("optimize", tmp_path)
+    assert result.returncode == 1
+    assert "skeleton_ratio" in result.stdout
+
+
+def early_stop_workspace(tmp_path, threshold="0.80"):
+    build_workspace(tmp_path)
+    path = tmp_path / "ITERATIONS.md"
+    text = path.read_text(encoding="utf-8")
+    text += (
+        "\n## Optimization Policy\n"
+        "- mode: explore\n"
+        "- early_stop: skeleton_ratio >= {}\n".format(threshold)
+    )
+    write(path, text)
+
+
+def test_gate_optimize_rejects_lowered_early_stop_threshold(tmp_path):
+    """门槛不得自行降低，否则 0.5 也能收口。"""
+    early_stop_workspace(tmp_path, threshold="0.50")
+
+    result = run_gate("optimize", tmp_path)
+    assert result.returncode == 1
+    assert "不能低于 0.80" in result.stdout
 
 
 def rewrite_kernel(workspace):
@@ -613,6 +888,71 @@ def test_gate_remote_detached_stops_after_code_generation(tmp_path):
     for stage in ("fulltest", "optimize", "benchmark", "finish"):
         result = run_gate(stage, tmp_path)
         assert result.returncode == 1, (stage, result.stdout)
+
+
+def test_gate_remote_detached_requires_skeleton_before_focused(tmp_path):
+    kernel = build_workspace(tmp_path, mode="remote-detached")
+    set_milestones(
+        tmp_path,
+        [
+            "| 1 | skeleton | {0} | python3 tools/skeleton_gemm.py | blocked | - |".format(
+                kernel
+            ),
+            "| 2 | focused test | {0} | run | passed | evidence/focused.log |".format(
+                kernel
+            ),
+        ],
+    )
+
+    result = run_gate("develop", tmp_path)
+    assert result.returncode == 1
+    assert "skeleton 未 passed" in result.stdout
+
+    set_milestones(
+        tmp_path,
+        [
+            "| 1 | skeleton | {0} | python3 tools/skeleton_gemm.py | passed | evidence/skeleton.log |".format(
+                kernel
+            ),
+            "| 2 | focused test | {0} | run | passed | evidence/focused.log |".format(
+                kernel
+            ),
+        ],
+    )
+
+    result = run_gate("develop", tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_design_registers_reference_sample_runnability():
+    design = skill_text("catlass-dsl-design")
+    assert "参考样例可运行性" in design
+    assert "not_run" in design
+    template = (ROOT / "skills/catlass-dsl-design/templates/DESIGN.md").read_text(
+        encoding="utf-8"
+    )
+    assert "参考样例可运行性" in template
+    develop = skill_text("catlass-dsl-develop")
+    assert "参考样例可运行性" in develop
+
+
+def test_precision_upgrade_allows_implementation_order_changes():
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    assert "数学语义必须一致，实现精度可升档" in agents
+    assert "同精度与降精度" in agents
+    assert "本条优先于上文精度升档规则" in agents
+    assert "softmax 的 online / 两遍式" in agents
+    assert "误差界不劣于标杆" in agents
+    for name in ("catlass-dsl-design", "catlass-dsl-develop"):
+        text = skill_text(name)
+        assert "精度不降即可自由实现" in text, name
+        assert "不再要求逐项复现标杆" in text, name
+    knowledge = (
+        ROOT / "knowledge/debug/multi-kernel-precision-localization.md"
+    ).read_text(encoding="utf-8")
+    assert "精度不降即可自由实现" in knowledge
+    assert "online / 两遍式" in knowledge
+    assert "误差界不劣于标杆" in knowledge
 
 
 def test_gate_remote_detached_rejects_deferred_full_test(tmp_path):

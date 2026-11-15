@@ -77,7 +77,8 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
   DESIGN.md 记录 SHA-256，并声明 `执行模式` 与 `性能要求`；
 - develop：skeleton 与 focused test 记录、`solution.json` 与实现文件一致；
 - fulltest：当前 kernel 的 full test #1 或 #2 已 `passed` 且有证据；
-- optimize：模式 A ≥1 轮、模式 B ≥3 轮的完整账本；
+- optimize：模式 A ≥1 轮、模式 B 2~3 轮（上限 3 轮）的完整账本；`skeleton_ratio ≥ 0.80`
+  时按 `early_stop` 记 0 轮；
 - benchmark：当前 kernel 已有全量测试记录（优化采纳改动了 kernel 时必须重跑 full test #2，
   全部未采纳、kernel 未变化时可复用 full test #1）；`性能要求：requested` 时还要求
   benchmark `passed`，`none` 时跳过本阶段；
@@ -120,20 +121,50 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
   判定并记录，再叠加 epilogue、其余 vector / GEMM 阶段；多 matmul 时逐个测，不得只测主
   GEMM，也不得因整体不是 GEMM 主导而跳过。骨架只用于测量，不改变 kernel 划分，也不作为
   拆成独立 Cube / Vector kernel 的理由。正确性在性能骨架之后收敛，不得先落一个能跑但
-  串行的骨架。CV 融合算子叠完 epilogue 后要回测一次 GEMM 段的有效算力，与骨架同 shape
-  偏差超过 15% 时写清归因（tile 退化、交棒等待或流水被打断）。
+  串行的骨架。含 MMAD 的算子叠完 epilogue 后要回测一次 GEMM 段的有效算力，与骨架同 shape
+  偏差超过 15% 时写清归因（tile 退化、交棒等待或流水被打断），同时记录骨架达成率
+  `skeleton_ratio = Σ骨架 gemm_ms ÷ Σ实现段耗时`（仅计 `passed` / `bandwidth-bound`
+  组，绑定 kernel SHA）；`skeleton_ratio ≥ 0.80` 时 optimize 按 `early_stop` 不做任何
+  探索轮直接收口。
 - **骨架判据可豁免**：指标不达标但有可核对理由（带宽受限、尾块、波次、profiler 口径等）
   时，写清实测值、原因、已做过的判断或改动和 optimize 补偿计划，记 `passed (waived)` 继续，
   不设二次确认。
 - **多 kernel 精度先定位首个偏差边**：跨 kernel 中间张量出现数值不匹配时，先按
   `knowledge/debug/multi-kernel-precision-localization.md` 建阶段 oracle；局部检查用
   标杆中间量作输入，下游通过不能证明上游正确。
-- **对齐优先于容差**：标杆定义的存储/累加 dtype、舍入位置与模式、归约顺序必须复现；
-  不复现就是精度 bug，容差只吸收完全对齐后的浮点尾差，不能当作保留下来的理由。
-  **例外**：中间量精度高于标杆（dtype/累加/舍入逐项不低于标杆，且至少一项更高）时，
-  不按精度 bug 处理，直接按用例容差判定，并在 DESIGN 的 deviation 项记录推导依据与预期
-  偏差量级（实测值在 develop 补齐）。容差判定不过时本例外不成立，必须回到 design 按误差
-  分析重新推导容差并记录 deviation，不得在调试中放宽；重推后的容差仍不过按精度 bug 处理。
+- **数学语义必须一致，实现精度可升档**：
+  **数学语义（必须一致）**：算子定义、输入输出关系、mask 与索引、归并/散写（如 scatter）
+  的合并关系（哪些元素合并、重复索引是否累加、越界如何处理），以及 softmax 等非线性步骤
+  的数学定义（如 max 减法、归一化形式），必须与标杆表达同一个数学过程；改变这些按精度
+  bug 处理。softmax 的 online / 两遍式等实现顺序属于精度实现，按升档规则处理。
+  **精度不降即可自由实现**：存储/累加 dtype、归约与累加顺序、分块方式、舍入位置与模式
+  属于精度实现。实现精度严格不低于标杆：dtype 与累加 dtype 逐项不低于且至少一项更高；
+  舍入不按模式名排序，以同一输入下该步的误差界不劣于标杆为准（给出推导或对照实验）。
+  满足时不再要求逐项复现标杆：顺序、分块、舍入位置都可以按实现需要选择，只需保证数学
+  过程不变，并按 deviation 记录标杆原实现、实现新选择、预期偏差量级与影响用例
+  （实测值在 develop 补齐）。
+  **同精度与降精度**：与标杆同精度时，顺序重排与分块方式变化只产生浮点尾差，允许；但不得
+  增加舍入次数或提前舍入。精度低于标杆、增加或提前舍入、引入额外低精度落盘，按精度 bug 处理。
+  **容差只用于判定**：只吸收数学语义一致后的浮点尾差，不得用于规避语义一致性，也不得在调试
+  阶段放宽；判定不过时回 design 按误差分析重推容差并记录，重推仍不过按精度 bug 处理。
+  本条不反向成立：精度更高不等于可以改变数学语义（如改变 softmax 的归一化定义、
+  去掉 max 减法、丢掉 mask）。
+- **被切开的 matmul 按整体处理**：标杆把同一 matmul 的 K 维（或 batch 维）按外部预算
+  分段、逐段累加到同一输出时（如 `for seg: C.addmm_(A[seg].T, B[seg])`），design 阶段
+  先做「分段判定」：段间除对 C 的累加外无其他读写、无跨段归约或非线性依赖、切分不改变
+  数学结果。判定成立则按一个完整 matmul 实现——K 单链、最高可用精度（默认 fp32 L0C）
+  累加、写回输出 dtype 时舍入一次，不得逐段复现低精度中间舍入或在 GM 上逐段读改写，
+  并按「精度不降即可自由实现」记录 deviation（段数、标杆舍入次数、偏差量级、对照实验）。
+  判定不成立（段间有归约/非线性/其他依赖，或用户要求逐段 bit 级复现）时按原分段语义
+  实现并写明原因。
+- **完整 matmul 的实现判据**：判定成立后必须同时满足（**本条优先于上文精度升档规则，
+  精度更高也不例外**）——单个输出 tile 的全部 K 贡献在同一次 launch 内累加完成；
+  累加器只在片上（默认 fp32 L0C），不得跨 launch 落在 GM
+  （atomic add、GM 读改写、fp32 缓冲回读都算）；写回输出 dtype 时只舍入一次。按输出
+  tile / block 划分任务不改变累加器归属，把同一输出 tile 的 K 贡献拆到多个 launch 合并
+  一律按分段实现处理。中间量预算按设备可用 HBM 反推并写显存账，不得沿用保守默认值；
+  预算取小造成的分段不算「完整 matmul 不可行」。放不下时按「提预算 → 改布局/复用 →
+  实测不可行才 split-K 或跨 launch 累加」降级，后者必须在 deviation 单列依据与对照。
 - **按结构选参考样例**：Cube-only → `tla/kernel/matmul/basic_mmad/basic_matmul.py`；
   Cube-Vector → `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
   Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
@@ -142,7 +173,9 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
   优先：先选阶段序列、数据流、任务映射、同步方式都接近的主参考；主参考是基线不是约束，
   偏离写清理由。没有足够契合的主参考时，可以组合多个分步样例，但要显式设计整体结构并
   照常跑 skeleton DoD。路径以工作区 `.catlass-dsl/references/catlass/` 下 `find` 的
-  结果为准。
+  结果为准。登记样例时同时登记当前环境可运行性（`passed` / `failed` / `not_run`）；
+  主参考必须实跑，局部参考未直接复用其机制的可记 `not_run` 并写原因；主参考 `failed`
+  必须写失败机制与改选方案，`remote-detached` 的 `not_run` 要附远端首跑命令。
 
 ## 自动执行
 
@@ -157,8 +190,10 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|o
   不等于任务完成，不得以“已汇报”为由结束回合。
 - **只在真阻塞时停**：仅当缺少只有用户能提供的信息（凭据、上板信息、无法自行判断的方案
   取舍），或可行路径已穷尽时才向用户提问，并列出已尝试的路径和失败原因。
-- **优化不提前收口**：optimize 模式 B 默认做完 3 轮、模式 A 至少 1 轮；不得以收益小、
-  没有思路或询问用户为由跳过轮次。
+- **优化不提前收口**：optimize 模式 B 按 2~3 轮执行（下限 2 轮、上限 3 轮）；不足两轮
+  不得以收益小、没有思路或询问用户为由跳过，满两轮且归因第一名已被针对性攻过后可收口，
+  不得为凑轮次做空转轮。唯一例外是 baseline 之后重算的 `skeleton_ratio ≥ 0.80`（详见
+  optimize 的 Setup and baseline 第 5 步），此时 0 轮收口，且不改写 mode、不虚构用户门槛。
 
 ## 超时纪律
 

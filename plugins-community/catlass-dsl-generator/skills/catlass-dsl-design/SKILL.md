@@ -58,8 +58,9 @@ description: Use when specifying a new CATLASS Python DSL operator and producing
 
 默认取 `none`。只有用户原话里出现性能相关诉求才写 `requested`，不得以“顺便测一下”为由
 自行升级；用户后续补充性能要求时，在 `ITERATIONS.md` 记录一条设计修订并更新该行。
-两种情况都必须完成 optimize（模式 B 三轮 / 模式 A 一轮）；优化采纳改动了 kernel 时补跑
-`full test #2`，全部未采纳、kernel 未变化时可复用 `full test #1`。
+两种情况都必须完成 optimize（模式 B 2~3 轮 / 模式 A 一轮；baseline 之后重算的
+`skeleton_ratio ≥ 0.80` 时按 `early_stop` 记 0 轮）；优化
+采纳改动了 kernel 时补跑 `full test #2`，全部未采纳、kernel 未变化时可复用 `full test #1`。
 
 ## 语言与实现边界
 
@@ -74,11 +75,22 @@ CATLASS DSL 是以 Python 语法编写的算子 DSL，不是 C++ 算子库。设
 - GM/L1/L0/UB、tiling、layout、copy、MMAD、vector、flag 和 mutex 等概念必须映射到
   CATLASS Python DSL 的现有接口；
 - C++、MLIR 或生成代码只能作为后端资料，不能成为算子公开接口或初步实现方案；
-- 默认 `fusion.mode=performance`，按整体性能最大化确定融合范围，允许多个
+- 默认 `fusion.mode=performance`：kernel 划分由你按算子语义与整体性能自行决定，允许多个
   `@tla.kernel`、多个 executor、GM 中间张量及 shape/dtype/layout 分派；
-- 只有用户明确要求单个融合 kernel 时设置 `fusion.mode=single_kernel`：一次 host `run`
-  只 launch 一个 kernel，solution 只声明一个 `@tla.kernel`，所有编译期变体复用它，不得
-  通过 GM 临时张量连接多个 executor；
+- 用户明确要求单个融合 kernel 时设 `fusion.mode=single_kernel`。此时**先独立给出自然划分**
+  （`fusion.structural_verdict: single | multi`），再围绕用户约束出方案，两者分开记录：
+  - 自然划分按 `performance` 模式正常做，不为"好合并"预留、缩小或改动结构；
+  - 自然划分就是单 kernel：按普通单 kernel 设计继续，无需合并；
+  - 自然划分是多 kernel：**不改这个判断**，在 DESIGN 的「融合与合并」写明
+    `merge_required: true`、段清单、段间边界清单（依赖方向、前后段 tile/任务映射是否一致、
+    覆盖核范围）与容量可行性（两段是否要求同时驻留 L0C/L1）。**同步原语与 pipe 不在 design
+    选型**：段间怎么接、用哪个 flag、走哪条 pipe 统一在 implement 阶段按
+    [`knowledge/optimization/multi-kernel-to-single-kernel.md`](../../knowledge/optimization/multi-kernel-to-single-kernel.md)
+    一次决定；design 不得为此调研 `SyncAll` / `cross_flag` / atomic，也不做合并原型。这是
+    用户约束驱动的合并，不是结构判断出错，记录里要把"自然多 kernel"和"交付单 kernel"两件事
+    都写清楚；
+- 合并不可行时（如两段各需一份顶满 L0C 的输出 tile），在 DESIGN 写明不可行的具体容量账与
+  两个候选方案（缩 tile / 落 GM），不得为了满足"单 kernel"而悄悄降低精度或改数学语义；
 - 每个 `@tla.kernel` 必须自包含：除形式参数、函数内局部值、Python 内建符号和受信任的
   `tla` API 命名空间外，不得读取模块级 tile、shape、dtype、params、开关或 closure 配置；
 - 固定 tile/dtype/params 在 kernel 函数内定义；运行时 shape 通过显式 scalar/tensor
@@ -90,27 +102,33 @@ CATLASS DSL 是以 Python 语法编写的算子 DSL，不是 C++ 算子库。设
 ## Torch 精度标杆
 
 设计阶段必须在当前 workspace 生成项目专用 `reference.py`，只使用公开 `torch` API 表达
-算子数学语义，不得 import candidate、复用 candidate 输出或调用待实现算子。reference 默认
-在 CPU 上执行；只有语义确实依赖设备且 CPU 无等价表达时才使用目标 device。
+算子数学语义，不得 import candidate、复用 candidate 输出或调用待实现算子。reference 与
+candidate 在同一个目标 device 上执行；只有完全没有 NPU 时才退回 CPU，且只允许小 shape。
 
-### 执行分层（无 NPU 时）
+### 执行分层
 
 | 层 | 内容 | 执行要求 |
 |---|---|---|
 | L1 静态 | Python 语法、`run` 入口、摘要与 solution 一致性 | 真实环境执行；纯本地生成模式推迟到真实环境 |
-| L2 reference | Torch CPU 精度 oracle | 真实环境执行；纯本地生成模式推迟并记 `blocked` / `not_run` |
+| L2 reference | Torch 精度 oracle（与 candidate 同一 `npu:<id>`） | 真实环境执行；纯本地生成模式推迟并记 `blocked` / `not_run` |
 | L3 NPU | 编译、上板、精度、benchmark、profiling | 真实环境执行；缺环境记 `blocked` / `not_run` |
 
 执行位置：有真实环境（远端服务器或本机 NPU 机器）就在该环境执行 L1/L2；纯本地生成模式
 下本地一行都不跑，只生成文件并写好精确命令，等真实环境就绪后直接执行。本地不做静态
 检查、模拟检查、打桩检查或任何形式的代跑。
 
-L2 延迟口径：
+L2 执行口径：
 
-- 在真实环境跑全 shape 算量过大时，先用小 shape（M≤8、V≤256、H≤64）的临时
-  `definition` / `workload` 证明 `reference.py` 可执行；冒烟结果只作可执行性证据。
-- 随后把冻结 workload 的全 shape 校验记录为 `blocked`，写明原因和精确重跑 argv，并在
-  `DESIGN.md` 与 `ITERATIONS.md` 同步标注。
+- 调用方（`validate_reference.py` 或 bench 脚本）必须提供 `--device`，把输入落到该
+  `npu:<id>` 后再调 `reference.run`；`reference.run` 的签名与 bench 契约一致，不额外接
+  device 参数。
+- 冻结 workload 的全 shape 校验必须在 NPU 上执行；CPU 只允许在没有 NPU 时用于小 shape
+  冒烟（M≤8、V≤256、H≤64）。不得用 CPU 跑全 shape，也不得以 CPU 上的完成时间或是否
+  跑完作为性能、可行性或精度证据。
+- 小 shape 冒烟只证明 `reference.py` 可执行，不能替代全 shape 校验。
+- 完全没有 NPU 时，把冻结 workload 的全 shape L2 校验记录为 `blocked`，写明原因和精确
+  重跑 argv（必须带 `--device`），并在 `DESIGN.md` 与 `ITERATIONS.md` 同步标注；有设备
+  后补跑全 shape 校验，仍走 device，不得改用 CPU。
 - 允许带 L2 `blocked`（纯本地生成模式记 `blocked` / `not_run`）进入 develop，但 `finish` 前必须
   补跑全部非 performance required cases；未补跑不得标记完成。
 - 禁止为判断“能不能跑”做 CPU / NPU 算力或环境探测；环境缺失直接记录。
@@ -201,15 +219,52 @@ case 规则：
    写替代方案，不得按“应该支持”假设（例如 RINT 这类 round mode 在不同子包的支持情况
    并不一致，2.2.0 仍在演进，必须按目标版本实测或查 API 确认）。容差按输出 dtype 写入
    definition（atol/rtol/matched_ratio/max_error_cap），debug 期不得放宽。
-   **对齐优先于容差**：标杆已定义的数值语义（存储/累加 dtype、舍入位置与模式、归约与
-   累加顺序）必须在实现中复现，不复现按精度 bug 处理；容差只吸收“完全对齐后”仍然存在
-   的浮点尾差，不能当作不对齐的理由。确实无法复现时（DSL 无等价表达，或成本不可接受），
-   必须在 DESIGN 里单列 deviation：哪一项、不可复现的原因、量级估算或对照实验、影响的
-   用例范围、high risk 标记和补偿计划，不得只写“容差内”。
-   **豁免**：中间量精度高于标杆（dtype/累加/舍入逐项不低于标杆，且至少一项更高）时，
-   视为满足对齐要求，在 DESIGN 的 deviation 项记录推导依据与预期偏差量级（实测值在
-   develop 补齐）；容差判定不过时豁免不成立，需按误差分析重新推导容差并记录，不得在
-   调试中放宽；重推后的容差仍不过按精度 bug 处理。
+   **数学语义必须一致，实现精度可升档**：
+   **数学语义（必须一致）**：算子定义、输入输出关系、mask 与索引、归并/散写（如 scatter）
+   的合并关系（哪些元素合并、重复索引是否累加、越界如何处理），以及 softmax 等非线性步骤
+   的数学定义（如 max 减法、归一化形式），必须与标杆表达同一个数学过程；改变这些按精度
+   bug 处理。softmax 的 online / 两遍式等实现顺序属于精度实现，按升档规则处理。
+   **精度不降即可自由实现**：存储/累加 dtype、归约与累加顺序、分块方式、舍入位置与模式
+   属于精度实现。实现精度严格不低于标杆：dtype 与累加 dtype 逐项不低于且至少一项更高；
+   舍入不按模式名排序，以同一输入下该步的误差界不劣于标杆为准（给出推导或对照实验）。
+   满足时不再要求逐项复现标杆；顺序、分块、舍入位置都可以按实现需要选择，只需保证数学
+   过程不变，并在 deviation 项记录标杆原实现、实现新选择、推导依据、预期偏差量级与影响用例
+   （实测值在 develop 补齐）。
+   **同精度与降精度**：与标杆同精度时，顺序重排与分块方式变化只产生浮点尾差，允许；但不得
+   增加舍入次数或提前舍入。精度低于标杆、增加或提前舍入、引入额外低精度落盘，按精度 bug 处理。
+   因 DSL 限制既无法按标杆精度表达、也无法升档时，单列 deviation：哪一项、原因、量级估算或
+   对照实验、影响用例范围、high risk 标记和补偿计划，不得只写“容差内”。
+   **容差只用于判定**：只吸收数学语义一致后的浮点尾差，不得用于规避语义一致性，也不得在
+   调试阶段放宽；判定不过时按误差分析重推容差并记录，重推仍不过按精度 bug 处理。本条不反向
+   成立：精度更高不等于可以改变数学语义。
+   **被切开的 matmul 按整体处理**：标杆把同一个 matmul 的 K 维（或 batch 维）按外部
+   预算切成多段、逐段累加到同一个输出时（典型形态是 `for seg: C.addmm_(A[seg].T,
+   B[seg])`，段长由临时缓冲预算而非算法语义决定），design 阶段必须先做「分段判定」
+   并写入 `DESIGN.md`：段间除对 C 的累加外没有其他读写、没有跨段归约或非线性依赖、
+   切分不改变数学结果。判定成立时按**一个完整 matmul** 设计：K 方向走单链，中间累加
+   统一用目标设备可用的最高精度（默认 fp32 L0C），只在写回输出 dtype 时舍入一次；
+   不得逐段复现低精度累加器的中间舍入，也不得为复现段边界在 GM 上做逐段读改写。
+   该选择属于上文「精度不降即可自由实现」，必须在 deviation 中记录：段数、
+   标杆的舍入次数、预期偏差量级、对照实验和影响用例。判定不成立（段间存在归约/
+   非线性/其他数据依赖，或用户明确要求逐段 bit 级复现）时按原分段语义实现，并写明
+   原因。不得因「分段是标杆的显存优化」就直接认定它可以合并，也不得因「合并后精度
+   更高」就跳过判定和 deviation。
+   **「完整 matmul」的实现判据**：判定成立后，实现必须同时满足三条（本条优先于上文
+   精度升档规则，精度更高也不例外）——① 单个输出 tile 的全部 K 贡献在同一次 kernel
+   launch 内累加完成；② 累加器只存在于片上（默认 fp32 L0C），不得跨 launch 落在 GM，
+   `atomic add`、GM 读改写、fp32 中间缓冲回读都按跨 launch 累加器处理；③ 只在写回
+   输出 dtype 时舍入一次。按输出 tile / block 划分任务不改变累加器归属；把同一个输出
+   tile 的 K 贡献分散到多个 launch 再合并，一律按分段实现处理，不能因为「精度仍是 fp32」
+   就认为合规。
+   **中间量预算必须以设备可用显存为上限反推**：确定 chunk / tile 前先写显存账（可用
+   HBM − 输入输出 − 工作区余量），预算取设备上限与算法需要中的较小值；不得直接沿用
+   保守默认值（如 2 GiB）而不核对设备上限。预算取小导致的分段属于实现自造的约束，
+   不能作为「完整 matmul 不可行」的依据。
+   **中间量放不下时的降级顺序**：① 把中间量预算提到设备可用上限；② 改布局或复用缓冲；
+   ③ 只有 ①② 都实测不可行（写明实测显存与失败现象）才允许 split-K 或跨 launch 累加，
+   并在 deviation 中单列「完整 matmul 不可行」的依据、替代方案对照与影响用例。
+   `DESIGN.md` 同时出现「判定成立」与 atomic / 跨 chunk 累加缓冲时，必须补足上述实测
+   依据，否则判定无效。
 5. 生成 `reference.py` 与 `definition.json`，把每个非 performance required case 写成
    `workload.jsonl` 一行，并按规则生成 `workload_dev.jsonl`。
 6. 按 L2 口径在真实环境运行 reference cases 并记录证据；全 shape 不可完成时先冒烟
@@ -246,21 +301,39 @@ case 规则：
    在 DESIGN 的「结构类型与参考样例」一节分别记录主参考（整体结构匹配点、偏离点）和
    局部参考（补齐的机制或组合方案）。目标版本没有同名样例时，选最接近的整体结构样例
    并记录差异与改造点，不得凭记忆引用。
+   登记样例时必须同时登记它在当前环境的可运行性（DESIGN 的「参考样例可运行性」字段）：
+   主参考必须实跑；局部参考只在直接复用其机制时实跑，其余可记 `not_run` 并写明未复用原因。
+   `remote-connected` / `local` 下用样例自带的入口（`run()` 或等价入口）原样实跑一次
+   （不改源码，取小 shape，覆盖样例声明的关键机制——如 scatter、SPLIT_M 等，必须让对应
+   分支真正执行），编译按 `timeout 600s`、单次运行按 `timeout -k 5 60s`；命令可直接内联，
+   也可落在 `tools/sample_probe.py`，日志与退出码放 `evidence/reference/`，并记录 shape。
+   结果记 `passed` / `failed`；`remote-detached` 下记 `not_run` 并写出精确重跑命令，作为
+   远端第一个执行动作。主参考记 `failed` 时，必须写明失败机制（编译 / 运行 / 超时）、
+   是否影响拟用结构与降级方案，不得按未验证的结构直接冻结设计；局部参考记 `failed` 时
+   说明改用哪个等价样例。
+   容差/偏差测量与样例 probe 同口径：`remote-connected` / `local` 下只允许在 NPU 上跑
+   1~2 个最大用例，单例 `timeout -k 5 60s`；**禁止 CPU 全尺寸复现标杆分块**（例如按
+   chunk 循环 `addmm_` 复现 96 段 bf16 累加的探针）。design 只写容差公式与解析上界，
+   实测放到 develop 首跑执行；`remote-detached` 下记 `not_run` 并写出精确重跑命令。
    设计期先完整读取 `knowledge/debug/multi-kernel-precision-localization.md` 的「通用规则」
    （中间量 dtype、layout、舍入位置、归约顺序、独立 oracle），不要等到测试失败才看。
    多 kernel 或跨 kernel 中间张量的算子，还必须为每条跨 kernel 边定义精度契约：数学语义、
    shape/stride/有效区、输入输出与累加 dtype、舍入位置、重复 ID/归约/chunk 顺序、消费
    分支和对应 oracle；并在 DESIGN 的「跨 kernel 阶段 oracle」一节给出阶段检查计划（局部
    检查、真实链路、双向替换）。没有中间量 oracle 时，明确写出替代验证方式。
-   同时给出搬运量核算（Σ 重读次数 × 体积）与对应的带宽下界，tiling 参数偏离参考样例时
-   逐项说明差异及对搬运量的影响。
-   写明 `fusion.mode` 及单融合是否由用户明确提出；没有实测支持的性能判断标记为待验证
-   假设。
+   同时给出搬运量核算（Σ 重读次数 × 体积）与按有效 MTE2 带宽折算的搬运下界，tiling 参数
+   偏离参考样例时逐项说明差异及对搬运量的影响。
+   写明 `fusion.mode`、单融合是否由用户明确提出，以及是否发生「自然多 kernel → 交付单
+   kernel」的合并（`structural_verdict` / `merge_required`、边界清单是否齐备）；没有实测
+   支持的性能判断标记为待验证假设。
 8. 明确正确性 oracle、required cases、`focused_cases`、focused/full test 命令、风险、
    允许路径、benchmark/profiling 命令和可选性能门槛。要求执行器输出实际 argv、退出码
    和逐 case 结果。
 9. 从 [`templates/DESIGN.md`](templates/DESIGN.md) 创建面向用户的设计文档，写入目标 DSL
-   版本与执行模式，并在 `ITERATIONS.md` 记录 design 里程碑。
+   版本与执行模式，并在 `ITERATIONS.md` 记录 design 里程碑。文档创建后只允许用 `Edit`
+   定点修改，禁止整文件重写；同一内容不在对话与文档中各写一遍（对话只留结论摘要）；
+   按小节增量构建，禁止“先写粗略全文再整体推翻重写”。DESIGN 大小由算子复杂度决定，
+   不设上限；超过 30 KB 时检查是否有重复描述（同一 deviation 多节重复、样例代码整段抄入）。
 10. 向用户展示 `DESIGN.md`、Resolved Plan 与 reference case 结果（纯本地生成模式
     展示 `blocked` / `not_run` 状态与精确命令）；默认直通时直接进入 develop，用户要求
     先评审时才暂停。
@@ -300,4 +373,4 @@ evidence/reference-cases.json      # 自行生成的一次性校验结果
 声明性能门槛时还必须写明方向、阈值、迭代上限、停滞阈值和最小提升比例。门槛只能来自
 用户提示或用户确认；由知识条目、基线实现或 roofline 推算出的数值只是参考目标，不得
 写成本设计的门槛。没有性能门槛不表示跳过 optimize：无门槛时进入模式 B（explore），
-至少执行三轮优化；也不表示跳过 benchmark 或 profiling。
+执行 2~3 轮优化（上限 3 轮，命中 `early_stop` 时 0 轮）；也不表示跳过 benchmark 或 profiling。

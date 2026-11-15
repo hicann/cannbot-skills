@@ -41,9 +41,11 @@ arch: [c310]
 [^api] MMAD 使用 `unit_flag` 表达末次 K 计算/搬运协议；VADD 展示 flag、mutex
 与 barrier 的可替换实现。[^mmad][^vadd]
 
-当前还提供 `@tla.kernel(auto_sync="v0")`：编译 pass 可为 MMAD/FIX 流水插入核内
-mutex 与 unit-flag 协议，示例 kernel 本身不手写 local flag/mutex。它是明确的 v0
-模式，不能假设覆盖 cross-core 或所有自定义内存别名。[^auto-sync]
+也可以用 `@tla.kernel(auto_sync="v0")`：编译 pass 可代插核内 mutex 与 unit-flag 协议，
+kernel 本身不手写 local flag/mutex。它是明确的 v0 模式，不能假设覆盖 cross-core 或所有
+自定义内存别名；骨架与融合 kernel 的核内流水默认用显式 mutex（与
+`matmul_row_exp_scatter_add` 的 GEMM 段同构），跨核交棒仍用 `cross_flag`，`auto_sync`
+仅作纯 MMAD/FIX 的对照写法。[^auto-sync]
 
 # 用法
 

@@ -127,10 +127,12 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 `design` 会暂停并展示产物；回复“继续”即进入开发，不需要“批准”字样。
 
 `develop` 会按 `ITERATIONS.md` 逐个里程碑推进：含 MMAD 的算子（纯 matmul 与 CV 融合都算）
-先把每个 matmul 阶段剥成单 GEMM 骨架，**各自**按时间与流水判据判定（不达标可写豁免理由），
+先把每个 matmul 阶段剥成单 GEMM 骨架，**各自**按时间与流水判据判定（先做解析预筛、实跑
+不超过 3 组，骨架同步只用 mutex；骨架直接复制 `templates/skeleton_gemm.py` +
+`skeleton_profile.py` + `skeleton_spec.json`，只填 spec 与 kernel 体；不达标可写豁免理由），
 再按「正确性 → 边界 → 性能细节」扩展。骨架只是测量工件，不改变最终 kernel 划分。阶段
 顺序固定为 focused test → **full test #1** → optimize（有目标走模式 A，无目标走模式 B
-至少三轮）→ targeted/final review →
+2~3 轮，上限 3 轮）→ targeted/final review →
 全量测试验收（kernel 变化时补跑 **full test #2**）→ [benchmark]。每次进入下一阶段前都要
 先跑门禁并通过：
 
@@ -208,7 +210,7 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <阶段> --workspace <项�
 
 调用 optimize 时需提供算子路径、测试命令、benchmark 指标、design 冻结的
 `workload_dev.jsonl` 和迭代上限；有明确目标时给出阈值（模式 A），没有目标时省略阈值、
-至少执行三轮（模式 B）：
+按 2~3 轮执行（模式 B，上限 3 轮）：
 
 ```text
 使用 catlass-dsl-optimize 优化 src/matmul.py。
@@ -266,8 +268,8 @@ develop 先落性能骨架并达标，再扩展主 Python 文件内的全部 ker
 编译、上板、精度、benchmark、profiling 全部在真实环境完成；环境缺失记录 `blocked` /
 `not_run`，保留代码及待执行阶段，环境就绪后直接继续。连接与同步由使用者现有方式处理。
 
-focused test 通过后先跑全量测试 #1，再进入 optimize（有目标走模式 A，无目标走模式 B 至少
-三轮），完成后经 targeted_review / final_review、全量测试验收（kernel 变化时补跑 #2，
+focused test 通过后先跑全量测试 #1，再进入 optimize（有目标走模式 A，无目标走模式 B
+2~3 轮，上限 3 轮），完成后经 targeted_review / final_review、全量测试验收（kernel 变化时补跑 #2，
 2~5 片）交付；声明 `性能要求：requested` 时再执行逐例配对 benchmark 与 profiling。每一步
 进入前都要通过 `gate.py` 对应门禁。
 

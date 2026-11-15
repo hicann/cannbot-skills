@@ -58,7 +58,10 @@ description: Use when the user asks for any CATLASS DSL operator task (design, i
 
 9. **建立或更新里程碑日志**：工作区没有 `ITERATIONS.md` 时创建，表头为
    `| Iter | Stage | Kernel SHA256 | Command | Result | Evidence |`。后续每次阶段推进
-   都追加一行真实记录。
+   都追加一行真实记录；已创建的文件只允许追加或定点 `Edit`，禁止整文件重写。
+   首次写表前先读 `scripts/gate.py` 的 `read_iterations` / `section_rows` /
+   `milestone_rows` / `status_of` / `require_evidence` / `optimization_rounds`，
+   按实际解析规则一次写对；每次改表后立即跑对应 `gate.py <stage>` 验证。
 
 ## 2. 阶段路由
 
@@ -100,7 +103,7 @@ finish。
 | design | `python3 <SKILL_DIR>/scripts/gate.py design --workspace <ws>` | 五件交付物齐备；definition/workload 合法；dev 子集总数 ≤40（用户用例 ≥30 条时为 30~40 条；不足 30 条时全选，不要求补齐；无用户用例时按覆盖需要自定，不以下限 30 为目标）；DESIGN.md 记录三个文件的 SHA-256；声明执行模式与性能要求 |
 | develop | `python3 <SKILL_DIR>/scripts/gate.py develop --workspace <ws>` | design 通过；skeleton 与 focused test 记录；`solution.json` 与实现文件一致 |
 | fulltest | `python3 <SKILL_DIR>/scripts/gate.py fulltest --workspace <ws>` | 当前 kernel 的 full test passed 记录与证据 |
-| optimize | `python3 <SKILL_DIR>/scripts/gate.py optimize --workspace <ws>` | full test 通过；模式 A ≥1 轮或模式 B ≥3 轮的完整账本 |
+| optimize | `python3 <SKILL_DIR>/scripts/gate.py optimize --workspace <ws>` | full test 通过；模式 A ≥1 轮或模式 B 2~3 轮的完整账本；`early_stop`（`skeleton_ratio ≥ 0.80`）记 0 轮 |
 | benchmark | `python3 <SKILL_DIR>/scripts/gate.py benchmark --workspace <ws>` | 当前 kernel 有全量测试 passed（优化改动了 kernel 时须为 full test #2）；`性能要求：requested` 时还要求当前 kernel 的 benchmark passed；`none` 时跳过 benchmark 与 profiling |
 | finish | `python3 <SKILL_DIR>/scripts/gate.py finish --workspace <ws>` | `性能要求：requested` 时 benchmark 已通过；final review passed；Final Verdict 存在 |
 
@@ -213,11 +216,13 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
 
 - **控温只在 optimize 阶段执行**：同用例内各实现温差 ≤3℃，执行前 AICore 频率须为
   1650 MHz，温度超过 85℃ 停机；full test 与 benchmark 不做控温。
-- **optimize 轮次**：有明确性能目标时（模式 A）至少完成 1 轮；没有目标时（模式 B）至少
-  完成 3 轮并逐轮写入 `ITERATIONS.md` 的 `## Performance Rounds`。禁止以“已收敛”“收益
-  不大”或询问用户换取提前收口。optimize 只能在 full test #1 通过后开始，结束后必须确认
-  当前 kernel 有全量测试记录（kernel 变化时补跑 full test #2）；`性能要求：requested`
-  时再进入 benchmark。
+- **optimize 轮次**：有明确性能目标时（模式 A）至少完成 1 轮；没有目标时（模式 B）完成
+  2~3 轮（下限 2 轮、上限 3 轮），逐轮写入 `ITERATIONS.md` 的 `## Performance Rounds`。
+  不足两轮不得以“已收敛”“收益不大”或询问用户换取提前收口；满两轮且归因第一名已被针对性
+  攻过后可收口，不得为凑轮次做空转轮。例外：baseline 之后重算的 `skeleton_ratio ≥ 0.80`
+  时按 `early_stop` 记 0 轮。optimize 只能在 full test #1
+  通过后开始，结束后必须确认当前 kernel 有全量测试记录（kernel 变化时补跑 full test #2）；
+  `性能要求：requested` 时再进入 benchmark。
 - **性能采集看用户要求**：`DESIGN.md` 的 `性能要求：none` 表示用户没有明确提性能，
   当前 kernel 全量测试通过后直接 finish，不跑 benchmark、不做 profiling，也不得自行补测；
   `requested` 才按 §5 口径采集性能并作为交付证据。

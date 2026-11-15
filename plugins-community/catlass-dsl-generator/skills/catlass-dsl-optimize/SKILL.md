@@ -56,22 +56,26 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 | 模式 | 触发条件 | 停止条件 |
 |---|---|---|
 | A 达标 | 用户明确给出的数值门槛（`DESIGN.md` 仅转述用户原话；agent 自定、知识/基线/roofline 推算值不算） | best candidate 达到 threshold 且至少完成 1 轮 |
-| B 探索 | 没有明确性能目标 | 至少完成 3 轮已记录迭代 |
+| B 探索 | 没有明确性能目标 | 完成 2~3 轮已记录迭代（下限 2 轮、上限 3 轮）；develop 回测 `skeleton_ratio ≥ 0.80` 时 0 轮收口 |
 
 门槛只能来自用户提示或用户确认。由知识条目、基线实现或 roofline 推算出的数值只能作为
 轮次内的参考目标，不得写入 `threshold` 触发模式 A；`DESIGN.md` 中由 agent 自定的数值
 目标不构成模式 A 的依据。用户只提出“更快”“性能差”“需要优化”等相对诉求而未给具体
 指标时，按模式 B 执行（`threshold: none`），性能采集要求按 `性能要求` 行单独判定。
 
-唯一例外：`性能要求：none` 且用户用例平均 MFU 已达 90% 时，按模式 A 记录
-`threshold: MFU ≥ 90%`，用 1 轮判定收口，见 Setup and baseline 第 5 步。
+唯一例外：baseline 之后按同一份 device profile 重算的 `skeleton_ratio ≥ 0.80` 时，optimize
+不做任何探索轮，`Optimization Policy` 记 `mode: explore` +
+`early_stop: skeleton_ratio >= 0.80`，直接进入 finalization。该例外不改写 mode，也不虚构
+用户门槛，见 Setup and baseline 第 5 步。
 
-模式在开始时确定并写入 `ITERATIONS.md`，中途不得切换。模式 B 在无用户确认时也必须执行
-至少三轮，不得以“感觉差不多了”提前收口；模式 A 即使 baseline 已经达标也必须记录至少
-一轮，避免把未优化的首版实现直接当作达标交付。`性能要求：none` 且 dev 子集内用户用例
-平均 MFU 已达 90% 的收口例外见 Setup and baseline 第 5 步。
+模式在开始时确定并写入 `ITERATIONS.md`，中途不得切换。模式 B 在无用户确认时按 2~3 轮执行
+（下限两轮、上限三轮）：低于两轮不得以“感觉差不多了”提前收口；满两轮且归因第一名已被
+针对性攻过、无新轴可试时即可收口，不得为凑轮次做空转轮；达到三轮后停止新增轮次。模式 A
+即使 baseline 已经达标也必须记录至少一轮，避免把未优化的首版实现直接当作达标交付。
+骨架达成率命中时的 0 轮收口例外见 Setup and baseline 第 5 步。
 
-停止条件只看账本：模式 B 未满 3 轮、模式 A 未满 1 轮或未达标时必须继续下一轮。不得中途
+停止条件只看账本：模式 B 未满 2 轮（`early_stop` 命中时为 0 轮）、模式 A 未满 1 轮或未
+达标时必须继续下一轮。不得中途
 结束回合、不得汇报“优化完成”、不得询问用户是否继续。认为没有新方向时，仍要选一个可
 证伪的优化轴完成本轮并如实记录 `rejected`。
 
@@ -84,6 +88,7 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 - mode: target | explore
 - metric: performance.candidate.mean_ms (end2end 口径, lower is better)
 - threshold: <value | none>
+- early_stop: skeleton_ratio >= 0.80        # 仅命中骨架达成率收口时出现
 - device: npu:<id>
 - dev workload: workload_dev.jsonl (<n> cases)
 
@@ -103,7 +108,8 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 - `Decision`：越过噪声门禁为 `adopted`，否则 `rejected`；
 - `Evidence`：本轮结果 JSON 与 profile 目录的项目相对路径。
 
-账本逐轮追加，禁止事后补写。模式 B 不足三轮、模式 A 不足一轮时不得进入 finalization。
+账本逐轮追加，禁止事后补写。模式 B 不足两轮（`early_stop` 命中时为 0 轮）、模式 A 不足
+一轮时不得进入 finalization。
 
 ## 评测口径（控温仅在 optimize 阶段执行）
 
@@ -132,18 +138,17 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 3. 运行全部 correctness 命令，再用已解析命令生成 baseline；确认结果的
    `solution.source_sha256` 与当前 kernel SHA-256 一致。
 4. 在 `ITERATIONS.md` 写入 `## Optimization Policy` 与第 0 行 baseline。
-5. **MFU 收口判定（仅 `性能要求：none`）**：baseline 完成后，只用 **`workload_dev.jsonl`
-   中 `origin=user` 的行**计算平均 MFU（逐例 MFU = 实际 FLOPs ÷ (device_ms × 峰值算力)；
-   同一判定内所有用例使用同一分母，参与判定的用例必须逐例具备 `device_ms` 且
-   `host_gap_ms / end2end_ms ≤ 5%`；任一用例缺 `device_ms` 或超过该阈值时，本例外不成立，
-   按模式 B 执行，不得用 `mean_ms` 代替 device 口径计算 MFU；FLOPs 算式与峰值来源写入账本）。
-   口径是"子集内筛选出的用户用例"，不是
-   `workload.jsonl` 里全部用户用例：不得为判定额外采集子集外用例的性能（用户用例总数
-   远超子集规模时，只算子集内选中的那些，禁止先跑全量）。子集内没有 `origin=user`
-   用例时该例外不适用，按模式 B 执行。平均 MFU ≥ 90% 时不再进入三轮优化：
-   `Optimization Policy` 按模式 A 记录 `threshold: MFU ≥ 90%`，只写 1 轮判定行
-   （Decision 为 `rejected`，Reason 写明 MFU 数值、参与计算用例的 uuid 列表与峰值来源），
-   随后直接进入 finalization。agent 补充用例只承担正确性覆盖，不参与该判定。
+5. **骨架达成率收口（仅模式 B，在 baseline 之后判定）**：用 baseline 的同一份 device
+   profile 重算 `skeleton_ratio = Σ 有实测的骨架 gemm_ms ÷ Σ 全部 GEMM 实现段耗时`。
+   `waived` 组按实测计入分子（须写了饱和理由：`mac ≥ 0.99` 或对应带宽管 `≥ 0.95`），
+   `failed` 组分子记 0、其实现段仍计入分母；用例取 DESIGN / spec 登记的每个 GEMM 最大
+   dev shape，分子与分母逐段配对；单 kernel 或多段共用一个 kernel 拆不开时，实现侧取该
+   kernel 单轮 task duration 总量，并写明按什么区分不同 launch。`skeleton_ratio ≥ 0.80`
+   时不做任何探索轮，直接进入 finalization：`Optimization Policy` 记 `mode: explore` 与
+   `early_stop: skeleton_ratio >= 0.80`，`## Performance Rounds` 只保留表头（0 轮），
+   Final Verdict 写明未做优化轮次及依据。不命中或回测为 `not_run` 时按 2~3 轮执行——缺少
+   骨架数据（如纯 vector 算子）不构成豁免理由，不得以“骨架不适用”跳过优化，也不得把该
+   例外改写成模式 A 或虚构 `threshold`。
 
 ## Optimization loop
 
@@ -152,6 +157,19 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 1. **Analyze.** 从保留的 `kernel_details.csv`、`step_trace_time.csv` 和历史指标识别当前
    瓶颈。不要盲目调参；先形成可用于检索的 operator family、瓶颈类型、相关 DSL API、
    shape/dtype/layout 和架构关键词。
+
+   每轮先产出**结构差异对照**，再选优化轴：把当前 best 实现与 DESIGN.md 登记的主参考
+   样例、原始 golden（任务书提供的高精度参考实现）逐项对齐——数据流与中间量（落 GM 的
+   中间量个数/dtype/字节数）、epilogue 结构（在哪个 pipe 融合、扫描遍数、每 tile 的
+   barrier 次数）、tile 与块映射、舍入位置与次数、同步原语。每个差异项必须标注代价来源
+   （fresh profile 的 pipe 占比、消融实测 ms，或 `not measured`）；标 `not measured` 的
+   差异项不得作为本轮优化轴的依据。骨架阶段有同 shape 数据时，同时写出 kernel 时间与
+   骨架 GEMM 的比值，并把差值落到具体段（epilogue / scatter / 写出 / barrier）。
+
+   有 kernel 级产物时，整个 optimize 阶段至少完成一次针对 profile 占比最高段的单变量
+   消融（关闭该段、换回骨架等价写法或只保留 GEMM），把差值折算成 ms；best 结构与 shape
+   未变时可复用该结果，不重复消融。消融用交付主实现的临时副本，在
+   `evidence/round-NNN/ablation/` 下计时，不改动交付主实现，也不占 Performance Rounds 行。
 
    有 kernel 级产物时，若 `device_ms / end2end_ms < 0.5`（小 shape）或
    `host_gap_ms / end2end_ms > 0.05`（大 shape），先按 host 关键路径归因：首 kernel 前的
@@ -163,7 +181,8 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    → L0 双侧双缓冲），不要在同一阶段反复微调参数。
 
    若同时满足 `mac < 0.5`、`mte2 > 0.8`、`mac + mte2 < 1.5`，先排除带宽受限：若
-   `mte2 ≥ 0.95` 且实测耗时已接近 DESIGN 的带宽下界（或不超过同 shape `torch.mm`），
+   `mte2 ≥ 0.95` 且实测耗时已接近 DESIGN 的搬运下界（按有效 MTE2 带宽折算，或不超过同
+   shape `torch.mm`），
    说明该 shape 贴住带宽上限，本轮轴改为减流量、铺放或波次量化，不得按“缺流水”处理。
    排除带宽受限后，唯一结论是**缺少流水、拷贝链与 MMAD 串行**；本轮轴只能是双缓冲、
    `BK > SK` 或同步协议修复，禁止选铺放、减流量类改动。`cube_utilization` 接近 100%
@@ -188,16 +207,17 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    便于 rejected 后恢复。
 5. **Modify.** 只修改主实现文件，修改后同步更新 `solution.json` 的源码包；不改变
    reference、workload、容差或计时边界。默认允许多 launch、融合范围及显式 dispatch
-   调整，以完整 `run` 的性能为准；严格模式禁止多 kernel、多 launch 或独立变体。
+   调整，以完整 `run` 的性能为准；严格模式禁止多 kernel、多 launch 或独立变体。核内
+   同步保持 `tla.mutex`，跨核交棒保持 `cross_flag`，不得更换同步原语。
 6. **Correctness.** 运行全部 required correctness 命令。失败时立即停止本轮，不得
    benchmark；记录 `After ms = null`、`Decision = rejected`。
 7. **Benchmark.** 正确后使用同一 device、`workload_dev.jsonl`、环境和采样配置测量，逐例
    配对。默认 warmup 1 次、采集 2 次；需要更稳时可加到 5，统计口径（`mean_ms` 算术平均、
    `median_ms`/`all_ms` 作噪声参考）按 `catlass-dsl-bench`。不得为得到更好数字临时改变
    配置。
-8. **Record immediately.** benchmark 返回后立即补齐本轮行与 `evidence/round-NNN/result.json`；
-   在关闭本轮前不得 profile、读新资料、修改 kernel 或规划下一轮。failed/partial 轮也必须
-   记录。
+8. **Record immediately.** benchmark 返回后立即补齐本轮行、`## Structural Delta` 对应行与
+   `evidence/round-NNN/result.json`；在关闭本轮前不得 profile、读新资料、修改 kernel 或
+   规划下一轮。failed/partial 轮也必须记录。
 9. **Decide.** 按下方噪声门禁判断 adopted / rejected。rejected 时从
    `evidence/round-NNN/kernel-before.py` 恢复 best；不要手工重建候选。
    实测方向与预登记预期相反（例如预测 ≥1.3×、实得 <1.0×，或指标应升反降、应降反升）
@@ -232,13 +252,15 @@ task duration 占比最高的 pipe（mac / mte2 / mte1 / fix / vec）；`op_summ
 版本确实带 pipe 指标时才可作为替代。按阶梯映射到轴：MTE2 → 波次量化或 L1 双缓冲；
 MTE1 → L0 双侧双缓冲或 `BK > SK`；CUBE → 铺放或结构上限；FIX → epilogue 归并。若该
 映射轴已被 DESIGN 判定不可用，或已有 rejected 轮次的实测证据，可停止，并在 Final
-Verdict 写明依据。`性能要求：none` 且触发 MFU ≥ 90% 收口时，本要求不适用。
+Verdict 写明依据。命中骨架达成率收口（`early_stop: skeleton_ratio >= 0.80`）时，本要求
+不适用。
 
 仅在以下条件停止迭代并进入 Finalization：
 
-- 模式 A 达到 threshold 且至少完成 1 轮，且满足上方“归因第一名已尝试”要求（MFU 收口
-  例外除外）；
-- 模式 B 至少完成 3 轮；
+- 模式 A 达到 threshold 且至少完成 1 轮，且满足上方“归因第一名已尝试”要求；
+- 模式 B 已完成 2~3 轮（上限 3 轮），且归因第一名已被针对性攻过；
+- 模式 B 命中 `early_stop: skeleton_ratio >= 0.80`（Setup and baseline 第 5 步），未做
+  任何探索轮；
 - 达到 `max_iterations`（默认 30）；
 - 环境缺失导致无法继续，记录 `blocked` / `not_run` 与精确重跑命令。
 

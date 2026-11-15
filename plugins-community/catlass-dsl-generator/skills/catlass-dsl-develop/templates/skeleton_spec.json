@@ -1,0 +1,14 @@
+{
+  "dtype": "bf16",
+  "_layout_note": "layout_a=col 表示对物理 KxM 缓冲取列主序视图（零拷贝转置）。该路径有条件：K 必须让 ceil(K/SK) 是 BK/SK 的整数倍，否则 LOAD2D 写 L0A 越界（err 5,131）或挂死。skeleton_profile.py 会自动把 K 补到 BK 倍数并记录 k_raw/k_pad。",
+  "stages": [
+    {
+      "name": "gemm1",
+      "m": 4096,
+      "n": 8192,
+      "k": 4096,
+      "layout_a": "row",
+      "source": "largest-dev-case"
+    }
+  ]
+}

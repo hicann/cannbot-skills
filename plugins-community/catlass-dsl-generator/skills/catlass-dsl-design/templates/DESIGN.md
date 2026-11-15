@@ -72,6 +72,23 @@ class 或模板。
 开销、存储容量、同步成本和并行度，说明各 kernel 的计算范围、调用顺序及中间张量。
 没有实测数据的性能判断必须标记为待验证假设。
 
+**融合与合并（仅 `single_kernel`）**：先写自然划分结论 `structural_verdict`
+（`single` / `multi`），再写是否发生合并。自然划分是多 kernel、因用户要求合成为单 kernel
+时，`merge_required: true`，并按段列出：
+
+| 段 | 原 kernel | 计算范围 | 输出（GM/片上） |
+|----|-----------|----------|-----------------|
+
+边界清单（design 只记方向、映射一致性与覆盖核范围；原语与 pipe 由 implement 按已有知识回填）：
+
+| 边界 | 发布方 → 等待方 | 前后段映射是否一致 | 覆盖核范围 |
+|------|-----------------|--------------------|------------|
+
+合并可行性：两段是否要求同时驻留 L0C/L1、缩 tile 或落 GM 的代价；不可行时写明容量账与
+候选方案。容量可行但性能可能回退时，标为待验证假设，由 implement 的配对计时确认。合并
+后仍须满足分段 matmul 判定：同一输出 tile 的全部 K 贡献在同一次 launch 内完成，不得因为
+分段把一个 tile 的 K 拆到多个阶段分别累加。
+
 ### 数据流
 
 按执行顺序说明各 kernel 的加载、计算、写回和中间数据依赖。默认允许多个 executor
@@ -83,7 +100,8 @@ class 或模板。
 
 搬运量核算（必填）：
 
-- 总搬运字节 = Σ（各输入的重读次数 × 其体积），给出具体数字，并折算成带宽下界时间
+- 总搬运字节 = Σ（各输入的重读次数 × 其体积），给出具体数字，并按有效 MTE2 带宽折算成
+  搬运下界时间（不得用 HBM 带宽作分母）
 - tiling 参数与参考样例不同时，逐项说明差异、理由及对搬运量的影响
 
 ### GEMM 骨架与优化阶梯（含 MMAD 时必填）
@@ -95,8 +113,8 @@ class 或模板。
 - 骨架验证 shape：`<主 matmul：M, N, K, dtype, batch>`；来源 dev 用例：`<uuid>`
 - 全部 matmul 阶段清单（逐行）：`<名称 / 所在 kernel 或阶段 / 预计占比 / 各自最大 dev shape(M,N,K,dtype,batch) / 来源 uuid；每个都要各自跑一次骨架评测>`
 - 骨架形态：`<剥掉 vector / epilogue 后的单 GEMM；与最终融合 kernel 的差异，以及融合后的真实占用由哪一步复核；骨架仅用于测量，不反推 kernel 划分>`
-- 首版骨架必须包含：`<L1A/L1B 各 2 份、L0A/L0B 各 2 份、BK > SK、auto_sync 或等价 flag 结构>`
-- 明确排除的反模式：`<单缓冲串行、BK == SK、多个 ready flag 共享同一 MTE1→CUBE 对>`
+- 首版骨架必须包含：`<L1A/L1B 各 2 份、L0A/L0B 各 2 份、BK > SK、每份片上缓冲一块 tla.mutex（L0C 单列，id 唯一，随缓冲份数增减）；同步只用 mutex，禁用 auto_sync / flag / pipe_barrier / cross_flag；唯一豁免：主参考样例本身不用 mutex 时按样例原语，并写明样例路径、原语与理由>`
+- 明确排除的反模式：`<单缓冲串行、BK == SK、多个缓冲共享同一 mutex>`
 - skeleton 性能验收：默认判据、豁免与带宽受限规则见 `catlass-dsl-develop/SKILL.md` 的
   「skeleton 性能 DoD」；不达标但有可核对理由时记 `passed (waived)`，理由写入
   ITERATIONS；验收 shape 与来源 dev 用例同上
@@ -107,6 +125,9 @@ class 或模板。
 - 结构类型：`<Cube-only / Cube-Vector / Cube-Vector-Cube / Vector-only>`
 - 主参考样例（整体结构，可为空）：`<Cube-only → tla/kernel/matmul/basic_mmad/basic_matmul.py；Cube-Vector → experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py；Cube-Vector-Cube → experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py；Vector-only → tla/kernel/vec/basic_vadd/basic_vadd.py、dsl_tutorials/vector_simd_ops/、dsl_tutorials/vector_simt_ops/；没有足够契合的样例时写“无”>`
 - 整体结构匹配点 / 偏离点：`<阶段序列 / 数据流 / 任务映射 / 同步；偏离时写理由>`
+- 参考样例可运行性（逐个样例登记）：`<path → passed / failed / not_run（含未复用原因或
+  remote-detached）；命令、shape、退出码、日志路径（默认 evidence/reference/）；failed
+  写首个失败点、是否影响拟用结构、改选或降级方案>`
 - 任务映射与结论迁移：`<样例的任务分解 → 本 kernel 的任务分解；逐项说明哪些结论可迁移、
   哪些必须重算（并发度、数据复用、每块工作量、归约范围、跨核 / 跨引擎同步开销等），
   并给出核算值；设计期估算即可，后续用 profile 校正>`
@@ -130,12 +151,13 @@ class 或模板。
 |---|---|---|---|---|
 | `<...>` | `<...>` | `<...>` | `<...>` | `<一致 / deviation>` |
 
-- reference 精度路径：`<输入 f16/bf16 是否先 .float() 再计算、结果按输出 dtype 还是 f32 转回；必须与 candidate 的转换点一一对应>`
-- 累加 / 归约顺序：`<K 分块与 BK 循环顺序、是否 splitK、atomic add、分段归约、online softmax 或整行一趟；哪些会改变结果、误差量级、是否在容差内>`
-- 舍入 / 饱和 / 近似：`<cast 的 round mode（如 RINT，支持情况随子包而异）、f32→f16 溢出处理、HF32、exp/rcp 近似；模式支持范围以目标 ascend-catlass-dsl 版本的包实际 API 能力为准，不支持时写替代方案，不得按“应该支持”假设>`
+- reference 精度路径：`<输入 f16/bf16 是否先 .float() 再计算、结果按输出 dtype 还是 f32 转回；默认与 candidate 的转换点对应；candidate 升档或减少舍入时记录 deviation>`
+- 累加 / 归约顺序：`<K 分块与 BK 循环顺序、是否 splitK、atomic add、分段归约、online softmax 或整行一趟；实现精度高于标杆时，顺序、分块方式与舍入位置可按实现需要选择，不再要求逐项复现，写明标杆原实现、实现新选择、偏差量级与 deviation；同精度时允许顺序重排，但不得增加或提前舍入>`
+- 舍入 / 饱和 / 近似：`<cast 的 round mode（如 RINT，支持情况随子包而异）、f32→f16 溢出处理、HF32、exp/rcp 近似；模式支持范围以目标 ascend-catlass-dsl 版本的包实际 API 能力为准，不支持时写替代方案，不得按“应该支持”假设；升档替代标杆模式时写明误差界对照>`
 - 无效值与边界语义：`<padding 是否参与归约（sum 补 0 / max 补 -inf）、被 mask 的 lane、空输入、全 mask 行、NaN/Inf 传播>`
 - 容差口径（按输出 dtype 写死）：`<max_atol / max_rtol / required_matched_ratio / max_error_cap；debug 期不得放宽，放宽必须改设计并记录>`
-- 与标杆的对齐结论：`<逐项一致；或列出 deviation：哪一项没复现、为什么不可复现、量级或对照实验、影响用例、补偿计划、high risk；不得只写“容差内”>`
+- 分段 matmul 判定：`<标杆是否把同一 matmul 的 K 维按外部预算分段逐段累加到同一输出；判定成立/不成立与依据（段间是否有其他读写、归约或非线性依赖）；成立时写明按完整 matmul 实现（单个输出 tile 的全部 K 贡献在同一次 launch 内完成、片内 fp32 等最高可用精度累加、累加器不跨 launch 落 GM、末尾一次舍入）、中间量预算按设备 HBM 反推的依据与显存账，以及 deviation 记录；若中间量放不下，写明提预算/改布局的实测结果与降级依据；不成立时写明按段实现的原因>`
+- 与标杆的对齐结论：`<逐项一致；或列出 deviation：哪一项与标杆不同（含更高精度实现）、为什么选该实现、量级或对照实验、影响用例、补偿计划、high risk；不得只写“容差内”>`
 
 ### 跨 kernel 阶段 oracle（多 kernel 时必填）
 
@@ -163,6 +185,9 @@ class 或模板。
 （`full test #1`），优化采纳改动、kernel 变化时再补跑 `full test #2`，每次执行的记录都绑定
 当时的 kernel；优化未采纳、kernel 未变化时 `full test #1` 可继续作为交付证据。
 
+L2 reference 执行 device：`<npu:<id>，与 benchmark 同一张卡>`；小 shape 冒烟与全 shape
+校验都在该 device 执行；CPU 仅在没有 NPU 时用于最小冒烟。
+
 | 用例 | 类别 | 输入摘要 | 预期结果 |
 | --- | --- | --- | --- |
 | `correctness-main` | 正确性 | `<shape、dtype 和输入分布>` | `<与 Torch reference 的比较方式>` |
@@ -185,7 +210,7 @@ profiling 原始数据的保存位置；默认结果记录 `anti_hack.status=dis
 
 `性能要求：none`（用户没有明确提出性能、时延或加速比要求）时，明确写“本次不采集性能”，
 当前 kernel 全量测试通过后直接进入 finish，不执行 benchmark 与 profiling；仍按流程完成
-optimize 的三轮（或模式 A 一轮）记录，只是不采集交付性能数据。两种取值下，优化采纳改动
+optimize 的 2~3 轮（或模式 A 一轮）记录，只是不采集交付性能数据。两种取值下，优化采纳改动
 了 kernel 都必须在 optimize 结束后补跑 `full test #2`；全部未采纳、kernel 未变化时可复用
 `full test #1`。
 
@@ -203,6 +228,12 @@ develop 一次生成全部 kernel、host 编排及完整 `solution.json`，随�
 
 说明 DSL 执行语义、同步、内存、layout、精度、公共接口或构建配置方面的风险，
 以及 reviewer 应重点检查的内容。没有特殊风险时也应明确写出。
+
+`执行模式：remote-detached` 时本条必须登记骨架延迟风险，不能写「无特殊风险」：骨架的
+`BM/BN/BK/SK` 与块映射在主实现生成时未经实测，远端首跑可能达不到
+`1.08 × torch.mm` 而需要回退。写明受影响的 GEMM 阶段与用例、回退范围（只改 tile 与块映射，
+不动缓冲数量、同步顺序与 MMAD 结构）、以及哪次远端运行后的骨架判定结论会回填
+`ITERATIONS.md`。
 
 ## 交付与证据
 

@@ -20,6 +20,9 @@ arch: [c310]
 L1 双缓冲的常见实现是"一块大 allocation + 固定偏移切半区"，而不是两次 allocate。
 每个半区内部再按 A 在前、B 在后的顺序排布，偏移量在编译期算好。
 
+本条描述 flag 配对写法；骨架与融合 kernel 默认改用 mutex，每份缓冲一个 mutex、`lock`/
+`unlock` 的 pipe 成对，半区切分方式不变。仅在允许 flag 的 kernel 中使用下面的写法。
+
 # 用法
 
 ```python

@@ -20,3 +20,4 @@
 - [SIMT 不规则访存与冲突处理](simt-irregular.md)
 - [Scalar 代码生成减负](scalar-codegen.md)
 - [MoE 通信前量化](moe-communication.md)
+- [多 kernel 合并为单 kernel](multi-kernel-to-single-kernel.md)

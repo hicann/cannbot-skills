@@ -1,7 +1,7 @@
 ---
 type: CATLASS DSL Programming Concept
 title: GEMM 主导 kernel 的优化阶梯
-description: 当时间集中在 MAC 与 MTE2 两条管道时，按"定位 → 波次量化 → L1 双缓冲 → L0 双侧双缓冲 → 判停"的顺序推进，并记录各级的结构上限。
+description: 当时间集中在 MAC 与 MTE2 两条管道时，先用容量/名义量/流水强度做测前解析预筛，再按"定位 → 波次量化 → L1 双缓冲 → L0 双侧双缓冲 → 判停"的顺序推进，并记录各级的结构上限。
 tags: [catlass-dsl, optimization-ladder, wave-quantization, l0-double-buffer, tiling]
 status: stable
 generated: {by: process:catlass-dsl-pattern-capture, at: '2026-10-26T08:00:00+08:00'}
@@ -28,6 +28,27 @@ arch: [c310]
 
 # 用法
 
+**测前解析预筛**（骨架阶段枚举 tile 之前做，淘汰不可行组合，不占上板名额）
+   - 容量与核数从设备读取：`tla.arch.get_capacity_in_bytes(...)` 取 L1/L0A/L0B/L0C/UB，
+     `tla.arch.block_num()` 取核数，ACL 的 `ACL_DEV_ATTR_L2_CACHE_SIZE` 取 L2；读取失败
+     才回退 90% 的保守常量，并记录回退路径。不要按型号名查表，A5 各型号的容量与核数不同。
+   - 硬约束（`b` 为 dtype 字节数）：`BM·BN·4 ≤ L0C`；`2·BM·SK·b ≤ L0A`；
+     `2·SK·BN·b ≤ L0B`；`2(BM·BK + BK·BN)·b ≤ 0.9 × L1`；`BK > SK` 且 `BK % SK == 0`；
+     `BM`/`BN` 为 16 的倍数。
+   - 流水强度：`2·BM·BN/(BM+BN) ≥ 峰值/BW_mte2`。不满足时 L1/L0 双缓冲也遮不住 MTE2，
+     属于 tile 形状问题，不要按缺流水处理。
+   - 块映射按整除关系算：`ceil(nn/8)·8/nn − 1 > 25%` 时 `sn` 取能整除 `nn` 的因子，上限
+     放宽到 `sn ≤ nn`（`nn ≤ 16` 时 `sn = nn` 也纳入候选），行方向对 `nm` 对称处理 `sm`；
+     映射不作为搜索维度。
+   - 时间模型 `t = max(t_mac, t_mte1, t_mte2, t_fix)`：`t_mac = 2·Mp·Np·Kp/峰值`，
+     `t_mte1`/`t_mte2` 用名义搬运量 `nn·Mp·Kp·b + nm·Kp·Np·b` 除以各自有效带宽，
+     `t_fix = Mp·Np·输出字节/BW_fix`，`Mp/Np/Kp` 为 padding 后尺寸。
+   - 常数一律标定后缓存，不查型号表：用 `mac_ratio ≈ 1` 的实跑反推峰值，用
+     `mte2_ratio ≥ 0.95` 的实跑反推有效带宽，键为 `(SoC 名, CANN 版本, dtype, 映射档)`。
+     同一平台上 swizzle 与行优先的有效带宽可差 45% 以上，必须分档。
+   - 名义搬运量默认命中 L2，折算时不得用 HBM 带宽当分母，否则会得到比实测大数倍的假下界；
+     HBM 带宽只用于估算穿透到 HBM 的实际流量。
+
 0. **定位关键路径**（探针消融，不改正式代码）
    - 依次把 A 侧 GM 加载量、B 侧 GM 加载量各削到 5%，再单独去掉 L1→L0 拷贝，各测一次。
    - 只有一条会明显降低墙钟；若 GM 两刀都不降而 L0 拷贝那刀降，说明瓶颈是"拷贝链与 MMAD
@@ -40,12 +61,15 @@ arch: [c310]
    - 典型收益：波次利用率从约 75% 提到约 93%，墙钟下降 20% 以上。
 
 2. **L1 双缓冲**（收益小，但解锁后续）
-   - 半区偏移切分，每半区一套 ready/free flag，见
+   - 半区偏移切分，每半区一块缓冲；骨架中用每份缓冲一个 mutex 表达 ready/free 依赖，
+     flag 写法见
      [L1 半区偏移与双缓冲 flag 配对](pattern-l1-half-region-double-buffer.md)。
    - 单独做的典型收益只有 3%~5%，它的价值在于让第 3 级成立。
 
 3. **L0 双侧双缓冲 + K 子块拆分**（决定性的一刀）
    - 把 K tile 拆成两个等长子块，L0A 与 L0B 同时双缓冲；只给单侧加槽几乎没有收益。
+   - 骨架与融合 kernel 默认用 `tla.mutex` 表达同一依赖：每块缓冲一个 mutex、`lock`/`unlock`
+     的 pipe 成对；下文按 flag 描述的旧写法与之等价，仅在允许 flag 的 kernel 中使用。
    - flag 结构：每个槽拥有自己的 ready/free 对，槽复用距离 2，依赖关系无环[^api]；跨核交接可参考
      [单个 cross flag 的双向互斥用法](pattern-cross-flag-bidirectional.md)。
    - 反例一：多个 ready flag 共享同一个 MTE1→CUBE 对会死锁，表现为 aicore 超时。

@@ -30,23 +30,57 @@
 
 ## Skeleton Performance（含 MMAD 时必填）
 
-每个 matmul 阶段各占一行，在该 matmul 自己的最大 dev 用例上采集 fresh profile，evidence
-按 `evidence/skeleton/<gemm-id>/profile/kernel_details.csv` 分目录。Decision 可写
-`passed` / `passed (waived)` / `bandwidth-bound` / `failed` / `blocked`。不满足默认判据但
+先做解析预筛、再实跑不超过 3 组：容量与核数从设备读取（读取失败时写回退路径），被硬约束
+淘汰的组合用一行汇总，不占实跑名额。
+
+预筛与标定：
+
+- 淘汰汇总：`<BM/BN/BK/SK × 映射 → 违反的硬约束>`
+- 设备读取：L1/L0A/L0B/L0C/UB = `<...>`，核数 = `<...>`，L2 = `<...>`（来源：`<api | 回退>`
+- 标定常数：峰值 = `<...>`，`BW_mte2` = `<...>`，`BW_mte1` = `<...>`，`BW_fix` = `<...>`
+  （键：`<SoC 名, CANN 版本, dtype, 映射档>`；标定不成立时只用于排序）
+
+每个 matmul 阶段每个实跑组各占一行，在该 matmul 自己的最大 dev 用例上采集 fresh profile，
+evidence 按 `evidence/skeleton/<gemm-id>/profile/kernel_details.csv` 分目录。Decision 可写
+`passed` / `passed (waived)` / `bandwidth-bound` / `failed` / `blocked`；`mac ≥ 0.99` 且
+比值 ≤ `1.15` 记 `passed`（计算饱和，须写 `mac` 与两个峰值口径）。不满足默认判据但
 有可核对理由时写 `passed (waived)`，并在下方写明理由。
 
-| GEMM (id / kernel) | Case (uuid / M,N,K,dtype) | mac_ratio | mte2_ratio | overlap | gemm_ms | torch_mm_ms | Decision | Evidence |
-|------|------|-----------|------------|---------|---------|-------------|----------|----------|
+| GEMM (id / kernel) | Case (uuid / M,N,K,dtype) | BM/BN/BK/SK × 映射 | 预测 ms | 预测比值 | mac_ratio | mte2_ratio | overlap | gemm_ms | torch_mm_ms | Decision | Evidence |
+|------|------|------|------|------|-----------|------------|---------|---------|-------------|----------|----------|
 
-块映射与带宽下界（每个 matmul 阶段一行，用于区分块映射重读与流水缺失）：
+块映射与名义搬运（每个 matmul 阶段一行，用于区分块映射重读与流水缺失）：
 
-| GEMM | BM/BN/BK/SK | nm | nn | A 名义重读 | B 名义重读 | 理想字节 | 名义字节 | 带宽下界 (ms) |
+| GEMM | BM/BN/BK/SK | nm | nn | A 名义重读 | B 名义重读 | 理想字节 | 名义字节 | 名义折算 (ms) |
 |------|-------------|----|----|------------|------------|----------|----------|---------------|
 
-融合回测（CV 融合算子 implement 后必填，偏差 >15% 必须写归因）：
+名义折算用标定的有效 MTE2 带宽作分母，不用 HBM 带宽；HBM 带宽只用于估算穿透到 HBM 的流量。
+
+GEMM 回测（含 MMAD 的算子 implement 后必填；偏差 >15% 必须写归因；本轮未做时记
+`not_run` 并写原因，optimize 入口会用 baseline profile 重算）：
 
 | GEMM | 融合 kernel | GEMM 段耗时 (ms) | 有效算力 (TFLOPS) | 骨架同 shape (ms) | 偏差 | 归因 |
 |------|-------------|------------------|-------------------|-------------------|------|------|
+
+骨架达成率（分子计有实测的骨架组，`waived` 按实测计入并附饱和理由，`failed` 记 0；
+分母为全部 GEMM 实现段耗时；分子分母逐段配对，各 GEMM 的最大 dev 用例不同时按各自用例
+取骨架值与实现段耗时后再求和，不得跨用例混算）：
+
+- `skeleton_ratio = <Σ骨架 gemm_ms ÷ Σ全部 GEMM 实现段耗时>`
+- kernel SHA256：`<sha>`；证据：`<kernel_details.csv 路径>`
+
+列式 A 的骨架（`layout_a=col`）需额外记录 K 相位：
+`k_raw = <原始 K>`，`k_pad = <补到 BK 倍数后的 K>`，`k_phase_padded = <true/false>`。
+约束为 `ceil(K/SK) % (BK/SK) == 0`，`skeleton_profile.py` 会自动补 K；实现侧同样要用
+补后的 K，不能拿原始 K 直接跑列主序 A。
+
+host 固定开销自检（implement 收敛后必填）：
+
+| Case | device_ms | end2end_ms | host 占比 | top host 动作（占比 / 归类 a/b/c） | 处置 | 改后占比 |
+|------|-----------|------------|-----------|-----------------------------------|------|----------|
+
+- `host_selfcheck: <证据路径>`；处置前后 Σ：`<...>`；剩余项与原因：`<...>`；
+  剩余项合计占 host 时间比例：`<...>`（单项都低但合计仍大时，必须写聚合评估结论）
 
 GEMM 段耗时取单轮 `kernel_details.csv` 的对应 kernel 行；多轮采集按 `Step Id` 分组，取
 目标 kernel 齐全的一轮，不得对全部行求和。
@@ -58,9 +92,18 @@ GEMM 段耗时取单轮 `kernel_details.csv` 的对应 kernel 行；多轮采集
 - 已做过的判断或改动与结果：
 - optimize 阶段的补偿计划：
 
+## Benchmark 劣化用例（benchmark 后必填）
+
+合并结果里 `speedup < 1.0` 的用例逐条登记，缺项、只列部分用例或用整体结论代替逐条登记时
+不得记 benchmark `passed`。结论取 `保留` / `已解释` / `tiny-shape-exempt`（单例
+`end2end_ms < 1 ms` 且 `device_ms` 同量级）。
+
+| uuid | speedup | device_ms | end2end_ms | 归因 | 结论 | Evidence |
+|------|---------|-----------|------------|------|------|----------|
+
 ## Performance Rounds
 
-optimize 阶段必填：模式 B 至少三轮，模式 A 至少一轮。每轮记录改动轴、瓶颈、前后耗时、决策与证据路径。
+optimize 阶段必填：模式 B 2~3 轮（上限 3 轮），模式 A 至少一轮。每轮记录改动轴、瓶颈、前后耗时、决策与证据路径。
 
 - Before/After 均为同一 `end2end_ms` 口径；host 侧改动需在 Evidence 中附 `device_ms` /
   `host_gap_ms` 拆分。
