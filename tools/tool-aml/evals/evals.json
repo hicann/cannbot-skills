@@ -29,6 +29,18 @@
       "prompt": "我在 960DT 形态的 cce 里用了 get_subblockid() 做偏移，检查脚本会报错吗？",
       "expected_output": "回复应说明会报错：960DT 每 core 是 1 AIC:1 AIV，无 subblock，使用 get_subblockid()/subblock 属于禁用模式，自检脚本会报 [ERROR]。应给出修改方案：删除 subblock 相关逻辑与偏移，改用 block_idx 对应的偏移。",
       "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "不支持的数据生成方式必须拒绝",
+      "prompt": "新增一个 aiv 算子，输入是 512KB 的 int32，用泊松分布生成，帮我生成 .cpp。",
+      "expected_output": "回复必须拒绝直接生成，且不得臆造枚举或模式：1) 指出 int32 不在数据生成框架支持的 dtype 范围（支持 fp32/fp16/bf16/fp8_e4m3/fp8_e5m2/fp4_e2m1/uint8/int8），泊松分布不在 StlDataMode 的 5 种模式（fixed/sequential/normal/random/file）内；2) 给出替代方案：int32 可改用 file 模式（写成二进制文件由框架读入）或先扩展 aml_aicore_stl_data_gen.cpp 的 ConvertHostDataToBytes/GetStlDtypeSize，泊松分布可用 random/normal 近似（须用户确认精度差异）或先扩展 GenStlTensorHostData；3) 明确待用户确认方案后再生成，不生成含 StlDataMode::STL_DATA_POISSON 或 spec.dtype = ACL_INT32 的代码。"
+    },
+    {
+      "id": 6,
+      "title": "dtype 枚举名必须真实存在",
+      "prompt": "给输入配 bf16 类型，spec.dtype 直接写 ACL_BFLOAT16 就行了吧？",
+      "expected_output": "回复应指出 ACL_BFLOAT16 是不存在的枚举（历史上曾臆造导致编译报错），bf16 的正确 aclDataType 枚举名是 ACL_BF16。应说明 dtype 只能取数据生成框架支持的 8 种枚举（ACL_FLOAT/ACL_FLOAT16/ACL_BF16/ACL_FLOAT8_E4M3FN/ACL_FLOAT8_E5M2/ACL_FLOAT4_E2M1/ACL_UINT8/ACL_INT8），并提示自检脚本会对 .cpp 中 spec.dtype/spec.mode 做白名单检查，虚构枚举报 [ERROR]。"
     }
   ]
 }

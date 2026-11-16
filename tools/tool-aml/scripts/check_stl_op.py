@@ -15,12 +15,14 @@
 
 检查项:
   1. 基础语法:括号/花括号/方括号是否配对。
-  2. 命名一致性:.cpp desc.name / ResolveKernelSymbol / .asc 导出符号 / include 的 cce。
-  3. 内在函数参数个数:与同形态其它算子(兄弟算子)对照,个数不一致则告警。
-  4. 禁用模式:960DT 上使用 get_subblockid()/subblock。
-  5. 越界:host 每 block 输出字节数 vs kernel `block_idx * <expr>` 块偏移是否一致;
+  2. dtype/填充方式白名单:spec.dtype 只能是数据生成函数支持的 aclDataType 枚举,
+     spec.mode 只能是 StlDataMode 的 5 种模式,虚构枚举直接报错。
+  3. 命名一致性:.cpp desc.name / ResolveKernelSymbol / .asc 导出符号 / include 的 cce。
+  4. 内在函数参数个数:与同形态其它算子(兄弟算子)对照,个数不一致则告警。
+  5. 禁用模式:960DT 上使用 get_subblockid()/subblock。
+  6. 越界:host 每 block 输出字节数 vs kernel `block_idx * <expr>` 块偏移是否一致;
      输出字节数须为 4 的倍数(CreateStlOutputTensor 要求)。
-  6. copy_ubuf_to_gm_align_v2 传输量(nBurst*burstLen)是否可能超出 dst 块。
+  7. copy_ubuf_to_gm_align_v2 传输量(nBurst*burstLen)是否可能超出 dst 块。
 
 退出码:0=无问题;1=发现问题。
 """
@@ -37,6 +39,30 @@ INTRINSICS = [
     "copy_matrix_cc_to_ub",
     "copy_ubuf_to_gm_align_v2",
 ]
+
+# aclDataType 全集(runtime/include/external/acl/acl_base_rt.h)。凡不在此列表的
+# ACL_* 都不是合法 aclDataType(历史案例:臆造 ACL_BFLOAT16,实际是 ACL_BF16)。
+ACL_DTYPES = {
+    "ACL_DT_UNDEFINED", "ACL_FLOAT", "ACL_FLOAT16", "ACL_INT8", "ACL_INT32", "ACL_UINT8",
+    "ACL_INT16", "ACL_UINT16", "ACL_UINT32", "ACL_INT64", "ACL_UINT64", "ACL_DOUBLE",
+    "ACL_BOOL", "ACL_STRING", "ACL_COMPLEX64", "ACL_COMPLEX128", "ACL_BF16", "ACL_INT4",
+    "ACL_UINT1", "ACL_COMPLEX32", "ACL_HIFLOAT8", "ACL_FLOAT8_E5M2", "ACL_FLOAT8_E4M3FN",
+    "ACL_FLOAT8_E8M0", "ACL_FLOAT6_E3M2", "ACL_FLOAT6_E2M3", "ACL_FLOAT4_E2M1",
+    "ACL_FLOAT4_E1M2", "ACL_HIFLOAT4", "ACL_HIFLOAT4_SCALE",
+}
+
+# 数据生成框架(ConvertHostDataToBytes/GetStlDtypeSize)实际支持的 dtype 子集:
+# spec.dtype 只允许取这些值,其余即使枚举合法也会在运行期 CreateStlTensor 失败。
+SUPPORTED_DTYPES = {
+    "ACL_FLOAT", "ACL_FLOAT16", "ACL_BF16", "ACL_FLOAT8_E4M3FN", "ACL_FLOAT8_E5M2",
+    "ACL_FLOAT4_E2M1", "ACL_UINT8", "ACL_INT8",
+}
+
+# StlDataMode 全集(aml_aicore_stl_data_gen.h):spec.mode 只允许这 5 种。
+SUPPORTED_MODES = {
+    "STL_DATA_FIXED", "STL_DATA_NORMAL", "STL_DATA_FILE", "STL_DATA_SEQUENTIAL",
+    "STL_DATA_RANDOM",
+}
 
 
 def strip_comments(text):
@@ -229,6 +255,31 @@ def host_output_per_block(text, defines):
     return bd, per
 
 
+def check_dtype_and_mode(text, add):
+    """白名单检查:spec.dtype 须为数据生成支持的 aclDataType,spec.mode 须为 StlDataMode 之一。
+
+    分别覆盖虚构枚举(ACL_BFLOAT16 之类不在 aclDataType 全集)与合法但不支持
+    (ACL_INT32 之类运行期 CreateStlTensor 会失败)两种情况。
+    """
+    for m in re.finditer(r"(?:spec|input)\s*\.\s*dtype\s*=\s*([A-Za-z_][A-Za-z0-9_]*)\s*;", text):
+        dt = m.group(1)
+        if dt not in ACL_DTYPES:
+            add("ERROR", "spec.dtype = %s 不是合法 aclDataType 枚举(acl_base_rt.h 中不存在)。" % dt,
+                "改用支持的枚举(fp32→ACL_FLOAT/fp16→ACL_FLOAT16/bf16→ACL_BF16/fp8_e4m3→ACL_FLOAT8_E4M3FN/"
+                "fp8_e5m2→ACL_FLOAT8_E5M2/fp4_e2m1→ACL_FLOAT4_E2M1/uint8→ACL_UINT8/int8→ACL_INT8)。")
+        elif dt not in SUPPORTED_DTYPES:
+            add("ERROR", "spec.dtype = %s 是合法 aclDataType 但数据生成框架不支持(ConvertHostDataToBytes/"
+                "GetStlDtypeSize 无该分支,CreateStlTensor 会失败)。" % dt,
+                "改用支持范围:%s;int32 等需求建议改用 STL_DATA_FILE 模式,或先扩展 aml_aicore_stl_data_gen。"
+                % ", ".join(sorted(SUPPORTED_DTYPES)))
+    for m in re.finditer(r"StlDataMode\s*::\s*([A-Za-z_][A-Za-z0-9_]*)", text):
+        mode = m.group(1)
+        if mode not in SUPPORTED_MODES:
+            add("ERROR", "StlDataMode::%s 不存在(aml_aicore_stl_data_gen.h 仅定义 %s)。" %
+                (mode, ", ".join(sorted(SUPPORTED_MODES))),
+                "改用 5 种模式之一;需求超出时先扩展数据生成框架,不得在算子内发明枚举。")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--op-dir", required=True, help="<FORM>/ops/<TYPE>_<NAME>")
@@ -256,13 +307,17 @@ def main():
     def add(sev, msg, fix):
         problems.append((sev, msg, fix))
 
+    cpp = next((t for f, t in stripped.items() if f.endswith(".cpp")), "")
+
     # 1. 基础语法
     for f, t in stripped.items():
         if not balanced(strip_strings(t)):
             add("ERROR", "%s 括号/花括号不配对。" % f, "检查 #if/#ifdef 与函数体括号是否闭合。")
 
-    # 2. 命名一致性
-    cpp = next((t for f, t in stripped.items() if f.endswith(".cpp")), "")
+    # 2. dtype/填充方式白名单
+    check_dtype_and_mode(cpp, add)
+
+    # 3. 命名一致性
     asc = next((t for f, t in stripped.items() if f.endswith(".asc")), "")
     export = re.search(r'AmlStlLaunch(\w+)', asc)
     if not export:
@@ -288,7 +343,7 @@ def main():
             if "__aicore__" not in asc:
                 add("WARN", "aic/aiv 算子 .asc 未见 __global__ __aicore__ 包装。", "用 __global__ __aicore__ 包装 device 核函数。")
 
-    # 3. 内在函数参数个数:对照兄弟算子
+    # 4. 内在函数参数个数:对照兄弟算子
     ref = {fn: set() for fn in INTRINSICS}
     for d in os.listdir(ops_root):
         sib = os.path.join(ops_root, d)
@@ -308,14 +363,14 @@ def main():
                         % (f, fn, c, sorted(ref[fn])),
                         "对照同形态算子修正参数个数/占位符(形态间签名有差异)。")
 
-    # 4. 禁用模式
+    # 5. 禁用模式
     if arch960:
         for f, t in stripped.items():
             if "get_subblockid" in t or "subblock" in t:
                 add("ERROR", "%s 在 960DT 使用了 subblock/get_subblockid。" % f,
                     "960DT 每 core 1 AIC:1 AIV,无 subblock;删除 subblock 相关逻辑与偏移。")
 
-    # 5. 越界:host 每 block 输出 vs kernel block 偏移
+    # 6. 越界:host 每 block 输出 vs kernel block 偏移
     _, per = host_output_per_block(cpp, defines)
     kernel_text = "".join(t for f, t in stripped.items() if f.endswith((".cce", ".asc")))
     strides = find_block_strides(kernel_text, defines)
@@ -352,7 +407,7 @@ def main():
             % [hex(v) for v in extra],
             "检查这些偏移是否对应输入读取或多输出;无法一一关联时保留现状。")
 
-    # 6. copy_ubuf_to_gm_align_v2 传输量估算(burstLen 为 32 字节 burst 单位)
+    # 7. copy_ubuf_to_gm_align_v2 传输量估算(burstLen 为 32 字节 burst 单位)
     if resolved:
         for f, t in stripped.items():
             for m in re.finditer(r"copy_ubuf_to_gm_align_v2\s*\(([^;]*)\)\s*;", t):

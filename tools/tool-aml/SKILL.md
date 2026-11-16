@@ -13,6 +13,7 @@ license: CANN-2.0
 - 生成前必须收集齐全参数，缺一项必须先向用户确认，不得臆造。
 - 目录名、算子名、各文件名、`.cpp`/`.asc` 内符号名必须一致推导，不允许出现半成品。
 - kernel 侧 cce 代码由用户提供；本 skill 只负责包装与生成 host/下发骨架，**不要自行编造 device 核函数内部实现**。
+- **dtype 只能取 [references/stl-data-contract.md](references/stl-data-contract.md) 第二节白名单内的 `aclDataType` 枚举值；填充方式只能是第三节 `StlDataMode` 的 5 种模式。凭记忆写枚举（如臆造 `ACL_BFLOAT16`——bf16 实为 `ACL_BF16`）或发明 `STL_DATA_*` 新模式必然编译报错。生成前先查白名单；用户需求超范围时按第五节拒绝生成并给替代方案。**
 - 生成后必须完成 host so 编译与注册校验；dav-9201/dav-3510 kernel `.o` 编译需在目标 CANN 包环境验证。
 - 输入/输出均为“字节”语义：输入 size、输出每 block size 都以字节给出。
 
@@ -26,9 +27,10 @@ license: CANN-2.0
 3. **算子名**：如 `cube_covery`、`all_method_sync`。目录名 = `<类型>_<算子名>`(见命名规则)。
 4. **输入列表**：每个输入声明
    - `size`：字节数；
-   - `填充方式`：`fixed`(固定值) / `sequential`(递增序列) / `normal`(正态分布) / `file`(从文件读取)；
-   - `dtype`：如 `fp16`/`fp32`/`fp8_e4m3`/`fp8_e5m2`/`fp4_e2m1`/`uint8`；**填充方式为 `file` 时可不声明**。映射到 `aclDataType`：`fp32→ACL_FLOAT`、`fp16→ACL_FLOAT16`、`fp8_e4m3→ACL_FLOAT8_E4M3FN`、`fp8_e5m2→ACL_FLOAT8_E5M2`、`fp4_e2m1→ACL_FLOAT4_E2M1`(半字节)、`uint8→ACL_UINT8`；
-   - 各填充方式的附加参数：`fixed`→值；`sequential`→起始值/步长；`normal`→mean/stddev/可选 clamp 区间；`file`→文件名。
+   - `填充方式`：`fixed`(固定值) / `sequential`(递增序列) / `normal`(正态分布) / `random`(均匀随机) / `file`(从文件读取)。**仅此 5 种**（`StlDataMode` 全集），之外的分布一律不支持；
+   - `dtype`：仅支持 `fp32`/`fp16`/`bf16`/`fp8_e4m3`/`fp8_e5m2`/`fp4_e2m1`/`uint8`/`int8`（**其余 dtype 一律不支持，不得写枚举**）。映射到 `aclDataType`：`fp32→ACL_FLOAT`、`fp16→ACL_FLOAT16`、`bf16→ACL_BF16`、`fp8_e4m3→ACL_FLOAT8_E4M3FN`、`fp8_e5m2→ACL_FLOAT8_E5M2`、`fp4_e2m1→ACL_FLOAT4_E2M1`(半字节)、`uint8→ACL_UINT8`、`int8→ACL_INT8`；
+   - 各填充方式的附加参数：`fixed`→值；`sequential`→起始值/步长；`normal`→mean/stddev/可选 clamp 区间；`random`→范围下界/上界；`file`→文件名。完整字段见 [references/stl-data-contract.md](references/stl-data-contract.md) 第四节；
+   - dtype 或填充方式超出上述范围时，**停止收集、拒绝生成**，按 [references/stl-data-contract.md](references/stl-data-contract.md) 第五节回复用户（列出支持范围 + 替代方案，如 int32 建议改用 `file` 模式或先扩展数据生成框架）。
 5. **输出列表**：每个输出声明 **每 block 的 size(字节)**（只需每块大小；总大小 = `blockDim × 每块 size`）。**完全以用户输入为准**，不由 skill 推断。
 6. **下发标量参数**（如 `l2Read`/`l2Write`/`burst_len`/`l2Ctrl` 等）及下发方式（单次 / 循环多次）。
 
@@ -109,13 +111,15 @@ using AmlStl<PascalName>Func = int32_t (*)(/* 入参:各输入地址、输出地
 StlInputSpec Make<NAME>Input0()
 {
     StlInputSpec spec;
-    spec.dtype = <ACL_DTYPE>;               // 见 dtype 映射
-    spec.shape = {<...>};                   // 元素数乘积 × dtype 字节 = size
-    // 按填充方式二选一填写：
+    spec.dtype = <ACL_DTYPE>;               // 仅白名单枚举:ACL_FLOAT/ACL_FLOAT16/ACL_BF16/ACL_FLOAT8_E4M3FN/
+                                            // ACL_FLOAT8_E5M2/ACL_FLOAT4_E2M1/ACL_UINT8/ACL_INT8
+    spec.shape = {<...>};                   // 元素数乘积 × dtype 字节 = size(fp4 为 元素数/2 字节)
+    // 按填充方式五选一填写(仅此 5 种 StlDataMode,不得发明新模式):
     spec.mode = StlDataMode::STL_DATA_FIXED; spec.fixedValue = <v>;         // fixed
     // spec.mode = StlDataMode::STL_DATA_SEQUENTIAL; spec.seqStart = <s>; spec.seqStep = <d>;  // sequential
-    // spec.mode = StlDataMode::STL_DATA_NORMAL; spec.normalMean=<>; spec.normalStddev=<>; ... // normal
-    // spec.mode = StlDataMode::STL_DATA_FILE; spec.fileName = "<file.bin>"; // file(无需 dtype)
+    // spec.mode = StlDataMode::STL_DATA_NORMAL; spec.normalMean=<>; spec.normalStddev=<>; ... // normal(可加 clamp)
+    // spec.mode = StlDataMode::STL_DATA_RANDOM; spec.randMin=<>; spec.randMax=<>;            // random
+    // spec.mode = StlDataMode::STL_DATA_FILE; spec.fileName = "<file.bin>"; // file(dtype 仍决定字节数,建议 ACL_UINT8)
     return spec;
 }
 
@@ -229,6 +233,7 @@ python3 scripts/check_stl_op.py --op-dir <FORM>/ops/<TYPE>_<NAME>
 脚本检查（对照同形态兄弟算子，而非硬编码形态签名）：
 
 - **基础语法**：括号/花括号/方括号配对。
+- **dtype / 填充方式白名单**：`.cpp` 中的 `spec.dtype =` 值必须是数据生成函数支持的 `aclDataType` 枚举（ACL_FLOAT/ACL_FLOAT16/ACL_BF16/ACL_FLOAT8_E4M3FN/ACL_FLOAT8_E5M2/ACL_FLOAT4_E2M1/ACL_UINT8/ACL_INT8）；`spec.mode =` 值必须是 `StlDataMode` 的 5 种模式之一。出现虚构枚举直接报 `[ERROR]`。
 - **命名一致性**：`.cpp` 的 `desc.name`、`ResolveKernelSymbol(...)`、`.asc` 的 `AmlStlLaunch<Name>`、`#include` 的 cce 名。
 - **内在函数参数个数**：`copy_gm_to_cbuf_align_v2` / `copy_matrix_cc_to_gm` / `copy_matrix_cc_to_ub` / `copy_ubuf_to_gm_align_v2` 的参数个数须与同形态其它算子一致（950 与 960DT 签名有差异，如 `copy_matrix_cc_to_ub` 两端都是 26 个参数但语义不同）。
 - **禁用模式**：960DT 上出现 `get_subblockid()`/`subblock`（1 AIC:1 AIV 无 subblock）。
@@ -246,5 +251,9 @@ python3 scripts/check_stl_op.py --op-dir <FORM>/ops/<TYPE>_<NAME>
 
 - `git status --short` 只应出现新算子目录内的文件。
 - 不修改任何公共头、注册表、CMakeLists（GLOB 自动收）。
-- dtype/填充方式/输出块大小与用户声明逐项对齐。
+- dtype/填充方式/输出块大小与用户声明逐项对齐；dtype 枚举与 `StlDataMode` 全部落在 [references/stl-data-contract.md](references/stl-data-contract.md) 白名单内（自检脚本会再查一遍）。
 - mix 算子确认 `__mix__(1,1)`(960DT) / `__mix__(1,2)`(950) 与 `KERNEL_TYPE_MIX_AIC_1_1`/`_1_2` 匹配。
+
+## 参考资料
+
+- [references/stl-data-contract.md](references/stl-data-contract.md) - aclDataType / StlDataMode / StlInputSpec 白名单与超范围需求的拒绝话术（生成输入规格前必读）。

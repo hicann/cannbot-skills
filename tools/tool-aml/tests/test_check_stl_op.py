@@ -143,6 +143,55 @@ class HostOutputPerBlockTest(unittest.TestCase):
         self.assertEqual(per, [None])
 
 
+class CheckDtypeAndModeTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.module = load_module()
+
+    def _check(self, cpp):
+        problems = []
+        self.module.check_dtype_and_mode(cpp, lambda sev, msg, fix: problems.append((sev, msg, fix)))
+        return problems
+
+    def test_fabricated_dtype_enum_is_error(self):
+        # 历史案例:ACL_BFLOAT16 是臆造枚举,真实名为 ACL_BF16
+        problems = self._check("spec.dtype = ACL_BFLOAT16;")
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0][0], "ERROR")
+        self.assertIn("ACL_BFLOAT16", problems[0][1])
+        self.assertIn("bf16→ACL_BF16", problems[0][2])  # 修复建议含正确枚举
+
+    def test_valid_dtype_but_unsupported_is_error(self):
+        # ACL_INT32 是合法 aclDataType,但数据生成框架不支持
+        problems = self._check("spec.dtype = ACL_INT32;")
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0][0], "ERROR")
+        self.assertIn("不支持", problems[0][1])
+
+    def test_all_supported_dtypes_pass(self):
+        cpp = "\n".join("spec.dtype = %s;" % d for d in sorted(self.module.SUPPORTED_DTYPES))
+        self.assertEqual(self._check(cpp), [])
+
+    def test_fabricated_mode_is_error(self):
+        problems = self._check("spec.mode = StlDataMode::STL_DATA_POISSON;")
+        self.assertEqual(len(problems), 1)
+        self.assertEqual(problems[0][0], "ERROR")
+        self.assertIn("STL_DATA_POISSON", problems[0][1])
+
+    def test_all_supported_modes_pass(self):
+        cpp = "\n".join("spec.mode = StlDataMode::%s;" % m for m in sorted(self.module.SUPPORTED_MODES))
+        self.assertEqual(self._check(cpp), [])
+
+    def test_input_prefix_is_also_checked(self):
+        problems = self._check("input.dtype = ACL_BFLOAT16;")
+        self.assertEqual(len(problems), 1)
+        self.assertIn("ERROR", problems[0][0])
+
+    def test_random_assignment_not_flagged(self):
+        # 非 spec.dtype 赋值(如局部 aclDataType 变量)不在白名单检查范围
+        self.assertEqual(self._check("aclDataType t = ACL_INT32;"), [])
+
+
 class EndToEndTest(unittest.TestCase):
     def _run(self, op_dir):
         env = dict(os.environ)
