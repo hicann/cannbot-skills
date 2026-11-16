@@ -1,0 +1,258 @@
+{
+  "skill_name": "ge-custom-op-development",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "在线预编译 kernel 的分发与接入",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text",
+        "distractor_skills": [
+          "ascendc-registry-invoke-template",
+          "ge-onnx-plugin-development"
+        ]
+      },
+      "prompt": "我有一个 Ascend C Add kernel，准备预编译后通过 C++ BaseCustomOp 接入在线 GE Session。默认应该怎样分发二进制？如果产品明确要求只交付一个 so，又该怎么做？",
+      "expected_output": "1. 在线命令式方案可通过 EagerExecuteOp 加载预编译产物，并使用 GE 提供的 stream 执行。\n2. 没有单文件约束时，将预编译 binary 作为独立文件随交付件分发，从明确路径读取；不默认将其字节内嵌 so。\n3. 明确要求单 so 时，可以评估内嵌字节，说明更新 kernel 需重新链接等代价，并区分 Ascend C 源码同库编译。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "skill_activated",
+          "pattern": "ge-custom-op-development",
+          "description": "面对相近接入任务时激活目标 Skill"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "预编译 kernel 的离线 OM 接口选择",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我的 kernel 已预编译成 device binary，需要通过 GE 导出 OM 并在无编译工具链的机器运行。必须实现 CompilableOp 和 PortableOp 吗？",
+      "expected_output": "1. 预编译产物不因导出 OM 自动需要 CompilableOp，图编译期是否需要实际编译是独立判断。\n2. PortableOp 用于携带并恢复自定义状态；命令式独立状态可以用它，声明式已收集的 kernel binary 不必重复序列化。\n3. 结合额外状态与部署方式确认依赖，并建议在独立进程验证模型加载和结果。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "Triton 与 TileLang 产物加载",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我有 Triton 编译的 npubin 和 TileLang 生成的 so，想分别在 GE 自定义算子的 Execute 中加载。两者的实现有什么区别？",
+      "expected_output": "1. npubin 读取二进制并通过 ACL binary 加载和获取函数；so 通常通过动态库加载与查找导出符号，或按构建方式链接。\n2. 根据实际产物核对入口、参数布局和 block/grid，而不把一种产物的 ABI 假定为另一种也适用。\n3. 说明运行时依赖和句柄生命周期需要与部署、执行时机匹配。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "静态图与动态图的执行及刷新",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "自定义算子既要支持静态图 OM，也要支持 TorchAir 的动态 shape，并希望静态图自动刷新地址。应该实现哪些接口？ArgsUpdater 和 AnnotatedArgsOp 能一起用吗？",
+      "expected_output": "1. 静态声明式路径可实现 AnnotatedArgsOp，若实际需要支持 unknown graph，可同时实现 EagerExecuteOp 并分别验证两条路径。\n2. ArgsUpdater 在刷新策略中优先于 AnnotatedArgsOp，同时实现会使声明式刷新不被选择。\n3. 动态 shape 不足以单独确定是否为 unknown graph，应结合实际图判断。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "Python 自定义算子 OM 与状态恢复",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我用 ge.custom_op 写了 Python 算子，想导出 OM 并把 tiling 表一起带到没有源码的部署机。有哪些步骤和运行依赖？",
+      "expected_output": "1. 按目标版本说明 Python 自定义算子可生成 OM，概述构建 ES 原型和 wheel、构图生成 AIR、ATC 编译及部署验证。\n2. 需要携带自定义状态时可使用 PortableOp：类自身成对实现 serialize 和 deserialize，实例可零参构造，序列化结果为非空 bytes。\n3. 支持该机制的版本可携带 Python 源码及描述信息；部署机仍需兼容的 Python、GE bridge 和源码依赖，建议独立进程验证。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "Python 命令式执行与 GE 流",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "Python 的 ge.custom_op 如果使用 execute，是不是只能调用 torch_npu 的全局同步，不能自己 launch kernel 并使用 GE 的流？",
+      "expected_output": "1. Python 回调可取得执行上下文并使用 ctx.get_stream()；pyACL launch 可以使用该流，不必因使用 Python 就全局同步。\n2. 第三方框架是否接受外部 stream 要按实际接口和版本核对，不能将某个框架的限制推广到全部 Python 算子。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "Tiling 托管路径分诊",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我在 Ascend C 算子工程中用 IMPL_OP 注册 InferShape 和 Tiling，想接入 GE。应该使用哪种开发路径？",
+      "expected_output": "1. IMPL_OP 的 Tiling 回调对应标准 Tiling 托管算子工程，应指向 ops-registry-invoke 或 ascendc-registry-invoke-template。\n2. REG_OP 注册算子原型，托管路径和 BaseCustomOp 路径都可使用；不能仅凭出现 IMPL_OP 就断定没有混合注册。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "已有算子的 ONNX 节点映射",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "ONNX 模型中有一个自定义节点，GE 已有等价算子。我只需要将这个节点映射成已有算子，应该用什么方法？",
+      "expected_output": "1. 识别为 ONNX 节点映射场景，指向 ge-onnx-plugin-development 或对应解析插件流程。\n2. 现有 GE 算子可满足计算时，无需仅为节点映射生成新的 BaseCustomOp kernel 交付件。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "kernel 尚未编写时的接入契约",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我计划开发一个新 kernel 并接入 GE，kernel 还没写。应该先和 kernel 开发者约定哪些内容？",
+      "expected_output": "1. 说明目标环境、图形态、编译时机和部署方式。\n2. 说明输入输出的 shape/dtype、kernel 参数 ABI、产物及加载契约；未生成的产物信息标记为待验证。\n3. 给出数值、边界和多轮执行等适用的验收方向，不要求在此咨询中实际运行。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "固定块 kernel 的尾块和空张量",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我的 Ascend C kernel 每个 block 固定读写 1024 个 float，参数只有 x/y/z，没有 n。将 block_dim 改成 ceil(n/1024) 就能支持 1025 个元素和空张量吗？",
+      "expected_output": "1. 说明 ceil 只改变 block 数，不能为 kernel 增加尾块保护；强制启动空张量也可能越界。\n2. 可暂时拒绝不支持的输入，或同时修改 kernel ABI、边界处理和 Host 校验；不能只修改 block_dim。\n3. 给出正常整块、尾块及空张量的验证场景和预期行为。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 11,
+      "title": "旧 GE 运行库中的注册门控",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "交付件用新版头文件构建后，在旧 GE 运行库里没有注册成功。是不是先把本地 GE 仓库更新到最新 develop 就能解决？",
+      "expected_output": "1. 先只读核对实际安装的 GE 头文件、运行库版本和注册宏版本门控；更新源码仓库不会自动更新目标运行库。\n2. 根据核查结果使用相互兼容的目标头文件和运行库，并通过注册日志或导出接口验证。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 12,
+      "title": "声明式路径与 MIX 产物的加载属性",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "AnnotatedKernelLaunchInfo 没有 magic 字段，是否就能断言 MIX 产物绝对无法走声明式？请结合 GE 任务构建逻辑说明。",
+      "expected_output": "1. 说明 GE 构建逻辑会读取节点上的 TVM_ATTR_NAME_MAGIC，缺失时使用默认值；不能仅凭 launch info 无该字段断言结构性不可行。\n2. 也不能仅凭存在节点属性就断言 MIX 可用；入口、参数 ABI、FFTS 和目标运行时加载仍需验证。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 13,
+      "title": "Portable 反序列化与共享实例",
+      "config": {
+        "max_tokens": 180000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "同一 op type 的实例被多个模型复用。如果 Deserialize 一开始先 clear 共享缓存，坏 payload 或第二个模型会影响第一个吗？",
+      "expected_output": "1. 说明共享实例中先清空或边解析边修改会破坏已有状态或造成跨模型覆盖。\n2. 建议先完整解析和校验临时状态，再安全合并或隔离；同 key 不同产物需要明确处理冲突。\n3. 给出坏 payload、不同 shape 以及同 key 不同产物的测试场景和预期，无需假称实际运行。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 14,
+      "title": "C++ 在线交付件骨架生成",
+      "config": {
+        "max_tokens": 288000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "file_based"
+      },
+      "prompt": "请为 AddCustom 生成 C++ 在线 GE 接入骨架，输入 x、y，输出 z。二进制和 ABI 文件暂时无法提供；请将源码放在 src/，并提供 CMakeLists.txt。",
+      "expected_output": "1. 生成 C++ 实现、算子原型及 CMake 构建文件，保持原型、实现注册和构图侧 op type 一致，原型注册代码应参与构建。\n2. 按命令式方案组织运行时加载和 GE stream；未提供 binary 或 ABI 时明确待完成，未实现计算不得返回成功。\n3. 说明本地可做的构建检查和目标环境中的数值验证，不声称未执行的阶段通过。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "file_list",
+          "pattern": "src/*.cpp",
+          "description": "生成 C++ 源文件"
+        },
+        {
+          "type": "file_list",
+          "pattern": "CMakeLists.txt",
+          "description": "生成工程构建文件"
+        }
+      ]
+    },
+    {
+      "id": 15,
+      "title": "Python 自定义算子骨架生成",
+      "config": {
+        "max_tokens": 288000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "file_based"
+      },
+      "prompt": "请为 PyAddCustom 生成 Python ge.custom_op 接入骨架，两个输入、一个输出，准备在静态图使用声明式 launch。把实现放在 src/ge/；当前没有 kernel binary。",
+      "expected_output": "1. 生成含 register_op 和 register_op_impl 的 Python 文件，输入输出元信息与回调签名相匹配。\n2. 按声明式路径组织 kernel 和参数；binary 未提供时明确待完成，不能伪报执行或数值验证成功。\n3. 说明所需的构图、环境和目标设备验证步骤。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "file_list",
+          "pattern": "src/ge/*.py",
+          "description": "生成 Python 自定义算子文件"
+        }
+      ]
+    }
+  ]
+}
