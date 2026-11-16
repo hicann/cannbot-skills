@@ -58,7 +58,7 @@ permission:
 | 检视方法论 | core/methodology.md | 假设检验流程、置信度标准、红线问题 |
 | 编码规范 | references/*.md | 安全编码、API 最佳实践、性能、TOPK 等规则文档 |
 | 规则集总览 | references/README.md | 全部规则文件的分类目录（仅供人读，机器路由不依赖） |
-| 错误码检测 | references/ascendc-error-code.md | ERR-1~4 默认纳入 C/C++ 检视；引用相邻 cann-error-code-standard 的规范与码表，检查废弃码、注册契约、首报与失败返回 |
+| 日志与错误码检测 | references/ascendc-log.md | ERR-1~4 默认纳入 Host C++ 检视；引用相邻 cann-error-code-standard 的规范与码表，检查废弃码、注册契约、首报与失败返回 |
 | 废弃码扫描 | scripts/clause.check_error_codes.py | 只读扫描被检代码中的废弃码及旧宏，作为 ERR-1 的检测证据 |
 | Skill 自身规范 | docs/architecture.md | 目录结构、各类文件格式规范、扩展方式（维护本 skill 时读） |
 | 规则集写作规范 | docs/rule-writing-standard.md | 新增/修改规则文件的逐条写作约束与提交前自查清单（维护规则集时读） |

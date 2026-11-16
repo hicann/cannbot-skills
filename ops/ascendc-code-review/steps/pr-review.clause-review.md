@@ -22,10 +22,11 @@ workflow 按 plan-design 产出的检视计划，单波并行派发子 Agent（�
 - 第一步加载 ascendc-code-review skill，然后 Read `{skill_base}/core/methodology.md` 掌握假设检验方法、置信度标准、红线问题和 PR 交叉验证规则
 - 若提供了关联依据，仅用于其对应条款的适用判断；保留用户来源，不写成已查阅源码确认。
 - API 约束信息：检视条款涉及的 API（DataCopy、repeatTime 限制等），使用 `/ascendc-docs-search` 查阅官方文档核实约束（对齐要求、参数限制、代际差异），禁止凭记忆或推测
-- Read 本组所属规则文件**全文**——仅当本组承接该文件**全部条款**时（1M 上下文足够容纳，全文阅读提供跨条款上下文；快速索引与条款正文一并读取，轨迹如实记录）。若本次任务是**定向/部分条款检视**，退回单章边界：只读 `<适用>` 声明头 + 目标条款章节（见 quick-review 读取硬约束）。逐条检视文件内全部条款：快速索引中的每条条例都要产出结果；判定某条款不适用于当前代码时提交 `status: PASS` 并在 problem_desc 注明「不适用：<原因>」（侧别不符/无对应代码模式/触发场景缺失等）——**禁止跳过不提交**（完整性校验按条例 ID 对账）。若条例包含专属检视方法，必须严格按该指引执行；所属规则文件若有「交付声明要求」类共用节（如 ascendc-error-code.md），交付须逐项满足
+- Read 本组所属规则文件**全文**——仅当本组承接该文件**全部条款**时（1M 上下文足够容纳，全文阅读提供跨条款上下文；快速索引与条款正文一并读取，轨迹如实记录）。若本次任务是**定向/部分条款检视**，退回单章边界：只读 `<适用>` 声明头 + 目标条款章节（见 quick-review 读取硬约束）。逐条检视文件内全部条款：快速索引中的每条条例都要产出结果；判定某条款不适用于当前代码时提交 `status: PASS` 并在 problem_desc 注明「不适用：<原因>」（侧别不符/无对应代码模式/触发场景缺失等）——**禁止跳过不提交**（完整性校验按条例 ID 对账）。若条例包含专属检视方法，必须严格按该指引执行；所属规则文件若有「交付声明要求」或「验证边界」类共用节，交付须逐项满足
 - 若检视条款来自 ascendc-kernel-rules / ascendc-sunset-api / ascendc-simt，使用 `/ascendc-docs-search` 查阅对应 API 的最新官方文档
 - 先 Read diff 了解变更范围，再 Read 完整源码追溯变量来源
 - 严格按假设检验驱动流程执行（H0/H1、证据收集、自信值计算）。**例外**：若条例的专属检视方法已声明不走假设检验（如 cpp-style 的 16 条、ascendc-sunset-api 的 SUNSET-1/2），按专属方法执行，不收集证据分值；此类条款 FAIL/SUSPICIOUS 的 yaml 提交时使用对应 category（cpp-style → `category: style`，SUNSET-* → `category: sunset`），不带 evidence/confidence 字段（collector 已豁免校验）
+- 提交每条结果前，对照条款中「输出结论须显式覆盖」等要求和任务列出的各条路径，逐项写明输入或分支、保护条件和结论。用现有结果字段记录合法边界和证据缺口，同一条款内同时存在违规与合法路径时分别说明。
 - 所有条款检视完成后，**将每条结果按下方 yaml schema 通过 curl 提交到 collector 端点**。提交命令模板：
   ```
   curl -s -X POST "http://127.0.0.1:{collector_port}/submit?clause={条例ID}" --data-binary @- <<'YAML_EOF'

@@ -458,7 +458,7 @@ Step 2: 逐文件匹配：语言 → 侧别 → 默认启用 → 领域触发
 | `MC2` | mc2-specific.md | MC²领域 |
 | `BLAZE` | blaze-specific.md | Blaze矩阵乘框架（ops-tensor） |
 | `LOG` | ascendc-log.md | AscendC日志上报 |
-| `ERR` | ascendc-error-code.md | CANN错误码，唯一基准为相邻 cann-error-code-standard；不复制正式码表 |
+| `ERR` | ascendc-log.md | CANN错误码，唯一基准为相邻 cann-error-code-standard；不复制正式码表 |
 | `HOST` | ascendc-host-rules.md | AscendC Host工程布局 |
 | `STYLE` | cpp-style.md | 代码风格（专项托管） |
 
@@ -500,7 +500,7 @@ Step 2: 逐文件匹配：语言 → 侧别 → 默认启用 → 领域触发
 
 ### 5.5 错误码基准与门禁部署工具（供维护者使用）
 
-`ascendc-error-code.md` 通过声明头自动纳入文件/PR 检视，快速检视按“错误码”等关键词匹配该文件。安装或分发本 skill 时须同时提供相邻的 `cann-error-code-standard`，基准缺失不能跳过该检测项。正式码表只在该上游维护。
+`ascendc-log.md` 通过声明头自动纳入 Host C++ 文件/PR 检视，快速检视按“错误码”等关键词匹配该文件。安装或分发本 skill 时须同时提供相邻的 `cann-error-code-standard`，基准缺失不能跳过该检测项。正式码表只在该上游维护。
 
 ```bash
 python3 scripts/install_error_code_hooks.py --repo /path/to/ops-math
