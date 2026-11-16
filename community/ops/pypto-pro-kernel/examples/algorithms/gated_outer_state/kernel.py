@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。门控外积更新与查询，矩阵状态在片上跨时间步保留。
 
 机制：[不变量改写](../../../references/api/numerics.md#prove-an-invariant-before-removing-work)与[特例资格](../../../references/workflows/authoring.md#generalization-and-specialization)。
@@ -28,7 +27,6 @@ UNPK 扩精度与后续 FP32 指令复用相同物理谓词。逐状态行的 VF
 调用开销与其他计算映射需要单独计时，此例不声称性能优势。
 验证工具链为 PyPTO cbd3c4a778、CANN 9.2.0、Ascend950PR；运行证据须绑定当前源码与安装身份。
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

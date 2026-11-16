@@ -59,7 +59,6 @@ def test_complete_scope_passes_existing_gates_without_importing_sources(corpus):
 def test_declared_route_overlap_preserves_conditional_alternatives(corpus):
     write(
         corpus.references / "other.md",
-        # pylint: disable-next=line-too-long
         '<!-- kernel-query: {"id":"other","aliases":["copy route"],"facets":{"source_memory":["Mat"]}} -->\n## Other\nBody\n',
     )
     result = admission(corpus)

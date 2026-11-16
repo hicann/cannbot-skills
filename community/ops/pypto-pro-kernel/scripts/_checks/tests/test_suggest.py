@@ -74,7 +74,6 @@ def test_real_handover_has_one_conversion_candidate():
 def layout(tmp_path, *, source_layout="ND", consumer="nz", rebind="", space="Mat"):
     return source(
         tmp_path,
-        # pylint: disable=line-too-long
         f"""
         @pl.jit(auto_mutex=False)
         def kernel():
@@ -85,7 +84,6 @@ def layout(tmp_path, *, source_layout="ND", consumer="nz", rebind="", space="Mat
             {rebind}
             pl.insert(l1, {consumer}, [0,0])
     """,
-        # pylint: enable=line-too-long
     )
 
 

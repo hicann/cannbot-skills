@@ -6,14 +6,12 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """Kernel skill checks and a source-gated command runner.
 
 Invoke from any directory with `python <skill>/scripts/check.py`. Defaults are resolved relative to the skill; explicit input paths are resolved relative to the caller's current directory. Put path-override options before the subcommand.
 
 `rules` runs static checks; `coverage` verifies API example assignments; `catalog` reconciles the matmul/algorithm index; `links` checks local Markdown targets and anchors; `surface` searches API usage; `api` reads declaration stubs; `srcrefs` reports suspicious source-line references. `suggest` proposes bounded source-pattern comparisons; `experiment` maintains explicit best/current scratch state. The default command runs rules and knowledge admission, including coverage, catalog, links and API freshness. Those checks do not import PyPTO or use a board. `run` checks the named source files, then executes the caller's explicit command in the current environment.
 """
-# pylint: enable=line-too-long
 
 from __future__ import annotations
 
@@ -244,7 +242,6 @@ def rules_result(targets, *, pypto_root, examples_root=EXAMPLES_ROOT, findings=N
     }
     chains = [vf_dataflow.inspect(path, pypto_root=pypto_root) for path in files]
     result["coverage"]["vf_dataflow"] = [
-        # pylint: disable-next=all
         {"file": str(path.resolve()), **chain[2]} for path, chain in zip(files, chains)
     ]
     result["coverage"]["synchronisation"] = [

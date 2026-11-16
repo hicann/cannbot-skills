@@ -247,9 +247,7 @@ def inspect(path: Path, *, pypto_root: Path = PYPTO_ROOT):
         if not has_decorator(fn, alias, "jit") or auto_mutex_off(fn, alias):
             continue
         nodes = list(body_nodes(fn))
-        # pylint: disable-next=all
         parents = {
-            # pylint: disable-next=all
             child: node for node in nodes for child in ast.iter_child_nodes(node)
         }
         bare = [

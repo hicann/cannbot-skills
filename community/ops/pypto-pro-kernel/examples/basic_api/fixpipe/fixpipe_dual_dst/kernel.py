@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。Fixpipe 的 Single/Dual 目的选择与两个 AIV 的输出所有权。
 
 M=N=K=64，输入为 FP16、Acc 为 FP32。SingleModeVec0/Vec1 把整块矩阵送到指定 AIV；DualModeSplitM/N 分别按行/列拆给两个 AIV。UB 物理容量与各自消费的半块形状一致，测试检查两
@@ -21,7 +20,6 @@ Dual 与 scale、ReLU、降位 dtype、DN 目的布局的非法组合均要求�
 
 混合与纯 Vector 两个探针分别读回 block/subblock 数，测试依据当前执行预算检查关系，不固定核数。``reference.py`` 与 ``test.py`` 保留逐位数值对照、目的区分和参数覆盖检查。
 """
-# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 

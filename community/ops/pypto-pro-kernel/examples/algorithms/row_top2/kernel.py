@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。VF 稳定逐行 Top-2，输出输入原始 FP32 位模式。
 
 机制：[选择集合与payload](../../../references/patterns/ordered-selection.md#exact-payload-recovery-cannot-repair-lossy-selection)及[离散决策资格](../../../references/api/numerics.md#certify-a-discrete-decision-before-taking-a-fast-path)。
@@ -18,7 +17,6 @@
 全行常驻 UB，输入占 ceil(N/64)*256 字节，四个输出槽各占256字节；扩大形状前检查总容量。
 验证边界：行为版本 872df763f、CANN 9.2.0、Ascend950PR。test.py 固定精确下标、位模式及守卫判据。
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

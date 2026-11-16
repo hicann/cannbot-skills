@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。通过 Scaling Tile 提供每列独立的 Fixpipe 量化参数。
 
 本例 M=N=K=64，FP16 输入、FP32 Acc，输出覆盖 FP16/INT8。FP32→FP32 的带 scale 路径会静默丢弃缩放，测试要求解析期拒绝；当前官方 master 缺少该 guard，因此相应检查失败。Cube 输入与 Acc 的声明复用
@@ -24,7 +23,6 @@ INT64 表项的低 32 bit 是 FP32 scale 的 IEEE 位模式，bit46 控制 INT8 
 表的合法形状为 [1,N]、N 是 16 的倍数且不超过 512，dtype 必须 INT64，空间必须 Scaling。超限的表在分配或 scale 消费时由解析期拒绝；其余非法形状、类型、GM Tensor 和
 per-channel+atomic 组合也只做解析期验证。
 """
-# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 

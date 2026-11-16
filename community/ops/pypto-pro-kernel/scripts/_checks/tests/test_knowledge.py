@@ -244,7 +244,6 @@ def test_moving_reference_files_changes_locations_but_not_identity_or_rank(
 ):
     original = tmp_path / "a.md"
     original.write_text(
-        # pylint: disable-next=line-too-long
         '<!-- kernel-query: {"id":"b","aliases":["shared"]} -->\n## Beta\nBody B\n\n<!-- kernel-query: {"id":"a","aliases":["shared"]} -->\n## Alpha\nBody A\n'
     )
     monkeypatch.setattr(query, "REFERENCES_ROOT", tmp_path)

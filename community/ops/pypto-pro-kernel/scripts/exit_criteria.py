@@ -100,7 +100,6 @@ def evaluate_exit_criteria(tree, observations):
     for condition in leaves:
         values, missing = [], []
         for case in condition["cases"]:
-            # pylint: disable-next=all
             matches = [row for row in observations if row.get("metric") == condition["metric"]
                        and row.get("case") == case and row.get("unit") == condition["unit"]
                        and row.get("basis") == condition["basis"]

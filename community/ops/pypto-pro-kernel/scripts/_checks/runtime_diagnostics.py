@@ -302,6 +302,5 @@ def from_output(text, *, examples_root=EXAMPLES_ROOT, transfers=()):
         if item:
             _bind_transfer_context(item, transfers)
             found.append(item)
-    # pylint: disable-next=all
     ids = {ident for item in found for ident in item.get("context_ids", [])}
     return found, query.context(ids, examples_root=examples_root)

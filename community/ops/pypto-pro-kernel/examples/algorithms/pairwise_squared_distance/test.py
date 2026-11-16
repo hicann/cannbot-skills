@@ -6,12 +6,10 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """验证直接差平方、近邻、FP16 算术舍入陷阱、尾部和原地址输入变化。
 
 worker 独占输出区域，输入和输出 tile 用独立缓冲组同步；FIRST_ELEMENT_B32 在 UB 内打包单值，GM 每次写入完整有效片段。输入从非零存储偏移开始，前后守卫检查越界写。FP64 参考独立于 VF 分块与搬运顺序；三条公开路径都受同一数学契约约束。
 """
-# pylint: enable=line-too-long
 
 import numpy as np
 import pytest

@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：语法糖（``pl.gemm`` + B 层流水 + VF）。M=1000 的 RMSNorm → GEMM，全链路有效行数收口。
 
 Contract: X[1000,256], gamma[256] and W[256,256] are FP16; O[1000,256] is FP32. Arithmetic, row+1-pitch NZ packing,
@@ -32,7 +31,6 @@ separately; this example makes no performance claim.
 
 example-query: {"aliases":["RMS normalization and GEMM with M tails","带M尾块的RMSNorm矩阵乘"],"term_groups":[["rmsnorm","rms normalization","均方根归一化"],["gemm","矩阵乘"]],"facets":{"source_dtype":["FP16"],"destination_dtype":["FP32"]},"exclude":[{"term_groups":[["N tail","N tails","N尾块","N 尾块","K tail","K tails","K尾块","K 尾块"]],"reason":"This fixed K=N=256 program demonstrates M tails only."},{"term_groups":[["backward","gradient","反向","梯度"]],"reason":"This program implements the forward RMSNorm-to-GEMM composition only."}]}
 """
-# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf  # noqa: N813

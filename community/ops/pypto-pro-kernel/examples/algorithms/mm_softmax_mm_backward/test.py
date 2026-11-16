@@ -39,7 +39,6 @@ def allocate(shape, dtype, device):
         backing = torch.full((count + 64,), 29, dtype=torch.float32, device=device)
         outputs.append(backing[32:-32].view(out_shape))
         backings.append(backing)
-    # pylint: disable-next=all
     workspace = [torch.empty((m, n), dtype=kind, device=device) for kind in (
         torch.float32, torch.float32, dtype, dtype, torch.float32, torch.float32, dtype, dtype,
     )]
@@ -85,7 +84,6 @@ def test_rectangular_gradients(shape, dtype, device):
 
 def test_reference_directional_derivative():
     generator = torch.Generator().manual_seed(17)
-    # pylint: disable-next=all
     a, b, c, g = [torch.randn(size, generator=generator, dtype=torch.float64).mul(0.2) for size in (
         (3, 5), (5, 7), (7, 4), (3, 4),
     )]

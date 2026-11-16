@@ -275,7 +275,6 @@ def inspect(
 
         visit_AsyncFunctionDef = visit_FunctionDef
 
-        # pylint: disable-next=all
         def visit_For(self, node):
             if (self.native_body and isinstance(node.iter, ast.Call)
                     and isinstance(node.iter.func, ast.Name) and node.iter.func.id == "range"):

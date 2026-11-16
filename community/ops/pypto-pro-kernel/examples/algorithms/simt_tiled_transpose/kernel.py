@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。SIMT 的连续 GM 读写与共享 UB 转置。
 
 机制：[按真实访问集合比较布局](../../../references/patterns/vf-neighborhood.md#compare-layouts-from-actual-access-sets)。
@@ -22,7 +21,6 @@ padding 改变 UB 行跨度，不改变外部布局；默认 2 是实验配置�
 接口核对源码 c46548e；数值验证安装源码 cbd3c4a 的相关实现相同，CANN 9.2.0 / Ascend950PR。
 example-query: {"aliases":["SIMT shared UB transpose","SIMT tiled permutation"],"term_groups":[["transpose","rotation","permutation","转置","旋转"],["simt","ub","tile","tensor","layout","张量"]],"exclude":[{"term_groups":[["noncontiguous input","non-contiguous input","arbitrary positive row","arbitrary input strides","非连续输入"]],"reason":"This program requires contiguous input. Resolve example:algorithms/strided_transpose/kernel.py for the separate positive-stride physical-view contract."}]}
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

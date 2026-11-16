@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：语法糖。三维 GM 寻址、L1 转置视图与 M 尾块的组合。
 
 FP16 输入，FP32 输出；显式地址与自动 mutex ID，单槽五组缓冲，batch 分核，pl.gemm 收窄 M。
@@ -17,7 +16,6 @@ Mat A 从 0 开始，W 紧随 A 的 2*block_m*block_k 字节；Left、Right、Ac
 
 example-query: {"aliases":["batched transposed GEMM with M tails","带M尾块的批量转置GEMM"],"term_groups":[["batched","批量"],["transposed","transpose","转置"],["gemm","矩阵乘"]],"facets":{"source_dtype":["FP16"],"destination_dtype":["FP32"]},"exclude":[{"term_groups":[["N tail","N tails","N尾块","N 尾块","K tail","K tails","K尾块","K 尾块"]],"reason":"N % 16 == 0 and K % 32 == 0 are required; this example handles M tails only."}]}
 """
-# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 

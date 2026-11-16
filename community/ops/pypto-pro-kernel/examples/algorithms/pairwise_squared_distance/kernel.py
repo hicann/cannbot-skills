@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。FP16 向量的两两平方距离，差值、乘法与归约使用 FP32。
 
 example-query: {"aliases": ["pairwise squared distance", "squared Euclidean distance", "两两平方欧氏距离"], "facets": {"source_dtype": ["FP16"], "destination_dtype": ["FP32"]}}
@@ -27,7 +26,6 @@ run 使用当前平台 vector_core_num 限制 worker 数；批量路径的工作
 不同设备和工作负载仍需完整调用计时。原生接口与配置在 PyPTO cbd3c4a778、
 CANN 9.2.0、Ascend950PR 验证，当前证据须绑定源码与安装身份。
 """
-# pylint: enable=line-too-long
 
 import torch
 import torch_npu  # noqa: F401

@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。VF 逐行间接读取，包含负索引和尾块。
 
 契约：有限 FP32 x[M,N]，INT32 index[M,K]，索引位于 [-N,N)，负值按 +N 解释，允许重复索引，输出逐位保持输入值。
@@ -16,7 +15,6 @@
 机制：[联合访问范围证明](../../../references/api/vf.md#prove-joint-address-bounds-before-repeated-accesses)。本例分开物理补齐、逻辑索引和实际访问，扩大表容量或前移检查时，须按新的消费者重新证明完整packet与尾部。
 验证边界：行为版本 872df763f、CANN 9.2.0、Ascend950PR；运行 test.py 检查数值与输出守卫。未测硬件性能。
 """
-# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf

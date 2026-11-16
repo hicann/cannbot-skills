@@ -99,12 +99,10 @@ raise RuntimeError("must not import tests")
     write(examples / "pytest.ini", "[pytest]\npython_files = test.py\n")
     owner = write(
         references / "owner.md",
-        # pylint: disable=line-too-long
         """<!-- kernel-query: {"id":"copy","aliases":["copy route"],"symbols":["pl.move"],"example":"basic_api/chapter/copy/kernel.py","facets":{"source_memory":["Vec"]}} -->
 ## Copy contract
 Read the source layout and independent test before adapting.
 """,
-        # pylint: enable=line-too-long
     )
     catalog = write(
         references / "tooling/examples.md",

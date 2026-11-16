@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：语法糖。SparseFlashAttention 的 dense-mask / indexed-KV 两条完整路径。
 
 example-query: {"aliases": ["sparse flash attention", "SparseFlashAttention", "SFA", "ROWPLUSONE", "ROWPLUSONE attention", "稀疏闪存注意力"], "term_groups": [["sparse flash attention", "SparseFlashAttention", "SFA", "稀疏闪存注意力"]], "facets": {"source_dtype": ["FP16"], "destination_dtype": ["FP16"]}, "exclude": [{"term_groups": [["independent v", "independent value", "独立V"]], "reason": "The native paths require V to equal the K prefix."}]}
@@ -29,7 +28,6 @@ P 默认采用 ROWPLUSONE；aligned 和 padded 保留为布局对照。物理 pi
 此实现覆盖上述两类规则分块，不声明通用尾块、独立 V、BF16、重复或越界索引支持。
 目标为支持原生自动 mutex ID 的 PyPTO 与 Ascend950PR；测试保留原评测器的误差标准。
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 from math import isfinite

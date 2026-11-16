@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：语法糖。 Native materialized backward control for Y = softmax(A @ B, dim=1) @ C.
 
 A[M,K], B[K,N], C[N,D] and the supplied upstream G[M,D] are contiguous
@@ -38,7 +37,6 @@ automatic mutex IDs. The default automatic launch count is retained.
 
 example-query: {"aliases":["matrix softmax matrix backward","normalized matrix chain gradients","normalized contraction gradients","attention backward","二维归一化矩阵链反向"],"term_groups":[["softmax","normalized","attention","归一化"],["backward","gradient","gradients","grad","reverse","反向","梯度"]],"facets":{"source_dtype":["FP16","BF16"],"destination_dtype":["FP32"]},"exclude":[{"term_groups":[["causal mask","runtime mask","head mapping","TND","BSND","BNSD","arbitrary strides"]],"reason":"This bounded control implements contiguous 2-D unmasked matrices only: all extents are multiples of 64 in [64,1024], finite inputs have magnitude at most one, and each score row has range at most 16. It does not implement masks, head mapping or application layouts; use its matrix algebra through a separately verified adapter."}]}
 """
-# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf

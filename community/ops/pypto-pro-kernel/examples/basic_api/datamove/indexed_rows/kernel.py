@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。Native device-side row selection followed by an MTE payload copy.
 
 Contract: contiguous, disjoint FP32 table[R,C], INT32 indices[N], FP32 out[N,C];
@@ -18,7 +17,6 @@ performance control; this example does not promise a general gather speedup.
 API scope: source c46548e, CANN 9.2.0 / Ascend950PR; tests check current behavior.
 example-query: {"aliases":["device scalar indexed row copy","MTE indirect row payload"],"term_groups":[["indexed row","indirect row","整行间接搬运"],["copy","mte","搬运"]],"exclude":[{"term_groups":[["noncontiguous input","non-contiguous input","noncontiguous output","non-contiguous output","arbitrary input strides","arbitrary output strides","非连续输入","非连续输出","任意输入步长","任意输出步长"]],"reason":"This program requires contiguous FP32 input and output; arbitrary physical strides need a separately verified implementation."}]}
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

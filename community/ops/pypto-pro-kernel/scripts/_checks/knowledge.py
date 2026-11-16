@@ -729,7 +729,6 @@ def discover(
             if example_locator and example_locator[0] == row["id"]:
                 item["program"] = {**item["program"], **row["_details"]}
             else:
-                # pylint: disable-next=line-too-long
                 # Discovery offers role/source locators; exact resolution supplies the original statements and full call graph.
                 item["conditions"] = []
                 item["validation"] = {"status": "not_established"}

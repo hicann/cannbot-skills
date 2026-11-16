@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。原生 SIMT 双线性采样，使用带边界判定的四邻点读取。
 
 机制：[元数据计划](../../../references/patterns/stable-placement.md#separate-reusable-metadata-from-payload-execution)、[离散决策](../../../references/api/numerics.md#certify-a-discrete-decision-before-taking-a-fast-path)和[布局成本](../../../references/patterns/vf-neighborhood.md#compare-layouts-from-actual-access-sets)。
@@ -19,7 +18,6 @@
 默认线程配置只代表已测候选；小形状、读取有效率和局部性的性能需分别验证。
 验证边界：行为版本 872df763f、CANN 9.2.0、Ascend950PR，固定 atol=rtol=2e-5。
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

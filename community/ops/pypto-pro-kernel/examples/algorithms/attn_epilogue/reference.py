@@ -10,7 +10,6 @@
 import torch
 
 
-# pylint: disable-next=all
 def inverse_rope(o, sin, cos):  # noqa: E741 - Public evaluator keyword contract.
     """Apply separate FP32 products/additions, then round the tail to BF16."""
     x = o.float()
@@ -46,7 +45,6 @@ def dequantize_mx(payload, scales):
     ).reshape(payload.shape)
 
 
-# pylint: disable-next=all
 def attn_epilogue_golden_cpu(o, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos):  # noqa: E741 - Evaluator API.
     """CPU mathematical oracle with BF16 rounding at each projection boundary.
 

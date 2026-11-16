@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。SIMT 单元素预留与线程内批量 ticket 预留。
 
 契约：连续 INT32 keys[N]，0<=keys[i]<B，1<=B<=256，0<=N<=INT32_MAX。
@@ -19,7 +18,6 @@ atomic_add 返回该段的起点，再回访段内位置写 base+rank；不需�
 atomic_add 显式接收 counts 与单轴元素坐标，返回更新前的 INT32 计数；数值验收见 test.py。
 example-query: {"aliases":["SIMT ticket ranges","SIMT batched reservation"],"term_groups":[["simt","atomic"],["ticket","reservation","票据"]]}
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

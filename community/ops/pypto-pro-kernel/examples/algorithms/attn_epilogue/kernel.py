@@ -1201,7 +1201,6 @@ def _launch(
         ](*args)
 
 
-# pylint: disable-next=all
 def attn_epilogue(o, woa, wob, descale_woa, descale_wob, rope_sin, rope_cos):  # noqa: E741 - Evaluator API.
     """Return a contiguous BF16 [T,5120] projection from prequantized ND weights."""
     if (

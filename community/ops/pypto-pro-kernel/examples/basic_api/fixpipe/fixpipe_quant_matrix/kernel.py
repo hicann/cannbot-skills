@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。Fixpipe 的标量/逐列量化矩阵与 scale 负载探针。
 
 固定 M=N=K=64。FP16×FP16 产生 FP32 Acc，INT8×INT8 产生 INT32 Acc；目的 dtype、layout 与量化方式在工厂调用时确定。Acc→Vec 的 11 个组合中，带 scale 的
@@ -21,7 +20,6 @@ Acc→Vec 是单次 FIX→MTE3 交接；HF8 解码首先由 VF 读取，因此�
 HF8 的 VF 解码只检查前 256 个字节中 stride=4、phase=0 的 64 个值。Acc→Mat 的 HF8 路径仍是运行检查，UINT8 路径只验证读回操作数被拒绝；这些不是独立格式或完整数值验证。参考、判据及这些边界由
 reference.py 与 test.py 说明。
 """
-# pylint: enable=line-too-long
 
 import struct
 

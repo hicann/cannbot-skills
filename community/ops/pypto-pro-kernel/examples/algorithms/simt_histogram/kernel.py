@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。UINT8 直方图：直接 GM 原子与每 block 的 UB 局部聚合。
 
 输入是连续 UINT8[N]，输出是连续 INT32[256]，二者不重叠，要求 N <= INT32_MAX。
@@ -20,7 +19,6 @@ local=False 保留直接 GM 原子对照，combine_runs=True 则合并同一线�
 原子更新显式接收容器与逐轴元素坐标；数值验收使用 test.py 的独立频数参考、输入保持和输出守卫。
 example-query: {"aliases":["SIMT local histogram","SIMT local counters"],"term_groups":[["simt","ub","block-local"],["histogram","counters","categorical","直方图"]]}
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

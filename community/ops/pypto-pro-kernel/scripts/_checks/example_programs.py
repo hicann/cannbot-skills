@@ -685,7 +685,6 @@ def collect(root, references_root, entries, document_records):
         )
     manifest = {str(path): digest for path, digest in snapshots.identities.items()}
     counts = {
-        # pylint: disable-next=all
         group: sum(row["example_group"] == group for row in records) for group in GROUPS
     }
     provider = {

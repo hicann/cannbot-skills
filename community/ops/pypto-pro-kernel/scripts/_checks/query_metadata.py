@@ -109,7 +109,6 @@ def validate(meta, *, kind):
             )
         elif key in meta:
             meta[key] = [
-                # pylint: disable-next=all
                 [knowledge.symbol(name) for name in group] for group in meta[key]
             ]
     if kind == "contract":

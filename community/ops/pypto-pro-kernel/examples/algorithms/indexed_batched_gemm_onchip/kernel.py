@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：语法糖。SIMT gathers an indexed operand into on-chip Cube storage.
 
 example-query: {"aliases": ["SIMT Cube fusion", "on-chip indexed contraction", "SIMT Cube 片上交接"], "facets": {"source_dtype": ["FP16", "BF16"], "destination_dtype": ["FP32"]}}
@@ -42,7 +41,6 @@ Compare complete calls at matched AIC/AIV budgets and preserve the better
 path for the actual workload. Source behavior was checked at c46548e;
 revalidate synchronization, resources and numerical results after upgrades.
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 import pypto_pro.language as pl

@@ -293,7 +293,6 @@ def _bind_shape_symbol(expression: int | str, concrete: int,
 def _case_environment(case: dict[str, Any], inputs: list[dict[str, Any]],
                       where: str) -> dict[str, int]:
     env = {
-        # pylint: disable-next=all
         key: value for key, value in case["params"].items()
         if isinstance(value, int) and not isinstance(value, bool)
     }

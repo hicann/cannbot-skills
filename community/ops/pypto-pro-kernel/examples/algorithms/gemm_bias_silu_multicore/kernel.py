@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：语法糖。八个执行组分担 ``C = silu(A @ B + bias)``。
 
 A 为 [2048,256] FP16，B 为 [256,256] FP16，bias 为 [1,256] FP32，输出为 [2048,256] FP32。每组处理连续 256 行，再切成四条 64 行的带。
@@ -25,7 +24,6 @@ Left、Right、Bias、Acc、Vec 各自从 0 开始。局部 L0A/L0B、A 和 Acc 
 
 ``reference.py`` 复用未分块的 FP32 数学定义。``test.py`` 保持 rtol=atol=2e-2，覆盖全量输出、preload 与重复调用的逐位一致，以及首/中/末组的首末带边界。
 """
-# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf  # noqa: N813

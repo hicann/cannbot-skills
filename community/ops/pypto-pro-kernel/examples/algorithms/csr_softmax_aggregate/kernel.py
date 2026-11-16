@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。CSR 分段 softmax 加权聚合，共享权重与独占分片归约。
 
 契约：连续 FP32 logits[E]/table[V,D]、INT32 offsets[R+1]/indices[E]，R=1..257、E=0..65537、V=1..4097、D=1..129；offsets 单调且首0末E，
@@ -24,7 +23,6 @@ FP64 数学参考不采用实现的固定参考或分块归约顺序。
 
 example-query: {"aliases":["CSR sparse softmax aggregation","CSR稀疏softmax加权聚合"],"term_groups":[["csr","压缩稀疏行"],["softmax"],["aggregate","aggregation","weighted sum","加权聚合","聚合"]],"facets":{"source_dtype":["FP32"],"destination_dtype":["FP32"]},"exclude":[{"term_groups":[["backward","gradient","反向","梯度"]],"reason":"This program implements forward segmented softmax-weighted aggregation only."}]}
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

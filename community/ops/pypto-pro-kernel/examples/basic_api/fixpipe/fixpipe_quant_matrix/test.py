@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """Fixpipe quantization across Acc→Vec, Acc→Mat and Acc→GM.
 
 The Vec matrix tests ten accepted dtype combinations with scalar and per-channel scales. Scaled FP32→FP32 has dedicated
@@ -30,7 +29,6 @@ decoder/quantizer consistency, fp19 scale truncation and signed nine-bit offsets
 on both Acc→Vec and Acc→GM paths. Source hashes and actual toolchain identity are captured outside the repository by the source-gated
 runner.
 """
-# pylint: enable=line-too-long
 
 import numpy as np
 import pytest

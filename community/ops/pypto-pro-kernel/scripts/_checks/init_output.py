@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """Rule: a bare `pl.make_tile` next to `pl.init_output` needs a drain.
 
 | Rule | Evidence | What happens if missed |
@@ -97,7 +96,6 @@ analysis, which belongs in the parser ([skill constraints](../../SKILL.md#constr
 - **Do not judge the target Tensor of `init_output`.** The overwrite happens in UB and does not depend on `offset`,
 `size`, or target identity—`TEXPANDS` runs before `SetValidShape`, so `size=128` still fills 8 KB.
 """
-# pylint: enable=line-too-long
 
 from __future__ import annotations
 

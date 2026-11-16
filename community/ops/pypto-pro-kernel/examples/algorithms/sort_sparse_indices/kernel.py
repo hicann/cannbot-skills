@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：混合。有界 INT32 索引排序，独立缓冲与精确 key 逆变换。
 
 example-query: {"aliases": ["sparse index sorting", "sort index values", "稀疏索引排序"], "term_groups": [["sort", "sorting", "排序"], ["index", "indices", "索引"]], "facets": {"source_dtype": ["INT32"], "destination_dtype": ["INT32"]}, "exclude": [{"term_groups": [["arbitrary int32", "full int32 range", "任意INT32"]], "reason": "Both key encodings are qualified only for values in [0,2**24]."}, {"term_groups": [["associated payload", "独立payload", "附带payload"]], "reason": "This example emits index values, not independently associated payloads."}]}
@@ -28,7 +27,6 @@ sort32 产生 16 个 32-record run；两级 mrgsort.block_len=64/256 的单位�
 范围、排序单位及传输成本见
 [sort records](../../../references/patterns/ordered-selection.md#native-sort-records-and-index-payloads)。
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 

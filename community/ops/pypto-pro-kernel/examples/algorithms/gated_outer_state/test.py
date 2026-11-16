@@ -6,12 +6,10 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """验证片上矩阵状态的跨时间传播、门控重置、轴方向和改变输入后的完整调用。
 
 每个 worker 独占一个状态序列；独立的 Vec 缓冲组由 auto_mutex 管理 VF 调用之间的读写依赖。状态只在开始读入、结束写出，输出按时间步写出。连续偏移输入的前后守卫检查越界写，独立 FP64 数学参考使用实际 FP16/FP32 输入，不模拟分块顺序。此处验证正确性与状态语义，不声称性能优势。
 """
-# pylint: enable=line-too-long
 
 import numpy as np
 import pytest

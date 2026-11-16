@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。 Streamed causal-attention gradients with explicit single-slot Vec resources.
 
 example-query: {"aliases":["attention gradients","softmax backward","normalized contraction reverse"],"term_groups":[["attention","softmax","normalized contraction"],["gradient","gradients","backward","reverse"]]}
@@ -44,7 +43,6 @@ dispatch/allocation is the only host work. Tests cover tails, the joint upper bo
 cancellation, input bit preservation and offset guards, with two output poison values. No current performance claim is
 made.
 """
-# pylint: enable=line-too-long
 
 from functools import lru_cache
 import math

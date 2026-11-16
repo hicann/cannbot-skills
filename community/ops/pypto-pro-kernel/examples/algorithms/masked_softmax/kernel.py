@@ -6,7 +6,6 @@
 # INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
 # See LICENSE in the root of the software repository for the full text of the License.
 
-# pylint: disable=line-too-long
 """写法：原始。带运行期有效长度的逐行 VF softmax。
 
 契约：FP32 x[M, N]，INT32 lengths[M]，0 <= lengths[i] <= N。
@@ -22,7 +21,6 @@
 
 example-query: {"aliases":["runtime prefix softmax","运行期前缀softmax"],"term_groups":[["softmax"],["runtime prefix","prefix length","runtime length","有效前缀","有效长度"]],"facets":{"source_dtype":["FP32"],"destination_dtype":["FP32"]}}
 """
-# pylint: enable=line-too-long
 
 import pypto_pro.language as pl
 from pypto_pro.language import Vf as vf  # noqa: N813
