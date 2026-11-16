@@ -6,7 +6,7 @@ tags: [catlass-dsl, fusion, cross-flag, sync, single-kernel]
 status: stable
 generated: {by: process:catlass-dsl-pattern-capture, at: '2026-11-15T00:00:00Z'}
 verified:
-  - {by: process:catlass-dsl-kernel-run-audit, at: '2026-11-15T00:00:00Z'}
+  - {by: process:catlass-dsl-source-audit, at: '2026-11-16T00:00:00Z'}
 sources:
   - id: sync
     resource: https://gitcode.com/cann/catlass/blob/master/python/tla_dsl/docs/zh/kernel_development/core_concepts/sync.md
@@ -14,9 +14,6 @@ sources:
   - id: sample
     resource: https://gitcode.com/cann/catlass/blob/master/examples/python/tla_dsl/tla/kernel/matmul/fused_ffn/ffn/sync_hard.py
     title: 用 cross_flag 复刻 SyncAll<false>()
-  - id: measure
-    resource: project-evidence:topk-log-probs-backward-2k-to-1k-merge
-    title: 合并前后逐位一致、同进程配对计时（Ascend950PR）
 operator_families: [matmul, mixed]
 dsl_version: ascend-catlass-dsl 2.2.0
 arch: [c310]
@@ -95,20 +92,10 @@ arch: [c310]
 5. 逐位对比：同一 seed、同一输入，合并版与基线输出 `bitwise_equal`；不等先查栅栏与 pipe。
    前提是中间量的窄化点没变——基线把中间量落 GM 并窄化、合并后留在片上不窄化时，本来就
    不该逐位，按精度分档规则判"不劣于基线"即可，不得为了逐位强行插一次窄化。
-6. 同进程配对计时（基线 / 合并版交替），确认回退在可接受范围内；profiling 确认每次 `run`
-   只有一行目标 kernel。
-
-# 实测数据
-
-`topk_log_probs_backward`（M=41316/51350，H=2560，V=124160，K=128，Ascend950PR，28 cube）[^measure]：
-
-- 2 kernel / 3 次 launch → 1 个 `@tla.kernel` / 1 次 launch；
-- `grad_hidden`、`grad_weight` 与基线**逐位一致**（`bitwise_equal=true`、`max_abs_err=0`）；
-- 端到端（同进程配对）：小 shape −0.7%、device −1.5%；最大 modelShape +1.85%、
-  device +1.81%，均在「不慢于基线 5%」以内；
-- 结构比对：段 A（cube/vector）、段 B 的 dh 部分与基线逐 token 相同，仅 dw 部分尾部多一个
-  必要的 `pipe_barrier(ALL)`；
-- 边界 B1 用第 4 类组合栅栏，B2 用任务表并列，均未挂死、未超时。
+6. 同进程配对计时（基线 / 合并版交替）：合并版回退必须 ≤ 5%；超过 5% 时继续优化合并版
+   （定位栅栏、空核与映射统一带来的额外开销），不得退回多 kernel 版本收口；确实定位不到
+   可消除开销时，把证据与剩余偏差记入 `ITERATIONS.md` 与 Final Verdict；profiling 确认
+   每次 `run` 只有一行目标 kernel。
 
 # 失败表现
 
@@ -121,4 +108,3 @@ arch: [c310]
 
 [^sync]: 固定提交的同步原语文档，含 mode 表与 16 个 cross_flag id 上限。
 [^sample]: 官方 MIX 样例，展示用 cross_flag 组合复刻 `SyncAll<false>()` 的语义。
-[^measure]: 项目实测证据：2 kernel / 3 次 launch 合并为单 kernel / 单次 launch，逐位一致与配对计时记录。
