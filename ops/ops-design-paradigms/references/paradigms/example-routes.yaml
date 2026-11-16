@@ -48,6 +48,8 @@ routes:
     ScatterUpdate:
       ascendc:
         - references/paradigms/scatterupdate/adapters/ascendc/example/examples-tensor-scatter-nd-update-code
+      dsl:
+        - references/paradigms/scatterupdate/adapters/dsl/example/tensor_scatter_nd_update_dsl
     ConvBackward:
       ascendc:
         - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddx_direct
