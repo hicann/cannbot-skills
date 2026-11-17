@@ -254,6 +254,29 @@
       "expected_output": "回复应覆盖图模式适配（op_graph IR 定义）的核心知识：\n1. 图模式适配通过 op_graph/{op}_proto.h（如 add_example_proto.h）定义算子在图模式下的输入输出规格，即 IR 定义\n2. IR 接口：.INPUT(x, type) 定义输入、.OPTIONAL_INPUT(x, type) 可选输入、.DYNAMIC_INPUT(x, type) 动态输入、.OUTPUT(x, type) 定义输出、.REQUIRED_ATTR(x, type) 必备属性、.ATTR(x, type, default) 可选属性\n3. TensorType 类型：TensorType::ALL() 所有类型、TensorType::NumberType() 数值类型、TensorType::RealNumberType() 实数类型、TensorType::IntegerDataType() 整数类型、TensorType::FloatingDataType() 浮点类型\n4. 图模式调用示例 test_geir_{op}.cpp：CreateOppInGraph() 中用 op::{OpName}(\"op1\") 实例化算子并 ADD_INPUT/ADD_OUTPUT 构图，main 流程为 GEInitialize → SetInputs/SetOutputs → Session AddGraph → RunGraph → GEFinalize",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 15,
+      "title": "架构 helper 与平台注册覆盖",
+      "config": {
+        "max_tokens": 12000,
+        "eval_mode": "text"
+      },
+      "prompt": "某注册算子工程约定使用 opbase::ArchConfigHelper，准备调整 _def.cpp 的平台注册方式。如何确认 AddConfigByArch 的接口、目标覆盖和依赖？是否应以源码出现某个芯片名的 AddConfig 字面为完成标准，helper 是否同时完成构建与 kernel 分发？仅阅读该 skill 的平台注册规范并说明，不修改文件或执行构建。",
+      "expected_output": "按 references/arch-registration.md 核对实际 helper 头文件、实现/链接来源、目标架构映射及展开的 dtype/format/属性配置。使用该版本的 AddConfigByArch，验收实际展开结果和重复注册处理；具体工程的直接注册或 helper 方式遵循项目约定。构建 compute unit、kernel 源、binary 配置与 API/图/tiling 分发分别检查，运行时证明实际命中预期实现。",
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "AddConfigByArch",
+          "description": "引用工程实际使用的架构注册接口。"
+        },
+        {
+          "type": "contains",
+          "pattern": "dtype",
+          "description": "验收展开配置保持接口契约。"
+        }
+      ],
+      "files": []
     }
   ]
 }

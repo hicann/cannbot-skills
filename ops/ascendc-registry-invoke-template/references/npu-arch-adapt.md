@@ -27,7 +27,7 @@
 
 | # | 适配点 | 要查什么 | 怎么改 |
 |:-:|--------|----------|--------|
-| 1 | `_def.cpp` | `AddConfig` 注册 | 复制基准芯片行（含缩进），改芯片名 |
+| 1 | `_def.cpp` | 平台注册及实际展开配置 | 按 [平台注册规范](arch-registration.md) 核对工程使用的直接注册或架构 helper、目标覆盖范围和 dtype/format |
 | 2 | `CMakeLists.txt` / `variables.cmake` | `SUPPORT_COMPUTE_UNIT`、`SUPPORT_TILING_DIR`、`STREQUAL` 条件分支、`SHORT_NAME_LIST` / `FULL_NAME_LIST` | 追加芯片号；同架构 TILING_DIR 复用已有 arch 目录，条目数 1:1 |
 | 3 | `op_host/config/<chip>/` | `config/` 是否已有新芯片目录 | 复制基准芯片的 config 目录 |
 | 4 | `op_graph` / `op_api` / `op_host` | `grep` 基准芯片名和功能等价芯片的 `DAV_` / `SocVersion::` / `__NPU_ARCH__` / `__NPU_ARCH` / `__CCE_AICORE__` 值 | 涉及芯片判断的地方逐一适配，适配逻辑与等价芯片一致。**新芯片统一使用 `__NPU_ARCH__` / `__NPU_ARCH` 添加条件**，不沿用 `__CCE_AICORE__` 或 `DAV_CXXX`。`==` 和 `!=` 均需等价适配 |

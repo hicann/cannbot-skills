@@ -31,6 +31,8 @@
 
 ## 迁移层级决策树（含 API 差异适配）
 
+L1 负责基础兼容适配；L2 负责性能关键路径的 RegBase 改造，Cube 算子同时评估 AIC 低阶直跑与同步协议；L3 负责满足条件的索引类算子的 SIMT 改造。按下列条件选择实现方式及配套指南。
+
 ```
 算子是否满足以下任一条件？
   ├─ 性能关键路径 (RMSNorm/RoPE/Softmax 等 vector 类；Attention/Matmul 等 cube 类计算型算子)

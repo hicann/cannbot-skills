@@ -1,0 +1,36 @@
+/*
+ * Copyright (c) 2026 Huawei Technologies Co., Ltd.
+ * This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+ * CANN Open Software License Agreement Version 2.0 (the "License").
+ * Please refer to the License for details. You may not use this file except in compliance with the License.
+ * THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+ * INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR A PARTICULAR PURPOSE.
+ * See LICENSE in the root of the software repository for the full text of the License.
+ */
+
+#ifndef MIGRATION_PRECISION_DTYPE_MAP_H
+#define MIGRATION_PRECISION_DTYPE_MAP_H
+
+// Include after AT_ALL_SCALAR_TYPE_AND_ACL_DATATYPE_PAIR in the generated helper.
+// Confirm the FP8 enum names in the actual PyTorch and CANN headers before use.
+inline aclDataType MigrationAclDataType(at::ScalarType scalarType)
+{
+    aclDataType result = ACL_DT_UNDEFINED;
+    switch (scalarType) {
+#define MIGRATION_DTYPE_CASE(torchType, aclType) case torchType: result = aclType; break;
+        AT_ALL_SCALAR_TYPE_AND_ACL_DATATYPE_PAIR(MIGRATION_DTYPE_CASE)
+#undef MIGRATION_DTYPE_CASE
+        case at::ScalarType::Float8_e5m2:
+            result = ACL_FLOAT8_E5M2;
+            break;
+        case at::ScalarType::Float8_e4m3fn:
+            result = ACL_FLOAT8_E4M3FN;
+            break;
+        default:
+            break;
+    }
+    TORCH_CHECK(result != ACL_DT_UNDEFINED, "Unsupported scalar dtype in migration binding: ", scalarType);
+    return result;
+}
+
+#endif

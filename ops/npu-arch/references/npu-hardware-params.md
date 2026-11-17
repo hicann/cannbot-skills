@@ -21,6 +21,8 @@
 | Atlas 200I/500 A2 推理 | ASCEND310B | DAV_3002 | 3002 | dav-m300 | Ascend310B1~B4 |
 | Atlas A5 训练 | ASCEND950 | DAV_3510 | 3510 | dav-c310 | Ascend950DT (Decode) |
 | Atlas A5 推理 | ASCEND950 | DAV_3510 | 3510 | dav-c310 | Ascend950PR (Prefill) |
+| A6 / Ascend960DT 构建目标 | 待核实 | DAV_9201 | 9201 | 待核实 | 具体 SKU 未登记；构建短名 `ascend960dt` |
+| A6 / Ascend960PR 构建目标 | 待核实 | DAV_9202 | 9202 | 待核实 | 具体 SKU 未登记；构建短名 `ascend960pr` |
 | Mate80、Pura90等系列 | Kirin9030 | DAV_3113 | 3113 | dav-l311 | Kirin9030 |
 | MatePad Edge、MateBookPro等系列 | KirinX90 | DAV_3003 | 3003 | dav-l300 | KirinX90 |
 
@@ -29,6 +31,25 @@
 > **950 系列定位**（950 白皮书 §2/§3）：**Ascend950PR** 面向高性能推荐、大模型 **Prefill** 及多模态推理；**Ascend950DT** 覆盖预训练、后训练及推理（含 **Decode** 与 Prefill）全流程（Memory 规格见典型 SKU 示例）。上表中的 (Decode)/(Prefill) 为场景侧重标注，并非唯一用途。
 >
 > **运行时映射**：`Ascend910_93` 的 SocVersion 字符串在运行时映射到 `SocVersion::ASCEND910B`（非独立枚举值）。源码中虽存在 `SocVersion::ASCEND910_93` 枚举值（platform_ascendc.h），但 convertMap 中 `"Ascend910_93"` 映射到的是 `ASCEND910B`，该枚举仅在少数内部模块使用。NpuArch 同为 `DAV_2201`。
+
+### 0.1 DAV_9201 / DAV_9202 映射依据与边界
+
+以**目标 CANN SDK、配套官方文档和平台接口查询结果**为主要依据。§0 中 `ascend960dt → DAV_9201`、`ascend960pr → DAV_9202` 用于目标识别参考，迁移前按下表核验具体环境；构建短名不等同于 `SocVersion` 枚举或完整运行时型号字符串。
+
+| 核查项 | 主要依据 | 使用边界 |
+|------|------|------|
+| 具体型号与目标架构的对应关系 | 在目标的 Tiling 上下文中调用 `PlatformAscendC::GetCurNpuArch()`；离线准备时核对该 SDK 随包的 `data/platform_config/*.ini` 中对应型号的 `NpuArch` 配置及配套产品文档 | 记录型号、SDK 版本、配置文件或查询结果；区分真实设备、仿真与离线配置，不由构建短名推断设备身份 |
+| `NpuArch::DAV_9201 = 9201`、`DAV_9202 = 9202` | 目标 CANN 安装包的 `include/platform/soc_spec.h` | 核对枚举是否存在及其数值；枚举定义本身不能证明某个产品对应哪个架构 |
+| Device 侧编译架构 | 目标 SDK 编译器提供的 `__NPU_ARCH__` 宏及实际编译选项 | 核对编译产物的目标架构；不能将手工指定的编译架构当作设备查询结果 |
+| RegBase / SIMT 及具体 API 支持范围 | 目标版本的官方 API 文档、SDK/devkit 声明、目标分发与实现 | 分别核对 9201/9202 的 API、dtype、模式和约束，再做编译与功能验证；目录或枚举存在不代表全部接口可用 |
+
+查询方法参考官方 [GetCurNpuArch](https://www.hiascend.com/doc_center/source/en/CANNCommunityEdition/900/API/ascendcopapi/atlasascendc_api_07_00199.html) 与 [预定义宏和内建变量](https://www.hiascend.com/doc_center/source/zh/CANNCommunityEdition/920beta2/compiler/BishengCompiler/atlas_bisheng_10_0005.html)。这些页面用于说明接口和宏的含义，未列出的 960 型号映射仍需目标 SDK 或平台查询证据。
+
+目标 SDK 缺少对应配置、查询失败或各项证据不一致时，将具体型号映射标为**待核实**，补充证据后再确认。用户已明确给出 `DAV_9201` 或 `DAV_9202` 时可据此选择迁移路线，但应记录这是指定目标，不能视为已验证的设备身份或 SDK 支持结论。
+
+**未确认的规格**：具体 SKU、完整 SocVersion 映射、编译 arch-token、UB/L1/L0 容量、向量寄存器宽度、SIMT 资源、核数、频率与带宽均不由上述映射推出。本文 §1–§4 的既有资源表未验证 DAV_9201/9202，不得将 DAV_3510 的参数或某个算子采用的 MIX 比例、UB 布局推广到它们。
+
+通过 `PlatformAscendC::GetCurNpuArch()` 核对目标架构；资源参数单独通过 `GetCoreMemSize()`、`GetCoreNumAic()`、`GetCoreNumAiv()` 等接口获取，不能由构建映射推导或写成固定规格。记录 SDK/devkit 版本、查询值及必要的模板预留；接口用法见 `npu-arch-guide.md` 的“Kernel/Tiling 侧获取（推荐）”。
 
 ---
 

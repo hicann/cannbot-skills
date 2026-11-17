@@ -4,35 +4,30 @@
   "evals": [
     {
       "id": 1,
-      "title": "无外部 golden 的源码迁移流程",
+      "title": "公共：路线选择与阶段读取",
       "config": {
         "max_tokens": 12000,
-        "ascend_platforms": [
-          "A2",
-          "A3",
-          "A5"
-        ],
         "eval_mode": "text"
       },
-      "prompt": "我有一个已在 A2/A3 使用的 AscendC 算子工程，没有外部 golden，想按 ascendc-cross-gen-migration 迁移到 A5。请说明这个入口是否适用，并按 Stage 0 到 Stage 6 列出工作顺序、各阶段主要产物及 Gate 的作用（Stage 6 为路线包定义的收尾阶段）。精度参考从哪里来，是否需要启动编排引擎？另外请分别说明：2201→3510 与 2201→2002 两条路线包中 Stage 6 的语义与对应 Gate 编号差异、Stage 6 是否为通用强制阶段；每个阶段开始时的读取顺序要求；以及编译通过之后还必须满足什么才算迁移完成。这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。",
-      "expected_output": "1. 该轻量入口适用于已有 A2/A3 源码且无外部 golden 的迁移，不启动编排引擎。2. 顺序为 Stage 0 环境验证、Stage 1 评估定级、Stage 2 代码改造、Stage 3 编译安装、Stage 4 精度验证、Stage 5 性能验证；每阶段先读对应 stage，满足证据和前序 Gate 才继续。Stage 6 由路线包定义：2201→3510 路线为「A5 新特性使能」（GATE-6 A5_FEATURES），2201→2002 路线为性能优化（GATE-6 OPT）；Stage 6 不是通用的强制阶段，按所属路线包判据执行。3. GATE-0 对应已确认的 CANN/Python/NPU 与 asc-devkit 环境，Stage 1 输出源码分析摘要与 L1/L2/L3 迁移方案；后续提供改造文件、编译安装产物、精度报告及真实性能采集证据，GATE-5 对应性能证据齐备。4. CPU 参考标杆由源码逆向合成，并与 A5 实测双向互检；编译通过不等于迁移完成。这里只说明流程，不输出已通过的 Gate。",
+      "prompt": "已有 AscendC 算子工程要做跨架构迁移，可能是 DAV_2201→DAV_3510、DAV_2201→DAV_2002 或 DAV_3510→DAV_9201/DAV_9202。请说明公共入口如何选择路线、按什么顺序读取和执行阶段、缺少外部 golden 时如何准备参考，以及完成验收需要哪些证据。这是纯文字评测；可读取本 skill 与所选路线引用的资料，不执行编译、安装、NPU 测试或修改文件，不把计划中的 Gate 写成已通过。",
+      "expected_output": "公共入口按源/目标架构选择 routes/2201-to-3510/route.md、routes/2201-to-2002/route.md 或 routes/3510-to-920x/route.md。先读 route，再按 Stage 0 环境、Stage 1 评估、Stage 2 改造、Stage 3 构建安装、Stage 4 精度、Stage 5 性能的顺序读取对应 stage；Stage 6 的工作与通过条件由所选路线定义。具体方案、Gate 结果字段和能力清单读取该路线文件。无外部 golden 时可从源契约合成 CPU 参考并交叉核对；构建产物、真实被测实现输出和性能数据齐备后按各 GATE 的实际证据验收，静态分析不证明通过。",
       "files": [],
       "expectations": [
         {
           "type": "contains",
-          "pattern": "GATE-0",
-          "description": "应说明先完成环境验证。"
+          "pattern": "routes/3510-to-920x/route.md",
+          "description": "覆盖新增架构对的路由。"
         },
         {
           "type": "contains",
-          "pattern": "GATE-5",
-          "description": "应覆盖性能阶段及其证据。"
+          "pattern": "GATE",
+          "description": "说明按实际证据衔接阶段。"
         }
       ]
     },
     {
       "id": 2,
-      "title": "L1 L2 L3 分流与 Cube 迁移边界",
+      "title": "2201→3510：实现层级与 Cube 改造分工",
       "config": {
         "max_tokens": 12000,
         "ascend_platforms": [
@@ -42,7 +37,7 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "请依据 ascendc-cross-gen-migration 的决策树比较三类任务：普通非性能关键 Vector 算子；性能关键 Matmul/Attention；仅做简单索引 Scatter/Gather、无需 UB 中转且线程并行度高的算子。分别如何判定 L1/L2/L3？有人认为 Cube 算子定为 L2 就要照搬 Vector 的整套 RegBase 重写，只需确认不死锁便算完成，这种理解是否正确？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。另外请说明：Cube 类算子迁移时需要关注的数据通路层级与分形转换，以及 cube 迁移指南与各层级指南的关系。另外请说明：无论判定为 L1、L2 还是 L3，所有层级都必须统一执行什么动作（API 差异风险扫描与适配）、该扫描覆盖哪几个维度（精度、兼容性、性能）、各自对应的典型风险项，以及依据哪份参考文件。",
+      "prompt": "本用例仅评测 routes/2201-to-3510/route.md：源平台 DAV_2201、目标 DAV_3510。请依据 ascendc-cross-gen-migration 中2201-to-3510路线自己的决策树比较三类任务：普通非性能关键 Vector 算子；性能关键 Matmul/Attention；仅做简单索引 Scatter/Gather、无需 UB 中转且线程并行度高的算子。分别如何判定 L1/L2/L3？有人认为 Cube 算子定为 L2 就要照搬 Vector 的整套 RegBase 重写，只需确认不死锁便算完成，这种理解是否正确？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。另外请说明：Cube 类算子迁移时需要关注的数据通路层级与分形转换，以及 cube 迁移指南与各层级指南的关系。另外请说明：无论判定为 L1、L2 还是 L3，所有层级都必须统一执行什么动作（API 差异风险扫描与适配）、该扫描覆盖哪几个维度（精度、兼容性、性能）、各自对应的典型风险项，以及依据哪份参考文件。",
       "expected_output": "1. 无 L2/L3 触发条件的普通 Vector 算子走 L1 基础适配；性能关键 Matmul/Attention 同样触发 L2；在无优先 L2 触发条件且满足全部索引条件时，Scatter/Gather 可走 L3 SIMT 优化。2. 所有层级均须执行 API 差异风险扫描与适配。3. Cube 的 L2 由 AIC 低阶直跑评估、跨核同步协议处理和 AIV 自身 Vector 路径的 RegBase 评估改造三部分组成；必须给出保留高阶 Matmul 或采用低阶路径的理由，不能仅证明不死锁就宣称完成。4. Cube 迁移还须结合 cube-migration-guide 的数据通路、ZZ 到 NZ 分形和同步语义；该指南不替代对应层级指南，不能把 Cube 的 L2 等同于 Vector 整体重写。",
       "files": [],
       "expectations": [
@@ -70,35 +65,30 @@
     },
     {
       "id": 3,
-      "title": "缺少设备与执行证据不能宣称验收通过",
+      "title": "公共：缺少执行证据的验收状态",
       "config": {
         "max_tokens": 12000,
-        "ascend_platforms": [
-          "A2",
-          "A3",
-          "A5"
-        ],
         "eval_mode": "text"
       },
-      "prompt": "当前拿不到 A5 设备，也没有有效的 CANN 环境和实际编译、精度测试、profiler 输出。只是读过源码并认为迁移应该没问题，是否可以输出 GATE-3、GATE-4 通过和 GATE-5 性能已采集？请说明当前应记录的状态以及后续缺少哪些证据；CANN 环境路径未知时应如何处理？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。",
-      "expected_output": "1. 静态分析、待办完成或预计正确都不能替代实际证据，不能宣称 GATE-3 编译安装通过、GATE-4 精度通过或 GATE-5 性能已采集。2. 缺证据时保持 NOT VERIFIED、NOT PASSED 或 BLOCKED，准确说明尚未进行真机验证；Stage 0 未确认时不执行后续编译、安装与测试。3. 需补齐有效环境、真实编译安装产物、全部计划精度用例的实际输出及性能阶段要求的采集数据和报告，之后才按各 Gate 条件判断。4. CANN 环境变量无法提供有效路径时应向用户询问，不自行扫描文件系统或猜路径；本题不伪造硬件数据或加速比。",
+      "prompt": "已确定迁移架构对，但当前没有目标设备、有效 CANN 环境以及真实构建、精度与 profiler 输出。只读源码能否宣称 GATE-3、GATE-4 通过或 GATE-5 性能已采集？环境路径未知时如何继续？这是纯文字评测；可读取本 skill 与所选路线引用的资料，不执行编译、安装、NPU 测试或修改文件，不把计划中的 Gate 写成已通过。",
+      "expected_output": "静态分析不能替代构建安装、全部计划精度用例和性能采集证据。当前 GATE-3、GATE-4、GATE-5 保持 NOT_VERIFIED/BLOCKED，列出环境、设备与产物缺口；Stage 0 未确认时不执行后续构建和测试。复用用户已提供的配置与有效环境变量，CANN 路径仍未知时询问，不猜测路径。取得实际证据后再逐项验收。",
       "files": [],
       "expectations": [
         {
           "type": "contains",
-          "pattern": "GATE-4",
-          "description": "说明精度 Gate 必须有实测依据。"
+          "pattern": "BLOCKED",
+          "description": "缺少证据时阻塞验收。"
         },
         {
           "type": "contains",
-          "pattern": "GATE-5",
-          "description": "说明性能 Gate 必须有真实采集证据。"
+          "pattern": "GATE-4",
+          "description": "覆盖精度验收。"
         }
       ]
     },
     {
       "id": 4,
-      "title": "逆向标杆双向互检与条件接受边界",
+      "title": "2201→3510：源码参考与精度差异处理",
       "config": {
         "max_tokens": 12000,
         "ascend_platforms": [
@@ -108,8 +98,8 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "这个无 golden 的迁移任务应怎样从原 A2/A3 源码准备精度参考并检验它？如果 A5 输出与自合成标杆有少量差异，能否直接认定算子有错、放宽阈值或删掉失败用例？根因分析后若确认是 dtype 表示粒度等非缺陷小差异，原流程允许怎样由用户决定是否接受，Gate 和报告应如何表示？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。另外请说明：按原流程设计的精度用例在数量、单用例元素规模、dtype 与数据排布覆盖上的硬性要求，以及被测迁移算子应以何种方式被调用。",
-      "expected_output": "1. 先从原源码逆向接口、计算逻辑、dtype/转换点和边界条件，合成 CPU 参考，再与 A5 输出双向互检；有差异不能默认算子或标杆一定错误，应先核验标杆精度对齐等问题。2. 按原流程设计至少30条精度用例、每条不超过200K元素，覆盖支持的 dtype、排布及适用的 subnormal 场景；被测迁移算子通过 EXEC_NPU_CMD 绑定的 torch.ops.npu 调用，不能拿 PyTorch 同名算子替代被测实现。3. 不得通过放宽阈值、跳过 case、修改输入范围或缩减 dtype 来把失败伪装为全过；失败须分析根因并如实记录。4. 已完成根因分析并归类的非缺陷小差异，应呈现超标元素、占比、绝对误差和归类依据，询问用户是否接受；接受后输出 CONDITIONAL 和 USER_ACCEPTED，保留实际通过数及豁免明细，不冒充全量 PASS；未接受则按原流程修复、升级或停止报告。5. 根因未定的 NaN/Inf、公式错误或正常值域真实精度缺陷不能进入该接受通道。",
+      "prompt": "本用例仅评测 routes/2201-to-3510/route.md 及其精度阶段。这个无 golden 的迁移任务应怎样从原 DAV_2201 源码准备精度参考并检验它？如果 DAV_3510 输出与自合成标杆有少量差异，能否直接认定算子有错、放宽阈值或删掉失败用例？根因分析后若确认是 dtype 表示粒度等非缺陷小差异，原流程允许怎样由用户决定是否接受，Gate 和报告应如何表示？这是纯文字评测；可读取技能及引用说明，不要执行命令、编译、测试、调用硬件或修改文件，也不要把计划中的 Gate 写成已实际通过。另外请说明：按原流程设计的精度用例在数量、单用例元素规模、dtype 与数据排布覆盖上的硬性要求，以及被测迁移算子应以何种方式被调用。",
+      "expected_output": "1. 先从原源码逆向接口、计算逻辑、dtype/转换点和边界条件，合成 CPU 参考，再与 DAV_3510 输出双向互检；有差异不能默认算子或标杆一定错误，应先核验标杆精度对齐等问题。2. 按原流程设计至少30条精度用例、每条不超过200K元素，覆盖支持的 dtype、排布及适用的 subnormal 场景；被测迁移算子通过 EXEC_NPU_CMD 绑定的 torch.ops.npu 调用，不能拿 PyTorch 同名算子替代被测实现。3. 不得通过放宽阈值、跳过 case、修改输入范围或缩减 dtype 来把失败伪装为全过；失败须分析根因并如实记录。4. 已完成根因分析并归类的非缺陷小差异，应呈现超标元素、占比、绝对误差和归类依据，询问用户是否接受；接受后输出 CONDITIONAL 和 USER_ACCEPTED，保留实际通过数及豁免明细，不冒充全量 PASS；未接受则按原流程修复、升级或停止报告。5. 根因未定的 NaN/Inf、公式错误或正常值域真实精度缺陷不能进入该接受通道。",
       "files": [],
       "expectations": [
         {
@@ -319,6 +309,112 @@
           "type": "contains",
           "pattern": "arch22",
           "description": "性能结论必须来自目标架构实测。"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "3510→920x：迁移方案评估",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": ["A5", "A6"],
+        "eval_mode": "text"
+      },
+      "prompt": "源平台 DAV_3510，需迁移到 DAV_9201/DAV_9202。请依据 routes/3510-to-920x/route.md 说明如何分析源契约、核对 API 与模板差异、选择实现方式，并将 Stage 1 的方案交给 Stage 2 实施。这是纯文字评测；可读取本 skill 与所选路线引用的资料，不执行编译、安装、NPU 测试或修改文件，不把计划中的 Gate 写成已通过。",
+      "expected_output": "Stage 1 形成 migration_plan.md，记录输入输出、dtype/layout、数学与数值契约、实际调用链、资源与位宽证明、逐目标能力矩阵、实现方案和验证计划。按实际 SDK 版本核对源/目标 API 声明、实现及模板的布局、同步和准入条件，保留可复用路径。必要依据齐备后输出 GATE-1 PLAN=READY，Stage 2 按逐项文件与修改依据实施；必要语义或依赖未明时保持 PLAN=NOT_VERIFIED BLOCKED。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "migration_plan.md",
+          "description": "评估结果形成可实施方案。"
+        },
+        {
+          "type": "contains",
+          "pattern": "PLAN=READY",
+          "description": "方案齐备后衔接实施阶段。"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "3510→920x：新特性选择与实施",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": ["A5", "A6"],
+        "eval_mode": "text"
+      },
+      "prompt": "按 routes/3510-to-920x/route.md 将 DAV_3510 算子迁往 DAV_9201/DAV_9202。比较两项迁移：无索引、无量化接口的 elementwise 算子；原实现没有 DMA 路径、且已确认某目标的 Scatter DMA 对其 dtype/shape 适用的索引算子。另一目标的模板支持尚未查明。依据本路线说明适用性记录、复用/改造/新增实现的选择与完整接入链路，以及 Stage 6 零试验、暂缓或失败时的验收方式。这是纯文字评测；可读取本 skill 与所选路线引用的资料，不执行编译、安装、NPU 测试或修改文件，不把计划中的 Gate 写成已通过。",
+      "expected_output": "按算子、目标、dtype/shape、版本与契约记录 APPLICABLE/NOT_APPLICABLE/NEEDS_EVIDENCE，适用性与实施状态分开；elementwise 不强加 DMA 或量化接口，缺目标证据则继续核查准入并保留合法兼容路径。适用项选择已有能力复用验证、原路径改造或新增模板；需要新增时按 feature-implementation-guide 完成 kernel、host tiling、资源与偏移计算、模板注册、tiling key、准入分发、构建加载及合法回退，验证命中/回退、边界和源路径。Stage 6 对任务范围内适用项实际实施，以全量精度与同目标性能 A/B 决定保留或完整回退。仅任务范围内候选均已判定不适用或完成复用验证时允许 FEATURES=EVALUATED RETAINED=0/0；适用项暂缓、缺证据、未验证或回退失败保持 FEATURES=NOT_VERIFIED BLOCKED，记录实际结果。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "NOT_APPLICABLE",
+          "description": "按算子选择适用能力。"
+        },
+        {
+          "type": "contains",
+          "pattern": "tiling",
+          "description": "新增实现覆盖 host 与 kernel 的接入链路。"
+        },
+        {
+          "type": "contains",
+          "pattern": "回退",
+          "description": "验证合法回退并如实记录实施结果。"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "title": "3510→920x：UB 与位宽边界",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": ["A5", "A6"],
+        "eval_mode": "text"
+      },
+      "prompt": "在 DAV_3510→DAV_9201 的迁移任务中，tiling 把 UB 容量和可用 Vector 核数写成固定常量。旧 uint16_t tile 计数字段被赋值 65536，之后转成 uint64_t 算地址；另有 available-reserved 的无符号减法可能下溢。某 UB 访存 API 以 uint16 元素索引访问源数据块；索引存储区、输出和临时区均不由该接口寻址。原 kernel 已有消费 tiling 块长的分块循环，但相对 baseAddr 的一个原始索引值为 65536，随后被转为 uint16。应限制哪一块 UB？统一缩小 ubSize、仅减少每批索引个数或改写 kernel 搬运顺序是否恰当？请给出迁移检查、修复和触发用例。这是纯文字评测；可读取本 skill 与所选路线引用的资料，不执行编译、安装、NPU 测试或修改文件，不把计划中的 Gate 写成已通过。",
+      "expected_output": "从 tiling context 构造 PlatformAscendC，用 GetCoreMemSize(CoreMemType::UB, ...) 和 GetCoreNumAiv() 获取容量与可用核数，沿 host→tiling→kernel 核对传递并替换硬编码；必要的模板预留单独核算，不重复扣除。65536 窄化到 uint16_t 成为 0，再转 uint64_t 不能恢复；available<reserved 会下溢。沿 host→tiling→kernel→API 区分元素/索引/字节等单位，检查中间乘法和转换前范围、减法前条件；固定位宽 API 分块或合法回退。额外追踪 API 实际重载、dtype、索引类型和单位；65536 元素索引窄化到 uint16 后成为 0，少量索引也会发生寻址错误。按相对 baseAddr 的索引表达式证明最大值，计数合法不代表索引值合法；基址和索引值不变时，仅减少每批个数无效。将该索引范围反推为接口实际寻址的源数据块上限，通过现有 tiling 字段约束该块 UB 的分配及块长，由原 kernel 既有循环完成分块/baseAddr 更新；按访问宽度、对齐和缓冲份数核算。索引存储区、输出和临时区按自身约束预算，不能统一缩小 ubSize，也不因它们的存储 dtype 为 uint16 而套同一上限。保持原 kernel 搬运顺序和计算流程；现有字段/循环不支持时列出实现缺口，不以新增 kernel 窗口逻辑或切换模板代替本项验证。只扩宽 host 变量无效。补索引值临界点、少量索引取大值、stride 乘加超限、65535/65536/65537、实际 API 上限、满/尾 tile 及大 shape 用例。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "GetCoreMemSize",
+          "description": "通过平台接口获取资源参数并检查硬编码。"
+        },
+        {
+          "type": "contains",
+          "pattern": "65536",
+          "description": "分别覆盖计数与 API 寻址索引的边界。"
+        },
+        {
+          "type": "contains",
+          "pattern": "baseAddr",
+          "description": "定位相对基址实际寻址的UB数据块，独立限界并复用原kernel分块循环。"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "title": "3510→920x：分目标构建与验收",
+      "config": {
+        "max_tokens": 12000,
+        "ascend_platforms": ["A5", "A6"],
+        "eval_mode": "text"
+      },
+      "prompt": "源平台为 DAV_3510。任务要求同时交付 DAV_9201 和 DAV_9202，目前只有 9201 的构建、精度与性能报告。一处配置 SOC=ascend960pr 却填 TARGET_ARCH=9201，另一处仅修改环境就拿 9201 包用于 9202，并照搬 dtype/模板准入。如何处理这些问题，证明实际加载了本轮目标实现，并判断双目标交付是否完成？这是纯文字评测；可读取本 skill 与所选路线引用的资料，不执行编译、安装、NPU 测试或修改文件，不把计划中的 Gate 写成已通过。",
+      "expected_output": "构建模板接受 ascend960dt:9201、ascend960pr:9202 的有效配对，配对不符在构建或安装前拒绝。逐目标核实 dtype/模板支持与合法回退，分别构建；证据目录、build_target.txt、manifest 和包 hash 绑定目标身份，精确选择本轮产物。安装库、符号与动态依赖校验后，通过真实算子绑定和 trace/kernel 归因证明命中预期实现，分别提供全量精度与同目标性能基线/A-B。环境变量或一侧报告不能替代另一侧产物与验证，缺少 9202 执行证据时保持相关验收 BLOCKED，明确双目标交付尚未完成。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "build_target.txt",
+          "description": "构建产物绑定实际目标。"
+        },
+        {
+          "type": "contains",
+          "pattern": "BLOCKED",
+          "description": "双目标证据缺失时不宣称完成。"
         }
       ]
     }

@@ -30,6 +30,7 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | 算子调用示例 | `references/example-guide.md` + `references/add_example/examples/` |
 | 查阅完整代码/手写AscendC | `references/add_example/` |
 | 多芯片开发 | `references/npu-arch-adapt.md`。发起时提供：芯片名、SOC version、NpuArch 值、等价于哪个已有芯片（同架构/不同架构）、算子目录路径、待适配算子列表 |
+| 平台注册与架构 helper | `references/arch-registration.md`；核对工程注册方式、helper 版本、目标展开配置与链接依赖 |
 | SIMT 算子开发 | `references/simt-engineering-guide.md` |
 
 #### ACLNN 接口开发指南

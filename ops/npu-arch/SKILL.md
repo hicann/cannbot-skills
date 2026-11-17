@@ -20,6 +20,12 @@ description: Ascend NPU 架构知识查询技能。通过芯片型号映射、�
 
 完整产品系列 / SocVersion / NpuArch / `__NPU_ARCH__` / 编译 arch-token / 芯片型号的逐芯片映射见 [`npu-hardware-params.md` §0 产品映射表](references/npu-hardware-params.md#0-产品映射表)。
 
+查询芯片型号映射时，先读取该表，再按型号列出 **SocVersion、NpuArch、`__NPU_ARCH__` 数值和 archXX**，便于分别用于运行时判断与 Device 条件编译。不能只给架构枚举而省略编译宏数值。
+
+同一 NpuArch 对应多个产品时，补充一对多说明，并列出该表登记的同架构芯片型号，保留具体型号范围和后缀；仅写“同属某架构”不能代替该清单。运行时型号别名按表中的实际映射解释，不将别名当作独立 SocVersion。尚未确认的映射字段明确标为待核实，不由型号或构建短名推断。
+
+A6 的 `ascend960dt → DAV_9201`、`ascend960pr → DAV_9202` 为目标识别参考，具体环境以目标 CANN SDK 和 `PlatformAscendC` 查询结果核验；A5 对应 `DAV_3510`。DT/PR 分别核对，缺少证据的型号映射标为待核实；核验方法及具体 SKU、SocVersion 枚举、编译 arch-token 与资源规格的边界见该文档 §0.1，不能套用 DAV_3510 的数值。
+
 ## 获取当前架构
 
 ```cpp
@@ -84,7 +90,7 @@ Ascend NPU 的 Vector 单元当前共有 3 种架构形态：**SIMD-Membase**（
 
 `references/` 按需加载：
 
-- **`npu-hardware-params.md`** — 硬件参数参考：各架构子型号一致参数、典型SKU示例、基于公开资料与经验值的规格
+- **`npu-hardware-params.md`** — 产品映射与硬件参数参考：9201/9202 构建目标映射及证据边界（§0.1）、各架构子型号一致参数、典型SKU示例、基于公开资料与经验值的规格
 - **`simt-arch-guide.md`** — SIMT 架构概念参考：线程层次结构、Warp调度机制、内存空间、UB分区、数据类型、函数调用层级、LAUNCH_BOUND与寄存器数量、SIMT与SIMD核心差异
 - **`npu-arch-guide.md`**：
   - **典型硬件参数与获取方式**：核数 / Buffer 容量典型值，`GetCoreNumA*` / `GetCoreMemSize` / `aclrtGetDeviceInfo` 接口用法（含硬编码反例）

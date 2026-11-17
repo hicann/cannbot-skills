@@ -74,6 +74,8 @@
 
 - **D3 一定包含 D2 与 D1 的工作**；等级取最高命中项。
 - **A5 专有数据类型属于"决策项"而非机械替换项**：A2 没有对应硬件格式时，等价性由算子语义决定（换 dtype / 拆量化 / 拒绝支持），必须经用户确认并记录（见 `references/a5-only-inventory.md`）。
+
+**D3 方案与改写说明**须读取 [api-migration-recipes.md](references/api-migration-recipes.md) §2、§3、§6，并完整覆盖：寄存器对象改为 `LocalTensor`，mask 改为 count 与尾块处理，删除 `__VEC_SCOPE__`，跨流水用 `SetFlag/WaitFlag` 保序、同流水按依赖使用 `PipeBarrier`。存在转换时，逐处将 `CastTrait` 的舍入要求映射到目标 `RoundMode`，饱和行为另按目标 dtype/API 验证；不能只说明类型与计算 API 替换而省略同步、舍入和精度边界。SIMT 替代与 dtype 非等价项仍按本路线决策树和用户确认处理。
 - 扫描器只做静态初判，不替代人工确认；`verify` 级命中（如 `LoadData2DParamsV2` 是否在 A2 头文件存在）必须查头文件/文档确认。
 
 ## 小范围能力下沉快速路径（feature down-port）

@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+# DAV_3510→DAV_9201/DAV_9202 ops-repo 构建/安装模板；由 Stage 0/3 设置变量。
+# build：传入已核实的 build.sh 附加参数。
+# install /absolute/package.run [installer-args...]：显式选择本轮产物和安装参数。
+set -eo pipefail
+
+action=${1:-}
+if [[ "$action" != build && "$action" != install ]]; then
+    echo 'Usage: bash build_and_install.sh build [build-args...] | install /absolute/package.run [installer-args...]' >&2
+    exit 2
+fi
+shift
+: "${CANN_SET_ENV:?Stage 0 must provide CANN_SET_ENV}"
+: "${PYTHON_PATH:?Stage 0 must provide PYTHON_PATH}"
+: "${OP_DIR:?Stage 0 must provide OP_DIR}"
+: "${EVIDENCE_DIR:?Stage 0 must provide EVIDENCE_DIR}"
+: "${SOC:?Stage 0 must provide SOC}"
+: "${TARGET_ARCH:?Stage 0 must provide TARGET_ARCH}"
+case "$SOC:$TARGET_ARCH" in
+    ascend960dt:9201|ascend960pr:9202) ;;
+    *)
+        echo 'Expected ascend960dt:9201 or ascend960pr:9202 from the confirmed target.' >&2
+        exit 2
+        ;;
+esac
+for task_path in "$CANN_SET_ENV" "$PYTHON_PATH" "$OP_DIR" "$EVIDENCE_DIR"; do
+    if [[ "$task_path" != /* ]]; then
+        echo "Expected an absolute path: $task_path" >&2
+        exit 2
+    fi
+done
+[[ -f "$CANN_SET_ENV" ]] || { echo "Missing CANN environment script: $CANN_SET_ENV" >&2; exit 2; }
+[[ -x "$PYTHON_PATH" ]] || { echo "Python is not executable: $PYTHON_PATH" >&2; exit 2; }
+[[ -f "$OP_DIR/build.sh" ]] || { echo "Missing build script: $OP_DIR/build.sh" >&2; exit 2; }
+mkdir -p "$EVIDENCE_DIR"
+# CANN 环境脚本可能读取未设置变量，先加载再启用 nounset。
+source "$CANN_SET_ENV"
+set -u
+export PATH="$(dirname "$PYTHON_PATH"):$PATH"
+cd "$OP_DIR"
+
+if [[ "$action" == build ]]; then
+    : "${OP_NAME:?Stage 0 must provide OP_NAME}"
+    : "${VENDOR_NAME:?Stage 0 must provide VENDOR_NAME}"
+    task_jobs=${JOB_NUM:-4}
+    [[ "$task_jobs" =~ ^[1-9][0-9]*$ ]] || { echo 'JOB_NUM must be a positive integer.' >&2; exit 2; }
+    for task_arg in "$@"; do
+        case "$task_arg" in
+            --soc|--soc=*|--ops|--ops=*|--vendor_name|--vendor_name=*|--jit|--help|-h)
+                echo "Conflicting or kernel-skipping argument: $task_arg" >&2
+                exit 2
+                ;;
+        esac
+    done
+    task_command=(bash "$OP_DIR/build.sh" --pkg "--soc=$SOC" "--ops=$OP_NAME" "--vendor_name=$VENDOR_NAME" "-j$task_jobs" "$@")
+    printf '%q ' "${task_command[@]}" > "$EVIDENCE_DIR/build_command.txt"
+    printf '\n' >> "$EVIDENCE_DIR/build_command.txt"
+    # 新一轮开始即撤销旧清单，失败后不能继续安装上轮产物。
+    : > "$EVIDENCE_DIR/package_candidates.sha256"
+    : > "$EVIDENCE_DIR/build_target.txt"
+    touch "$EVIDENCE_DIR/build_started"
+    "${task_command[@]}" 2>&1 | tee "$EVIDENCE_DIR/build.log"
+    [[ -d "$OP_DIR/build_out" ]] || { echo 'Build produced no build_out directory.' >&2; exit 1; }
+    find "$OP_DIR/build_out" -type f -name '*.run' -newer "$EVIDENCE_DIR/build_started" \
+        -exec sha256sum {} + > "$EVIDENCE_DIR/package_candidates.sha256.pending"
+    [[ -s "$EVIDENCE_DIR/package_candidates.sha256.pending" ]] || {
+        echo 'Build produced no current .run package; no install manifest was published.' >&2
+        exit 1
+    }
+    mv -- "$EVIDENCE_DIR/package_candidates.sha256.pending" "$EVIDENCE_DIR/package_candidates.sha256"
+    printf '%s:%s\n' "$SOC" "$TARGET_ARCH" > "$EVIDENCE_DIR/build_target.txt"
+    echo 'Build finished. Select the exact current package before the install action.'
+    exit 0
+fi
+
+task_package=${1:?Provide the exact package produced by the current build}
+shift
+# 每次尝试先撤销成功清单，后续失败不得沿用上次安装结论。
+: > "$EVIDENCE_DIR/installed_package.sha256"
+: > "$EVIDENCE_DIR/installed_libraries.sha256"
+: "${VENDOR_DIR:?Stage 3 must provide the verified installation directory}"
+: "${OPAPI_LIB:?Stage 3 must provide the expected op API library path}"
+: "${TILING_LIB:?Stage 3 must provide the expected tiling library path}"
+: "${ACLNN_SYMBOL:?Stage 3 must provide the target exported symbol}"
+[[ "$task_package" == /* && -f "$task_package" ]] || {
+    echo "Expected an existing absolute package path: $task_package" >&2; exit 2;
+}
+[[ "$VENDOR_DIR" == /* ]] || { echo 'VENDOR_DIR must be an absolute path.' >&2; exit 2; }
+VENDOR_DIR=$(realpath -m -- "$VENDOR_DIR")
+# 新目录内的库必须由本次安装产生；已有目录由调用者另选，不删除或覆盖。
+if [[ -e "$VENDOR_DIR" || -L "$VENDOR_DIR" ]]; then
+    echo "Use a new vendor directory within the authorized installation scope: $VENDOR_DIR" >&2
+    exit 2
+fi
+if [[ ! -f "$EVIDENCE_DIR/build_target.txt" ]] ||
+    [[ "$(<"$EVIDENCE_DIR/build_target.txt")" != "$SOC:$TARGET_ARCH" ]]; then
+    echo 'Current package manifest belongs to a different or incomplete target build.' >&2
+    exit 2
+fi
+for task_lib in "$OPAPI_LIB" "$TILING_LIB"; do
+    [[ "$task_lib" == /* ]] || { echo "Expected an absolute library path: $task_lib" >&2; exit 2; }
+    task_lib=$(realpath -m -- "$task_lib")
+    case "$task_lib" in
+        "$VENDOR_DIR"/*) ;;
+        *) echo "Library is outside the recorded vendor directory: $task_lib" >&2; exit 2 ;;
+    esac
+done
+task_package_hash=$(sha256sum "$task_package")
+if [[ ! -f "$EVIDENCE_DIR/package_candidates.sha256" ]] ||
+    ! grep -F -x -- "$task_package_hash" "$EVIDENCE_DIR/package_candidates.sha256" >/dev/null; then
+    echo 'Package is not in the current build manifest; verify the build output before installing.' >&2
+    exit 2
+fi
+printf '%q ' bash "$task_package" "$@" > "$EVIDENCE_DIR/install_command.txt"
+printf '\n' >> "$EVIDENCE_DIR/install_command.txt"
+bash "$task_package" "$@" 2>&1 | tee "$EVIDENCE_DIR/install.log"
+for task_lib in "$OPAPI_LIB" "$TILING_LIB"; do
+    [[ -f "$task_lib" && -s "$task_lib" ]] || {
+        echo "Current package did not install the expected library: $task_lib" >&2; exit 1;
+    }
+    case "$(realpath -e -- "$task_lib")" in
+        "$VENDOR_DIR"/*) ;;
+        *) echo "Installed library resolves outside the new vendor directory: $task_lib" >&2; exit 1 ;;
+    esac
+done
+nm -D --defined-only "$OPAPI_LIB" > "$EVIDENCE_DIR/opapi_symbols.txt"
+for task_symbol in "$ACLNN_SYMBOL" "${ACLNN_SYMBOL}GetWorkspaceSize"; do
+    if ! awk -v target="$task_symbol" '
+        { symbol = $NF; sub(/@.*/, "", symbol); if (symbol == target) found = 1 }
+        END { exit !found }
+    ' "$EVIDENCE_DIR/opapi_symbols.txt"; then
+        echo "Missing exact ACLNN symbol: $task_symbol" >&2
+        exit 1
+    fi
+done
+ldd "$OPAPI_LIB" > "$EVIDENCE_DIR/opapi_dependencies.txt"
+if grep -F 'not found' "$EVIDENCE_DIR/opapi_dependencies.txt" >/dev/null; then
+    cat "$EVIDENCE_DIR/opapi_dependencies.txt" >&2
+    exit 1
+fi
+sha256sum "$OPAPI_LIB" "$TILING_LIB" > "$EVIDENCE_DIR/installed_libraries.sha256"
+printf '%s\n' "$task_package_hash" > "$EVIDENCE_DIR/installed_package.sha256"
+echo 'Installation and library checks finished. Verify actual kernel dispatch in Stages 4/5.'

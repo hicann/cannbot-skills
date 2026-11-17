@@ -10,7 +10,7 @@
 
 ### Level 1：本地 Skill 文件（最高优先）
 
-本 skill 自带的迁移工作流与实现指南**必须先查**——完整清单见 `SKILL.md` 的「Reference 文件索引」（stages/ 阶段文件、build_system/ 构建模板、precision-testing/ 精度资产）与 SKILL.md Step R 选定的路线包（`routes/<源代号>-to-<目标代号>/`，含层级决策树 `route.md` 与路线专属实现指南 `references/`）。这些是 skill 独有内容，全量仓中没有对应物。
+本 skill 自带的迁移工作流与实现指南**必须先查**——完整清单见 `SKILL.md` 的「Reference 文件索引」（stages/ 阶段文件、build_system/ 构建模板、precision-testing/ 精度资产）与 SKILL.md Step R 选定的路线包（`routes/<源代号>-to-<目标代号>/`，含迁移方案与执行约束入口 `route.md`、路线专属实现指南 `references/`）。这些是 skill 独有内容，全量仓中没有对应物。
 
 ### Level 2：全量仓精确查找（按索引路由）
 
@@ -66,13 +66,13 @@
 1. **算子实现参考**：迁移时需要参考同类算子的实现
    → 查 `$DEVKIT_PATH/examples/` 和 `$DEVKIT_PATH/docs/zh/guide/operator_practice/`
 
-2. **API 函数签名验证**：确认 A5 上某 API 的确切原型和参数列表
+2. **API 函数签名验证**：确认目标架构上某 API 的确切原型和参数列表
    → 查 `$DEVKIT_PATH/include/` 头文件
 
 3. **性能优化技巧**：UB bank conflict、pipeline 优化、DoubleBuffer 等
    → 查 `$DEVKIT_PATH/docs/zh/guide/operator_practice/simd_operator_optimization/`
 
-4. **数据类型支持确认**：某 API 在 A5 上是否支持某 dtype
+4. **数据类型支持确认**：某 API 在目标架构上是否支持某 dtype
    → 查 API 文档的 `<cann-filter>` 标签或 `$DEVKIT_PATH/docs/zh/api/` 下对应文件
 
 5. **架构特性细节**：NPU 3510 的具体硬件参数（UB 大小、bank 结构等）

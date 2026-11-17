@@ -555,6 +555,10 @@ get_incremental_tests() {
         tests+="unit/skills/test-content.sh:fast\n"
         tests+="unit/skills/test-evals-required.sh:fast\n"
 
+        if [[ "${CHANGED_SKILLS[ascendc-cross-gen-migration]:-}" == "1" ]]; then
+            tests+="unit/test-cross-gen-migration.sh:fast\n"
+        fi
+
         if [[ "${CHANGED_SKILLS[gitcode-issue-handler]:-}" == "1" || \
               "${CHANGED_SKILLS[gitcode-toolkit]:-}" == "1" ]]; then
             tests+="unit/infra/test-gitcode-issue-workflow.sh:fast\n"
@@ -621,6 +625,7 @@ get_tests_for_category() {
             echo "unit/test-markdown-anchors.sh:fast"
             echo "unit/test-tilelang-source-paths.sh:fast"
             echo "unit/test-runner-incremental.sh:fast"
+            echo "unit/test-cross-gen-migration.sh:fast"
             echo "unit/test-evolution-diagnosis-contract.sh:fast"
             echo "unit/test-evolution-evaluation-contract.sh:fast"
             echo "unit/infra/test-gitcode-issue-workflow.sh:fast"
