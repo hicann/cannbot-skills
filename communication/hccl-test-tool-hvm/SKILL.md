@@ -1,6 +1,6 @@
 ---
 name: hccl-test-tool-hvm
-description: 触发：需要用 HCCL-VM 对 AICPU 集合通信算子执行 Checker、生成结构化证据、比较基线与回归、为失败/缺失用例生成定点补测计划，或在功能验证通过后用 estimate 模式估算算法性能时使用。输出用例结果、算法命中、源码/包身份及可追溯的原始证据。
+description: 触发：需要用 HCCL-VM 对 AICPU/CCU 集合通信算子执行 Checker、生成结构化证据、比较基线与回归、为失败/缺失用例生成定点补测计划，或在功能验证通过后用 estimate 模式估算算法性能时使用。输出用例结果、算法命中、源码/包身份及可追溯的原始证据。
 ---
 
 # HCCL-VM 测试能力
@@ -115,6 +115,8 @@ bash <hccl-test-tool-hvm>/run.sh \
 算法开发任务使用 HCCL-VM 完成功能验证并取得当前候选算法的有效 PASS 证据后，继续执行 `estimate` 性能估算模式，按 [estimate 性能估算](references/estimate.md) 操作。默认使用 `hccl-vm mock-comm 112`；用户有组网需求时根据需求修改 `mock-comm` 参数，记录实际通信域和拓扑。此默认值只用于性能估算，不改变功能验证的冻结矩阵。
 
 估算必须使用本次开发并验证的包和目标算法，保留算法命中证据。输出可纳入报告的性能估算结果，由调用方在最终报告中呈现给用户，说明此次开发算法在所记录条件下的估算耗时、主要观察和适用范围。未执行、失败或无法确认算法命中时如实记录原因，不填入推测数值。
+
+CCU 继承已验证的 `CCU_SCHED` 或 `CCU_MS` 模式、HCCL/HCOMM 身份及选路配置，独立 estimate 会话按上述参考准备环境。共享 estimate.json 中额外记录 `engine=CCU`、`ccu_mode`、`hcomm_source_identity`；不使用 Checker 的 run.sh/plan.py 执行或统计估算。工作流的完成状态仍由调用方依据真实证据判定。
 
 ## 结果语义
 

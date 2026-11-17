@@ -1,0 +1,275 @@
+{
+  "schema_version": 1,
+  "reviewed_heads": {
+    "hccl": "d749022326eb68a585851707bb0420f552ad12c3",
+    "hcomm": "d1c2b18c2a8bf97d6d7ffde5f1a44762cbcd2a25"
+  },
+  "files": [
+    {
+      "repo": "hccl",
+      "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.h",
+      "required": true,
+      "sha256": "cc21a1ffcb484d3782750d6939dbf76216a679c51f5eb5a1a472c125951821f8",
+      "symbols": [
+        "CcuAlgTemplateBase",
+        "CalcRes",
+        "FastLaunch"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/op_common/algorithm/template/common_alg_template_base.h",
+      "required": true,
+      "sha256": "0556e63ce58650b557b92bf330dae9ac8e79cc985d5a292d8a02e8bc8e2a40e6",
+      "symbols": [
+        "CommonAlgTemplateBase",
+        "FastLaunch"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/op_common/algorithm/template/template_utils.h",
+      "required": true,
+      "sha256": "5f0dad7502dba49a6df6bb886cc5cf3a9b0f65ae54e9ab671d6b632219417cb3",
+      "symbols": [
+        "TemplateDataParams",
+        "TemplateResource"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/op_common/algorithm/template/ccu/ccu_kernel_alg_base.h",
+      "required": true,
+      "sha256": "02d0f51dc79502b9f0f6a0be922768e6337c6ddf27956e0be2dd4dbcab98d197",
+      "symbols": [
+        "CcuEventGroup",
+        "CcuKernelCtxBase",
+        "GroupCopy"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/op_common/inc/alg_param.h",
+      "required": true,
+      "sha256": "05f8f32a766a7a9559a25f599ab510a1d48a43d2b72a589f8e001bdc77c537c5",
+      "symbols": [
+        "CcuKernelInfo",
+        "setKernelArg",
+        "CCU_MAX_TASK_ARG_NUM"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/op_common/op_common.cc",
+      "required": true,
+      "sha256": "1bfa8db77151e654b0d34264c19007865e4e75b2ebcdb4e2c6e3c7e29320d6fd",
+      "symbols": [
+        "RegisterCcuKernels",
+        "HcommCcuKernelQueryResReq",
+        "HcommCcuKernelRegister"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/common/hcomm_dlsym/ccu_launch_dl.h",
+      "required": true,
+      "sha256": "2f242724e1b64f4d46d9bac0f54c1aaeb85fdc7b98310f4ec182aaad14d78acd",
+      "symbols": [
+        "HcommCcuKernelRegister",
+        "HcommCcuKernelLaunch"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/common/hcomm_dlsym/ccu/ccu_primitives_dl.hpp",
+      "required": true,
+      "sha256": "efc6e18e4e000cc471b3b02bd918bf214bfaec5bc6627bc62bb43fd818d01c27",
+      "symbols": [
+        "LoadArg",
+        "WriteVariableWithNotify",
+        "EventWait"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/all_gather/algorithm/template/ccu/ccu_temp_all_gather_mesh_1D_mem2mem.cc",
+      "required": false,
+      "sha256": "05a41deae577925b1c2fc09f8c608250581ea04c3d60bf611b8b6c618099ce73",
+      "symbols": [
+        "PrepareLaunchArgs",
+        "FastLaunch",
+        "FillCachedArgs"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/all_gather/algorithm/template/ccu/kernel/ccu_kernel_all_gather_mesh1d_mem2mem.cc",
+      "required": false,
+      "sha256": "b215ca6b8ec8d9bd0d93d06acf3c86aff82320619c7558a390427227723dc432",
+      "symbols": [
+        "LoadArgs",
+        "PreSync",
+        "PostSync",
+        "CcuAllGatherMesh1DMem2MemKernel"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/all_gather/algorithm/template/ccu/kernel/ccu_kernel_all_gather_mesh1d_mem2mem.h",
+      "required": false,
+      "sha256": "a98a97c83e66639c3478e558abe87c6ed6aefbe936e0c1b0085a279a37cac448",
+      "symbols": [
+        "CcuKernelArgAllGatherMesh1DMem2Mem"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/all_gather/algorithm/executor/ins_v2_all_gather_sole_executor.cc",
+      "required": false,
+      "sha256": "91dbfe5c7536f08ef251775207dfc97434319565efa58b9aae0063901a70b8cf",
+      "symbols": [
+        "CcuSchedAllGatherSoleMesh",
+        "CcuMSAllGatherSoleMesh",
+        "REGISTER_ALG_ATTRS"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/all_gather/selector/all_gather_auto_selector.cc",
+      "required": false,
+      "sha256": "5c0569c8148feb9f858947846eef0f486b6a5d9e36b9f5e399b7663f186afd9b",
+      "symbols": [
+        "SelectCcuMsAlgo",
+        "SelectCcuScheduleAlgo"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/all_gather/algorithm/template/ccu/CMakeLists.txt",
+      "required": false,
+      "sha256": "81fa9155a1d8d4b80710ea56d8a19ea17c3bae6c3b42c5e2f274cb975ae64430",
+      "symbols": [
+        "add_subdirectory(kernel)",
+        "target_sources(hccl"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/all_gather/algorithm/template/ccu/kernel/CMakeLists.txt",
+      "required": false,
+      "sha256": "381f8a539b78a90f73254022aee25c53327c4968eca5652faba343db298c647c",
+      "symbols": [
+        "ccu_kernel_all_gather_mesh1d_mem2mem.cc",
+        "target_sources(hccl"
+      ]
+    },
+    {
+      "repo": "hccl",
+      "path": "src/ops/all_reduce/algorithm/template/ccu/kernel/ccu_kernel_all_reduce_mesh1d_mem2mem.cc",
+      "required": false,
+      "sha256": "1da5e74535ee94f575d9c68da8fd2f872e21510eef74e4bbf629cd71739ad687",
+      "symbols": [
+        "LocalReduce",
+        "ReduceLoopGroup",
+        "EventWait"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "include/ccu/ccu_launch.h",
+      "required": true,
+      "sha256": "49286f5cf4acda58d50ac26b4cb89a5e514596cbb7e8641fc0af45adf54f7e7e",
+      "symbols": [
+        "HcommCcuKernelRegister",
+        "HcommCcuKernelLaunch",
+        "HcommCcuGetTaskArgsNum"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "include/ccu/ccu_primitives.hpp",
+      "required": true,
+      "sha256": "1bc7ca366fb154aeff889dae4e40b677330a24231a92008c32e1d060c25d87e3",
+      "symbols": [
+        "LoadArg",
+        "EventWait",
+        "NotifyWait",
+        "WriteVariableWithNotify"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "include/ccu/ccu_variable.hpp",
+      "required": true,
+      "sha256": "0eae27981d91f084b4b3d467f3ba5f47fe9929014bcf2578820d8c24eef63f80",
+      "symbols": [
+        "CondExpr",
+        "Variable(const Variable& other)",
+        "operator=(const Variable& other)"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "include/ccu/ccu_control_flow_macro.h",
+      "required": true,
+      "sha256": "9dd034f9baa18190e7163b3eec69236ff771e173a4ed05ab2d2db6097aabbfe6",
+      "symbols": [
+        "CCU_IF",
+        "CCU_WHILE",
+        "isVarCompare"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "include/ccu/ccu_res.h",
+      "required": true,
+      "sha256": "99047a2c3f112347138fdcc146e1a2f2c3c325dcde24f08c4f2d5afa1e3d0dba",
+      "symbols": [
+        "HcommCcuKernelQueryResReq",
+        "HcommCcuGetMemToken",
+        "HcommCcuInsCreate"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "src/base_comm/primitives/api_c_adpt/ccu/ccu_launch.cc",
+      "required": true,
+      "sha256": "5a9460f9bece02b7b96ba358f1bd515199a9f6e11196054ad40161c69cf2d7fc",
+      "symbols": [
+        "HcommCcuKernelRegister",
+        "GeneTaskParams",
+        "HcommCcuKernelLaunch"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "docs/zh/api_ref/comm_opdev/data_plane_api/ccu/synchronization/EventWait.md",
+      "required": false,
+      "sha256": "3c2fe1085200344740b73380e1cdbb6d2b87562efd8d26e1ef1207cc907b4897",
+      "symbols": [
+        "EventWait",
+        "mask"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "docs/zh/api_ref/comm_opdev/data_plane_api/ccu/synchronization/NotifyWait.md",
+      "required": false,
+      "sha256": "c1db8a528adb69bb38f841c53bb594c4d4fb2218c6b189c6775cc57497ec0a9d",
+      "symbols": [
+        "NotifyWait",
+        "die"
+      ]
+    },
+    {
+      "repo": "hcomm",
+      "path": "docs/zh/api_ref/comm_opdev/data_plane_api/ccu/execution_control/CCU_IF.md",
+      "required": false,
+      "sha256": "c9f5ce105864817e20caf27fe5a634e5ddcbcb13676e8260861629af2899bbcb",
+      "symbols": [
+        "CCU_IF",
+        "CCU_ELSE"
+      ]
+    }
+  ]
+}

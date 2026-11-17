@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "model": "hccl-test-collectives-v1",
+  "reviewed_at": "2026-10-23",
+  "source": "CANN 9.2.0 installed hccl_test; ordinary per-case count and basic send/recv allocations only",
+  "common_sources": {
+    "common/src/hccl_test_common.cc": "eb815fb31039c93669dce5fcb776be60de6ec661bcaf87f182e1e1b92c2834cb",
+    "common/src/hccl_test_common.h": "607a9e1729425796b06fa9a27021452afce30199ec809377e1997bddb059c6e4",
+    "common/src/hccl_opbase_rootinfo_base.cc": "239c9b1d06937bf253ed82daba2762fd60e8cc75e5ac4e09f22e95cb814d5ff8"
+  },
+  "operators": {
+    "all_gather": {
+      "binary": "all_gather_test",
+      "sources": {
+        "opbase_test/hccl_allgather_rootinfo_test.cc": "8a5339c7310160c8028dc4d481b9a44a9326979124c8ccf7b5b31732b9015d15"
+      }
+    },
+    "all_reduce": {
+      "binary": "all_reduce_test",
+      "sources": {
+        "opbase_test/hccl_allreduce_rootinfo_test.cc": "f7d3fce20c35604d0acaa5cac0921f75d715ab184fa844198353e05ce74ce588"
+      }
+    },
+    "reduce_scatter": {
+      "binary": "reduce_scatter_test",
+      "sources": {
+        "opbase_test/hccl_reducescatter_rootinfo_test.cc": "cbe63f1509a646c2bb92e0e0dd0c83f1709e154ba26ea459400946f7ad5e0c40"
+      }
+    },
+    "broadcast": {
+      "binary": "broadcast_test",
+      "sources": {
+        "opbase_test/hccl_brocast_rootinfo_test.cc": "b873564fd99e7ecd180c7335ca6e65c7bc185ad36f977822cebef8aa37d2f41a"
+      }
+    },
+    "reduce": {
+      "binary": "reduce_test",
+      "sources": {
+        "opbase_test/hccl_reduce_rootinfo_test.cc": "d4118967d1d14dc9d2449e472decaaeb6c6abd5c7e0e373eef5dfcf8a1e9db7f"
+      }
+    },
+    "scatter": {
+      "binary": "scatter_test",
+      "sources": {
+        "opbase_test/hccl_scatter_rootinfo_test.cc": "ae52aab68ba4f5561f4fe85107d00ceab9b25dd910194ccf727173deb05ee9a2"
+      }
+    }
+  }
+}

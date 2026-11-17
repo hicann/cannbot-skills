@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "source": "Reduce Sched Mesh mem2mem KernelRun/SubmitKernelInfo/FastLaunch; N=8 only, N+12=20 slots; this declares the physical cache layout and does not prove cache invalidation or runtime safety.",
+  "kernels": [
+    {
+      "name": "CcuReduceMesh1DMem2MemKernel",
+      "launch_args": [
+        "inputAddr",
+        "outputAddr",
+        "token",
+        "isInputOutputEqual",
+        "inputRepeatStride",
+        "outputRepeatStride",
+        "normalSliceSize",
+        "lastSliceSize",
+        "repeatNumVar",
+        "chunkSize[0]",
+        "chunkSize[1]",
+        "chunkSize[2]",
+        "chunkSize[3]",
+        "chunkSize[4]",
+        "chunkSize[5]",
+        "chunkSize[6]",
+        "goSize.addrOffset",
+        "goSize.loopParam",
+        "goSize.parallelParam",
+        "goSize.residual"
+      ],
+      "launch_count": 20,
+      "loads": [
+        {
+          "index": 0,
+          "name": "inputAddr"
+        },
+        {
+          "index": 1,
+          "name": "outputAddr"
+        },
+        {
+          "index": 2,
+          "name": "token"
+        },
+        {
+          "index": 3,
+          "name": "isInputOutputEqual"
+        },
+        {
+          "index": 4,
+          "name": "inputRepeatStride"
+        },
+        {
+          "index": 5,
+          "name": "outputRepeatStride"
+        },
+        {
+          "index": 6,
+          "name": "normalSliceSize"
+        },
+        {
+          "index": 7,
+          "name": "lastSliceSize"
+        },
+        {
+          "index": 8,
+          "name": "repeatNumVar"
+        },
+        {
+          "index": 9,
+          "name": "chunkSize[0]"
+        },
+        {
+          "index": 10,
+          "name": "chunkSize[1]"
+        },
+        {
+          "index": 11,
+          "name": "chunkSize[2]"
+        },
+        {
+          "index": 12,
+          "name": "chunkSize[3]"
+        },
+        {
+          "index": 13,
+          "name": "chunkSize[4]"
+        },
+        {
+          "index": 14,
+          "name": "chunkSize[5]"
+        },
+        {
+          "index": 15,
+          "name": "chunkSize[6]"
+        },
+        {
+          "index": 16,
+          "name": "goSize.addrOffset"
+        },
+        {
+          "index": 17,
+          "name": "goSize.loopParam"
+        },
+        {
+          "index": 18,
+          "name": "goSize.parallelParam"
+        },
+        {
+          "index": 19,
+          "name": "goSize.residual"
+        }
+      ],
+      "fast_launch": {
+        "enabled": true,
+        "cache_capacity": 48,
+        "cached_args": [
+          "launchSlotCount",
+          "inputAddr",
+          "outputAddr",
+          "token",
+          "isInputOutputEqual",
+          "inputRepeatStride",
+          "outputRepeatStride",
+          "normalSliceSize",
+          "lastSliceSize",
+          "repeatNumVar",
+          "chunkSize[0]",
+          "chunkSize[1]",
+          "chunkSize[2]",
+          "chunkSize[3]",
+          "chunkSize[4]",
+          "chunkSize[5]",
+          "chunkSize[6]",
+          "goSize.addrOffset",
+          "goSize.loopParam",
+          "goSize.parallelParam",
+          "goSize.residual",
+          "inBuffBaseOff",
+          "outBuffBaseOff"
+        ],
+        "cache_launch_offset": 1,
+        "launch_count": 20,
+        "required_updates": [
+          "inputAddr",
+          "outputAddr"
+        ],
+        "updates": [
+          {
+            "index": 1,
+            "name": "inputAddr"
+          },
+          {
+            "index": 2,
+            "name": "outputAddr"
+          }
+        ],
+        "invariant_args": {
+          "token": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "isInputOutputEqual": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "inputRepeatStride": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "outputRepeatStride": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "normalSliceSize": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "lastSliceSize": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "repeatNumVar": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "chunkSize[0]": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "chunkSize[1]": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "chunkSize[2]": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "chunkSize[3]": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "chunkSize[4]": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "chunkSize[5]": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "chunkSize[6]": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "goSize.addrOffset": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "goSize.loopParam": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "goSize.parallelParam": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse.",
+          "goSize.residual": "Cached by this sample; independently verify count/dtype/root/topology, memory registration and alias identity before reuse."
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "source": "HCCL d749022326eb68a585851707bb0420f552ad12c3; AllGather Mesh1D Mem2Mem PrepareLaunchArgs / LoadArgs / FastLaunch; 仅为当前样本参数表，不证明缓存失效正确性。",
+  "kernels": [
+    {
+      "name": "CcuAllGatherMesh1DMem2MemKernel",
+      "launch_args": [
+        "inputAddr",
+        "outputAddr",
+        "token",
+        "currentRankSliceInputOffset",
+        "currentRankSliceOutputOffset",
+        "tmpRepeatNum",
+        "inputRepeatStride",
+        "outputRepeatStride",
+        "normalSliceSize",
+        "lastSliceSize",
+        "isInputOutputEqual",
+        "goSize.addrOffset",
+        "goSize.loopParam",
+        "goSize.parallelParam",
+        "goSize.residual"
+      ],
+      "launch_count": 15,
+      "loads": [
+        {
+          "index": 0,
+          "name": "inputAddr"
+        },
+        {
+          "index": 1,
+          "name": "outputAddr"
+        },
+        {
+          "index": 2,
+          "name": "token"
+        },
+        {
+          "index": 3,
+          "name": "currentRankSliceInputOffset"
+        },
+        {
+          "index": 4,
+          "name": "currentRankSliceOutputOffset"
+        },
+        {
+          "index": 5,
+          "name": "tmpRepeatNum"
+        },
+        {
+          "index": 6,
+          "name": "inputRepeatStride"
+        },
+        {
+          "index": 7,
+          "name": "outputRepeatStride"
+        },
+        {
+          "index": 8,
+          "name": "normalSliceSize"
+        },
+        {
+          "index": 9,
+          "name": "lastSliceSize"
+        },
+        {
+          "index": 10,
+          "name": "isInputOutputEqual"
+        },
+        {
+          "index": 11,
+          "name": "goSize.addrOffset"
+        },
+        {
+          "index": 12,
+          "name": "goSize.loopParam"
+        },
+        {
+          "index": 13,
+          "name": "goSize.parallelParam"
+        },
+        {
+          "index": 14,
+          "name": "goSize.residual"
+        }
+      ],
+      "fast_launch": {
+        "enabled": true,
+        "cache_capacity": 48,
+        "cached_args": [
+          "inputAddr",
+          "outputAddr",
+          "token",
+          "currentRankSliceInputOffset",
+          "currentRankSliceOutputOffset",
+          "tmpRepeatNum",
+          "inputRepeatStride",
+          "outputRepeatStride",
+          "normalSliceSize",
+          "lastSliceSize",
+          "isInputOutputEqual",
+          "goSize.addrOffset",
+          "goSize.loopParam",
+          "goSize.parallelParam",
+          "goSize.residual",
+          "inBuffBaseOff",
+          "outBuffBaseOff"
+        ],
+        "launch_count": 15,
+        "required_updates": [
+          "inputAddr",
+          "outputAddr",
+          "isInputOutputEqual"
+        ],
+        "updates": [
+          {
+            "index": 0,
+            "name": "inputAddr"
+          },
+          {
+            "index": 1,
+            "name": "outputAddr"
+          },
+          {
+            "index": 10,
+            "name": "isInputOutputEqual"
+          }
+        ],
+        "invariant_args": {
+          "token": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "currentRankSliceInputOffset": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "currentRankSliceOutputOffset": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "tmpRepeatNum": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "inputRepeatStride": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "outputRepeatStride": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "normalSliceSize": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "lastSliceSize": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "goSize.addrOffset": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "goSize.loopParam": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "goSize.parallelParam": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。",
+          "goSize.residual": "样本缓存保留；复用前须另行核对对应内存注册域、count/layout/topology 的缓存身份与失效条件。"
+        }
+      }
+    }
+  ]
+}

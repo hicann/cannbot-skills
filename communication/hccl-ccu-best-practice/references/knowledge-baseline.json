@@ -1,0 +1,1158 @@
+{
+  "schema_version": 1,
+  "reviewed_heads": {
+    "hccl": "ff0ab744b7481086aeeb8a0bdf52e95dc915a202",
+    "hcomm": "4edb3b4f6b19dc6966d5ee7628815762a3b79140"
+  },
+  "reviewed_at": "2026-10-28",
+  "cards": {
+    "sync-limits": {
+      "scope": "每 channel 接收表 CKE/XN 配额、16-bit mask、Wait 清位；不证明算法重用时序",
+      "ops": [],
+      "reference": "references/api-and-synchronization.md#设计期同步契约检查",
+      "files": [
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_transport/ccu_transport_.h",
+          "sha256": "03fd72f73694ea34bad0d15f09ceca12bd8cee98339999dc21ed27ac8f9f6953",
+          "symbols": [
+            "INIT_CKE_NUM",
+            "INIT_XN_NUM"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_transport/ccu_transport_.cc",
+          "sha256": "93c4bdd3a6d957a1dfc13eeb172460b1ffabec5150315ef955b2b4d54cf2886b",
+          "symbols": [
+            "AppendCkes(INIT_CKE_NUM)",
+            "AppendXns(INIT_XN_NUM)",
+            "GetLocCkeByIndex",
+            "GetLocXnByIndex"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "include/ccu/ccu_primitives.hpp",
+          "sha256": "1bc7ca366fb154aeff889dae4e40b677330a24231a92008c32e1d060c25d87e3",
+          "symbols": [
+            "uint16_t mask",
+            "NotifyWait"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_representation/reps/translator/ccu_ins_generator_v1.cc",
+          "sha256": "c8a63a18bfb7658cf4bac2399eec7d4682d53b908e969a3da924bb39e2cb4532",
+          "symbols": [
+            "CcuRepRemWaitSemTranslate",
+            "GetLocCkeByIndex"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_representation/reps/translator/ccu_ins_generator_v2.cc",
+          "sha256": "731dbf4d7b6a79b4b0b181176340a4999e19b800512a480f0d6a7ecf8a7743dd",
+          "symbols": [
+            "CcuRepRemWaitSemTranslate",
+            "GetLocCkeByIndex"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_microcode/ccu_microcode.cc",
+          "sha256": "fd2177e38631e513bcf86e0bc684e6f02682e6031897c8c9103118fd397ffd1d",
+          "symbols": [
+            "clearType = 1"
+          ]
+        }
+      ]
+    },
+    "all-gather-sole": {
+      "scope": "AllGather Sole executor 的 CCU 分支、字节布局、外层 loop、缓存入口和 count=0 短路",
+      "ops": [
+        "all_gather"
+      ],
+      "reference": "references/operator-contracts.md",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_gather/algorithm/executor/ins_v2_all_gather_sole_executor.cc",
+          "sha256": "3c73db0d136acc3d15450cb468760de1c243b066bf838329e9243722fcb7833c",
+          "symbols": [
+            "OrchestrateLoop",
+            "outputSliceStride = dataSize_",
+            "loopTimes == 1"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_gather/all_gather.cc",
+          "sha256": "2ac44c61ed4e45f909fb03f319ac8623a562987a6eda1eef9c9de961e943b419",
+          "symbols": [
+            "sendCount == 0"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/inc/alg_param.h",
+          "sha256": "05f8f32a766a7a9559a25f599ab510a1d48a43d2b72a589f8e001bdc77c537c5",
+          "symbols": [
+            "UB_MAX_DATA_SIZE"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.h",
+          "sha256": "cc21a1ffcb484d3782750d6939dbf76216a679c51f5eb5a1a472c125951821f8",
+          "symbols": [
+            "CcuAlgTemplateBase"
+          ]
+        }
+      ]
+    },
+    "all-gather-routing": {
+      "scope": "CCU AllGather 的 DSL 解析、成本软检查/显式优先级和既有 selector；不证明所有 topology 可达",
+      "ops": [
+        "all_gather"
+      ],
+      "reference": "references/operator-contracts.md",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/common/alg_parse.h",
+          "sha256": "d7a2e2928af2fdfb63964ec6abf8af85b886bea9647b01fcadee8bf6ab90fb98",
+          "symbols": [
+            "AlgoType"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/common/alg_parse.cc",
+          "sha256": "95343db6bcc9aacc015bda39f94a7913e6738b02eaf1dd766775875c5112fab1",
+          "symbols": [
+            "ComposeAlgoName",
+            "MarkHcclAlgoPriority"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/cost_table.cc",
+          "sha256": "105c5a60c037b7030e5e4db7c203dbe5767270dd2c972f08938dc1bfa5806c7b",
+          "symbols": [
+            "needSoftCheck",
+            "opCustomCheck"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_gather/selector/all_gather_auto_selector.cc",
+          "sha256": "5c0569c8148feb9f858947846eef0f486b6a5d9e36b9f5e399b7663f186afd9b",
+          "symbols": [
+            "SelectCcuScheduleAlgo"
+          ]
+        }
+      ]
+    },
+    "all-gather-ring-example": {
+      "scope": "2026-10-20 的已修复 Ring 接线与同步布局样本，非其他版本预置能力",
+      "ops": [
+        "all_gather"
+      ],
+      "reference": "references/ring-example.md",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_gather/algorithm/template/ccu/ccu_temp_all_gather_ring_1D_mem2mem.cc",
+          "sha256": "01e19eda57398ac8d92d5a1ab79ca1beb98257bac95cf8ea34a599439797f4b9",
+          "symbols": [
+            "PrepareLaunchArgs",
+            "FastLaunch",
+            "CreateChannelRequestByRankId"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_gather/algorithm/template/ccu/kernel/ccu_kernel_all_gather_ring1d_mem2mem.cc",
+          "sha256": "2180e0606b71dc35f766177ec4ad989b18f0d24696daa0afe0416990dbecfa99",
+          "symbols": [
+            "POST_NOTIFY_IDX = 3",
+            "DATA_NOTIFY_BASE_IDX = 0",
+            "DoRingSteps"
+          ]
+        }
+      ],
+      "optional": true
+    },
+    "generator-arith": {
+      "scope": "Variable 算术 lowering 与目标 V1/V2 指令计数表；不证明设备/部署身份或表达式声明完整性",
+      "ops": [],
+      "reference": "references/api-and-synchronization.md#生成器算术能力",
+      "files": [
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_representation/reps/translator/ccu_ins_generator_v1.h",
+          "sha256": "70119e40a29cf675ac626dcae89ef1d0cdd6f73971891d42e863b0436640caa3",
+          "symbols": [
+            "repTypeInstrCount",
+            "GetInstrCount"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_representation/reps/translator/ccu_ins_generator_v1.cc",
+          "sha256": "c8a63a18bfb7658cf4bac2399eec7d4682d53b908e969a3da924bb39e2cb4532",
+          "symbols": [
+            "Unsupported repType",
+            "GetInstrCount"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_representation/reps/common/ccu_rep_type_v1.h",
+          "sha256": "6d62fdaa7d61164ac53754985dca35ba17703792db8b89580acdb3d9d5eb1127",
+          "symbols": [
+            "MUL",
+            "ASSIGN",
+            "ADD"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_representation/reps/translator/ccu_ins_generator_v2.h",
+          "sha256": "4356cd9bcc893524d7a64e4cb38977d40f05004540525ce2d7b4f0d2756f99a4",
+          "symbols": [
+            "repTypeInstrCount",
+            "CcuRepType::MUL",
+            "CcuRepType::SUB"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "include/ccu/ccu_variable.hpp",
+          "sha256": "0eae27981d91f084b4b3d467f3ba5f47fe9929014bcf2578820d8c24eef63f80",
+          "symbols": [
+            "operator*",
+            "CcuVariableMulImmToVar",
+            "operator+="
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/primitives/api_c_adpt/ccu/ccu_primitives_impl.cc",
+          "sha256": "ea4198dc1925b4d683cb40e8d6082da5fdf9bafab15cd4df08f0d4c3013ecb16",
+          "symbols": [
+            "CcuVariableMulImmToVar",
+            "VariableMulImmToVar"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_kernel/ccu_kernel.cc",
+          "sha256": "361ea60b95c1ba924300111dc05f9de1b612854d3e2bb1deb68a41b8c411a33d",
+          "symbols": [
+            "VariableMulImmToVar",
+            "VariableMulVarToVar"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_kernel/ccu_kernel_mgr.cc",
+          "sha256": "73901ac1981de20321a6bd91825eb50ea0b8f62ff417df4d68bf0c3e25285194",
+          "symbols": [
+            "Init CcuInsGeneratorV1",
+            "Init CcuInsGeneratorV2"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_representation/reps/arithmetic/ccu_rep_mul.cc",
+          "sha256": "d2477732108bc53710320287ae14c5ad249d9b89222a9defd458da0879067d01",
+          "symbols": [
+            "CcuRepType::MUL",
+            "GetInstrCount",
+            "VAR_MUL_IMMED_TO_VAR"
+          ]
+        },
+        {
+          "repo": "hcomm",
+          "path": "src/base_comm/resources/ccu/ccu_representation/reps/translator/ccu_ins_generator_v2.cc",
+          "sha256": "731dbf4d7b6a79b4b0b181176340a4999e19b800512a480f0d6a7ecf8a7743dd",
+          "symbols": [
+            "CcuRepMulTranslate",
+            "VAR_MUL_IMMED_TO_VAR",
+            "CcuV2::MulI"
+          ]
+        }
+      ]
+    },
+    "all-gather-framework": {
+      "scope": "AllGather Sole CCU框架实际调用、默认资源行为、成本空结果剔除与建链输出容器；不证明算法数据流或成本数值正确",
+      "ops": [
+        "all_gather"
+      ],
+      "reference": "references/framework-contracts.md",
+      "reviewed_heads": {
+        "hccl": "d749022326eb68a585851707bb0420f552ad12c3"
+      },
+      "reviewed_at": "2026-10-22",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.h",
+          "sha256": "cc21a1ffcb484d3782750d6939dbf76216a679c51f5eb5a1a472c125951821f8",
+          "symbols": [
+            "CalcCostCoeff",
+            "Describe",
+            "CalcRes",
+            "FastLaunch"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.cc",
+          "sha256": "c82a2657bcf74a674421d3caaaba6cc99dff6ac9cc47deb3a328b82b5e96383b",
+          "symbols": [
+            "GetThreadNum",
+            "CalcScratchMultiple",
+            "Unsupported interface"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_gather/algorithm/executor/ins_v2_all_gather_sole_executor.cc",
+          "sha256": "91dbfe5c7536f08ef251775207dfc97434319565efa58b9aae0063901a70b8cf",
+          "symbols": [
+            "InsAlgTemplate::CalcCostCoeff",
+            "make_unique<InsAlgTemplate>",
+            "FastLaunchSaveCtx",
+            "OrchestrateLoop"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/cost_model.cc",
+          "sha256": "22a674eaf71f30113e33ab8c58cc3a05c3adcd9ed2f951575c6a57843cf83d68",
+          "symbols": [
+            "params.empty()",
+            "uncalibrated"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/executor/channel/channel.cc",
+          "sha256": "41f3e77b6ec7c845cb3fe7b9184204e3a208a407b6d79b3231542deeaaba101c",
+          "symbols": [
+            "CreateChannelRequestByRankId",
+            "channels.clear()"
+          ]
+        }
+      ]
+    },
+    "all-reduce-sole": {
+      "scope": "AllReduce Sole：Sched Mesh mem2mem executor/template/kernel、启动缓存、API短路；MS仅列已存在注册，不覆盖其实现及其他多阶段变体",
+      "ops": [
+        "all_reduce"
+      ],
+      "reference": "references/operators/all_reduce.md",
+      "reviewed_heads": {
+        "hccl": "d749022326eb68a585851707bb0420f552ad12c3"
+      },
+      "reviewed_at": "2026-10-23",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/executor/ins_v2_all_reduce_sole_executor.cc",
+          "sha256": "10cb24a0186889a1e5097d825c0c097ee4de1c788f3b83a9930466e926d66253",
+          "symbols": [
+            "CalcRes",
+            "OrchestrateLoop",
+            "FastLaunch",
+            "CcuSchedAllReduceSoleMesh"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/executor/ins_v2_all_reduce_sole_executor.h",
+          "sha256": "785dd71b07e2ab0572fc8766db8c0fbd25ca12d4471f4a047ff9220de5b2f0bf",
+          "symbols": [
+            "InsV2AllReduceSoleExecutor"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/template/ccu/ccu_temp_all_reduce_mesh_1D_mem2mem.cc",
+          "sha256": "546adb45dcc4381cb8542edd43c879e16194b1f66c803375b8274219f3858d1b",
+          "symbols": [
+            "CalcRes",
+            "KernelRun",
+            "FastLaunch"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/template/ccu/ccu_temp_all_reduce_mesh_1D_mem2mem.h",
+          "sha256": "74877b998fa93194f5f2ad65fd466db442f31ddb40e5892f0c49ff33cfbb522b",
+          "symbols": [
+            "CcuTempAllReduceMeshMem2Mem1D"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/template/ccu/kernel/ccu_kernel_all_reduce_mesh1d_mem2mem.cc",
+          "sha256": "1da5e74535ee94f575d9c68da8fd2f872e21510eef74e4bbf629cd71739ad687",
+          "symbols": [
+            "LoadArgs",
+            "PreSync",
+            "PostSync"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/template/ccu/kernel/ccu_kernel_all_reduce_mesh1d_mem2mem.h",
+          "sha256": "5d4f5504a3e03141b5e2a407c44ea3cc3e33373a7f548de02be011519edcedc9",
+          "symbols": [
+            "CcuKernelArg"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/all_reduce.cc",
+          "sha256": "1c4a87f192659a7b1633f67d8efe521ed0dede3a567fc7865702b4bfdc9ba88a",
+          "symbols": [
+            "SingleRankProc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/executor/CMakeLists.txt",
+          "sha256": "035ff5b24bb0d6b0b6a9c75d0b7abe294dc25ffd5bc0994f132246cad2fd0176",
+          "symbols": [
+            "ins_v2_all_reduce_sole_executor.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/template/ccu/CMakeLists.txt",
+          "sha256": "c58e9847bdc62a92ab2205bc997d37d76c27b50baaef4ec05d0f7bb0e1c26556",
+          "symbols": [
+            "ccu_temp_all_reduce_mesh_1D_mem2mem.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/all_reduce/algorithm/template/ccu/kernel/CMakeLists.txt",
+          "sha256": "7f649c40ae5854674057a4a98700f926eabab74a570c853e2b270c546f8e4a5c",
+          "symbols": [
+            "ccu_kernel_all_reduce_mesh1d_mem2mem.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.h",
+          "sha256": "cc21a1ffcb484d3782750d6939dbf76216a679c51f5eb5a1a472c125951821f8",
+          "symbols": [
+            "CalcScratchMultiple",
+            "GetRes"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.cc",
+          "sha256": "c82a2657bcf74a674421d3caaaba6cc99dff6ac9cc47deb3a328b82b5e96383b",
+          "symbols": [
+            "CalcScratchMultiple",
+            "Unsupported interface"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/alg_attrs.h",
+          "sha256": "e6832b804e4aaad2e073467a37b73719009d1cd99b0e5fd7c2b29911aaf9e4fd",
+          "symbols": [
+            "CCU_SCHED_MAX_RANK_SIZE",
+            "UNSUPPORTED_INT8_AND_64BIT"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/inc/alg_param.h",
+          "sha256": "05f8f32a766a7a9559a25f599ab510a1d48a43d2b72a589f8e001bdc77c537c5",
+          "symbols": [
+            "UB_MAX_DATA_SIZE"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/template_utils.h",
+          "sha256": "5f0dad7502dba49a6df6bb886cc5cf3a9b0f65ae54e9ab671d6b632219417cb3",
+          "symbols": [
+            "struct TemplateDataParams",
+            "struct TemplateResource",
+            "struct TemplateFastLaunchCtx"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/common/alg_parse.cc",
+          "sha256": "fb8c2f520e615fcd71e86dc76817e4dca7ae1898fd017d9546be557696159d1d",
+          "symbols": [
+            "ComposeAlgoName"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/cost_table.cc",
+          "sha256": "105c5a60c037b7030e5e4db7c203dbe5767270dd2c972f08938dc1bfa5806c7b",
+          "symbols": [
+            "needSoftCheck"
+          ]
+        }
+      ]
+    },
+    "reduce-scatter-sole": {
+      "scope": "ReduceScatter Sole：Sched Mesh mem2mem executor/template/kernel、启动缓存、API短路；MS仅列已存在注册，不覆盖其实现及其他多阶段变体",
+      "ops": [
+        "reduce_scatter"
+      ],
+      "reference": "references/operators/reduce_scatter.md",
+      "reviewed_heads": {
+        "hccl": "d749022326eb68a585851707bb0420f552ad12c3"
+      },
+      "reviewed_at": "2026-10-23",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/executor/ins_v2_reduce_scatter_sole_executor.cc",
+          "sha256": "f3bbe68fcc51e82fdc85d1d0cfbcb1ab1cf42d84a11f855a4e4d8710fe84e91f",
+          "symbols": [
+            "CalcRes",
+            "OrchestrateLoop",
+            "FastLaunch",
+            "CcuSchedReduceScatterSoleMesh"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/executor/ins_v2_reduce_scatter_sole_executor.h",
+          "sha256": "6cdeebab9c317461702a176bacf19573510f7d2fe9b6bf873305e7a48e99bf53",
+          "symbols": [
+            "InsV2ReduceScatterSoleExecutor"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/template/ccu/ccu_temp_reduce_scatter_mesh_1D_mem2mem.cc",
+          "sha256": "bca40160437cdf95b8cffe1bad734d6e31fbfafe0a90838963573860b432f1b5",
+          "symbols": [
+            "CalcRes",
+            "KernelRun",
+            "FastLaunch"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/template/ccu/ccu_temp_reduce_scatter_mesh_1D_mem2mem.h",
+          "sha256": "0b4e3a05d77f6a19e7d3e243be5491942fc1adf92631724ac2df51f019e9bc32",
+          "symbols": [
+            "CcuTempReduceScatterMesh1DMem2Mem"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/template/ccu/kernel/ccu_kernel_reduce_scatter_mesh1d_mem2mem.cc",
+          "sha256": "8d7f546419859e0929379d89a6eb356f9d2fd8940ac8007fa704d1880c7fbf1f",
+          "symbols": [
+            "LoadArgs",
+            "PreSync",
+            "PostSync"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/template/ccu/kernel/ccu_kernel_reduce_scatter_mesh1d_mem2mem.h",
+          "sha256": "1f7d5ace7f7a3755578be7f0016581759383f3551cabf9bd2508c724dabff498",
+          "symbols": [
+            "CcuKernelArg"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/reduce_scatter.cc",
+          "sha256": "a6159de1fe3fceb65e4fe008ac3f4640afb354735229cb2771854907468455b9",
+          "symbols": [
+            "SingleRankProc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/executor/CMakeLists.txt",
+          "sha256": "66baf42e08f26694956726b193572f53dc9d4c7f421333c5f4d30e20d2d64df8",
+          "symbols": [
+            "ins_v2_reduce_scatter_sole_executor.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/template/ccu/CMakeLists.txt",
+          "sha256": "98a5971eb206bf0c5ac90886432e6c6d5a097ed53a9116ccc192b2822c75cc31",
+          "symbols": [
+            "ccu_temp_reduce_scatter_mesh_1D_mem2mem.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce_scatter/algorithm/template/ccu/kernel/CMakeLists.txt",
+          "sha256": "13effa2803d61d41a2ac2b3322999a17386070496a0e092ebfeaa6e08ab0aa22",
+          "symbols": [
+            "ccu_kernel_reduce_scatter_mesh1d_mem2mem.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.h",
+          "sha256": "cc21a1ffcb484d3782750d6939dbf76216a679c51f5eb5a1a472c125951821f8",
+          "symbols": [
+            "CalcScratchMultiple",
+            "GetRes"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.cc",
+          "sha256": "c82a2657bcf74a674421d3caaaba6cc99dff6ac9cc47deb3a328b82b5e96383b",
+          "symbols": [
+            "CalcScratchMultiple",
+            "Unsupported interface"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/alg_attrs.h",
+          "sha256": "e6832b804e4aaad2e073467a37b73719009d1cd99b0e5fd7c2b29911aaf9e4fd",
+          "symbols": [
+            "CCU_SCHED_MAX_RANK_SIZE",
+            "UNSUPPORTED_INT8_AND_64BIT"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/inc/alg_param.h",
+          "sha256": "05f8f32a766a7a9559a25f599ab510a1d48a43d2b72a589f8e001bdc77c537c5",
+          "symbols": [
+            "UB_MAX_DATA_SIZE"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/template_utils.h",
+          "sha256": "5f0dad7502dba49a6df6bb886cc5cf3a9b0f65ae54e9ab671d6b632219417cb3",
+          "symbols": [
+            "struct TemplateDataParams",
+            "struct TemplateResource",
+            "struct TemplateFastLaunchCtx"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/common/alg_parse.cc",
+          "sha256": "fb8c2f520e615fcd71e86dc76817e4dca7ae1898fd017d9546be557696159d1d",
+          "symbols": [
+            "ComposeAlgoName"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/cost_table.cc",
+          "sha256": "105c5a60c037b7030e5e4db7c203dbe5767270dd2c972f08938dc1bfa5806c7b",
+          "symbols": [
+            "needSoftCheck"
+          ]
+        }
+      ]
+    },
+    "broadcast-sole": {
+      "scope": "Broadcast Sole：Sched Mesh mem2mem executor/template/kernel、启动缓存、API短路；MS仅列已存在注册，不覆盖其实现及其他多阶段变体",
+      "ops": [
+        "broadcast"
+      ],
+      "reference": "references/operators/broadcast.md",
+      "reviewed_heads": {
+        "hccl": "d749022326eb68a585851707bb0420f552ad12c3"
+      },
+      "reviewed_at": "2026-10-23",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/executor/ins_v2_broadcast_sole_executor.cc",
+          "sha256": "d6364d4d630eff51bf5c0d943be6dc76832940a3870eb2f88f1df9b1e42a54cf",
+          "symbols": [
+            "CalcRes",
+            "OrchestrateLoop",
+            "FastLaunch",
+            "CcuSchedBroadcastSoleMesh"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/executor/ins_v2_broadcast_sole_executor.h",
+          "sha256": "2a2e411b49cb010d498423c8b142c7aaa68ea2b707a671f6d25748d3bd5e809b",
+          "symbols": [
+            "InsV2BroadcastSoleExecutor"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/template/ccu/ccu_temp_broadcast_mesh_1D_mem2mem.cc",
+          "sha256": "ce947a637728f95cf5eac9baaafadedcb82d90568b0407a987fad38655194704",
+          "symbols": [
+            "CalcRes",
+            "KernelRun",
+            "FastLaunch"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/template/ccu/ccu_temp_broadcast_mesh_1D_mem2mem.h",
+          "sha256": "3309bc1afe8e412fd387f33069928a7f77db02f5fa00a4dc9146022160f33f5c",
+          "symbols": [
+            "CcuTempBroadcastMesh1DMem2Mem"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/template/ccu/kernel/ccu_kernel_broadcast_mesh1d_mem2mem.cc",
+          "sha256": "6b2c41245aa90d503152b72bf6e679e58b1d94861599c4fe69af0b9e52268529",
+          "symbols": [
+            "LoadArgs",
+            "PreSync",
+            "PostSync"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/template/ccu/kernel/ccu_kernel_broadcast_mesh1d_mem2mem.h",
+          "sha256": "f8a2bc5659a05ade3c28b3e23ed4e6a49078f6805362dd06560de53bedb23401",
+          "symbols": [
+            "CcuKernelArg"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/broadcast.cc",
+          "sha256": "944b12de26c817bef9beb1d907f21a1c39fc31420fa292e73a7129c7cac74abc",
+          "symbols": [
+            "SingleRankProc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/executor/CMakeLists.txt",
+          "sha256": "09b31016665f5af0e69307f868c849cbc99c2c583a9c0625648a57af9f7f9378",
+          "symbols": [
+            "ins_v2_broadcast_sole_executor.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/template/ccu/CMakeLists.txt",
+          "sha256": "3f0cf94a56ca7afe60c6bba2a062cdbeeb04e98ccfb3327ff39ff1ff3a8d594f",
+          "symbols": [
+            "ccu_temp_broadcast_mesh_1D_mem2mem.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/broadcast/algorithm/template/ccu/kernel/CMakeLists.txt",
+          "sha256": "4cbf31bb701f33d4c29dff5651b45e3f80f1fabb2e8df5f864c894c459336c61",
+          "symbols": [
+            "ccu_kernel_broadcast_mesh1d_mem2mem.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.h",
+          "sha256": "cc21a1ffcb484d3782750d6939dbf76216a679c51f5eb5a1a472c125951821f8",
+          "symbols": [
+            "CalcScratchMultiple",
+            "GetRes"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.cc",
+          "sha256": "c82a2657bcf74a674421d3caaaba6cc99dff6ac9cc47deb3a328b82b5e96383b",
+          "symbols": [
+            "CalcScratchMultiple",
+            "Unsupported interface"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/alg_attrs.h",
+          "sha256": "e6832b804e4aaad2e073467a37b73719009d1cd99b0e5fd7c2b29911aaf9e4fd",
+          "symbols": [
+            "CCU_SCHED_MAX_RANK_SIZE",
+            "UNSUPPORTED_INT8_AND_64BIT"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/inc/alg_param.h",
+          "sha256": "05f8f32a766a7a9559a25f599ab510a1d48a43d2b72a589f8e001bdc77c537c5",
+          "symbols": [
+            "UB_MAX_DATA_SIZE"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/template_utils.h",
+          "sha256": "5f0dad7502dba49a6df6bb886cc5cf3a9b0f65ae54e9ab671d6b632219417cb3",
+          "symbols": [
+            "struct TemplateDataParams",
+            "struct TemplateResource",
+            "struct TemplateFastLaunchCtx"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/common/alg_parse.cc",
+          "sha256": "fb8c2f520e615fcd71e86dc76817e4dca7ae1898fd017d9546be557696159d1d",
+          "symbols": [
+            "ComposeAlgoName"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/cost_table.cc",
+          "sha256": "105c5a60c037b7030e5e4db7c203dbe5767270dd2c972f08938dc1bfa5806c7b",
+          "symbols": [
+            "needSoftCheck"
+          ]
+        }
+      ]
+    },
+    "reduce-sole": {
+      "scope": "Reduce Sole：Sched Mesh mem2mem executor/template/kernel、启动缓存、API短路；MS仅列已存在注册，不覆盖其实现及其他多阶段变体",
+      "ops": [
+        "reduce"
+      ],
+      "reference": "references/operators/reduce.md",
+      "reviewed_heads": {
+        "hccl": "d749022326eb68a585851707bb0420f552ad12c3"
+      },
+      "reviewed_at": "2026-10-23",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/executor/reduce_sole_executor.cc",
+          "sha256": "bfe9bd1f3df64155b9131609a0070442d2a97159d5a3f2ce699d0587a9692b4e",
+          "symbols": [
+            "CalcRes",
+            "OrchestrateLoop",
+            "FastLaunch",
+            "CcuSchedReduceSoleMesh"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/executor/reduce_sole_executor.h",
+          "sha256": "9d517b8d132b307a3e04a6d0404c35ef5834ec0522def3794f0049e06848522d",
+          "symbols": [
+            "ReduceSoleExecutor"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/template/ccu/ccu_temp_reduce_mesh_1D_mem2mem.cc",
+          "sha256": "2c51de3ba35e62ec359578c02d3ddb7b613e5b87d9c1902ba9f301b03a6e5fc8",
+          "symbols": [
+            "CalcRes",
+            "KernelRun",
+            "FastLaunch"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/template/ccu/ccu_temp_reduce_mesh_1D_mem2mem.h",
+          "sha256": "238f4c4c667f006b15edd5f0621576c03f05d2df6335974f85a715542b5cfcc2",
+          "symbols": [
+            "CcuTempReduceMesh1DMem2Mem"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/template/ccu/kernel/ccu_kernel_reduce_mesh1d_mem2mem.cc",
+          "sha256": "aaf49268ffd2ed3bea76c901d247c8386fd24059eb70f7cd64327e4ae55dcef5",
+          "symbols": [
+            "LoadArgs",
+            "PreSync",
+            "PostSync"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/template/ccu/kernel/ccu_kernel_reduce_mesh1d_mem2mem.h",
+          "sha256": "0b865e9a3cc445024c60bf435374686283196bcaa0b1c9133a8fde0496c175ce",
+          "symbols": [
+            "CcuKernelArg"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/reduce.cc",
+          "sha256": "d9a1266adbc4bf9ea24c9d71939206fcb770d4f4221d975d4955dc666a760287",
+          "symbols": [
+            "SingleRankProc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/executor/CMakeLists.txt",
+          "sha256": "235793fb4d1e8bad5aab914e16bf2153b0e8aab5b31a4b3cba5a0fdeb66c1bac",
+          "symbols": [
+            "reduce_sole_executor.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/template/ccu/CMakeLists.txt",
+          "sha256": "79c7b9261df9190df3465387d61cedd6a9b395f00270ad71a0598811910bf0d1",
+          "symbols": [
+            "ccu_temp_reduce_mesh_1D_mem2mem.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/reduce/algorithm/template/ccu/kernel/CMakeLists.txt",
+          "sha256": "f4d66e9502b4337b437405139b810552866fdc69da6db270a8f9ca9874e9ba7c",
+          "symbols": [
+            "ccu_kernel_reduce_mesh1d_mem2mem.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.h",
+          "sha256": "cc21a1ffcb484d3782750d6939dbf76216a679c51f5eb5a1a472c125951821f8",
+          "symbols": [
+            "CalcScratchMultiple",
+            "GetRes"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.cc",
+          "sha256": "c82a2657bcf74a674421d3caaaba6cc99dff6ac9cc47deb3a328b82b5e96383b",
+          "symbols": [
+            "CalcScratchMultiple",
+            "Unsupported interface"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/alg_attrs.h",
+          "sha256": "e6832b804e4aaad2e073467a37b73719009d1cd99b0e5fd7c2b29911aaf9e4fd",
+          "symbols": [
+            "CCU_SCHED_MAX_RANK_SIZE",
+            "UNSUPPORTED_INT8_AND_64BIT"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/inc/alg_param.h",
+          "sha256": "05f8f32a766a7a9559a25f599ab510a1d48a43d2b72a589f8e001bdc77c537c5",
+          "symbols": [
+            "UB_MAX_DATA_SIZE"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/template_utils.h",
+          "sha256": "5f0dad7502dba49a6df6bb886cc5cf3a9b0f65ae54e9ab671d6b632219417cb3",
+          "symbols": [
+            "struct TemplateDataParams",
+            "struct TemplateResource",
+            "struct TemplateFastLaunchCtx"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/common/alg_parse.cc",
+          "sha256": "fb8c2f520e615fcd71e86dc76817e4dca7ae1898fd017d9546be557696159d1d",
+          "symbols": [
+            "ComposeAlgoName"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/cost_table.cc",
+          "sha256": "105c5a60c037b7030e5e4db7c203dbe5767270dd2c972f08938dc1bfa5806c7b",
+          "symbols": [
+            "needSoftCheck"
+          ]
+        }
+      ]
+    },
+    "scatter-sole": {
+      "scope": "Scatter Sole：Sched Mesh mem2mem executor/template/kernel、启动缓存、API短路；MS仅列已存在注册，不覆盖其实现及其他多阶段变体",
+      "ops": [
+        "scatter"
+      ],
+      "reference": "references/operators/scatter.md",
+      "reviewed_heads": {
+        "hccl": "d749022326eb68a585851707bb0420f552ad12c3"
+      },
+      "reviewed_at": "2026-10-23",
+      "files": [
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/executor/ins_v2_scatter_sole_executor.cc",
+          "sha256": "cdaa0fde81c115ff0ca904fa9f8d51a4cb1a52d81ffad76620a237b58339c88c",
+          "symbols": [
+            "CalcRes",
+            "OrchestrateLoop",
+            "FastLaunch",
+            "CcuSchedScatterSoleMesh"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/executor/ins_v2_scatter_sole_executor.h",
+          "sha256": "58d59f378b6366f1b0de51ef12e5bfb0b6a0f8a9e7d212ab2040946eb6d0a2aa",
+          "symbols": [
+            "InsV2ScatterSoleExecutor"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/template/ccu/ccu_temp_scatter_mesh1d.cc",
+          "sha256": "017c5d7f762aa42219bdc089080373caf7c4839680d6b6d58c48d87205d7fd89",
+          "symbols": [
+            "CalcRes",
+            "KernelRun",
+            "FastLaunch"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/template/ccu/ccu_temp_scatter_mesh1d.h",
+          "sha256": "d48bec0d38f369cd29b2df35f29f0113911088ff75ba8d19d560b31b4b8a54db",
+          "symbols": [
+            "CcuTempScatterMesh1D"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/template/ccu/kernel/ccu_kernel_scatter_mesh1d.cc",
+          "sha256": "6c0c610fb78a81e89d230bc3bf3c8e649a52a673a1811914088e34f49fc9babc",
+          "symbols": [
+            "LoadArgs",
+            "PreSync",
+            "PostSync"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/template/ccu/kernel/ccu_kernel_scatter_mesh1d.h",
+          "sha256": "eaac14540edfb87686677ab18c2460543ec84dc3cb448f597307a9d331eee051",
+          "symbols": [
+            "CcuKernelArg"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/scatter.cc",
+          "sha256": "be4e6ee87c9dc18b70f5fb107f6df0a01d1e827954fbac76f4068d2313ef1116",
+          "symbols": [
+            "SingleRankProc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/executor/CMakeLists.txt",
+          "sha256": "c8a4891f472f9741321dd0843d21ec6824cb1262409a7891814e62a3c5374b5f",
+          "symbols": [
+            "ins_v2_scatter_sole_executor.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/template/ccu/CMakeLists.txt",
+          "sha256": "d871668f3ff801b365b3c1dfa0edfd30a879282d3ace8365f88fd64002ee7f23",
+          "symbols": [
+            "ccu_temp_scatter_mesh1d.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/scatter/algorithm/template/ccu/kernel/CMakeLists.txt",
+          "sha256": "dc7a262389d36e1e8ca7f8bfc7bf1636c5f149572183a08a3b5aa9ba28d255ac",
+          "symbols": [
+            "ccu_kernel_scatter_mesh1d.cc"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.h",
+          "sha256": "cc21a1ffcb484d3782750d6939dbf76216a679c51f5eb5a1a472c125951821f8",
+          "symbols": [
+            "CalcScratchMultiple",
+            "GetRes"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/ccu_alg_template_base.cc",
+          "sha256": "c82a2657bcf74a674421d3caaaba6cc99dff6ac9cc47deb3a328b82b5e96383b",
+          "symbols": [
+            "CalcScratchMultiple",
+            "Unsupported interface"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/alg_attrs.h",
+          "sha256": "e6832b804e4aaad2e073467a37b73719009d1cd99b0e5fd7c2b29911aaf9e4fd",
+          "symbols": [
+            "CCU_SCHED_MAX_RANK_SIZE",
+            "UNSUPPORTED_INT8_AND_64BIT"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/inc/alg_param.h",
+          "sha256": "05f8f32a766a7a9559a25f599ab510a1d48a43d2b72a589f8e001bdc77c537c5",
+          "symbols": [
+            "UB_MAX_DATA_SIZE"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/algorithm/template/template_utils.h",
+          "sha256": "5f0dad7502dba49a6df6bb886cc5cf3a9b0f65ae54e9ab671d6b632219417cb3",
+          "symbols": [
+            "struct TemplateDataParams",
+            "struct TemplateResource",
+            "struct TemplateFastLaunchCtx"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/common/alg_parse.cc",
+          "sha256": "fb8c2f520e615fcd71e86dc76817e4dca7ae1898fd017d9546be557696159d1d",
+          "symbols": [
+            "ComposeAlgoName"
+          ]
+        },
+        {
+          "repo": "hccl",
+          "path": "src/ops/op_common/selector/cost_table.cc",
+          "sha256": "105c5a60c037b7030e5e4db7c203dbe5767270dd2c972f08938dc1bfa5806c7b",
+          "symbols": [
+            "needSoftCheck"
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "model": "hccl-test-allgather-align-ceil-v1",
+  "reviewed_at": "2026-10-23",
+  "source": "CANN 9.2.0 installed hccl_test; AllGather only",
+  "sources": {
+    "common/src/hccl_test_common.cc": "eb815fb31039c93669dce5fcb776be60de6ec661bcaf87f182e1e1b92c2834cb",
+    "common/src/hccl_test_common.h": "607a9e1729425796b06fa9a27021452afce30199ec809377e1997bddb059c6e4",
+    "common/src/hccl_opbase_rootinfo_base.cc": "239c9b1d06937bf253ed82daba2762fd60e8cc75e5ac4e09f22e95cb814d5ff8",
+    "opbase_test/hccl_allgather_rootinfo_test.cc": "8a5339c7310160c8028dc4d481b9a44a9326979124c8ccf7b5b31732b9015d15"
+  }
+}

@@ -11,6 +11,7 @@ CANNBot Skills 项目文档索引。各文档的入口与推荐阅读顺序如�
 | [使用样例](skills-usage.md) | 各 Skill 可复制的 prompt 样例 | 所有用户 |
 | [架构设计](architecture-design.md) | 三层架构与各开发路径逻辑视图 | 贡献者 |
 | [开发规范](STANDARDS.md) | 命名、结构、分类体系、代码规范 | 贡献者 |
+| [CCU Skill 维护与评测](hccl-ccu-skill-maintenance.md) | 工具回归、来源基线维护、行为评测与效率记录 | CCU Skill 维护者 |
 | [贡献指南](CONTRIBUTING.md) | 贡献流程、准入门槛、评审规则 | 贡献者 |
 | [治理规范](GOVERNANCE.md) | 成文法+判例法模型、角色职责 | Committer / 贡献者 |
 

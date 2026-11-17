@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "pools": [
+    {
+      "name": "N=2 shared prev/next receiver",
+      "source_evidence": "operator-contracts.md Ring 示例；落地时替换为本任务源码/设计位置并核对 channel 去重",
+      "xn_indices": [
+        1,
+        2
+      ],
+      "epochs": [
+        {
+          "name": "whole-invocation",
+          "signals": [
+            {
+              "name": "ADDR",
+              "slot": 0,
+              "mask": 6
+            },
+            {
+              "name": "DATA0",
+              "slot": 0,
+              "mask": 1
+            },
+            {
+              "name": "POST",
+              "slot": 3,
+              "mask": 32768
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "N=64 receiver from prev",
+      "source_evidence": "operator-contracts.md Ring 示例；落地时替换为本任务源码/设计位置并核对 channel 去重",
+      "xn_indices": [],
+      "epochs": [
+        {
+          "name": "whole-invocation",
+          "signals": [
+            {
+              "name": "DATA0..15",
+              "slot": 0,
+              "mask": 65535
+            },
+            {
+              "name": "DATA16..31",
+              "slot": 1,
+              "mask": 65535
+            },
+            {
+              "name": "DATA32..47",
+              "slot": 2,
+              "mask": 65535
+            },
+            {
+              "name": "DATA48..62",
+              "slot": 3,
+              "mask": 32767
+            },
+            {
+              "name": "POST",
+              "slot": 3,
+              "mask": 32768
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "N=64 receiver from next",
+      "source_evidence": "operator-contracts.md Ring 示例；落地时替换为本任务源码/设计位置并核对 channel 去重",
+      "xn_indices": [
+        1,
+        2
+      ],
+      "epochs": [
+        {
+          "name": "whole-invocation",
+          "signals": [
+            {
+              "name": "ADDR",
+              "slot": 0,
+              "mask": 6
+            },
+            {
+              "name": "POST",
+              "slot": 3,
+              "mask": 32768
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "compute_ops": {
+    "target_generator": "UNKNOWN",
+    "operations": [
+      {
+        "expression": "offset = 0; doubled = stride",
+        "rep": "ASSIGN",
+        "source_evidence": "替换为本任务初始化方法/行号；独立 Variable 句柄赋值"
+      },
+      {
+        "expression": "offset += doubled; doubled += doubled",
+        "rep": "ADD",
+        "source_evidence": "替换为本任务 host-index 二进制分解方法/行号；host 判断不产生 Variable MUL/SHL"
+      }
+    ]
+  }
+}

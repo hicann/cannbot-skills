@@ -1,0 +1,284 @@
+{
+  "skill_name": "hccl-ccu-best-practice",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "新 CCU Ring 算法",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "为 HCCL AllReduce 新增 CCU Ring。给定已确认的 HCCL/HCOMM 仓，支持 fp32/sum、4 和 8 rank、单 server，保持默认选路。请说明设计和实现顺序；仅输出方案，不运行构建。",
+      "expected_output": "先确认目标 CCU 模式/版本与拓扑、count 和验收范围，推导分阶段片归属、字节范围和归约贡献；不把 Mesh 线程数或同步常量复制为 Ring。明确 template/kernel、按需 executor/selector/属性/CMake；只显式启用且默认路由不变。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "启动参数与缓存混淆",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "CCU host launch 传 15 个 uint64_t 槽，kernel 使用 LoadArg 0..14；cachedArgs 有 17 项，后两项是输入输出基址偏移。能否把 FastLaunch 的 argNum 改成 sizeof(cachedArgs)？仅分析。",
+      "expected_output": "指出启动计数是槽数而不是字节，缓存尾部 metadata 不发送，仍按 15 槽；核对实际 LoadArg、缓存前缀与动态字段。引用检查器只核验声明，不能单凭静态结果证明 C++ 正确。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "15"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "重放遗漏派生字段",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "第一次 CCU AllGather 正确，替换 input/output 指针重放失败；FastLaunch 只改两个地址，isInputOutputEqual 仍取缓存。只读分析排查路径。",
+      "expected_output": "检查 alias/in-place 派生标志、基址偏移、token 注册域和缓存失效；先定位实际路径与证据，不能把既有源码当修改目标并直接写文件。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "isInputOutputEqual"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "host 与运行期控制流",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "CCU kernel 用 LoadArg(v,0) 加载长度后，可以用普通 C++ if (v != 0) 和 for 循环实现运行期分支吗？",
+      "expected_output": "区分 host 指令生成与 CCU 运行期，动态条件使用目标支持的 CCU_IF/CCU_WHILE，静态拓扑可用 C++ 展开；核对宏和 Variable 重载，不假设数值语义。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "CCU_IF"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "多 rank 掩码与空数据死锁",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "20 rank 的 CCU kernel 用 uint16_t mask = 1 << rank，并在本 rank slice 为 0 时直接 return；其他 rank 固定等待所有 peer 的 Notify。评审这两个设计。",
+      "expected_output": "发现超过16位信号需分组或重设计，检查等待位与producer覆盖；零片仍可能需地址交换和完成通知，分析跨rank依赖，不能建议统一早退。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "16"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "旧接口与版本漂移",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "只有 HCOMM legacy 的 CcuContext 示例，当前 HCCL 用 CcuAlgTemplateBase 和 CcuKernelArg。是否可复制旧实现并 include HCOMM 私有头？",
+      "expected_output": "使用显式仓根运行来源检查，按目标 template/kernel/dlsym 实现重新建立接口，不复制legacy为新特性；公开文档与代码冲突时查证版本，不能臆造桥接API。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "dlsym"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "没有硬件时交付",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "CCU Skill 的参数检查器通过，host 构建通过，但没有CCU设备、没有VM运行结果。请给出准确验收结论和后续测试范围。",
+      "expected_output": "只确认声明契约和host构建，功能、实际选路、资源/同步、FastLaunch重放及性能未验证；不能宣布算法完整可用或性能提升。给出定向命中、默认回归和目标边界矩阵。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "只读评审及构建登记",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "仅评审一个现有 CCU template/kernel 的 CMake 接线，不修改任何文件。有人要求同时把它加进 libscatter_aicpu_kernel.so 并启动 HCCLBot AICPU 工作流。应如何处理？",
+      "expected_output": "以当前CCU样本的hccl target及上级CMake为依据做只读核验；不套AICPU device库登记，不触发插件多Agent工作流、环境安装或编译。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "复用已校验接入卡",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "当前目标是 AllGather Sole 的 CCU_SCHED 新算法，接入卡状态 MATCH，设计已经记录卡的适用范围与来源哈希。实现阶段应如何查证接口？",
+      "expected_output": "复用卡的 buffer/stride/loop/资源契约，只查看被改方法及新增依赖；不全仓扫描 HCOMM 或重读全部 Mesh/NHR；Reviewer 仍独立审查算法关键结论。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 10,
+      "title": "实现配额与文档偏差",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "目标 HCOMM 的 INIT_CKE_NUM=4、INIT_XN_NUM=4，但旧文档写 Notify 0..7。算法拟用 POST slot=5；N 上界64。设计冻结前应如何验证？",
+      "expected_output": "依实际分配配额拒绝 POST=5；区分 slot 和 mask bit，按每张接收表及 N=2 去重/N=64 上界建立 sync-contract 并运行检查器；不以文档扩大配额，不把 JSON 校验当活性证明。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 11,
+      "title": "矩阵可表达性和内存",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "AllGather VM 8rank，计划以 -s=2.25GiB 触发多 loop，并以 -s 1 验证 count=0，宿主机可用内存42GiB。测试前应怎样处理？",
+      "expected_output": "先核对 -s 总量含义和实际对齐/count、源码提前返回；计算 N*S 输出叠加 Checker/常驻/并发的峰值并留余量，不直接启动该用例、不靠 -s 1 冒充零数据；预算不够或不可达则明确未验证。64MiB只是历史现场例子。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 12,
+      "title": "V1不支持运行期乘法",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "设计欲以 ccu::Variable stride * uint16_t(host_index) 计算偏移，目标环境已确认 CcuInsGeneratorV1，API有operator*且编译通过。应如何决定？",
+      "expected_output": "识别MUL rep不在V1表，设计冻结前拒绝直接乘法；用host预乘或ASSIGN/ADD链并核对ABI、句柄别名及溢出，声明实际lowering。未知代际不能假定V2，不能靠编译通过或重跑判定。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 13,
+      "title": "单rank定向断言不可观测",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "AllGather 首次N=1走标准API，在SingleRankProc后返回。测试计划为该行配置 --expect-algo CcuSchedAllGatherSoleRing。请评审可执行性。",
+      "expected_output": "识别Selector前短路，正常算法命中日志不可达；首版明确替代API功能断言或LT/UNVERIFIED，不能把API短路PASS当新kernel覆盖，也不能以缺日志触发SOURCE修复。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 14,
+      "title": "框架调用契约复用",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "给定目标HCCL/HCOMM，新增AllGather Sole CCU template：仅提供带参构造，继承基类CalcCostCoeff/GetThreadNum，连续用同一个vector调用两次CreateChannelRequestByRankId以收集两个peer。只读检视此草案，不编译不运行设备；框架卡MATCH且适用。",
+      "expected_output": "从框架方法卡定位默认构造用于FastLaunch、成本空结果导致剔除、GetThreadNum默认0和建链clear语义；按目标调用方核对实际影响和替代方案，不从Mesh/NHR整篇重新提炼方法表，不把固定任务系数当通用公式。 GetThreadNum=0须按实际消费者判断；Sole的FastLaunchSaveCtx取templateAlgRes.threads.size()，不能仅凭默认返回0断言Sole运行失败。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 15,
+      "title": "漂移的定向补查",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "新增算法前知识卡CHANGED：executor相对核验版本只移除了一个算法include/注册块，当前树无可选历史Ring样本。已有基座与算术/同步卡可用。应该读取哪些证据、如何继续？",
+      "expected_output": "用check_knowledge --summary --explain输出经哈希核验的基线差异与符号位置，定向验证注册变化与相关契约；CHANGED不自动变MATCH。基线对象缺失则明确BASELINE_UNAVAILABLE，不伪造diff。未使用历史样本不阻塞，也不退回全仓扫描。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 16,
+      "title": "数据流产物不重复完整方案",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "调用方已经冻结TASK_SPEC、DESIGN、PLAN、TEST_PLAN，并维护launch/sync/compute_ops三个技术声明。现在为一个新CCU template编写Dataflow Spec，给出所需结构，不重复整份技术设计。",
+      "expected_output": "用assets/dataflow-spec-template.md，保留分阶段数据所有权、地址范围、资源/同步依赖、无环/边界与重放证明；参数/槽/池/算术值引用JSON字段，文件改动与矩阵引用现有产物。不复制第二份完整槽表/测试矩阵，也不因精简删关键证明。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 17,
+      "title": "测试输入实际量与通信域编号",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "使用CCU Skill制定AllGather矩阵：hvm通信域118、int32、请求字节1/1048576/1048579，认为分别覆盖零数据、大数据和尾块。现场hccl_test源码与Skill模型匹配，给出预检与覆盖判断，不运行测试。",
+      "expected_output": "读取已安装hvm映射确认118为8rank；运行preview_allgather_cases.py。1字节预测count/rank=1、总输出32，非零数据；1048576和1048579有效输入相同，count/rank=32768，不能新增尾块覆盖。不按CLI字节直接做整数除法，不凭源码哈希假定二进制对应关系；预算叠加现场开销。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 18,
+      "title": "输入模型漂移后不猜测",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "工具源码check_data_count与已核验profile不同，要求快速给出非对齐用例实际count并冻结测试计划。",
+      "expected_output": "预检非零返回SOURCE_MODEL_UNVERIFIED且不发出count；定向核对变化的解析/对齐/元素计算方法后再更新模型，不能仅换哈希、自动扩大调研或沿用旧预测冻结。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 19,
+      "title": "AllReduce按算子预检",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "使用CCU Skill，只读准备8rank/int32/sum的AllReduce接入和测试计划。S=1048576及1048579是否等效？不要构建。",
+      "expected_output": "按all_reduce卡和profile核验；不套rank对齐；C分别262144、262145，后者有效bytes1048580；核对Sole stride0、scratch倍数N、对称内存loop分支、注册限制及真实命中/Checker缺口。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 20,
+      "title": "ReduceScatter输入块与输出count",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "为ReduceScatter CCU_SCHED算法确认8rank/int32、CLI大小1048579的输入模型和多loop字段，仅读源码。",
+      "expected_output": "C=32768，输入1048576输出131072每rank，inputSliceStride为整次输出bytes，outputSliceStride=0；不是AllGather输出stride；loop基于recvCount且scratch约束；只加载本算子和公共卡。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 21,
+      "title": "Broadcast别名与非零root",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "规划Broadcast CCU测试，8rank/int32，请求1字节，root7。当前HVM计划能否直接表达？只输出有依据的计划。",
+      "expected_output": "C=1，每rank单buf4bytes、总基本分配32bytes，root映射kernelArg；不是两个分配。当前HVM默认root0，需核对定向runner或直接MPI并保存同等证据，预检不证明已覆盖；内部字节分片不能凭API对齐证明。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 22,
+      "title": "Reduce动态ABI与语义内存",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "给Reduce CCU_SCHED做接入摘要，8rank/int32/max/root7、请求1字节。关注启动参数和内存，仅读源码。",
+      "expected_output": "ReduceSoleExecutor文件名没有ins_v2；C=1，工具每rank分配4+4、总64，不把非root无语义输出当未分配；launch槽数N+12，缓存头存槽数且从args+1发送；N-1切片和16位mask边界；当前HVM默认sum/root0不覆盖max/root7。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 23,
+      "title": "Scatter重放与缓冲区角色",
+      "config": {
+        "eval_mode": "text"
+      },
+      "prompt": "用CCU Skill规划Scatter，8rank/int32/root7、S=1，多次换地址FastLaunch测试，禁止修改生产仓。",
+      "expected_output": "C=1；工具每rank分配32+4，总288，非root输入无语义仍分配；inputStride=整次每rankrecvbytes；Sole Sched有注册但不能推断MS；cachedArgs0/1偏移原地转绝对地址后连续重放有风险，要求实际地址证据，不能声称重复n次已验证。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}

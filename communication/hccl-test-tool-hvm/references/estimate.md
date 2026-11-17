@@ -9,6 +9,19 @@
 - 默认组网为 `112`。用户指定组网时，将 `hccl-vm mock-comm 112` 的参数改为对应通信域，核对当前集群配置支持该拓扑。此处通信域参数与 `mpirun -np` 是两个独立参数。
 - 确认目标算法支持所选组网。若默认 112 无法命中或不被目标算法支持，记录限制并交由调用方确认适用组网，不能把其他算法的估算记为此次开发算法的结果。
 - 沿用功能验证中已核验的显式选路配置（如 `HCCL_ALGO`，需要时），并从本次原始日志核对实际算法注册名。1G 数据量或组网变化可能改变选路，功能验证的命中证据不能代替本次命中证据。
+- 核对当前安装提供 `@estimate` 及其 Python/simpy 依赖；缺失时记录 NOT_READY 和具体证据，不自行安装。估算单独记录环境，结束后恢复本次覆盖的配置，不将其带入 Checker 会话。
+
+### estimate 环境与 CCU 模式
+
+目标 HCOMM 的 `test/hccl_vm/README.md` §4.9.4 要求估算业务启动前关闭链路心跳和一致性校验（幻影对端无法参与），在独立估算 shell/会话准备：
+
+```bash
+export HCCL_DFS_CONFIG=cluster_heartbeat:off,inconsistent_check:off
+```
+
+有其他已确认 DFS 配置时保留其余项，仅合并上述两个键。此设置仅用于 estimate，不代替功能验证的冻结配置。
+
+CCU 还须继承本次功能验证的模式和依赖身份，在启动 estimate 会话前设置 `HCCL_OP_EXPANSION_MODE` 为冻结的 `CCU_SCHED` 或 `CCU_MS`，并沿用已核验的 `HCCL_ENABLE_OPEN_CCU=1` 与显式选路配置；不切换为 AI_CPU。核对本次实际加载的 HCCL/HCOMM 库和候选包，记录两仓身份及模式。当前工具不能估算该模式/算法时记录失败与限制，不用其他模式或 fallback 的耗时代替。固定单进程估算也不证明单 rank 算法分支或全 rank 功能覆盖。
 
 ## 执行方法
 
@@ -82,6 +95,9 @@ hccl-vm plugin run @estimate
 | `parameters` | `{"np": 1, "begin": "1G", "end": "1G", "warmup": 0, "iterations": 1, "check": 0}` |
 | `exit_codes` | `start`、`mock_comm`、`mpirun`、`estimate` 四个整数退出码，成功时全部为 `0`；start 为会话结束后取得的真实退出码 |
 | `files` | `candidate_package`、`cluster`、`test_log`、`plugin_log`、`profiling`、`trace` 六项，每项为 `{"path": "绝对路径", "sha256": "64位小写十六进制"}` |
+| `engine`（CCU 必填） | 字符串 `CCU`；AICPU 原有证据无需补该字段 |
+| `ccu_mode`（CCU 必填） | 本次实际模式 `CCU_SCHED` 或 `CCU_MS`，与冻结设计/测试计划一致 |
+| `hcomm_source_identity`（CCU 必填） | 与功能验证及调用方登记一致的 HCOMM 依赖身份；`source_identity` 仍为 HCCL 单仓身份，不拼接两串 |
 
 `candidate_package` 指功能验证和估算共同使用的归档候选包；`cluster` 指本次实际集群配置。`profiling` 指本次 `perf_profiling.json`，`trace` 指对应目标算子/迭代的 trace 文件。存在多个 trace 时，分别在报告中列出，`files.trace` 记录与该条估算耗时对应的文件。
 
