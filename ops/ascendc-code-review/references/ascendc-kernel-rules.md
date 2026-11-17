@@ -956,7 +956,7 @@ VF（Vector Function）任务的正确实现方式为**具名 VF 函数 + asc_vf
 | 定义 | 具名 VF 函数 + 限定符：`__simd_vf__`（向量级并行）/ `__simt_vf__`（线程级并行），返回类型必须为 void |
 | 启动 | `asc_vf_call<funcName>(dim3 threadNums, args...)`（头文件 `simt_api/common_functions.h`，threadNums 总数 ≤ 2048，建议 32 的倍数） |
 
-**与 SIMT-1-5 的边界**：SIMT-1-5（ascendc-simt.md）管旧 C++ 风格调用 `Simt::VF_CALL` → `asc_vf_call` 的转换；本条管 `__VEC_SCOPE__` 内联块 → 具名 VF 函数化。两者独立判定，同现可双报。
+**与 SIMT-5 的边界**：SIMT-5（ascendc-simt.md）管旧 C++ 风格调用 `Simt::VF_CALL` → `asc_vf_call` 的转换；本条管 `__VEC_SCOPE__` 内联块 → 具名 VF 函数化。两者独立判定，同现可双报。
 
 ### 错误示例
 

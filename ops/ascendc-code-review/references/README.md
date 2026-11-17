@@ -6,7 +6,7 @@
 
 <table>
   <thead>
-    <tr><th>#</th><th>规则分类</th><th>规则文件</th><th>条款数(总计:194)</th><th>规则描述</th><th>规则缩写</th><th>适用语言</th><th>适用侧别</th></tr>
+    <tr><th>#</th><th>规则分类</th><th>规则文件</th><th>条款数(总计:202)</th><th>规则描述</th><th>规则缩写</th><th>适用语言</th><th>适用侧别</th></tr>
   </thead>
   <tbody>
     <tr><td>1</td><td rowspan="2">AscendC红线和topN</td><td>ascendc-red-line.md</td><td>10</td><td>生产环境总结的红线问题清单</td><td>RED</td><td>C++</td><td>All</td></tr>
@@ -19,7 +19,7 @@
     <tr><td>8</td><td>cpp-general.md</td><td>39</td><td>C++通用编码规范</td><td>GEN</td><td>C++</td><td>All</td></tr>
     <tr><td>9</td><td>cpp-style.md</td><td>16</td><td>C++代码风格规范</td><td>STYLE</td><td>C++</td><td>All</td></tr>
     <tr><td>10</td><td rowspan="3">领域专项规则</td><td>mc2-specific.md</td><td>41</td><td>MC2通信计算领域规则</td><td>MC2</td><td>不限</td><td>All</td></tr>
-    <tr><td>11</td><td>ascendc-simt.md</td><td>15</td><td>AscendC SIMT领域规范</td><td>SIMT</td><td>C++</td><td>Kernel</td></tr>
+    <tr><td>11</td><td>ascendc-simt.md</td><td>23</td><td>AscendC SIMT领域规范</td><td>SIMT</td><td>C++</td><td>Kernel</td></tr>
     <tr><td>12</td><td>blaze-specific.md</td><td>21</td><td>Blaze矩阵乘框架领域规则</td><td>BLAZE</td><td>C++</td><td>Host, Kernel</td></tr>
   </tbody>
 </table>
