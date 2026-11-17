@@ -126,7 +126,7 @@ run_check "SEC-12: mock 就绪探测使用 --noproxy（企业代理环境不误�
 DOCS=(
     "README.md"
     "docs/installation-guide.md"
-    "plugins-community/install-helper/README.md"
+    "scripts/install-helper/README.md"
 )
 
 print_section "Static: docs keep one-liner + security note"

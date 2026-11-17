@@ -18,8 +18,10 @@ cannbot-skills/
 │   ├── ops-registry-invoke/         # AscendC 算子注册调用开发
 │   └── tilelang-op-orchestrator/    # TileLang 算子开发
 ├── plugins-community/               # 社区 Plugins
-│   ├── install-helper/              # CANNBot Install Helper 工具
 │   └── tilelang2ascendc-ops-generator/   # AscendC 算子自动生成 Team（实验性）
+├── tools/                           # CANN 工具链 Skills
+├── scripts/                         # 仓库级脚本与安装工具
+│   └── install-helper/              # CANNBot Install Helper 工具
 ├── infra/                           # 基础设施维护 Skills
 ├── docs/                            # 项目文档
 └── tests/                           # 自动化测试框架

@@ -341,14 +341,17 @@ def test_repository_exposes_only_the_handler_public_name():
     marketplace = (REPO_ROOT / ".claude-plugin" / "marketplace.json").read_text(
         encoding="utf-8"
     )
-    registry = (
-        REPO_ROOT
-        / "plugins-community"
-        / "install-helper"
-        / "src"
-        / "core"
-        / "skill-registry.ts"
-    ).read_text(encoding="utf-8")
+    # install-helper was relocated from plugins-community/ to scripts/, so locate the
+    # registry by file name instead of hardcoding its parent directory.
+    registry_candidates = sorted(
+        REPO_ROOT.glob("*/install-helper/src/core/skill-registry.ts")
+    )
+    assert len(registry_candidates) == 1, (
+        "expected exactly one install-helper/src/core/skill-registry.ts under "
+        f"{REPO_ROOT}, found "
+        f"{[str(candidate.relative_to(REPO_ROOT)) for candidate in registry_candidates]}"
+    )
+    registry = registry_candidates[0].read_text(encoding="utf-8")
     public_name = "gitcode-issue-handler"
 
     assert marketplace.count(f'"./{public_name}"') == 1

@@ -78,13 +78,15 @@ cannbot-skills/
 ├── infra/                    # 基础设施 Skills（跨领域工具）
 │   ├── gitcode-toolkit/
 │   └── ...
-├── tools/                    # CANN 工具链 Skills（工具使用指导）
+├── tools/                    # CANN 工具链 Skills
 │   ├── tool-asys/
 │   ├── tool-msaicerr/
 │   ├── tool-msnpureport/
 │   ├── tool-atc/
 │   ├── tool-hdc/
 │   └── tool-npu-compute/
+├── scripts/                   # 仓库级脚本与安装工具
+│   └── install-helper/       # 安装引导工具（npm @cannbot-ai/install-helper）
 ├── plugins-official/         # 官方 Plugin（Plugin 配置 + Agents + init.sh）
 │   ├── ops-registry-invoke/  # 算子开发 Plugin（示例）
 │   │   ├── agents/           # Agent 定义（.md）

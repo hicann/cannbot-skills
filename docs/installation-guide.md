@@ -63,11 +63,11 @@ npm install -g @cannbot-ai/install-helper
 | `install-helper doctor --fix` | 健康检查 + 自动修复 |
 | `install-helper lang set en_US` | 切换语言 |
 
-> 完整命令参考和详细文档：[install-helper README](../plugins-community/install-helper/README.md)
+> 完整命令参考和详细文档：[install-helper README](../scripts/install-helper/README.md)
 
 ### 安装 cannbot 仓插件
 
-部分插件已迁移至 [cannbot 仓](https://gitcode.com/cann/cannbot) 维护，install-helper 直接支持：无需更换工具，`install-helper install <插件名>` 即可，产物与官方安装器直装完全一致（详见 [install-helper README](../plugins-community/install-helper/README.md#安装-cannbot-仓插件)）。
+部分插件已迁移至 [cannbot 仓](https://gitcode.com/cann/cannbot) 维护，install-helper 直接支持：无需更换工具，`install-helper install <插件名>` 即可，产物与官方安装器直装完全一致（详见 [install-helper README](../scripts/install-helper/README.md#安装-cannbot-仓插件)）。
 
 ```bash
 install-helper install ops-direct-invoke --tool opencode

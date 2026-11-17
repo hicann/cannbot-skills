@@ -233,12 +233,12 @@ install-helper lang set en_US      # 切换为英文
 
 ## 适配范围
 
-- **当前适配本仓官方插件及已迁移至 cannbot 的插件**（见上表）。社区插件（`plugins-community/`）迭代较快，暂不纳入 install-helper——`list`/`install` 不收录，社区插件请进入其目录按 quickstart.md 手动执行 `init.sh` 安装；待社区插件稳定后会在配置中恢复收录
+- **适配本仓全部插件**（官方 + 社区，见上表）及已迁移至 cannbot 的插件。社区插件（`plugins-community/`）同样可通过 `list`/`install` 直接安装；带 `init.sh` 的插件也可进入其目录按 quickstart.md 手动执行
 - **本仓插件支持的工具以其 `init.sh` 为准**，已迁移插件还须符合上述委托范围。install-helper 在执行安装脚本前会校验目标工具是否被插件适配，未适配时明确报错拦截，不会静默安装到默认目录
 
 ## 前置条件
 
-- 已安装至少一个 AI 编程工具（OpenCode / Claude Code / Trae / Cursor / Codex / GitHub Copilot / CodeArts）
+- 已安装至少一个 AI 编程工具（OpenCode / Claude Code / Trae / Cursor / Codex / GitHub Copilot / CodeArts / Qoder / DSH）
 - Git（用于克隆 Skills 仓库）
 
 ## Codex 安装说明
@@ -261,7 +261,7 @@ install-helper install torch-compile --tool codex        # 迁移至 cannbot，�
 
 ```bash
 git clone https://gitcode.com/cann/cannbot-skills.git
-cd cannbot-skills/plugins-community/install-helper
+cd cannbot-skills/scripts/install-helper
 
 npm install
 npm run dev          # watch 模式

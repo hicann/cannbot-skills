@@ -99,6 +99,7 @@ cannbot-skills/
 ├── tools/                # CANN / 端侧工具链 Skills
 ├── plugins-official/     # 官方 Plugins（开发路径入口，含 Agents/Workflows）
 ├── plugins-community/    # 社区 Plugins
+├── scripts/              # 仓库级脚本与安装工具（含 install-helper）
 ├── docs/                 # 项目文档
 └── tests/                # 自动化测试框架
 ```
