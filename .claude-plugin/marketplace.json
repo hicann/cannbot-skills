@@ -470,87 +470,6 @@
       ]
     },
     {
-      "name": "cannbot-knowledge-consumer-skills",
-      "description": "cannbot-knowledge 只读消费 Skill 套件（knowledge-query）。用于知识检索、知识依赖前置检索和文档查找场景。",
-      "source": "./plugins-community/cannbot-knowledge/skills",
-      "strict": false,
-      "version": "1.0.0",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "knowledge-base",
-        "knowledge-query",
-        "retrieval"
-      ],
-      "category": "skills",
-      "skills": [
-        "./knowledge-query"
-      ]
-    },
-    {
-      "name": "cannbot-knowledge-issue-skills",
-      "description": "cannbot-knowledge Issue 处理 Skill 套件（knowledge-issue-report）。用于整理复现材料并生成可提交的 Issue 草稿。",
-      "source": "./plugins-community/cannbot-knowledge",
-      "strict": false,
-      "version": "1.0.0",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "knowledge-base",
-        "knowledge-issue-report",
-        "issue"
-      ],
-      "category": "skills",
-      "skills": [
-        "./skills/knowledge-issue-report"
-      ]
-    },
-    {
-      "name": "cannbot-knowledge-contributor-skills",
-      "description": "cannbot-knowledge 知识贡献 Skills（7 个）。覆盖知识编译、知识治理、知识检索、Issue 材料整理、算子 wiki 生成和提交前体检。",
-      "source": "./plugins-community/cannbot-knowledge",
-      "strict": false,
-      "version": "1.0.0",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "knowledge-base",
-        "ascendc",
-        "governance"
-      ],
-      "category": "skills",
-      "skills": [
-        "./skills/ops-knowledge-ingest",
-        "./skills/ops-knowledge-reference-ingest",
-        "./skills/ops-knowledge-vv-ingest",
-        "./skills/ops-knowledge-cv-ingest",
-        "./skills/knowledge-lint",
-        "./skills/knowledge-query",
-        "./skills/knowledge-issue-report"
-      ]
-    },
-    {
-      "name": "cannbot-knowledge",
-      "source": "./plugins-community/cannbot-knowledge",
-      "description": "cannbot-knowledge 团队能力入口，提供知识编译、治理、检索和 Issue 归档完整能力。",
-      "version": "0.1.2",
-      "author": {
-        "name": "CANNBot"
-      },
-      "keywords": [
-        "knowledge-base",
-        "ascendc",
-        "plugin"
-      ],
-      "category": "development",
-      "dependencies": [
-        "cannbot-knowledge-contributor-skills"
-      ]
-    },
-    {
       "name": "tilelang2ascend-ops-developer-skills",
       "description": "TileLang2AscendC 算子自动生成 Skills（7 个）。TileLang 设计、AscendC 转译、Case 精简、性能分析、精度调优、Trace 记录。",
       "source": "./community/ops",
@@ -573,6 +492,10 @@
         "./tilelang2ascend-trace-recorder",
         "./tilelang2ascend-operator-project-init",
         "./tilelang2ascend-precision-tuning"
+      ],
+      "dependencies": [
+        "knowledge-query",
+        "knowledge-ingest"
       ]
     },
     {
@@ -713,6 +636,37 @@
       "category": "skills",
       "skills": [
         "./science-model-npu-migration"
+      ]
+    },
+    {
+      "name": "knowledge-query",
+      "source": "./infra",
+      "description": "通用知识检索，自动准备知识库、运行依赖和索引。",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "category": "skills",
+      "skills": [
+        "./knowledge-query"
+      ]
+    },
+    {
+      "name": "knowledge-ingest",
+      "source": "./infra",
+      "description": "通用知识生成与入库原则，包含知识库安装入口。",
+      "strict": false,
+      "version": "1.0.0",
+      "author": {
+        "name": "CANNBot"
+      },
+      "category": "skills",
+      "skills": [
+        "./knowledge-ingest"
+      ],
+      "dependencies": [
+        "knowledge-query"
       ]
     }
   ]

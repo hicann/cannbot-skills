@@ -564,6 +564,11 @@ get_incremental_tests() {
             tests+="unit/infra/test-gitcode-issue-workflow.sh:fast\n"
         fi
 
+        if [[ "${CHANGED_SKILLS[knowledge-query]:-}" == "1" || \
+              "${CHANGED_SKILLS[knowledge-ingest]:-}" == "1" ]]; then
+            tests+="unit/infra/test-knowledge-skills.sh:fast\n"
+        fi
+
         if [[ "${CHANGED_SKILLS[ascendc-evolution-world-model]:-}" == "1" || \
               "${CHANGED_SKILLS[ascendc-evolution-strategies]:-}" == "1" || \
               "${CHANGED_SKILLS[ascendc-evolution-knowledge]:-}" == "1" ]]; then
@@ -629,6 +634,7 @@ get_tests_for_category() {
             echo "unit/test-evolution-diagnosis-contract.sh:fast"
             echo "unit/test-evolution-evaluation-contract.sh:fast"
             echo "unit/infra/test-gitcode-issue-workflow.sh:fast"
+            echo "unit/infra/test-knowledge-skills.sh:fast"
             echo "unit/skills/test-structure.sh:fast"
             echo "unit/skills/test-content.sh:fast"
             echo "unit/skills/test-evals-required.sh:fast"
