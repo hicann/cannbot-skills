@@ -40,7 +40,7 @@
 
 按 full-review 第 2-3 步的方式执行勾选项：
 
-- **codespell 词典前置**：勾选项含 codespell-check 时，先按 SKILL.md"环境依赖 → cspell 词典"完成词典检查/安装（已装则跳过），再进入下方并发编排；安装失败时按该节规则跳过该勾选项（环境缺失，不计缺失）并明示。
+- **环境前置（进入并发编排前按序完成）**：① node 前置——无论勾选组合如何，先按 SKILL.md"环境依赖"节执行 `node -v` 检查（node 为 hub 硬依赖，聚合链路恒需），不可用即**停止本次质检**并提示安装，禁止带病执行后再逐项失败；② cspell 词典——勾选项含 codespell-check 时，按 SKILL.md"环境依赖 → cspell 词典"完成词典检查/安装（已装则跳过）；安装失败时按该节规则跳过该勾选项（环境缺失，不计缺失）并明示。
 - **脚本组**：勾选项 ∩ {markdownlint、tag-closed-check、link-validity-check、resource-existence-check、codespell-check}——每项一条 Bash（调用模板见 full-review），同一条消息并发发出；markdownlint 若在勾选中则先行预热缓存，其余脚本项（含 filename 各目标）与其同消息或待其返回后并发。
 - **模型组**：勾选 punctuation-check / compliance-check / aicheck 时各自派 subagent（提示词模板见 full-review），与脚本项同消息并发，无任何顺序约束。
 - 调用模板、计时文件写法、命令成功/失败的处理规则均同 full-review 第 2-3 步。

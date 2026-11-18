@@ -153,7 +153,7 @@ node <技能目录绝对路径>/scripts/run_check.js \
 
 | 字段名 | 类型 | 描述 | 要求 |
 | --- | --- | --- | --- |
-| rule_group | string | 问题大类 | 固定为"通用规则" |
+| rule_group | string | 问题大类 | 固定为"工具检查"（hub 聚合时会统一改写为"通用规则"） |
 | rule_item | string | 规则项名称 | 必须与规则文件中的规则项名称一致 |
 | rule_type | string | 规则类型 | 必须与规则文件中的规则类型一致 |
 | rule_name | string | 规则名称 | 必须与规则文件中的规则名称一致 |
@@ -167,7 +167,8 @@ node <技能目录绝对路径>/scripts/run_check.js \
 
 **类型与严重程度映射**（分级依据：直接影响读者获取内容的定为严重，可辨识的错误定为提示，纯规范性问题按规则影响面分级）：
 
-- link-validity-check、resource-existence-check、tag-closed-check → 正确性 / 严重
+- link-validity-check、resource-existence-check → 正确性 / 严重
+- tag-closed-check → 规范性 / 严重
 - codespell-check → 正确性 / 提示
 - markdownlint → 规范性 / 按规则号查 [references/markdownlint-severity.json](references/markdownlint-severity.json)，映射未覆盖的规则默认"一般"
 

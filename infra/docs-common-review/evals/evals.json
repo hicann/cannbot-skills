@@ -76,8 +76,141 @@
         "eval_mode": "text"
       },
       "prompt": "用门禁模式检查 infra/docs-common-review/evals/dataset/clean_doc.md。",
-      "expected_output": "1. 按 workflows/ci-gated-review.md 正常执行（含 codespell 词典前置与脚本缓存预热），本数据集不埋任何问题，全部检查项应零检出。\n2. 零问题也必须落盘：5 个工具项结果文件均为 []；合规脚本 tag_checker.js 与 encoding_format_checker.js 在零问题时同样写入 []（compliance-gate-result.json 必须存在，脚本保证），不得出现任何检查项结果文件缺失。\n3. 聚合报告 summary.gate.passed=true、blocking_issues=0、warning_issues=0、inputs.skipped=0，issues 为空数组；汇报\"门禁判定：通过、0 问题\"。若因结果文件缺失导致 skipped 非空、passed=false（清洁文档误红），即为回归失败。\n4. 其余流程（计时、产物落待检文档同级 output/、csv/md 询问、中间产物清理）与常规门禁模式一致。",
+      "expected_output": "1. 按 workflows/ci-gated-review.md 正常执行（含 node 前置检查、codespell 词典前置与脚本缓存预热），本数据集不埋任何问题，全部检查项应零检出。\n2. 零问题也必须落盘：5 个工具项结果文件均为 []；合规脚本 tag_checker.js 与 encoding_format_checker.js 在零问题时同样写入 []（compliance-gate-result.json 必须存在，脚本保证），不得出现任何检查项结果文件缺失。\n3. 聚合报告 summary.gate.passed=true、blocking_issues=0、warning_issues=0、inputs.skipped=0，issues 为空数组；汇报\"门禁判定：通过、0 问题\"。若因结果文件缺失导致 skipped 非空、passed=false（清洁文档误红），即为回归失败。\n4. 其余流程（计时、产物落待检文档同级 output/、csv/md 询问、中间产物清理）与常规门禁模式一致。",
       "expectations": [],
+      "files": []
+    },
+    {
+      "id": 7,
+      "title": "自定义模式最小环境检查：仅勾选 link-validity-check 时环境前置只查 node（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "自定义模式检查 infra/docs-common-review/evals/dataset/data_test.md，检查项只用 link_check；外链检查按 --disable-external 执行（内网/无外网环境约定，文档内锚点检查不受影响）。",
+      "expected_output": "1. 别名 link_check 按 SKILL.md 别名映射表转换为 canonical 名 link-validity-check（用户已给出清单，无需多选询问，输出检查项确定完成）。\n2. 环境前置按 SKILL.md\"环境依赖（分级按需）\"执行最小集合：仅 ① node -v（node 为 hub 硬依赖，聚合链路恒需）；禁止无差别预检预装——不检查/安装 cspell 词典（本次范围不含 codespell-check）、不预检 python（不含 filename-check，本次全程无 python 参与）、不触碰 npm。勾选集不含 markdownlint，无脚本缓存预热等待，单工具项直接执行。\n3. 执行仅 1 个工具项：run_check.js --checks=link-validity-check --disable-external（外链探测跳过，评测结果不随外网可用性漂移），独立结果文件 tool-based-link-validity-check-result.json 与计时文件 timing/link-validity-check.txt。\n4. 聚合 --inputs 仅含该结果文件，--mode=custom --timing=<timing目录>，产物落待检文档同级 output/：summary.mode=custom、by_check 与 check_timing_ms 仅含 link-validity-check 条目、无 gate 字段（custom 模式正常）；埋设的失效锚点 #不存在的锚点 被检出。\n5. 汇报 summary、逐条问题与该检查项耗时、误报引导（失效链接可加入 .doctools/url.whitelist.txt）；随后询问 csv/md 导出并清理中间产物，全程无检查项失败。",
+      "expectations": [
+        {
+          "type": "file_exists",
+          "pattern": "infra/docs-common-review/evals/dataset/output/docs-common-review-result.json",
+          "description": "最终聚合报告落在待检文档同级 output/ 目录"
+        },
+        {
+          "type": "file_contains",
+          "pattern": "infra/docs-common-review/evals/dataset/output/docs-common-review-result.json : \"mode\": \"custom\"",
+          "description": "summary.mode 为 custom"
+        },
+        {
+          "type": "file_contains",
+          "pattern": "infra/docs-common-review/evals/dataset/output/docs-common-review-result.json : \"rule_item\": \"link-validity-check\"",
+          "description": "埋设的失效锚点被 link-validity-check 检出"
+        },
+        {
+          "type": "file_contains",
+          "pattern": "infra/docs-common-review/evals/dataset/output/docs-common-review-result.json : \"check_timing_ms\"",
+          "description": "计时嵌入 summary.check_timing_ms"
+        },
+        {
+          "type": "contains",
+          "pattern": "link-validity-check",
+          "description": "汇报覆盖本次执行的检查项"
+        },
+        {
+          "type": "contains",
+          "pattern": "耗时",
+          "description": "汇报包含检查项耗时"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "检查项执行失败",
+          "description": "最小环境前置下检查项应全部成功（--disable-external 下外链跳过不计失败，评测不随外网漂移）"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 8,
+      "title": "自定义模式条件依赖：勾选 codespell-check 时才执行 cspell 词典前置",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "自定义模式检查 infra/docs-common-review/evals/dataset/data_test.md，检查项只用 codespell。",
+      "expected_output": "1. 别名 codespell 按 SKILL.md 别名映射表转换为 canonical 名 codespell-check。\n2. 环境前置：① node -v（hub 硬依赖）；② 本次范围含 codespell-check，必须按 SKILL.md\"环境依赖 → cspell 词典\"先检查词典（缓存目录下存在 node_modules/@cspell/cspell-bundled-dicts 即已装则跳过，缺失则按依赖清单安装 cspell-lib@9.2.1）——词典前置仅在勾选 codespell-check 时出现，与未勾选时不动词典的最小化行为互为对照。本用例断言以 cspell 词典就绪（缓存命中或联网安装成功）为前提：离线/无 npm 源环境不适用本用例（该场景的跳过行为由 SKILL.md 环境依赖节定义，不在本用例评测范围）。\n3. 执行 codespell-check 工具项（独立结果文件与计时），埋设的拼写错误 Krnel 与 tesst 各被检出一条。\n4. 聚合 --inputs 仅含该结果文件，--mode=custom，产物 summary.mode=custom、by_check 仅含 codespell-check 条目；汇报后 csv/md 询问与中间产物清理照常；词典就绪前提下全程无检查项失败。",
+      "expectations": [
+        {
+          "type": "file_exists",
+          "pattern": "infra/docs-common-review/evals/dataset/output/docs-common-review-result.json",
+          "description": "最终聚合报告落在待检文档同级 output/ 目录"
+        },
+        {
+          "type": "file_contains",
+          "pattern": "infra/docs-common-review/evals/dataset/output/docs-common-review-result.json : \"mode\": \"custom\"",
+          "description": "summary.mode 为 custom"
+        },
+        {
+          "type": "file_contains",
+          "pattern": "infra/docs-common-review/evals/dataset/output/docs-common-review-result.json : \"rule_item\": \"codespell-check\"",
+          "description": "埋设的拼写错误（Krnel/tesst）被 codespell-check 检出"
+        },
+        {
+          "type": "contains",
+          "pattern": "codespell-check",
+          "description": "汇报覆盖本次执行的检查项"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "检查项执行失败",
+          "description": "词典就绪前提下 codespell-check 应成功执行（本用例需联网安装或词典已缓存）"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 9,
+      "title": "环境依赖分级咨询：按勾选项说明最小环境集合",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "我准备用自定义模式只勾选 link-validity-check 检查一篇文档，执行前需要准备哪些环境依赖？需要提前安装 cspell 词典吗？",
+      "expected_output": "环境依赖咨询：不执行任何检查、不产出质检报告，按 SKILL.md\"环境依赖（分级按需）\"回答：① node 为 hub 硬依赖、恒需——即使只勾选单个工具项，结果聚合、计时读取与报告产出链路也全部运行在 node 上；② cspell 词典与 npm 不需要——词典仅在本次检查范围含 codespell-check 时才检查/安装，本次未勾选，禁止无差别预检预装；③ python 3 不需要——仅 filename-check 使用且不做预检（执行期内联探测 python/python3 兜底）；④ link-validity-check 的外链检查隐含网络依赖，内网/无外网环境可加 --disable-external。答复区分\"恒需\"与\"条件依赖\"，不引导用户安装本次用不到的依赖，也不虚构检查结果。",
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "node",
+          "description": "答复说明 node 为恒需硬依赖"
+        },
+        {
+          "type": "contains",
+          "pattern": "词典",
+          "description": "答复回应 cspell 词典问题（未勾选 codespell-check 时不需要）"
+        },
+        {
+          "type": "contains",
+          "pattern": "python",
+          "description": "答复覆盖 python 分级（仅 filename-check 需要，本次不需要）"
+        },
+        {
+          "type": "contains",
+          "pattern": "不需要",
+          "description": "答复明确说明条件依赖本次不需要"
+        },
+        {
+          "type": "not_contains",
+          "pattern": "问题总数",
+          "description": "咨询不产出质检报告"
+        }
+      ],
       "files": []
     }
   ]

@@ -42,6 +42,9 @@ tests/test-ut-report.html
 # Benchmark 框架
 tests/benchmark/results/
 tests/benchmark/cann-bench/
+
+# 文档质检基准运行产物（覆盖式写入，不入库）
+infra/docs-common-review/docs-skills-benchmark/runs/
 # OpenCode 配置
 .opencode/
 

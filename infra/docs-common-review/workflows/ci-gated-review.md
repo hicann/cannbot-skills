@@ -63,7 +63,7 @@ mkdir -p "<项目根>/output" "<项目根>/output/timing"
 
 ### 第 2 步：并发执行全部脚本检查
 
-**codespell 词典前置**：门禁范围固定含 codespell-check，先按 SKILL.md"环境依赖 → cspell 词典"完成词典检查/安装（已装则跳过、秒级完成；首次安装需访问 npm 源），完成后再进入下方编排。安装失败时按该节规则跳过 codespell-check：其结果文件缺失计入 skipped，门禁判定为未通过/不可信，须在汇报中明示。
+**环境前置（进入编排前按序完成）**：① node 前置——按 SKILL.md"环境依赖"节执行 `node -v` 检查（node 为 hub 硬依赖），不可用即**停止本次质检**并提示安装，禁止带病执行后再逐项失败；② cspell 词典——门禁范围固定含 codespell-check，按 SKILL.md"环境依赖 → cspell 词典"完成词典检查/安装（已装则跳过、秒级完成；首次安装需访问 npm 源）。安装失败时按该节规则跳过 codespell-check：其结果文件缺失计入 skipped，门禁判定为未通过/不可信，须在汇报中明示。
 
 **工具项调用模板**（`<检查项>` 替换为 canonical 名，每项一条 Bash）：
 
@@ -139,5 +139,5 @@ node <skill_base>/scripts/aggregate.js \
 - 零模型逐行检查、零 subagent；互不依赖的脚本项必须并发执行，禁止串行排队
 - **任一脚本项失败只影响该项本身**：记录失败清单并入 summary.failed_check（呈现见 SKILL.md"检查项失败提示"节），其余项正常执行并完成聚合；门禁判定据此不可信
 - 报告内容只来自脚本与 aggregate.js 输出，禁止增删改写与编造
-- node 缺失时停止执行并提示安装（指引见 SKILL.md 环境依赖）
+- node 前置检查（第 2 步）不可用时停止本次质检并提示安装（见 SKILL.md 环境依赖；运行期 node 异常按失败隔离处理）
 - 结果文件内容与汇总数字必须一致（以聚合报告为准）

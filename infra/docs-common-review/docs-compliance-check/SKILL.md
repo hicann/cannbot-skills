@@ -128,7 +128,7 @@ metadata:
 
 - 待检查文档按"逐文件 / 分批"处理，禁止一次性把整个大目录全读入上下文；
 - 每个文件可在不同步骤、不同规则下多次按行号回读；
-- 仅"同行已不好走内对同一文件同一区域无意义的重复读取"才需避免。
+- 仅"对同一文件同一区域无意义的重复读取"才需避免。
 
 在执行任何步骤前，在对话中先输出当前检查点：[CHECKPOINT: 开始]
 
@@ -173,7 +173,7 @@ metadata:
 
 #### 1.4 批量读取待检查文档
 
-- 生成文档列表后步预读全文。步骤 2 在处理每个文件时，按需用带行号方式读取该文件，处理完一个文件再处理下一个。
+- 生成文档列表后预读全文。步骤 2 在处理每个文件时，按需用带行号方式读取该文件，处理完一个文件再处理下一个。
 - 将带行号的文档内容保留在上下文中
 
 #### 1.5 清理历史结果文件
@@ -277,11 +277,7 @@ metadata:
 ### 第 4 步：清理临时文件
 
 - 删除 `output` 目录下的 `compliance` 文件夹
-- 删除 `output/tag_check_result.json` 文件
-- 删除 `output/encoding_format_check_result.json` 文件
-- 删除 `output/prohibited_words_check_result.json` 文件
-- 删除 `output/null_cell_check_result.json` 文件
-- 删除 `output/catalog_num_check_result.json` 文件
+- 如存在旧版本脚本遗留的 `output/tag_check_result.json`、`output/encoding_format_check_result.json`、`output/prohibited_words_check_result.json`、`output/null_cell_check_result.json`、`output/catalog_num_check_result.json`（当前各脚本已直接写入调用方传入的结果文件路径，运行期不再单独产生这些中间文件），一并删除
 
 完成后必须在对话中输出 [CHECKPOINT: 清理临时文件完成]
 

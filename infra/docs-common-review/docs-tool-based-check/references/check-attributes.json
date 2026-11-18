@@ -7,7 +7,7 @@
   },
   "tag-closed-check": {
     "rule_name": "HTML 标签闭合检查",
-    "rule_type": "正确性",
+    "rule_type": "规范性",
     "rule_level": "严重",
     "suggestion": "请补全或修正未闭合/未配对的 HTML 标签「{content}」"
   },
