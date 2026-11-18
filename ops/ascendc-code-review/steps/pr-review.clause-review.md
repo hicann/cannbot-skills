@@ -53,8 +53,8 @@ workflow 按 plan-design 产出的检视计划，单波并行派发子 Agent（�
 
 ```yaml
 type: clause
-clause_id: SEC-2.1
-clause_title: 资源释放后指针置新值
+clause_id: SEC-1.1
+clause_title: 指向资源句柄或描述符的变量，在资源释放后立即赋予新值
 category: clause          # clause | style
 status: PASS
 ```
@@ -63,8 +63,8 @@ status: PASS
 
 ```yaml
 type: clause
-clause_id: SEC-2.1
-clause_title: 资源释放后指针置新值
+clause_id: SEC-1.1
+clause_title: 指向资源句柄或描述符的变量，在资源释放后立即赋予新值
 category: clause
 status: FAIL              # FAIL | SUSPICIOUS
 severity: 高              # 条款声明的严重级别（高/中/低），报告分档依据
