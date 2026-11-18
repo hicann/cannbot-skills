@@ -240,6 +240,9 @@ scripts/compile_probe.py    selftest 内部编译参数重写：移除原对象/
 scripts/selftest.sh         回归测试：实现脚本 + 生成器故障注入 + 两份骨架真编译（默认隔离 worktree，
                             不碰工作树也不写仓里的 build/；--in-place 就地跑，
                             --with-aicpu-build 加验 device 侧，--strict 让「没验成」也非 0 退出）
+tests/                      脚本离线回归：来源校验、布局生成、CMake 解析、compile probe 与交付物检查
+evals/                      行为评测用例与 AICPU 引擎契约
+review/                     template 专项检视指南、规则、报告模板与静态筛查脚本
 assets/all-reduce-mesh-oneshot.{h,cc}.tpl  AllReduce 专用的 Mesh 1D one-shot 完整实现骨架
 assets/barebone.{h,cc}.tpl       自定义算法接口骨架，不预设拓扑/归约，未实现时返回错误
 ../hccl-aicpu-design/dataflow-spec-template.md  数据流规格模板 + 填写说明 + 记法速查（模式 C 的输入）
