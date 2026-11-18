@@ -11,12 +11,14 @@
 """catlass-dsl 主流程门禁检查。
 
 只读脚本：不写状态文件，不执行算子，只校验工作区产物与 ITERATIONS.md 记录。
-阶段顺序：design -> develop -> full test #1 -> optimize -> full test #2 -> benchmark -> finish。
+阶段顺序：design -> develop -> full test #1 -> merge -> full test #2 -> optimize ->
+full test #3 -> benchmark -> finish。
 
 用法:
     python3 gate.py design    --workspace <dir>
     python3 gate.py develop   --workspace <dir>
     python3 gate.py fulltest  --workspace <dir>
+    python3 gate.py merge     --workspace <dir>
     python3 gate.py optimize  --workspace <dir>
     python3 gate.py benchmark --workspace <dir>
     python3 gate.py finish    --workspace <dir>
@@ -40,7 +42,7 @@ DESIGN_FILES = (
 )
 DEV_MIN = 30
 DEV_MAX = 40
-ORDER = ("design", "develop", "fulltest", "optimize", "benchmark", "finish")
+ORDER = ("design", "develop", "fulltest", "merge", "optimize", "benchmark", "finish")
 MODES = ("remote-detached", "remote-connected", "local")
 REMOTE_DETACHED = "remote-detached"
 MODE_PATTERN = re.compile(r"执行模式[\s*`]*[:：][\s*`]*([A-Za-z\-]+)")
@@ -475,6 +477,12 @@ def check_design(ws):
     for keyword in ("dsl 版本", "benchmark", "性能要求"):
         if keyword not in lowered:
             fail("DESIGN.md 缺少必备内容: {}".format(keyword))
+    if not MERGE_DECLARED.search(design_text):
+        fail(
+            "DESIGN.md 未登记 merge_required（true / false）；该字段与用户是否要求单 kernel "
+            "正交，必须以独立一行写出（自然划分即单 kernel 或用户未要求单 kernel 时写 false），"
+            "不要只写在说明句里"
+        )
     for name in ("reference.py", "definition.json", "workload.jsonl"):
         if not design_digest_present(ws / name, design_text):
             fail("DESIGN.md 未记录 {} 的 SHA-256".format(name))
@@ -564,6 +572,22 @@ def fulltest_rows(rows, digest, stages):
 
 FIRST_FULLTEST = ("fulltest", "fulltest1", "fulltest#1")
 SECOND_FULLTEST = ("fulltest2", "fulltest#2")
+THIRD_FULLTEST = ("fulltest3", "fulltest#3")
+ALL_FULLTEST = FIRST_FULLTEST + SECOND_FULLTEST + THIRD_FULLTEST
+
+
+def any_fulltest_rows(rows, stages):
+    """不按 SHA 过滤的全量测试记录，用于校验融合前的多 kernel 基线。"""
+    return [
+        (index, cells)
+        for index, cells in rows
+        if normalize_stage(cells[1]) in stages and status_of(cells) == "passed"
+    ]
+
+
+BASELINE_SHA = re.compile(
+    r"baseline(?:_sha)?\s*[:=]\s*`?([0-9a-fA-F]{8,64})`?", re.IGNORECASE
+)
 
 
 def check_fulltest(ws):
@@ -571,16 +595,191 @@ def check_fulltest(ws):
     _, digest = kernel_info(ws)
     _, sections = read_iterations(ws)
     rows = milestone_rows(sections)
-    matched = fulltest_rows(rows, digest, FIRST_FULLTEST + SECOND_FULLTEST)
+    matched = fulltest_rows(rows, digest, ALL_FULLTEST)
     if not matched:
         fail(
-            "缺少当前源码（{}）的全量测试 passed 记录（full test #1 或 #2）；remote-detached "
+            "缺少当前源码（{}）的全量测试 passed 记录（full test #1 / #2 / #3）；remote-detached "
             "模式最多只推进到代码生成完成，必须先连接远端并真实执行全量测试".format(
                 digest[:8]
             )
         )
     require_evidence(ws, matched[-1][1][5], "full test")
     return "{}；当前 kernel 已有全量测试通过".format(note)
+
+
+MERGE_REQUIRED = re.compile(
+    r"^\s*[-*]?\s*`?merge_required`?\s*[:：]\s*`?(?:true|yes)`?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+MERGE_DECLARED = re.compile(
+    r"^\s*[-*]?\s*`?merge_required`?\s*[:：]\s*`?(?:true|false|yes|no)`?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def merge_is_fused(cells):
+    """Result passed 且未在 Command/Result 里标注 not_applicable 才算真正做过融合。"""
+    return status_of(cells) == "passed" and "not_applicable" not in (
+        cells[3] + " " + cells[4]
+    ).lower()
+
+
+def check_merge(ws):
+    """merge 阶段验收门禁：应在融合版 focused 与 full test #2 之后执行。"""
+    note = check_design(ws)
+    _, digest = kernel_info(ws)
+    _, sections = read_iterations(ws)
+    rows = milestone_rows(sections)
+    design_text = (ws / "DESIGN.md").read_text(encoding="utf-8")
+
+    merges = [
+        (index, cells)
+        for index, cells in rows
+        if normalize_stage(cells[1]).startswith("merge")
+        and merge_is_fused(cells)
+        and sha_match(cells[2], digest)
+    ]
+    if not MERGE_REQUIRED.search(design_text):
+        skipped = [
+            (index, cells)
+            for index, cells in rows
+            if normalize_stage(cells[1]).startswith("merge")
+            and status_of(cells) in ("passed", "not_applicable")
+            and sha_match(cells[2], digest)
+        ]
+        if skipped:
+            return "{}；DESIGN 未声明 merge_required: true，融合阶段记 not_applicable".format(
+                check_fulltest(ws)
+            )
+        stale = [
+            (index, cells)
+            for index, cells in rows
+            if normalize_stage(cells[1]).startswith("merge")
+            and status_of(cells) == "passed"
+        ]
+        if stale:
+            fail(
+                "ITERATIONS.md 已有 merge 记录，但 Kernel SHA（{}）与当前源码（{}）不一致；"
+                "当前源码相对融合版发生实质变化时必须补跑 full test #3 后再交付".format(
+                    strip_ticks(stale[-1][1][2])[:8], digest[:8]
+                )
+            )
+        fail(
+            "DESIGN 未声明 merge_required: true，但 ITERATIONS.md 缺少 merge 里程碑；"
+            "需追加一行 Stage=merge，Result 写 passed 并在 Command 列注明 "
+            "not_applicable（自然划分即单 kernel 或用户未要求单 kernel）"
+        )
+
+    if merges:
+        cells = merges[-1][1]
+        require_evidence(ws, cells[5], "merge")
+        focused = [
+            (index, cells)
+            for index, cells in rows
+            if normalize_stage(cells[1]).startswith("focusedtest")
+            and status_of(cells) == "passed"
+            and sha_match(cells[2], digest)
+        ]
+        if not focused:
+            fail(
+                "merge 阶段缺少融合版（{}）的 focused test passed 记录；融合后必须先跑 focused，"
+                "再进入 full test #2".format(digest[:8])
+            )
+        require_evidence(ws, focused[-1][1][5], "merge 阶段的 focused test")
+        if not fulltest_rows(rows, digest, SECOND_FULLTEST):
+            fail(
+                "缺少融合版（{}）的 full test #2 passed 记录；merge 门禁在 FT#2 之后执行，"
+                "融合版必须先跑 focused 与 full test #2".format(digest[:8])
+            )
+        baseline = BASELINE_SHA.search(" ".join(cells[3:5]))
+        if baseline:
+            baseline_sha = baseline.group(1)
+            if baseline_sha.lower() == digest.lower():
+                fail(
+                    "merge 记录声明的 baseline（{}）与当前源码相同；融合前后 kernel SHA 必须不同，"
+                    "请把 baseline 指向 full test #1 通过的多 kernel 版本".format(
+                        baseline_sha[:8]
+                    )
+                )
+            if not fulltest_rows(rows, baseline_sha, FIRST_FULLTEST):
+                fail(
+                    "merge 记录声明 baseline={}，但该 SHA 上没有 full test #1 passed 记录；"
+                    "融合前必须先让自然划分的多 kernel 版通过 full test #1".format(
+                        baseline_sha[:8]
+                    )
+                )
+        else:
+            distinct = [
+                (index, row_cells)
+                for index, row_cells in any_fulltest_rows(rows, FIRST_FULLTEST)
+                if not sha_match(row_cells[2], digest)
+            ]
+            if not distinct:
+                fail(
+                    "缺少融合前多 kernel 基线的 full test #1 passed 记录；融合前必须先让自然划分的"
+                    "多 kernel 版通过 full test #1，并在 merge 行的 Command 列用 baseline=<sha> "
+                    "注明基线 SHA，否则无法证明融合版与已验证基线一致"
+                )
+        return "{}；融合版 merge、focused、full test #2 与基线 full test #1 齐备".format(note)
+
+    history = [
+        (index, cells)
+        for index, cells in rows
+        if normalize_stage(cells[1]).startswith("merge") and merge_is_fused(cells)
+    ]
+    if history:
+        merge_sha = strip_ticks(history[-1][1][2])
+        require_evidence(ws, history[-1][1][5], "merge")
+        if not fulltest_rows(rows, merge_sha, SECOND_FULLTEST):
+            fail(
+                "merge 记录（{}）缺少对应的 full test #2 passed 记录；融合版必须先跑 full test #2".format(
+                    merge_sha[:8]
+                )
+            )
+        if fulltest_rows(rows, digest, THIRD_FULLTEST):
+            return "{}；merge 在 {} 完成，当前源码 {} 已补 full test #3，按 optimize 复验继承".format(
+                note, merge_sha[:8], digest[:8]
+            )
+        fail(
+            "缺少当前源码（{}）的 merge passed 记录；融合已在 {} 完成，当前源码相对融合版发生变化，"
+            "必须补跑 full test #3 后再交付".format(digest[:8], merge_sha[:8])
+        )
+
+    fail(
+        "缺少当前源码（{}）的 merge passed 记录；DESIGN 声明 merge_required: true 时，"
+        "必须先以 full test #1 通过的多 kernel 版本为基线完成融合，再进入 full test #2".format(
+            digest[:8]
+        )
+    )
+
+
+def check_merge_history(ws):
+    """finish 侧校验融合确实发生过：只按历史记录，不要求与交付 kernel 同一 SHA。"""
+    design_text = (ws / "DESIGN.md").read_text(encoding="utf-8")
+    if not MERGE_REQUIRED.search(design_text):
+        return "merge 非必需"
+    _, sections = read_iterations(ws)
+    rows = milestone_rows(sections)
+    completed = [
+        (index, cells)
+        for index, cells in rows
+        if normalize_stage(cells[1]).startswith("merge") and merge_is_fused(cells)
+    ]
+    if not completed:
+        fail(
+            "DESIGN 声明 merge_required: true，但没有 merge passed 记录；必须先完成"
+            "多 kernel 到单 kernel 的融合再交付"
+        )
+    index, cells = completed[-1]
+    require_evidence(ws, cells[5], "merge")
+    merge_sha = strip_ticks(cells[2])
+    if not fulltest_rows(rows, merge_sha, SECOND_FULLTEST):
+        fail(
+            "merge 记录（{}）缺少对应的 full test #2 passed 记录；融合版必须先跑 full test #2".format(
+                merge_sha[:8]
+            )
+        )
+    return "merge 已完成（融合版 full test #2 通过）"
 
 
 def optimization_mode(text):
@@ -624,11 +823,15 @@ def check_optimize(ws):
     baseline = [
         (index, cells)
         for index, cells in rows
-        if normalize_stage(cells[1]) in FIRST_FULLTEST and status_of(cells) == "passed"
+        if normalize_stage(cells[1]) in FIRST_FULLTEST + SECOND_FULLTEST
+        and status_of(cells) == "passed"
     ]
     if not baseline:
-        fail("缺少 full test #1 passed 记录；optimize 必须在 full test #1 通过后开始")
-    require_evidence(ws, baseline[-1][1][5], "full test #1")
+        fail(
+            "缺少 full test #1 / #2 passed 记录；optimize 必须在多 kernel 版（#1）或"
+            "融合版（#2）全量测试通过后开始"
+        )
+    require_evidence(ws, baseline[-1][1][5], "full test")
     opt_mode = optimization_mode(text)
 
     rounds = optimization_rounds(sections)
@@ -675,12 +878,11 @@ def check_benchmark(ws):
     _, digest = kernel_info(ws)
     _, sections = read_iterations(ws)
     rows = milestone_rows(sections)
-    if not fulltest_rows(rows, digest, FIRST_FULLTEST + SECOND_FULLTEST):
+    if not fulltest_rows(rows, digest, ALL_FULLTEST):
         fail(
-            "缺少当前源码（{}）的全量测试 passed 记录（full test #1 或 #2）；优化未采纳、kernel "
-            "未变化时可复用 full test #1，采纳优化改动了 kernel 的必须补跑 full test #2".format(
-                digest[:8]
-            )
+            "缺少当前源码（{}）的全量测试 passed 记录（full test #1 / #2 / #3）；优化未采纳、"
+            "kernel 未变化时可复用最近一次记录，采纳优化改动了 kernel 的必须补跑 full test #3"
+            "（无融合阶段时记全量测试 full test #2）".format(digest[:8])
         )
 
     if read_perf_demand(ws) != PERF_REQUESTED:
@@ -707,6 +909,7 @@ def check_benchmark(ws):
 
 def check_finish(ws):
     note = check_benchmark(ws)
+    merge_note = check_merge_history(ws)
     text, sections = read_iterations(ws)
     _, digest = kernel_info(ws)
     rows = milestone_rows(sections)
@@ -732,13 +935,14 @@ def check_finish(ws):
         fail("缺少当前源码（{}）的 final review passed 记录".format(digest[:8]))
     if "final verdict" not in text.lower():
         fail("ITERATIONS.md 缺少 Final Verdict 结论")
-    return "{}；可以交付".format(note)
+    return "{}；{}；可以交付".format(note, merge_note)
 
 
 CHECKS = {
     "design": check_design,
     "develop": check_develop,
     "fulltest": check_fulltest,
+    "merge": check_merge,
     "optimize": check_optimize,
     "benchmark": check_benchmark,
     "finish": check_finish,

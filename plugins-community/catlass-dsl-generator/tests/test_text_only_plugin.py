@@ -292,7 +292,7 @@ def test_quickstart_states_gate_guided_semantics():
 
 
 def test_stage_sequence_is_consistent_between_workflow_and_develop():
-    sequence = "skeleton → implement → focused test → full test #1 → optimize"
+    sequence = "skeleton → implement（自然多 kernel）→ focused test → full test #1"
     assert sequence in skill_text("catlass-dsl-workflow")
     assert sequence in skill_text("catlass-dsl-develop")
 
@@ -404,6 +404,7 @@ def build_design(
         design += "执行模式：{}\n\n".format(mode)
     if perf:
         design += "性能要求：{}\n\n".format(perf)
+    design += "merge_required: false\n\n"
     design += "benchmark: python tools/bench_local.py\n\n"
     for name in ("reference.py", "definition.json", "workload.jsonl"):
         design += "{}: {}\n".format(name, digest(workspace / name))
@@ -759,8 +760,7 @@ def test_gate_optimize_rejects_lowered_early_stop_threshold(tmp_path):
     assert "不能低于 0.80" in result.stdout
 
 
-def rewrite_kernel(workspace):
-    source = "def run(x):\n    return x + 1\n"
+def rewrite_kernel(workspace, source="def run(x):\n    return x + 1\n"):
     write(workspace / "solution.py", source)
     solution = json.loads((workspace / "solution.json").read_text(encoding="utf-8"))
     solution["sources"] = [{"path": "solution.py", "content": source}]
@@ -792,6 +792,191 @@ def test_gate_fulltest_accepts_second_run_after_kernel_change(tmp_path):
     assert result.returncode == 0, result.stdout
 
     result = run_gate("develop", tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_gate_fulltest_accepts_third_run_after_kernel_change(tmp_path):
+    build_workspace(tmp_path)
+    kernel = rewrite_kernel(tmp_path)
+    write(tmp_path / "evidence" / "fulltest3.json", "ok\n")
+    add_milestone(
+        tmp_path,
+        "| 4 | full test #3 | {} | run | passed | evidence/fulltest3.json |".format(
+            kernel
+        ),
+    )
+
+    result = run_gate("fulltest", tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_gate_merge_requires_fusion_record_when_declared(tmp_path):
+    base = build_workspace(tmp_path)
+    design = tmp_path / "DESIGN.md"
+    write(design, design.read_text(encoding="utf-8") + "\nmerge_required: true\n")
+
+    result = run_gate("merge", tmp_path)
+    assert result.returncode == 1
+    assert "merge passed" in result.stdout
+
+    fused = rewrite_kernel(tmp_path)
+    write(tmp_path / "evidence" / "merge.json", "ok\n")
+    write(tmp_path / "evidence" / "focused-fused.log", "ok\n")
+    add_milestone(
+        tmp_path,
+        "| 4 | merge | {} | run baseline={} | passed | evidence/merge.json |".format(
+            fused, base
+        ),
+    )
+    add_milestone(
+        tmp_path,
+        "| 5 | focused test | {} | run | passed | evidence/focused-fused.log |".format(
+            fused
+        ),
+    )
+    add_milestone(
+        tmp_path,
+        "| 6 | full test #2 | {} | run | passed | evidence/fulltest2.json |".format(
+            fused
+        ),
+    )
+
+    result = run_gate("merge", tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_gate_merge_requires_baseline_fulltest1(tmp_path):
+    base = build_workspace(tmp_path)
+    design = tmp_path / "DESIGN.md"
+    write(design, design.read_text(encoding="utf-8") + "\nmerge_required: true\n")
+    fused = rewrite_kernel(tmp_path)
+    path = tmp_path / "ITERATIONS.md"
+    lines = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if "full test #1" not in line
+    ]
+    write(path, "\n".join(lines) + "\n")
+    write(tmp_path / "evidence" / "merge.json", "ok\n")
+    write(tmp_path / "evidence" / "focused-fused.log", "ok\n")
+    add_milestone(
+        tmp_path,
+        "| 4 | merge | {} | run baseline={} | passed | evidence/merge.json |".format(
+            fused, base
+        ),
+    )
+    add_milestone(
+        tmp_path,
+        "| 5 | focused test | {} | run | passed | evidence/focused-fused.log |".format(
+            fused
+        ),
+    )
+    add_milestone(
+        tmp_path,
+        "| 6 | full test #2 | {} | run | passed | evidence/fulltest2.json |".format(
+            fused
+        ),
+    )
+
+    result = run_gate("merge", tmp_path)
+    assert result.returncode == 1
+    assert "full test #1" in result.stdout
+
+
+def test_gate_merge_rejects_fulltest1_only_on_fused_kernel(tmp_path):
+    build_workspace(tmp_path)
+    design = tmp_path / "DESIGN.md"
+    write(design, design.read_text(encoding="utf-8") + "\nmerge_required: true\n")
+    fused = rewrite_kernel(tmp_path)
+    path = tmp_path / "ITERATIONS.md"
+    lines = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if "full test #1" not in line
+    ]
+    write(path, "\n".join(lines) + "\n")
+    add_milestone(
+        tmp_path,
+        "| 7 | full test #1 | {} | run | passed | evidence/fulltest1.json |".format(
+            fused
+        ),
+    )
+    write(tmp_path / "evidence" / "merge.json", "ok\n")
+    write(tmp_path / "evidence" / "focused-fused.log", "ok\n")
+    add_milestone(
+        tmp_path,
+        "| 4 | merge | {} | run | passed | evidence/merge.json |".format(fused),
+    )
+    add_milestone(
+        tmp_path,
+        "| 5 | focused test | {} | run | passed | evidence/focused-fused.log |".format(
+            fused
+        ),
+    )
+    add_milestone(
+        tmp_path,
+        "| 6 | full test #2 | {} | run | passed | evidence/fulltest2.json |".format(
+            fused
+        ),
+    )
+
+    result = run_gate("merge", tmp_path)
+    assert result.returncode == 1
+    assert "融合前" in result.stdout
+
+
+def test_gate_merge_accepts_fulltest3_after_kernel_change(tmp_path):
+    base = build_workspace(tmp_path)
+    design = tmp_path / "DESIGN.md"
+    write(design, design.read_text(encoding="utf-8") + "\nmerge_required: true\n")
+    fused = rewrite_kernel(tmp_path)
+    write(tmp_path / "evidence" / "merge.json", "ok\n")
+    write(tmp_path / "evidence" / "focused-fused.log", "ok\n")
+    add_milestone(
+        tmp_path,
+        "| 4 | merge | {} | run baseline={} | passed | evidence/merge.json |".format(
+            fused, base
+        ),
+    )
+    add_milestone(
+        tmp_path,
+        "| 5 | focused test | {} | run | passed | evidence/focused-fused.log |".format(
+            fused
+        ),
+    )
+    add_milestone(
+        tmp_path,
+        "| 6 | full test #2 | {} | run | passed | evidence/fulltest2.json |".format(
+            fused
+        ),
+    )
+
+    tuned = rewrite_kernel(tmp_path, source="def run(x):\n    return x + 2\n")
+    write(tmp_path / "evidence" / "fulltest3.json", "ok\n")
+    add_milestone(
+        tmp_path,
+        "| 7 | full test #3 | {} | run | passed | evidence/fulltest3.json |".format(
+            tuned
+        ),
+    )
+
+    result = run_gate("merge", tmp_path)
+    assert result.returncode == 0, result.stdout
+    assert "full test #3" in result.stdout
+
+
+def test_gate_merge_accepts_not_applicable_when_not_declared(tmp_path):
+    kernel = build_workspace(tmp_path)
+
+    result = run_gate("merge", tmp_path)
+    assert result.returncode == 1
+    assert "not_applicable" in result.stdout
+
+    add_milestone(
+        tmp_path,
+        "| 4 | merge | {} | not required | passed | - |".format(kernel),
+    )
+    result = run_gate("merge", tmp_path)
     assert result.returncode == 0, result.stdout
 
 
@@ -827,6 +1012,44 @@ def test_gate_benchmark_requires_fulltest_after_kernel_change(tmp_path):
         "| 5 | benchmark | {} | run | passed | evidence/bench.json |".format(kernel),
     )
     result = run_gate("benchmark", tmp_path)
+    assert result.returncode == 0, result.stdout
+
+
+def test_gate_finish_requires_merge_when_declared(tmp_path):
+    kernel = build_workspace(tmp_path, perf="none")
+    design = tmp_path / "DESIGN.md"
+    write(
+        design,
+        design.read_text(encoding="utf-8").replace(
+            "merge_required: false", "merge_required: true"
+        ),
+    )
+    add_rounds(tmp_path, rounds=3, decision="rejected")
+    add_milestone(
+        tmp_path,
+        "| 4 | full test #2 | {} | run | passed | evidence/fulltest2.json |".format(
+            kernel
+        ),
+    )
+    add_milestone(
+        tmp_path,
+        "| 5 | final review | {} | review | passed | evidence/review.md |".format(
+            kernel
+        ),
+    )
+    path = tmp_path / "ITERATIONS.md"
+    write(path, path.read_text(encoding="utf-8") + "\n## Final Verdict\n\nconverged\n")
+
+    result = run_gate("finish", tmp_path)
+    assert result.returncode == 1
+    assert "merge passed" in result.stdout
+
+    write(tmp_path / "evidence" / "merge.json", "ok\n")
+    add_milestone(
+        tmp_path,
+        "| 6 | merge | {} | run | passed | evidence/merge.json |".format(kernel),
+    )
+    result = run_gate("finish", tmp_path)
     assert result.returncode == 0, result.stdout
 
 
@@ -1008,6 +1231,19 @@ def test_gate_accepts_bold_declarations_from_template(tmp_path):
     assert result.returncode == 0, result.stdout
     assert "remote-detached" in result.stdout
     assert "性能要求 none" in result.stdout
+
+
+def test_gate_design_requires_merge_required_declaration(tmp_path):
+    build_design(tmp_path)
+    path = tmp_path / "DESIGN.md"
+    write(
+        path,
+        path.read_text(encoding="utf-8").replace("merge_required: false\n\n", ""),
+    )
+
+    result = run_gate("design", tmp_path)
+    assert result.returncode == 1
+    assert "merge_required" in result.stdout
 
 
 def test_gate_benchmark_skipped_when_perf_not_requested(tmp_path):

@@ -67,19 +67,33 @@ class 或模板。
 
 ### 融合范围与性能依据
 
-默认 `fusion.mode=performance`，关闭全部 anti-hack；只有用户明确要求单个融合 kernel
-时才设为 `single_kernel` 并启用严格校验。记录用户约束，比较数据复用、GM 读写、launch
+默认 `fusion.mode=performance`；用户明确要求单个融合 kernel 时才设为
+`single_kernel`。记录用户约束，比较数据复用、GM 读写、launch
 开销、存储容量、同步成本和并行度，说明各 kernel 的计算范围、调用顺序及中间张量。
 没有实测数据的性能判断必须标记为待验证假设。
 
-**融合与合并（仅 `single_kernel`）**：先写自然划分结论 `structural_verdict`
-（`single` / `multi`），再写是否发生合并。自然划分是多 kernel、因用户要求合成为单 kernel
-时，`merge_required: true`，并按段列出：
+**融合与合并（`merge_required` 与用户诉求正交，始终登记）**：先写自然划分结论
+`structural_verdict`（`single` / `multi`），再写是否需要合并。**design 只登记自然划分方案与
+融合计划，不在本阶段把多 kernel 方案改写为单 kernel 方案**：
+
+- `structural_verdict: <single | multi>`
+- `merge_required: <true | false>`
+
+（以上两行必须独立成行并填成实际取值，门禁按行首匹配；说明句里的同名字样不算登记。）
+
+| 阶段 | 交付 | 验收 |
+|------|------|------|
+| 第一阶段 `develop` | 自然划分版（`structural_verdict=multi` 时就是多 kernel 版） | `full test #1` |
+| 第二阶段 `merge` | 融合为单 kernel 的版本 | `focused test` + `full test #2` |
+
+自然划分是多 kernel、因用户要求合成为单 kernel 时，`merge_required: true`；自然划分即单
+kernel 或用户未要求单 kernel 时写 `merge_required: false`（此时 `merge` 阶段记
+`not_applicable`）。`merge_required: true` 时按段列出：
 
 | 段 | 原 kernel | 计算范围 | 输出（GM/片上） |
 |----|-----------|----------|-----------------|
 
-边界清单（design 只记方向、映射一致性与覆盖核范围；原语与 pipe 由 implement 按已有知识回填）：
+边界清单（design 只记方向、映射一致性与覆盖核范围；原语与 pipe 由 merge 阶段按已有知识回填）：
 
 | 边界 | 发布方 → 等待方 | 前后段映射是否一致 | 覆盖核范围 |
 |------|-----------------|--------------------|------------|
@@ -182,8 +196,9 @@ class 或模板。
 另外列出 `focused_cases` 和实际执行命令。没有专用 focused 命令时执行冻结的全量命令；
 执行器应输出 argv、退出码、逐 case 状态和验证上下文摘要。覆盖全部 required cases 时，
 该执行证据只用于跳过重复的 focused 执行；全量测试在 optimize 之前跑一次
-（`full test #1`），优化采纳改动、kernel 变化时再补跑 `full test #2`，每次执行的记录都绑定
-当时的 kernel；优化未采纳、kernel 未变化时 `full test #1` 可继续作为交付证据。
+（`full test #1`；`merge_required: true` 时是融合版的 `full test #2`），优化采纳改动、kernel
+变化时再补跑 `full test #3`（无融合阶段时记 `#2`），每次执行的记录都绑定当时的 kernel；
+优化未采纳、kernel 未变化时可继续复用最近一次全量测试。
 
 L2 reference 执行 device：`<npu:<id>，与 benchmark 同一张卡>`；小 shape 冒烟与全 shape
 校验都在该 device 执行；CPU 仅在没有 NPU 时用于最小冒烟。
@@ -211,8 +226,8 @@ profiling 原始数据的保存位置；默认结果记录 `anti_hack.status=dis
 `性能要求：none`（用户没有明确提出性能、时延或加速比要求）时，明确写“本次不采集性能”，
 当前 kernel 全量测试通过后直接进入 finish，不执行 benchmark 与 profiling；仍按流程完成
 optimize 的 2~3 轮（或模式 A 一轮）记录，只是不采集交付性能数据。两种取值下，优化采纳改动
-了 kernel 都必须在 optimize 结束后补跑 `full test #2`；全部未采纳、kernel 未变化时可复用
-`full test #1`。
+了 kernel 都必须在 optimize 结束后补跑 `full test #3`（无融合阶段时记 `#2`）；全部未采纳、
+kernel 未变化时可复用最近一次全量测试（有融合时 `#2`，无融合时 `#1`）。
 
 ## 修改范围
 

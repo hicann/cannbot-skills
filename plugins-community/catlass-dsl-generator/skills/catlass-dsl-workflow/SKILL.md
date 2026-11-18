@@ -89,8 +89,11 @@ description: Use when the user asks for any CATLASS DSL operator task (design, i
 主流程固定为：
 
 ```text
-design → develop → full test #1 → optimize → full test #2 → [benchmark] → finish
+design → develop → full test #1 → merge → full test #2 → optimize → full test #3 → [benchmark] → finish
 ```
+
+`merge` 是条件阶段：`DESIGN.md` 声明 `merge_required: true` 时执行融合并进入 `full test #2`；
+否则记一条 `not_applicable` 的 merge 里程碑，直接进入 optimize（此时不产生 `full test #2`）。
 
 `benchmark` 是条件阶段：`DESIGN.md` 的 `性能要求：requested` 时执行，`none` 时跳过并直接
 finish。
@@ -100,12 +103,13 @@ finish。
 
 | 门禁 | 命令（`<ws>` 为工作区根） | 强制要求 |
 |---|---|---|
-| design | `python3 <SKILL_DIR>/scripts/gate.py design --workspace <ws>` | 五件交付物齐备；definition/workload 合法；dev 子集总数 ≤40（用户用例 ≥30 条时为 30~40 条；不足 30 条时全选，不要求补齐；无用户用例时按覆盖需要自定，不以下限 30 为目标）；DESIGN.md 记录三个文件的 SHA-256；声明执行模式与性能要求 |
+| design | `python3 <SKILL_DIR>/scripts/gate.py design --workspace <ws>` | 五件交付物齐备；definition/workload 合法；dev 子集总数 ≤40（用户用例 ≥30 条时为 30~40 条；不足 30 条时全选，不要求补齐；无用户用例时按覆盖需要自定，不以下限 30 为目标）；DESIGN.md 记录三个文件的 SHA-256；声明执行模式、性能要求与独立成行的 `merge_required` |
 | develop | `python3 <SKILL_DIR>/scripts/gate.py develop --workspace <ws>` | design 通过；skeleton 与 focused test 记录；`solution.json` 与实现文件一致 |
-| fulltest | `python3 <SKILL_DIR>/scripts/gate.py fulltest --workspace <ws>` | 当前 kernel 的 full test passed 记录与证据 |
-| optimize | `python3 <SKILL_DIR>/scripts/gate.py optimize --workspace <ws>` | full test 通过；模式 A ≥1 轮或模式 B 2~3 轮的完整账本；`early_stop`（`skeleton_ratio ≥ 0.80`）记 0 轮 |
-| benchmark | `python3 <SKILL_DIR>/scripts/gate.py benchmark --workspace <ws>` | 当前 kernel 有全量测试 passed（优化改动了 kernel 时须为 full test #2）；`性能要求：requested` 时还要求当前 kernel 的 benchmark passed；`none` 时跳过 benchmark 与 profiling |
-| finish | `python3 <SKILL_DIR>/scripts/gate.py finish --workspace <ws>` | `性能要求：requested` 时 benchmark 已通过；final review passed；Final Verdict 存在 |
+| fulltest | `python3 <SKILL_DIR>/scripts/gate.py fulltest --workspace <ws>` | 当前 kernel 的 full test passed 记录与证据（#1 / #2 / #3 任一） |
+| merge | `python3 <SKILL_DIR>/scripts/gate.py merge --workspace <ws>` | 验收门禁，在融合版 `focused test` 与 `full test #2` 之后执行：当前 kernel 的 `merge`、`focused test`、`full test #2` 均 passed 且有证据；`merge_required: false` 时接受 `not_applicable` 记录 |
+| optimize | `python3 <SKILL_DIR>/scripts/gate.py optimize --workspace <ws>` | full test #1 或 #2 通过（`merge_required: true` 时应为融合版 #2，由 merge 门禁保证）；模式 A ≥1 轮或模式 B 2~3 轮的完整账本；`early_stop`（`skeleton_ratio ≥ 0.80`）记 0 轮 |
+| benchmark | `python3 <SKILL_DIR>/scripts/gate.py benchmark --workspace <ws>` | 当前 kernel 有全量测试 passed（优化改动了 kernel 时须为 full test #3）；`性能要求：requested` 时还要求当前 kernel 的 benchmark passed；`none` 时跳过 benchmark 与 profiling |
+| finish | `python3 <SKILL_DIR>/scripts/gate.py finish --workspace <ws>` | `性能要求：requested` 时 benchmark 已通过；`merge_required: true` 时存在 `merge` passed 记录及其对应 SHA 的 `full test #2`；final review passed；Final Verdict 存在 |
 
 `gate.py` 是只读脚本：只检查产物和 `ITERATIONS.md`，不执行算子，也不写状态文件。
 `PASS` 只代表记录齐备，结果真实性仍由 §4 约束；`FAIL` 是硬阻断，不得绕过或手改记录蒙混。
@@ -143,13 +147,20 @@ finish。
 
 默认直接进入 develop，不等待用户批准；只有用户明确要求先评审时才暂停展示。
 
-### develop 内部顺序
+### develop → merge → optimize 顺序
 
 ```text
-skeleton → implement → focused test → full test #1 → optimize →
-targeted review（high risk）/ final review → full test #2 → [benchmark] → finish
+skeleton → implement（自然多 kernel）→ focused test → full test #1 →
+merge（仅 merge_required: true）→ full test #2 → optimize →
+targeted review（high risk）/ final review → full test #3（优化改动 kernel 时）→ [benchmark] → finish
 ```
 
+- `merge` 是独立阶段：以 `full test #1` 通过的多 kernel 版为基线，按 DESIGN 边界清单融合
+  为单 kernel；融合版先跑 focused test（与基线逐位对比），再跑 `full test #2`。同进程配对
+  计时回退必须 ≤5%，超过时继续优化融合版，不得退回多 kernel 版本收口。`gate.py merge` 是
+  验收门禁，在融合版 focused 与 FT#2 之后执行；`finish` 会复核 `merge` passed 记录及其
+  对应 SHA 的 FT#2，未融合不得交付。`merge_required: false` 时追加一行 `Stage=merge`、
+  `Result=passed`、Command 注明 `not_applicable`，直接进入 optimize。
 - `benchmark` 只在 `DESIGN.md` 声明 `性能要求：requested` 时执行；`none` 时当前 kernel
   全量测试通过后直接 finish，不采集性能，也不写 benchmark 里程碑。
 - 每个里程碑先在 `ITERATIONS.md` 追加一行，再进入下一步；写实现文件前至少已有
@@ -158,20 +169,22 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
   **每个 matmul 阶段**都必须按性能 DoD 各自判定为 `passed` 或 `passed (waived)`，不得
   只测主 GEMM、不得因整体不是 GEMM 主导而跳过，也不得用“能跑通”记过。
 - 代码变化后，受影响的测试、评审与性能结论需要重新评估；交付只认当前 kernel 的全量测试
-  与 final review。优化全部未采纳、kernel 未变化时 `full test #1` 继续有效；采纳改动导致
-  kernel 变化时必须补跑 `full test #2`，优化轮次作为过程证据保留，不要求重跑。
-- 全量测试至少跑一次：`full test #1` 在 optimize 之前确认功能正确，绑定 optimize 起始
-  kernel；`full test #2` 只在 optimize 采纳改动、kernel 变化时补跑，绑定交付 kernel。
-  `finish` 前必须有当前 kernel 的全量测试 passed 记录：优化采纳改动后必须补跑
-  `full test #2`，全部未采纳、kernel 未变化时可复用 `full test #1`。`ITERATIONS.md` 的
-  `Stage` 列按实际记录写 `full test #1` / `full test #2`，门禁据此识别。`remote-detached`
-  下需要执行的每一次全量测试都必须等连接远端后真实执行，不得推迟。
+  与 final review。优化全部未采纳、kernel 未变化时复用最近一次全量测试（有融合时 `#2`，
+  无融合时 `#1`）；采纳改动导致 kernel 变化时必须补跑 `full test #3`，优化轮次作为过程证据
+  保留，不要求重跑。
+- 全量测试编号按发生顺序递增：`#1` = develop 收口（自然划分版，单或多 kernel）；
+  `#2` = merge 收口（融合版，仅 `merge_required: true` 时存在）；`#3` = optimize 收口
+  （仅采纳改动导致 kernel 变化时补跑）。没有融合时，optimize 后的复验记 `#2`；
+  优化未采纳且 kernel 未变化时复用上一次记录。`ITERATIONS.md` 的 `Stage` 列按实际记录写
+  `full test #1` / `#2` / `#3`，门禁据此识别。`remote-detached` 下需要执行的每一次全量
+  测试都必须等连接远端后真实执行，不得推迟。
 - `finish` 前必须对**当前源码**完成一次全量测试与最终评审；声明 `性能要求：requested`
   时还要完成配对 benchmark 和 profiling。`Final Verdict` 必须记录交付 kernel SHA-256
   （与当前源码及 `solution.json` 一致），引用的最终证据路径必须真实存在；交付 kernel
   与 optimize best kernel 不同（例如 review 修复）时写明差异。
-- optimize 采纳改动后，当前 kernel 的 `full test #2` 可同时作为 develop / fulltest 门禁的
-  完成证据；kernel 未变化时 `full test #1` 继续作为交付证据，不要求对最终 kernel 重跑。
+- optimize 采纳改动后，当前 kernel 的 `full test #3`（无融合时为 `#2`）可同时作为
+  fulltest / benchmark / finish 门禁的完成证据；kernel 未变化时最近一次全量测试（有融合时
+  `#2`，无融合时 `#1`）继续作为交付证据，不要求对最终 kernel 重跑。
 
 ### 测试与性能口径
 
@@ -220,9 +233,9 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
   2~3 轮（下限 2 轮、上限 3 轮），逐轮写入 `ITERATIONS.md` 的 `## Performance Rounds`。
   不足两轮不得以“已收敛”“收益不大”或询问用户换取提前收口；满两轮且归因第一名已被针对性
   攻过后可收口，不得为凑轮次做空转轮。例外：baseline 之后重算的 `skeleton_ratio ≥ 0.80`
-  时按 `early_stop` 记 0 轮。optimize 只能在 full test #1
-  通过后开始，结束后必须确认当前 kernel 有全量测试记录（kernel 变化时补跑 full test #2）；
-  `性能要求：requested` 时再进入 benchmark。
+  时按 `early_stop` 记 0 轮。optimize 只能在最近一次全量测试（`full test #1` 或融合后的
+  `full test #2`）通过后开始，结束后必须确认当前 kernel 有全量测试记录（kernel 变化时补跑
+  `full test #3`，无融合时为 `#2`）；`性能要求：requested` 时再进入 benchmark。
 - **性能采集看用户要求**：`DESIGN.md` 的 `性能要求：none` 表示用户没有明确提性能，
   当前 kernel 全量测试通过后直接 finish，不跑 benchmark、不做 profiling，也不得自行补测；
   `requested` 才按 §5 口径采集性能并作为交付证据。

@@ -53,14 +53,15 @@ description: Use when specifying a new CATLASS Python DSL operator and producing
 
 | 取值 | 判定依据 | 后续流程 |
 |---|---|---|
-| `requested` | 用户明确提出性能目标、时延、加速比、吞吐或 profiling 要求 | optimize 后验收全量测试（kernel 变化时跑 full test #2），再执行 benchmark 与 profiling |
-| `none` | 用户没有明确提性能，只要求功能正确或实现算子 | optimize 后验收全量测试（kernel 变化时跑 full test #2），直接进入 finish，不执行 benchmark 与 profiling |
+| `requested` | 用户明确提出性能目标、时延、加速比、吞吐或 profiling 要求 | optimize 后验收全量测试（kernel 变化时跑 full test #3，无融合记 #2），再执行 benchmark 与 profiling |
+| `none` | 用户没有明确提性能，只要求功能正确或实现算子 | optimize 后验收全量测试（kernel 变化时跑 full test #3，无融合记 #2），直接进入 finish，不执行 benchmark 与 profiling |
 
 默认取 `none`。只有用户原话里出现性能相关诉求才写 `requested`，不得以“顺便测一下”为由
 自行升级；用户后续补充性能要求时，在 `ITERATIONS.md` 记录一条设计修订并更新该行。
 两种情况都必须完成 optimize（模式 B 2~3 轮 / 模式 A 一轮；baseline 之后重算的
 `skeleton_ratio ≥ 0.80` 时按 `early_stop` 记 0 轮）；优化
-采纳改动了 kernel 时补跑 `full test #2`，全部未采纳、kernel 未变化时可复用 `full test #1`。
+采纳改动了 kernel 时补跑 `full test #3`（无融合阶段时记 `#2`），全部未采纳、kernel 未变化时
+可复用最近一次全量测试（有融合时为 `#2`，无融合时为 `#1`）。
 
 ## 语言与实现边界
 
@@ -77,18 +78,36 @@ CATLASS DSL 是以 Python 语法编写的算子 DSL，不是 C++ 算子库。设
 - C++、MLIR 或生成代码只能作为后端资料，不能成为算子公开接口或初步实现方案；
 - 默认 `fusion.mode=performance`：kernel 划分由你按算子语义与整体性能自行决定，允许多个
   `@tla.kernel`、多个 executor、GM 中间张量及 shape/dtype/layout 分派；
-- 用户明确要求单个融合 kernel 时设 `fusion.mode=single_kernel`。此时**先独立给出自然划分**
-  （`fusion.structural_verdict: single | multi`），再围绕用户约束出方案，两者分开记录：
-  - 自然划分按 `performance` 模式正常做，不为"好合并"预留、缩小或改动结构；
-  - 自然划分就是单 kernel：按普通单 kernel 设计继续，无需合并；
-  - 自然划分是多 kernel：**不改这个判断**，在 DESIGN 的「融合与合并」写明
-    `merge_required: true`、段清单、段间边界清单（依赖方向、前后段 tile/任务映射是否一致、
-    覆盖核范围）与容量可行性（两段是否要求同时驻留 L0C/L1）。**同步原语与 pipe 不在 design
-    选型**：段间怎么接、用哪个 flag、走哪条 pipe 统一在 implement 阶段按
+- 用户明确要求单个融合 kernel 时设 `fusion.mode=single_kernel`。**设计仍按自然划分出方案**：
+  先给出 `fusion.structural_verdict: single | multi`，并把它作为 design 阶段唯一的实现方案，
+  不为"好合并"预留、缩小或改动结构：
+  - 自然划分就是单 kernel：按普通单 kernel 设计继续，写 `merge_required: false`；
+  - 自然划分是多 kernel：写 `merge_required: true`。**design 不把多 kernel 方案改写为单
+    kernel 方案**，只把它登记为实现链路的第二阶段任务：develop 按自然划分落地多 kernel 版，
+    通过 `full test #1` 后进入独立的 `merge` 阶段完成融合，融合版通过 `full test #2`。
+    DESIGN 的「融合与合并」写融合计划：段清单、段间边界清单（依赖方向、前后段 tile/任务
+    映射是否一致、覆盖核范围）、容量可行性（两段是否要求同时驻留 L0C/L1），以及 merge
+    阶段入口条件（`full test #1` passed，多 kernel 基线源码、SHA 与逐例结果已保留）。
+  - **同步原语与 pipe 不在 design 选型**：段间怎么接、用哪个 flag、走哪条 pipe 统一在 merge
+    阶段按
     [`knowledge/optimization/multi-kernel-to-single-kernel.md`](../../knowledge/optimization/multi-kernel-to-single-kernel.md)
     一次决定；design 不得为此调研 `SyncAll` / `cross_flag` / atomic，也不做合并原型。这是
     用户约束驱动的合并，不是结构判断出错，记录里要把"自然多 kernel"和"交付单 kernel"两件事
     都写清楚；
+- `structural_verdict`（自然划分）与用户诉求正交，四种组合都必须支持，`merge_required`
+  只由「用户要求单 kernel」且「自然划分是多 kernel」同时成立时为 `true`：
+
+  | 用户诉求 | 自然划分 | `merge_required` | 交付路径 |
+  |---|---|---|---|
+  | `single_kernel` | 单 kernel | `false` | develop 直接交付单 kernel |
+  | `single_kernel` | 多 kernel | `true` | develop 多 kernel → FT#1 → merge → FT#2 |
+  | `performance` | 单 kernel | `false` | develop 直接交付单 kernel |
+  | `performance` | 多 kernel | `false` | develop 交付多 kernel，merge 记 `not_applicable` |
+
+  不得因为 `structural_verdict: multi` 就默认融合，也不得因为用户没提单 kernel 就强行拆成
+  多 kernel；`merge_required` 无论取值都要登记，`performance` 模式下融合计划表留空即可。
+  **`structural_verdict` 与 `merge_required` 必须各占独立一行**（gate 按行首匹配，只写在
+  说明句里不算登记，design 门禁会直接判失败）；
 - 合并不可行时（如两段各需一份顶满 L0C 的输出 tile），在 DESIGN 写明不可行的具体容量账与
   两个候选方案（缩 tile / 落 GM），不得为了满足"单 kernel"而悄悄降低精度或改数学语义；
 - 每个 `@tla.kernel` 必须自包含：除形式参数、函数内局部值、Python 内建符号和受信任的
@@ -323,9 +342,9 @@ case 规则：
    检查、真实链路、双向替换）。没有中间量 oracle 时，明确写出替代验证方式。
    同时给出搬运量核算（Σ 重读次数 × 体积）与按有效 MTE2 带宽折算的搬运下界，tiling 参数
    偏离参考样例时逐项说明差异及对搬运量的影响。
-   写明 `fusion.mode`、单融合是否由用户明确提出，以及是否发生「自然多 kernel → 交付单
-   kernel」的合并（`structural_verdict` / `merge_required`、边界清单是否齐备）；没有实测
-   支持的性能判断标记为待验证假设。
+   写明 `fusion.mode`、单融合是否由用户明确提出，以及是否登记「自然多 kernel → 交付单
+   kernel」的第二阶段融合（`structural_verdict` / `merge_required`、边界清单、merge 阶段
+   入口条件 `full test #1` 是否齐备）；没有实测支持的性能判断标记为待验证假设。
 8. 明确正确性 oracle、required cases、`focused_cases`、focused/full test 命令、风险、
    允许路径、benchmark/profiling 命令和可选性能门槛。要求执行器输出实际 argv、退出码
    和逐 case 结果。
@@ -343,7 +362,7 @@ case 规则：
 填写 targeted review focus。
 
 **设计是工作草稿，不是合同。** 评测口径（allowed paths、required cases、benchmark
-命令、融合模式、anti-hack 策略）冻结后不再修改；但 `DESIGN.md` 中的实现方案（tiling、
+命令、融合模式）冻结后不再修改；但 `DESIGN.md` 中的实现方案（tiling、
 数据流、buffer 规划、同步策略、kernel 划分）允许在 develop 阶段随实测修改：
 
 - 修改后在 `ITERATIONS.md` 记录一条“设计修订”（改了什么、为什么改、依据哪次实测）；

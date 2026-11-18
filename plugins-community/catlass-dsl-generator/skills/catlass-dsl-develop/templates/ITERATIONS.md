@@ -5,6 +5,12 @@
 | Iter | Stage | Kernel SHA256 | Command | Result | Evidence |
 |------|-------|---------------|---------|--------|----------|
 
+`Stage` 按主流程记录：`skeleton` → `implement` → `focused test` → `full test #1` →
+`merge` → `full test #2` → `optimize` → `final review` → `full test #3` → `benchmark`。
+`merge` 只有在 DESIGN 声明 `merge_required: true` 时才是真实融合记录（同时补一行融合版的
+`focused test`）；否则追加一行 `Stage=merge`、`Result=passed`、Command 注明
+`not_applicable`。`full test #3` 只在 optimize 采纳改动、kernel 变化时补跑。
+
 ## Run Log（每次上板必填）
 
 每一次在设备上执行（focused 用例、批量分片、benchmark、profile、探针）都记一行，记录实际

@@ -46,21 +46,19 @@ description: Generate a complete CATLASS Python DSL operator from a frozen DESIG
 - **Commands / required cases** — 实际 argv、case IDs、设备与环境。
 - **Risk / Performance / Knowledge** — 评审重点、性能目标或只测量、查询条件。
 
-`fusion.mode=performance` 默认不做源码 anti-hack 扫描，允许多个 kernel、executor、
-GM 中间张量及显式 shape/dtype/layout 分派。只在用户明确要求单个融合 kernel 时使用
-`single_kernel`：只声明一个 `@tla.kernel`、每次 `run` 只 launch 一个 kernel，不得为编译期
+`fusion.mode=performance` 允许多个 kernel、executor、GM 中间张量及显式
+shape/dtype/layout 分派。用户明确要求单个融合 kernel 时使用 `single_kernel`：只声明一个
+`@tla.kernel`、每次 `run` 只 launch 一个 kernel，不得为编译期
 变体声明独立 kernel。
 
 `single_kernel` 模式写代码前先读 DESIGN 的「融合与合并」（`performance` 模式没有这一节，
 直接跳过）：
 
-- `structural_verdict=single`：按普通单 kernel 实现。
-- `structural_verdict=multi` 且 `merge_required: true`：以多 kernel 版本作为语义与性能
-  基线（已有可运行的当前版本就直接复用，没有才先写一版），再按边界清单逐条加栅栏合并；
-  原语与 pipe 直接查
-  [`knowledge/optimization/multi-kernel-to-single-kernel.md`](../../knowledge/optimization/multi-kernel-to-single-kernel.md)
-  的判定表选型，不重新调研同步 API；该条未覆盖的边界才补查一次，并把结论回写该条。
-  合并后与基线做逐位对比与同进程配对计时，两项结果都记入 `ITERATIONS.md`。
+- `structural_verdict=single` 或 `merge_required: false`：按普通单 kernel 实现。
+- `merge_required: true`：**develop 阶段只交付自然划分的多 kernel 版，不写融合代码**。
+  多 kernel 版通过 `focused test` 与 `full test #1` 后 develop 结束，融合在独立的 `merge`
+  阶段执行（见下文「merge 阶段（融合）」）。多 kernel 基线必须保留源码、SHA、命令与逐例
+  结果，作为 merge 的逐位对比与配对计时基准。
 - 合并不可行（DESIGN 已给容量账与候选方案）时按候选方案执行，不得为了"单 kernel"改数学
   语义或降低精度。
 
@@ -106,6 +104,7 @@ dev shape（或等价合成 shape）先让流水线指标达标（见下方 DoD�
 matmul 骨架拉跨，后面叠多少 vector 优化都补不回来。纯 vector（无 MMAD）算子不适用。
 骨架只是测量工件：它不改变 DESIGN 决定的 kernel 划分与 `fusion.mode`，也不能作为把
 CV 融合算子拆成独立 Cube / Vector kernel 的理由；最终交付结构仍按 DESIGN 的融合方案。
+骨架对应自然划分版本，`merge` 阶段融合为单 kernel 后不重跑骨架。
 首版单 GEMM 骨架阶段只允许修改 `BM/BN/BK/SK`、dtype 与块映射（波次量化 / L2 swizzle）；
 `SK` 是 L0 的 K 子块步长。改完 tile 与 dtype 后先按 `knowledge/dsl/pattern-capacity-driven-tiling`
 校核 L1/L0A/L0B/L0C 容量（超限编译期不报错，上板才 OOB）；
@@ -319,7 +318,8 @@ shape 的 GEMM 时间对比。偏差超过 15% 时在 `ITERATIONS.md` 写归因�
    dispatch 下沉或复用是否值得做，写清整体收益与代价后再决定是否收口，不得只凭单项占比
    收口，也不追求小 shape 追平 reference。
 4. 记账：`ITERATIONS.md` 记录逐例 host 占比、top-k 动作及归类、处置前后 Σ、剩余项与原因，
-   并把证据路径写入 `host_selfcheck`（optimize 的 `early_stop` 会校验它存在）。
+   并把证据路径写入 `host_selfcheck`（作为骨架达成率豁免的支撑证据，供 optimize 引用；
+   门禁不再校验该路径存在）。
 
 MAC/MTE2 占比只从 `kernel_details.csv` 同一行的 `aic_*` 列读取（字段名随版本
 可能是 `aic_mac_ratio` / `aic_cube_ratio`，以实际列为准并把列名写入账本）；`overlap` 为
@@ -357,16 +357,17 @@ skeleton。
    Skeleton Performance 表？
 10. `layout_a=col` 时 K 是否已按 `BK` 对齐（`ceil(K/SK) % (BK/SK) == 0`），结果里的
     `k_raw` / `k_pad` 与 Skeleton Performance 表是否一致？未验证过的子块相位不得直接上板。
-11. `single_kernel` 且 `merge_required: true` 时，DESIGN 边界清单里的每条边界是否都有对应
-    栅栏与原语，栅栏是否写在 per-task 循环之外（空核同样到达），并且合并版与多 kernel
-    基线的输出逐位一致？
+11. （merge 阶段执行）`merge_required: true` 时，DESIGN 边界清单里的每条边界是否都有对应
+    栅栏与原语，栅栏是否写在 per-task 循环之外（空核同样到达），并且融合版与多 kernel
+    基线的输出逐位一致？develop 阶段此项记 `not_applicable`，不阻塞 `full test #1`。
 
-十一项都答“是”才记 `passed`；未达默认判据但第 5 项给出了可核对豁免理由的记
+十一项都答“是”才记 `passed`（第 11 项在 develop 阶段记 `not_applicable`，由 merge 阶段
+回答）；未达默认判据但第 5 项给出了可核对豁免理由的记
 `passed (waived)`；其余记 `failed` 并先修。
 
 骨架判定通过（含 `passed (waived)`）后再做**最小 focused 验证**（编译 + 最小 shape 运行），
 随后进入 `implement`，按「正确性 → 边界 → 性能细节」增量扩展。每次扩展都必须重新通过
-编译与 focused test，全部 focused cases 通过后才进入 optimize。
+编译与 focused test，全部 focused cases 通过后才进入 `full test #1`。
 
 实现起点是 DESIGN 登记的主参考样例与 `reference.py` / golden，骨架只提供流水结构：每增加一个
 语义段（epilogue、散写合并、mask、索引、舍入、累加边界），都要在 `ITERATIONS.md` 指出它对应
@@ -490,14 +491,25 @@ scatter 没有官方样例，SIMT 标量读写写法同样参考 `**/indexer/gat
 阶段顺序：
 
 ```text
-skeleton → implement → focused test → full test #1 → optimize →
-targeted review（high risk）/ final review → full test #2 → [benchmark] → finish
+skeleton → implement（自然多 kernel）→ focused test → full test #1 →
+merge（仅 merge_required: true）→ full test #2 → optimize →
+targeted review（high risk）/ final review → full test #3（优化改动 kernel 时）→ [benchmark] → finish
 ```
+
+- `merge` 是独立阶段，只在 DESIGN 声明 `merge_required: true` 时执行；否则在
+  `ITERATIONS.md` 追加一行 `Stage=merge`、`Result` 写 `passed` 并在 Command 列注明
+  `not_applicable`，直接进入 optimize。
+- 全量测试编号按发生顺序递增：`#1` = develop 收口（自然划分版，单或多 kernel）；
+  `#2` = merge 收口（融合版，仅 `merge_required: true` 时存在）；`#3` = optimize 收口
+  （仅优化采纳改动导致 kernel 变化时补跑）。没有融合时，optimize 改动后的复验记 `#2`；
+  优化未采纳、kernel 未变化时复用上一次全量记录。
+- `optimize` 的 baseline 取最近一次全量测试通过版本；有融合时是 `full test #2` 的融合版，
+  不回到多 kernel 版上优化。
 
 - `benchmark` 只在 `DESIGN.md` 声明 `性能要求：requested` 时执行；`none` 时当前 kernel
   全量测试通过后直接 finish，不采集性能、不写 benchmark 里程碑。
 - 每完成一个里程碑，在 `ITERATIONS.md` 追加一行；进入下一阶段前先跑
-  `gate.py develop / fulltest / optimize / benchmark / finish`，未通过不得继续。
+  `gate.py develop / fulltest / merge / optimize / benchmark / finish`，未通过不得继续。
   唯一例外：`remote-detached` 的 focused test 补跑后，原地把该行 `deferred` 改为
   `passed` 并补上证据。
 
@@ -519,6 +531,37 @@ targeted review（high risk）/ final review → full test #2 → [benchmark] �
   review、full test、benchmark、finish 必须记录。
 - 环境缺失时记录 `blocked` / `not_run` 并保留当前实现；环境就绪后重跑该阶段，不重建
   run。
+
+## merge 阶段（融合）
+
+仅 DESIGN 声明 `merge_required: true` 时执行。入口条件全部满足才能开始：
+
+- `full test #1` 已在 multi kernel 版上 `passed`，且 `gate.py fulltest` 通过；
+- 多 kernel 基线源码、`solution.json`、SHA-256、运行命令与逐例结果都已保留，后续可随时
+  复跑与逐位对比。
+
+执行顺序：
+
+1. 按 DESIGN 边界清单逐条落地栅栏。原语与 pipe 直接查
+   [`knowledge/optimization/multi-kernel-to-single-kernel.md`](../../knowledge/optimization/multi-kernel-to-single-kernel.md)
+   的判定表选型，不重新调研同步 API；该条未覆盖的边界才补查一次，并把结论回写该条。
+2. 融合版跑 `focused test`，与多 kernel 基线做逐位对比。
+3. 与基线做同进程配对计时（基线 / 合并版交替）。回退必须 ≤5%；超过 5% 时继续优化融合版
+   （定位栅栏、空核与映射统一带来的额外开销），**不得退回多 kernel 版本收口**；确实定位
+   不到可消除开销时，把证据与剩余偏差记入 `ITERATIONS.md`。
+4. 融合版跑 `full test #2`，记录 `Stage=merge`（Kernel SHA256 取融合版源码，Command 列写
+   `baseline=<多 kernel 基线 SHA>`）与 `Stage=full test #2` 两行。`gate.py merge` 是验收门禁
+   （在融合版 focused 与 FT#2 之后执行），它会回查该 `baseline` SHA 上是否存在
+   `full test #1 passed`，并拒绝 `baseline` 等于融合版 SHA 的记录；未写 `baseline` 时要求
+   ITERATIONS.md 中存在与当前源码 SHA 不同的 `full test #1 passed`，否则报缺基线。
+   它与 `gate.py fulltest` 都通过后才能进入 optimize。
+
+融合阶段的产物必须满足 `single_kernel` 的交付定义：只声明一个 `@tla.kernel`、每次 `run`
+只 launch 一次；profiling 确认每次 run 只有一行目标 kernel。
+
+optimize 采纳改动导致 kernel SHA 变化时，补跑 `full test #3` 即可：`gate.py merge` 在
+当前 SHA 没有 merge 记录但历史 merge 已通过 FT#2、且当前 SHA 已有 FT#3 passed 时按
+optimize 复验继承，不再报缺 merge 记录。
 
 ## 开发循环
 
@@ -601,8 +644,7 @@ stride、有效区必须一一对应；代数等价不等于数值等价。然�
   O(M·K·nv)（按 V 块重新扫描全部 K），必须给出理由与实测代价，否则判不通过并要求改为
   O(M·K)。
 - review 默认检查接口、数学语义、数据流、融合范围及 DSL 实现；含 MMAD 的算子还要核对
-  DESIGN 列出的每个 matmul 阶段都有各自的 Skeleton Performance 行与 evidence；严格单融合
-  模式额外检查自由名字、唯一声明、单 launch、无独立 dispatch 和无 Torch/Tensor 计算替代。
+  DESIGN 列出的每个 matmul 阶段都有各自的 Skeleton Performance 行与 evidence。
 - full test 使用完整 `workload.jsonl`，必须分 2~5 片并行执行；每片一条命令、写独立
   `--output`，分片命令用分片级超时，片内逐例 60s 硬超时。全部 required cases 逐例
   passed 才通过。失败用例一次收集、批量修复、逐例复验后再重跑整轮。
@@ -615,15 +657,15 @@ stride、有效区必须一一对应；代数等价不等于数值等价。然�
   只有最终输出对比不足以证明链路与标杆对齐。
 - benchmark 只在 `DESIGN.md` 声明 `性能要求：requested` 时执行：逐例配对
   candidate/reference，引用 full test 的正确性证据，要求 candidate mean 为有限正数且
-  profiling 通过。默认不做 anti-hack 审计；`single_kernel` 模式要求人工核查唯一声明与
-  逐 iteration CSV。声明 `none` 时不做 benchmark、不采 profiling，也不写 benchmark 行。
+  profiling 通过。声明 `none` 时不做 benchmark、不采 profiling，也不写 benchmark 行。
 - 多 kernel 时测量完整 `run`，包括所有阶段；不挑选其中一个 kernel 的耗时作为整体性能。
 - 代码变化使旧测试、review、benchmark 和知识结论失效；每个结果绑定当前 kernel SHA-256。
-- focused test 通过后先跑 `full test #1`，通过后进入 `catlass-dsl-optimize`，继承融合策略
+- focused test 通过后先跑 `full test #1`；`merge_required: true` 时再进入 merge 阶段融合为
+  单 kernel 并跑 `full test #2`，然后进入 `catlass-dsl-optimize`，继承融合策略
   与 design 冻结的 `workload_dev.jsonl`。optimize 完成后按 targeted review / final
-  review → 全量测试重新验收：采纳改动导致 kernel 变化时补跑 `full test #2`，全部未采纳、
-  kernel 未变化时复用 `full test #1`。`性能要求：requested` 时继续 benchmark，`none` 时
-  当前 kernel 全量测试通过即 finish。
+  review → 全量测试重新验收：采纳改动导致 kernel 变化时补跑 `full test #3`（无融合记 `#2`），
+  全部未采纳、kernel 未变化时复用最近一次全量测试。`性能要求：requested` 时继续 benchmark，
+  `none` 时当前 kernel 全量测试通过即 finish。
 - 选择空闲 NPU，执行前 source 项目 `env.sh`。candidate profiler 每轮重新采集；普通 trace
   归档只保留 CSV。
 
@@ -668,12 +710,13 @@ stride、有效区必须一一对应；代数等价不等于数值等价。然�
 检查清单：
 
 - `ITERATIONS.md` 包含 skeleton 到 finish 的完整里程碑行，kernel SHA 与当前源码一致；
-- full test #1（optimize 前）覆盖全部 required cases；优化采纳改动了 kernel 时 full test #2
-  也要覆盖全部 required cases，失败重跑记录齐全；
+- full test #1（optimize 前；有融合时是 `full test #2` 的融合版）覆盖全部 required cases；
+  优化采纳改动了 kernel 时 `full test #3`（无融合记 `#2`）也要覆盖全部 required cases，
+  失败重跑记录齐全；
 - `gate.py finish --workspace <ws>` 通过，确认 optimize 轮次、当前 kernel 的全量测试、
   final review 与 Final Verdict 都已落账；`性能要求：requested` 时还包含 benchmark；
 - `Final Verdict` 记录交付 kernel SHA-256，与当前源码及 `solution.json` 一致；列出的
-  最终证据路径必须真实存在（例如 `full test #2` 的 result.json），引用缺失文件视为
+  最终证据路径必须真实存在（例如当前 kernel 的 `full test #3` / `#2` result.json），引用缺失文件视为
   记录不完整；交付 kernel 与 optimize best kernel 不同时写明差异原因；
 - final review 结论针对当前源码；
 - `性能要求：requested` 时 benchmark 为当前源码的配对测量，profiling 数据存在；

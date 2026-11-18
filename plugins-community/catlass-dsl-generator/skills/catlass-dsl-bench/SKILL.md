@@ -9,8 +9,9 @@ description: Use when independently checking and timing a CATLASS Python DSL sol
 
 > **入口门禁**：作为工作流阶段执行时，`python3 <workflow>/scripts/gate.py benchmark
 > --workspace <ws>` 必须通过。它要求 optimize 已按模式 A/B 完成并落账，且当前 kernel 已有
-> 全量测试 passed 记录：优化采纳改动了 kernel 时必须重跑 `full test #2`，全部未采纳、
-> kernel 未变化时可复用 `full test #1`；只有 optimize 自测结果的不得开始工作流内的
+> 全量测试 passed 记录：优化采纳改动了 kernel 时必须重跑 `full test #3`（无融合阶段时记
+> `full test #2`），全部未采纳、kernel 未变化时可复用最近一次全量测试（有融合时 `#2`，
+> 无融合时 `#1`）；只有 optimize 自测结果的不得开始工作流内的
 > benchmark。独立测量任务不经过该门禁，直接按本 Skill 执行。
 > 仅当 `DESIGN.md` 声明 `性能要求：requested` 时进入工作流内的 benchmark 阶段；声明 `none`
 > 时不执行 benchmark 与 profiling，当前 kernel 全量测试通过后直接 finish。
@@ -322,21 +323,6 @@ def timed(run, args, trials):
   二次失败按 kernel 问题处理，不得加大超时。数值正确性失败不得换卡重试，按精度或
   kernel 问题定位。
 - 禁止用 `rm -rf` 丢弃已完成结果。
-
-## 单融合审计（仅 `single_kernel` 模式）
-
-用户明确要求单融合时，测量前人工完成以下检查，并把结论写入 `ITERATIONS.md`：
-
-- solution 只声明一个 `@tla.kernel`，每次 `run` 只 launch 它；
-- 每个 decorated kernel 的自由名字只来自形式参数、函数内局部值、Python 内建符号和
-  `tla` API，不存在模块级可变配置或 closure；
-- 候选源码不调用 `torch` / `torch.nn` / `torch.ops` 或 Tensor 计算算子替代 DSL；
-  只允许 dtype/device/shape 元数据检查和空输出分配；
-- 单独一次 profiling 产出的 `kernel_details.csv` 只出现该 kernel（warmup 与主采集各
-  一条），不得出现替代计算的 torch / aclnn 算子；
-- 任何一项不满足即判定本轮无效，不产生性能结论。
-
-默认 `performance` 模式不做上述审计，允许多 kernel 和 GM 中间张量。
 
 ## 与其它阶段的衔接
 

@@ -8,7 +8,8 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
 > **入口**：本阶段开始前先加载 `catlass-dsl-workflow` 并输出阶段卡。
 
 > **入口门禁**：`python3 <workflow>/scripts/gate.py fulltest --workspace <ws>` 必须通过，
-> 即当前 kernel 已有全量测试（full test #1 或 #2）`passed`；未通过不得开始优化，也不得用
+> 即当前 kernel 已有全量测试（full test #1 / #2 / #3）`passed`；`merge_required: true` 时
+> 当前 kernel 必须是已通过 `full test #2` 的融合版。未通过不得开始优化，也不得用
 > focused test 或 optimize 自测代替。
 
 > **自动执行**：遇到问题只要有可行方案就逐步尝试，一个方案失败就换下一个，不停下来找
@@ -134,7 +135,7 @@ description: Iteratively optimize, speed up, benchmark, and profile one existing
    避免重复已证伪方向。
 2. 确认优化对象是一个现有、无符号链接的主实现文件，允许包含多个 DSL kernel。继承
    design/develop 的 `fusion.mode`：默认 performance，允许多 executor、GM 中间张量和
-   变体分派；仅用户明确要求单融合时按 `single_kernel` 审计唯一声明与单 launch。
+   变体分派。
 3. 运行全部 correctness 命令，再用已解析命令生成 baseline；确认结果的
    `solution.source_sha256` 与当前 kernel SHA-256 一致。
 4. 在 `ITERATIONS.md` 写入 `## Optimization Policy` 与第 0 行 baseline。
@@ -290,13 +291,14 @@ Verdict 写明依据。命中骨架达成率收口（`early_stop: skeleton_ratio
 
 最终验收证据只服务 optimize 自身，不移交 develop；交回 develop 后先跑
 `gate.py optimize` 确认账本完整，再按 final review → 全量测试验收：采纳改动导致 kernel
-变化时补跑 `full test #2`，全部轮次 rejected、kernel 未变化时可复用 `full test #1`。
+变化时补跑 `full test #3`（无融合阶段时记 `#2`），全部轮次 rejected、kernel 未变化时可
+复用最近一次全量记录（有融合时是 `full test #2`）。
 `DESIGN.md` 声明 `性能要求：requested` 时继续执行 benchmark，`gate.py benchmark` 通过后
 才算 optimize 真正交付；声明 `none` 时当前 kernel 全量测试通过后直接 finish，不再做交付
 benchmark 与 profiling。缺少当前 kernel 的全量测试记录时不得进入 benchmark 或 finish，
 也不得把本阶段的 dev 子集结果当作全量正确性证据。若后续 review 修复了源码，只需补跑
-focused test 与 `full test #2`；优化轮次按其 evidence 中的 kernel SHA 说明适用范围，
-不要求对最终 kernel 重跑。
+focused test 与新一轮全量测试（有融合时记 `full test #3`）；优化轮次按其 evidence 中的
+kernel SHA 说明适用范围，不要求对最终 kernel 重跑。
 
 ## 知识沉淀
 

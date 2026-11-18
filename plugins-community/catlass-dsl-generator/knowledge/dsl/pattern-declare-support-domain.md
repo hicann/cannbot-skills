@@ -45,10 +45,6 @@ assert hidden.dtype == torch.bfloat16 and ids.dtype in (torch.int32, torch.int64
 
 # 约束
 
-- host wrapper 只允许元数据检查、空输出分配与 GM 中间张量分配；
-  任何计算阶段都必须由 solution 声明的 kernel 承担。
-- 允许的 torch 调用仅限 `torch.device/empty/empty_like/empty_strided/is_tensor`；
-  张量元数据方法仅限 dim/size/stride/numel/is_contiguous 等。
 - 尾块 extent 必须同时用于搬运、mmad 与 fixpipe，三者对"实际 tile 大小"的认知要保持一致。
 - 若确需回退，必须在设计中显式登记为偏差并让 anti-hack 的声明与测量路径一致，
   不得让回退路径悄悄参与性能测量。

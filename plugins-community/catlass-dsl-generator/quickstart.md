@@ -116,8 +116,9 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 ```
 
 > **第二步（默认直通，无需批准）** — 产物齐备后自动进入 `develop`，继续完成
-> **骨架 → 实现 → 调试 → 全量测试 → optimize → Review → 全量测试验收（kernel 变化时补跑
-> #2）→ Benchmark/Profiling（仅用户明确要求性能时）**。
+> **骨架 → 实现（自然划分版）→ 调试 → full test #1 → merge（仅 `merge_required: true`）
+> → full test #2 → optimize → Review → 全量测试验收（kernel 变化时补跑 #3，无融合记 #2）
+> → Benchmark/Profiling（仅用户明确要求性能时）**。
 > 只有你想先评审设计时才需要额外说一句：
 
 ```text
@@ -131,10 +132,11 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 不超过 3 组，骨架同步只用 mutex；骨架直接复制 `templates/skeleton_gemm.py` +
 `skeleton_profile.py` + `skeleton_spec.json`，只填 spec 与 kernel 体；不达标可写豁免理由），
 再按「正确性 → 边界 → 性能细节」扩展。骨架只是测量工件，不改变最终 kernel 划分。阶段
-顺序固定为 focused test → **full test #1** → optimize（有目标走模式 A，无目标走模式 B
+顺序固定为 focused test → **full test #1** → **merge**（仅 `merge_required: true`，
+无融合时记 `not_applicable`）→ **full test #2** → optimize（有目标走模式 A，无目标走模式 B
 2~3 轮，上限 3 轮）→ targeted/final review →
-全量测试验收（kernel 变化时补跑 **full test #2**）→ [benchmark]。每次进入下一阶段前都要
-先跑门禁并通过：
+全量测试验收（kernel 变化时补跑 **full test #3**，无融合阶段时记 `#2`）→ [benchmark]。
+每次进入下一阶段前都要先跑门禁并通过：
 
 > 按结构找参考样例：Cube-only → `tla/kernel/matmul/basic_mmad/basic_matmul.py`；
 > Cube-Vector → `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
@@ -156,8 +158,8 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <阶段> --workspace <项�
 `DESIGN.md` 的 `性能要求：` 决定是否采集性能：只有用户明确提出性能、时延或加速比时才写
 `requested`，此时当前 kernel 全量测试后执行 benchmark 与 profiling；写 `none` 时当前 kernel
 全量测试通过后直接 finish，不跑 benchmark、不做 profiling。优化全部未采纳、kernel 未变化时
-`full test #1` 可直接作为交付用的全量测试，采纳改动导致 kernel 变化时才必须补跑
-`full test #2`。
+可复用最近一次全量测试（有融合时为 `full test #2`，无融合时为 `full test #1`）作为交付证据，
+采纳改动导致 kernel 变化时才必须补跑 `full test #3`（无融合阶段时记 `#2`）。
 
 执行模式在任务开始时确定并写入 `DESIGN.md` 的 `执行模式：` 行，门禁只读这一行、不做本地
 环境探测：
@@ -237,8 +239,7 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <阶段> --workspace <项�
 
 - 直接在当前 **Git workspace** 中运行，并明确允许修改的路径；
 - 测试、benchmark 和 profiling 命令应能从目标项目直接执行；
-- 融合范围由 design 按整体性能确定，NPU 结果应保留 profiling CSV 证据；严格单融合模式
-  额外执行唯一声明与单 launch 审计；
+- 融合范围由 design 按整体性能确定，NPU 结果应保留 profiling CSV 证据；
 - 缺少 CANN、NPU 或 CATLASS DSL 环境时，相关结果为 `not_run`，不会被视作通过。
 
 ---
@@ -268,8 +269,9 @@ develop 先落性能骨架并达标，再扩展主 Python 文件内的全部 ker
 编译、上板、精度、benchmark、profiling 全部在真实环境完成；环境缺失记录 `blocked` /
 `not_run`，保留代码及待执行阶段，环境就绪后直接继续。连接与同步由使用者现有方式处理。
 
-focused test 通过后先跑全量测试 #1，再进入 optimize（有目标走模式 A，无目标走模式 B
-2~3 轮，上限 3 轮），完成后经 targeted_review / final_review、全量测试验收（kernel 变化时补跑 #2，
+focused test 通过后先跑全量测试 #1；`merge_required: true` 时再走 merge 阶段融合为单 kernel
+并跑全量测试 #2，然后进入 optimize（有目标走模式 A，无目标走模式 B 2~3 轮，上限 3 轮），
+完成后经 targeted_review / final_review、全量测试验收（kernel 变化时补跑 #3，无融合记 #2，
 2~5 片）交付；声明 `性能要求：requested` 时再执行逐例配对 benchmark 与 profiling。每一步
 进入前都要通过 `gate.py` 对应门禁。
 

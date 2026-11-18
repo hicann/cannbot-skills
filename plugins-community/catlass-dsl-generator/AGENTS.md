@@ -65,24 +65,31 @@ skills:
 
 ## 主流程门禁
 
-主流程固定为 `design → develop → full test #1 → optimize → full test #2 → [benchmark] →
-finish`，每一步进入前必须运行对应门禁并通过：
+主流程固定为 `design → develop → full test #1 → merge → full test #2 → optimize →
+full test #3 → [benchmark] → finish`，每一步进入前必须运行对应门禁并通过：
 
 ```bash
-python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|optimize|benchmark|finish> --workspace <项目根>
+python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|merge|optimize|benchmark|finish> --workspace <项目根>
 ```
 
 - design：五件交付物齐备、definition/workload 合法、dev 子集总数 ≤40（用户用例 ≥30 条
   时为 30~40 条，不足 30 条时全选，无用户用例时按覆盖需要自定，不以下限 30 为目标）、
-  DESIGN.md 记录 SHA-256，并声明 `执行模式` 与 `性能要求`；
-- develop：skeleton 与 focused test 记录、`solution.json` 与实现文件一致；
-- fulltest：当前 kernel 的 full test #1 或 #2 已 `passed` 且有证据；
+  DESIGN.md 记录 SHA-256，并声明 `执行模式`、`性能要求` 与独立成行的 `merge_required`；
+- develop：skeleton 与 focused test 记录、`solution.json` 与实现文件一致；交付自然划分的
+  多 kernel 版（单 kernel 交付要求也先按自然划分落地）；
+- fulltest：当前 kernel 的 full test #1 / #2 / #3 已 `passed` 且有证据；
+- merge：验收门禁，在融合版 focused 与 `full test #2` 之后执行；`merge_required: true` 时
+  当前 kernel 为融合版，且有 `merge`、融合版 focused test、`full test #2` 的 passed 记录；
+  `merge_required: false` 时接受 `not_applicable` 记录；
 - optimize：模式 A ≥1 轮、模式 B 2~3 轮（上限 3 轮）的完整账本；`skeleton_ratio ≥ 0.80`
   时按 `early_stop` 记 0 轮；
-- benchmark：当前 kernel 已有全量测试记录（优化采纳改动了 kernel 时必须重跑 full test #2，
-  全部未采纳、kernel 未变化时可复用 full test #1）；`性能要求：requested` 时还要求
+- benchmark：当前 kernel 已有全量测试记录（优化采纳改动了 kernel 时必须重跑 full test #3，
+  全部未采纳、kernel 未变化时可复用最近一次全量测试，有融合时 #2、无融合时 #1）；
+  `性能要求：requested` 时还要求
   benchmark `passed`，`none` 时跳过本阶段；
-- finish：`requested` 时 benchmark 已通过，且 final review `passed` 与 `Final Verdict` 齐备
+- finish：`requested` 时 benchmark 已通过；`merge_required: true` 时存在 `merge` passed
+  记录及其对应 SHA 的 `full test #2`（未做融合不得交付）；且 final review `passed` 与
+  `Final Verdict` 齐备
   （Final Verdict 记录交付 kernel SHA-256，与当前源码及 `solution.json` 一致，引用的
   最终证据路径必须真实存在；交付 kernel 与 optimize best 不同时写明差异）。
 
