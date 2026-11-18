@@ -1,0 +1,15 @@
+# ---------------------------------------------------------------------------
+# CANN API docs generation - resource file (UTF-8).
+# See LICENSE in the root of the software repository for the full text.
+# Text content below may include Chinese prompt/description lines; this ASCII
+# header keeps the file recognized as text by content-type sniffing tools.
+# ---------------------------------------------------------------------------
+task_content: |
+  从证据中提取调用示例相关信息：
+  - 示例代码片段（接口调用、参数配置）
+  - 输入参数值
+  - 输入输出结果数据
+
+return_fields: |
+  "示例代码": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
+  "结果示例": [{"content": "描述内容", "evidence_id": ["证据ID"]}]

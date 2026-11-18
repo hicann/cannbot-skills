@@ -1,0 +1,241 @@
+doc_parts:
+  support:
+    label: 支持的产品
+    products:
+      - npu: "950"
+        id: "id1"
+        product: "Ascend 950PR&950DT系列产品"
+      - npu: "A3"
+        id: "id2"
+        product: "Atlas A3系列产品"
+      - npu: "910b"
+        id: "id3"
+        product: "Atlas A2系列产品"
+      - npu: "310b"
+        id: "id4"
+        product: "Atlas 200I/500 A2推理产品"
+      - npu: "310p"
+        id: "id5"
+        product: "Atlas推理系列产品AI Core"
+      - npu: "310p"
+        id: "id6"
+        product: "Atlas推理系列产品Vector Core"
+      - npu: "910"
+        id: "id7"
+        product: "Atlas训练系列产品"
+    requirement_from_spec: "3 产品支持情况规范"
+    template: |
+      ## 产品支持情况
+
+      <!-- npu="950" id1 -->
+      - <term>Ascend 950PR&950DT系列产品</term>：支持
+      <!-- end id1 -->
+      <!-- npu="A3" id2 -->
+      - <term>Atlas A3系列产品</term>：支持
+      <!-- end id2 -->
+      <!-- npu="910b" id3 -->
+      - <term>Atlas A2系列产品</term>：支持
+      <!-- end id3 -->
+      <!-- npu="310b" id4 -->
+      - <term>Atlas 200I/500 A2推理产品</term>：不支持
+      <!-- end id4 -->
+      <!-- npu="310p" id5 -->
+      - <term>Atlas推理系列产品AI Core</term>：支持
+      <!-- end id5 -->
+      <!-- npu="310p" id6 -->
+      - <term>Atlas推理系列产品Vector Core</term>：支持
+      <!-- end id6 -->
+      <!-- npu="910" id7 -->
+      - <term>Atlas训练系列产品</term>：支持
+      <!-- end id7 -->
+
+  summary:
+    label: 功能说明
+    requirement_from_spec: "4 功能说明规范"
+    template: |
+      ## 功能说明
+
+      根据接口输出的不同，本节介绍如下两种LayerNorm接口。
+
+      - 对shape为\[B，S，H\]的输入数据，输出归一化结果、均值和方差
+
+        在深层神经网络训练过程中，前面层训练参数的更新，会引起后面层输入数据分布的变化，导致权重更新不均衡及学习效率变慢。通过采用归一化策略，将网络层输入数据收敛到\[0, 1\]之间，可以规范网络层输入输出数据分布，加速训练参数收敛过程，使学习效率提升更加稳定。**LayerNorm是许多归一化方法中的一种。**
+
+        本接口实现了对shape大小为\[B，S，H\]输入数据的LayerNorm归一化，其计算公式如下，其中γ为缩放系数，β为平移系数，ε为防除零的权重系数：
+
+        $$y_i = \text{LayerNorm}(x_i)$$
+        $$y_i = \gamma \cdot \frac{x_i - \mu_B}{\sqrt{\sigma_B^2 + \varepsilon}} + \beta$$
+
+        其中，如下两个参数分别代表输入在H轴的均值和方差。
+
+        $$\mu_B = \frac{1}{m}\sum_{i=1}^{m}x_i$$
+        $$\sigma_B^2 = \frac{1}{m}\sum_{i=1}^{m}(x_i - \mu_B)^2$$
+
+      - 对shape为\[A，R\]的输入数据，输出归一化结果、均值、标准差的倒数或方差
+
+        接口实现了对shape为\[A，R\]输入数据的LayerNorm归一化，其计算公式如下，其中γ为缩放系数，β为平移系数，ε为防除零的权重系数：
+
+        $$y_i = \text{LayerNorm}(x_i)$$
+        $$y_i = \text{rstd} \cdot (x_i - E[x]) \cdot \gamma + \beta$$
+
+        其中，如下三个参数分别代表输入在R轴的均值，方差和标准差的倒数。
+
+        $$E[x] = \frac{1}{m}\sum_{i=1}^{m}x_i$$
+        $$\text{Var}[x] = \frac{1}{m}\sum_{i=1}^{m}(x_i - E[x])^2$$
+        $$\text{rstd} = \frac{1}{\sqrt{\text{Var}[x] + \varepsilon}}$$
+
+  impl_principle:
+    label: 实现原理
+    requirement: |
+      描述API内部的算法实现流程，包含：
+      - 算法框图（图示）
+      - 分步骤的计算过程描述
+      - 计算步骤中使用的底层API及其作用
+      - 不同输入shape/场景下的计算过程差异
+      - 数据流向和中间变量的含义
+    template: |
+      ## 实现原理
+
+      - 对shape为\[B，S，H\]的输入数据，输出归一化结果、均值和方差
+
+        以float类型，ND格式，输入为inputX\[B, S, H\]，gamma\[H\]和beta\[H\]为例，描述LayerNorm高阶API内部算法框图，如下图所示。
+
+        **图1**  LayerNorm算法框图
+        ![](../../../figures/LayerNorm算法框图.png "LayerNorm算法框图")
+
+        计算过程分为如下几步，均在Vector上进行（下文中m指尾轴H的长度）：
+
+        1.  计算均值：Muls计算x\*1/m的值，再计算累加值ReduceSum，得到均值outputMean；
+        2.  计算方差：Sub计算出输入x与均值的差值，再用Mul进行平方计算，最后用Muls乘上1/m并计算累加值，得到方差outputVariance；
+        3.  处理gamma和beta：通过broadcast得到BSH维度的gamma和beta；
+        4.  计算输出：方差通过broadcast（或Duplicate）得到BSH维度的tensor，再依次经过Adds\(outputVariance, eps\)、Ln, Muls, Exp（或Sqrt），最后与（x-均值）相乘，得到的结果乘上gamma，加上beta，得到输出结果。
+
+      - 对shape为\[A，R\]的输入数据，输出归一化结果、均值、标准差的倒数或方差
+
+        以float类型，ND格式，输入为inputX\[A, R\]，gamma\[R\] 和beta\[R\]为例，描述LayerNorm高阶API内部算法框架，如下图所示。
+
+        **图2**  LayerNorm-Rstd版本算法框图
+
+        ![](../../../figures/layernorm.png)
+
+        计算过程分为如下几步，均在Vector上进行，整体按照以A轴为最外层循环进行计算：
+
+        1.  计算均值：首先对x的每个元素乘以1/\(2^k+m\)，防止后续累加溢出。然后使用二分累加方式对数据进行求和：将数据拆分成一个整块和一个尾块，其中整块为2^k个元素，尾块为m个元素，将尾块数据叠加到整块数据。为方便描述，定义Vnum为参与单次计算的元素个数。对整块中，以Vnum长度为单位，奇偶位数据进行Vadd，得到一个Vnum长度的结果，对该结果做WholeReduceSum计算，得到输出均值mean；
+        2.  计算rstd：用Sub计算出输入x与均值的差值，再用Mul计算，计算该差值的平方，为防止溢出，按照同样的二分累加方式，计算出该平方结果的方差Variance；方差与防除零系数ε相加，通过Rsqrt计算，得到输出rstd；
+        3.  计算输出：用Sub计算出输入x与均值的差值，再与rstd相乘，得到的结果与gamma相乘，与beta相加，得到输出结果。
+
+  function_proto:
+    label: 函数原型
+    requirement_from_spec: "5 函数原型规范"
+    template: |
+      ## 函数原型
+
+      - 通过sharedTmpBuffer入参传入临时空间
+        - 源操作数Tensor全部/部分参与计算
+
+          ```
+          template <typename T, bool isReuseSource = false>
+          __aicore__ inline void Asin(const LocalTensor<T>& dstTensor, const LocalTensor<T>& srcTensor, const LocalTensor<uint8_t>& sharedTmpBuffer, const uint32_t calCount)
+          ```
+
+        - 源操作数Tensor全部参与计算
+
+          ```
+          template <typename T, bool isReuseSource = false>
+          __aicore__ inline void Asin(const LocalTensor<T>& dstTensor, const LocalTensor<T>& srcTensor, const LocalTensor<uint8_t>& sharedTmpBuffer)
+          ```
+
+      - 接口框架申请临时空间
+        - 源操作数Tensor全部/部分参与计算
+
+          ```
+          template <typename T, bool isReuseSource = false>
+          __aicore__ inline void Asin(const LocalTensor<T>& dstTensor, const LocalTensor<T>& srcTensor, const uint32_t calCount)
+          ```
+
+        - 源操作数Tensor全部参与计算
+
+          ```
+          template <typename T, bool isReuseSource = false>
+          __aicore__ inline void Asin(const LocalTensor<T>& dstTensor, const LocalTensor<T>& srcTensor)
+          ```
+
+      由于该接口的内部实现中涉及复杂的数学计算，需要额外的临时空间来存储计算过程中的中间变量。临时空间支持开发者**通过sharedTmpBuffer入参传入**和**接口框架申请**两种方式。
+
+      - 通过sharedTmpBuffer入参传入，使用该tensor作为临时空间进行处理，接口框架不再申请。该方式开发者可以自行管理sharedTmpBuffer内存空间，并在接口调用完成后，复用该部分内存，内存不会反复申请释放，灵活性较高，内存利用率也较高。
+      - 接口框架申请临时空间，开发者无需申请，但是需要预留临时空间的大小。
+
+      通过sharedTmpBuffer传入的情况，开发者需要为tensor申请空间；接口框架申请的方式，开发者需要预留临时空间。临时空间大小BufferSize的获取方式如下：通过[GetAsinMaxMinTmpSize](GetAsinMaxMinTmpSize.md)中提供的接口获取需要预留空间范围的大小。
+
+  para_clarify:
+    label: 参数说明
+    requirement_from_spec: "6 参数说明规范"
+    template: |
+      ## 参数说明
+
+      **表1**  模板参数说明
+
+      | 参数名 | 描述 |
+      | --- | --- |
+      | T | 操作数的数据类型。支持的数据类型为：half、float。 |
+      | isReuseSource | 是否允许修改源操作数。该参数预留，传入默认值false即可。 |
+
+      **表2**  参数说明
+
+      | 参数名 | 输入/输出 | 描述 |
+      | --- | --- | --- |
+      | dstTensor | 输出 | 目的操作数。<br><br>类型为[LocalTensor](../../../基础API/数据结构/LocalTensor和GlobalTensor定义/LocalTensor/LocalTensor.md)，支持的TPosition为VECIN/VECCALC/VECOUT。 |
+      | srcTensor | 输入 | 源操作数。<br><br>类型为[LocalTensor](../../../基础API/数据结构/LocalTensor和GlobalTensor定义/LocalTensor/LocalTensor.md)，支持的TPosition为VECIN/VECCALC/VECOUT。<br><br>源操作数的数据类型需要与目的操作数保持一致。 |
+      | sharedTmpBuffer | 输入 | 临时缓存。<br><br>类型为[LocalTensor](../../../基础API/数据结构/LocalTensor和GlobalTensor定义/LocalTensor/LocalTensor.md)，支持的TPosition为VECIN/VECCALC/VECOUT。<br><br>用于Asin内部复杂计算时存储中间变量，由开发者提供。<br><br>临时空间大小BufferSize的获取方式请参考[GetAsinMaxMinTmpSize](GetAsinMaxMinTmpSize.md)。 |
+      | calCount | 输入 | 参与计算的元素个数。 |
+
+  return_clarify:
+    label: 返回值说明
+    requirement_from_spec: "7 返回值说明规范"
+    template: |
+      ## 返回值说明
+
+      无
+
+  constraint:
+    label: 约束说明
+    requirement_from_spec: "8 约束说明规范"
+    template: |
+      ## 约束说明
+
+      - 操作数地址对齐要求请参见通用地址对齐约束。
+      - 对shape为[B, S, H]的输入数据的接口：
+        - output和inputX的空间可以复用。其他输出与输入的空间不可复用。
+        - 不支持对尾轴H轴的切分。
+      - 对shape为[A, R]的输入数据的接口：
+        - src和dst的Tensor空间不可以复用。
+        - 不支持对R轴进行切分。
+        - 支持的数据类型：
+          Ascend 950PR&950DT系列产品，支持的数据类型为：half、bfloat16_t、float。
+          Atlas A3系列产品，支持的数据类型为：half、float。
+
+  example:
+    label: 调用示例
+    requirement_from_spec: "9 调用示例规范"
+    template: |
+      ## 调用示例
+
+      - 输入数据的shape为[B, S, H]的接口调用示例
+
+        ```cpp
+        AscendC::Xxx<float, false>(
+            output,           // [输出] 计算结果，shape [B, S, H]
+            inputX,           // [输入] 原始输入数据，shape [B, S, H]
+            (float)epsilon,   // [输入] 防除零系数
+            tiling            // [输入] Tiling信息
+        );
+        ```
+
+        示例结果如下：
+
+        ```
+        输入数据(inputX, shape:[1, 8, 8]):
+        [ 0. 1. 2. 3. 4. 5. 6. 7. ... ]
+        输出数据(output):
+        [ 0. -0.09 0.69 2.34 ... ]
+        ```

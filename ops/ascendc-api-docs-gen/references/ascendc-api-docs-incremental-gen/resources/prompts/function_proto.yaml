@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# CANN API docs generation - resource file (UTF-8).
+# See LICENSE in the root of the software repository for the full text.
+# Text content below may include Chinese prompt/description lines; this ASCII
+# header keeps the file recognized as text by content-type sniffing tools.
+# ---------------------------------------------------------------------------
+task_content: |
+  从证据中提取函数原型相关信息：
+  - 函数原型定义（函数名、模板参数、参数名、参数类型、返回值类型、函数限定符）
+  - 多个函数原型之间的区别
+  - 接口所在的头文件路径
+  - 各函数原型支持的硬件型号
+
+return_fields: |
+  "函数原型": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
+  "原型区别": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
+  "头文件": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
+  "硬件支持": [{"content": "描述内容", "evidence_id": ["证据ID"]}]

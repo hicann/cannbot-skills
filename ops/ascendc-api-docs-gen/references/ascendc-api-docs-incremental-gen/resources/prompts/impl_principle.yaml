@@ -1,0 +1,17 @@
+# ---------------------------------------------------------------------------
+# CANN API docs generation - resource file (UTF-8).
+# See LICENSE in the root of the software repository for the full text.
+# Text content below may include Chinese prompt/description lines; this ASCII
+# header keeps the file recognized as text by content-type sniffing tools.
+# ---------------------------------------------------------------------------
+task_content: |
+  从证据中提取实现原理相关信息：
+  - 算法框图描述（计算流程和步骤）
+  - 不同输入shape/场景下的计算过程
+  - 计算步骤中使用的底层API及其作用（如Muls、ReduceSum、Sub、Mul等）
+  - 数据流向和中间变量的含义
+  - 不同实现版本的区别（如有）
+
+return_fields: |
+  "算法框图": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
+  "计算过程": [{"content": "描述内容", "evidence_id": ["证据ID"]}]

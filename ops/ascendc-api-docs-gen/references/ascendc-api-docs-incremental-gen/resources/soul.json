@@ -1,0 +1,78 @@
+{
+    "terminology": {
+        "terms": [
+            "LocalTensor",
+            "TPosition",
+            "VECIN",
+            "VECCALC",
+            "VECOUT",
+            "TQue",
+            "Tpipe",
+            "sharedTmpBuffer",
+            "calCount",
+            "repeatTime",
+            "srcBlkStride",
+            "dstRepStride",
+            "__aicore__",
+            "datablock",
+            "repeat",
+            "mask"
+        ],
+        "sensitive_words_replace": {
+            "HBM": "片上内存 / On-Chip Memory",
+            "算力切分": "昇腾虚拟化实例",
+            "910B": "Atlas A2 训练系列产品/Atlas A2 推理系列产品",
+            "910C": "Atlas A3 训练系列产品/Atlas A3 推理系列产品",
+            "910D": "Ascend 950PR/Ascend 950DT",
+            "950": "Ascend 950PR/Ascend 950DT",
+            "310B": "Atlas 200I/500 A2 推理产品",
+            "310P": "Atlas 推理系列产品",
+            "致命": "关键",
+            "缺陷": "问题",
+            "静默升级": "升级",
+            "强制升级": "升级",
+            "Fatal": "Critical",
+            "Defect": "Issue"
+        },
+        "sensitive_words_ban": [
+            {
+                "keywords": ["算力密度", "芯片面积", "晶体管数量", "NAND 层数", "128层", "192层"],
+                "reason": "产品规格/供应链信息"
+            },
+            {
+                "keywords": ["14nm", "16nm", "12nm", "10nm", "7nm", "5nm", "DDR5", "LP DDR5"],
+                "reason": "芯片工艺信息"
+            },
+            {
+                "keywords": ["开源"],
+                "reason": "涉及许可条款"
+            },
+            {
+                "keywords": ["1910", "1980", "1911", "1971", "1981", "1982", "1951", "1952", "PG1", "PG2"],
+                "reason": "芯片内部型号（代号）"
+            },
+            {
+                "keywords": ["Atlas 300T A2"],
+                "reason": "已下线产品"
+            }
+        ]
+    },
+    "structure": {
+        "avg_sentence_length": 25,
+        "short_long_ratio": "4:6"
+    },
+    "format": {
+        "table_style": "Markdown表格：参数说明表3列（参数名/输入输出/描述）+ 模板参数说明表2列（参数名/描述）",
+        "code_style": "使用cpp代码块包围，仅提供关键代码片段",
+        "heading_structure": "1级=算子名、2级=产品支持情况/功能说明/实现原理/函数原型/参数说明/返回值说明/约束说明/调用示例",
+        "list_style": "短横线列表 + 嵌套表格",
+        "special_markers": ["$$公式$$", "<term>产品名</term>"]
+    },
+    "punctuation": {
+        "preferred_marks": ["：", "、", "；", "（）"]
+    },
+    "tone": {
+        "person": "third",
+        "tense": "present"
+    }
+}

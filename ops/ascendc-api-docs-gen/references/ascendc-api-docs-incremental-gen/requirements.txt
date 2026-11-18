@@ -1,0 +1,10 @@
+colorama==0.4.6
+httpx==0.28.1
+libclang==18.1.1
+openai==2.37.0
+pydantic==2.13.4
+PyYAML==6.0.3
+questionary==2.1.1
+Requests==2.34.2
+rich==15.0.0
+tqdm==4.67.3

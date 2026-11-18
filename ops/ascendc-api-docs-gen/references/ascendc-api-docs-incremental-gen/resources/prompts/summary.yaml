@@ -1,0 +1,22 @@
+# ---------------------------------------------------------------------------
+# CANN API docs generation - resource file (UTF-8).
+# See LICENSE in the root of the software repository for the full text.
+# Text content below may include Chinese prompt/description lines; this ASCII
+# header keeps the file recognized as text by content-type sniffing tools.
+# ---------------------------------------------------------------------------
+summary:
+  task_content: |
+    从证据中提取API功能相关信息：
+    - API的功能、作用、目的、使用场景
+    - 计算逻辑描述
+    - 计算公式及其变量说明
+    - 公式变量与函数原型参数名的对应关系
+    - 计算示例
+    - 与其他API的关系（区别、配合使用）
+    - 不同芯片版本上的功能差异
+
+  return_fields: |
+    "功能说明": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
+    "计算公式": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
+    "示例": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
+    "区分芯片": [{"content": "描述内容", "evidence_id": ["证据ID"]}]

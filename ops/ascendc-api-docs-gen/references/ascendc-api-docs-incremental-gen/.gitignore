@@ -1,0 +1,27 @@
+# 编辑器 / IDE
+.vscode/
+.idea/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+!.vscode/*.code-snippets
+!*.code-workspace
+
+# 运行产物与本地数据（不入库）
+data/
+.diff/
+.temp_git/
+.omo/
+.claude/
+.opencode/
+src/api_locator/output/
+src/api_change_detect/output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 系统文件
+.DS_Store

@@ -1,0 +1,34 @@
+# ---------------------------------------------------------------------------
+# CANN API docs generation - resource file (UTF-8).
+# See LICENSE in the root of the software repository for the full text.
+# Text content below may include Chinese prompt/description lines; this ASCII
+# header keeps the file recognized as text by content-type sniffing tools.
+# ---------------------------------------------------------------------------
+# 文档生成的可配置规则（评审口径 / 领域叫法）
+#
+# 约定：代码里不写死"某个接口/某个 PR 的特殊处理"，个例差异一律放这里。
+# 加载失败时规则为空（对应处理自动跳过），不影响主流程。
+
+# 术语替换：生成正文里出现了仓内不用的叫法时按此替换
+# （跳过围栏代码与行内代码）
+terms:
+  管道: 流水
+
+# 枚举段名 -> 文档里沿用的缓冲区叫法（只做叫法统一，不做 TPosition 换算）
+buffer_names:
+  OUT: Global Memory
+  GM: Global Memory
+  UB: UB
+  VECIN: UB
+  VECOUT: UB
+  L1: L1 Buffer
+  A1: L1 Buffer
+  B1: L1 Buffer
+
+# 参数语义补句：同一 npu 块内既有"显式地址参数"行、又有来源开关句时，
+# 在开关句后补读取起点（隐式固定位置）。
+param_semantics:
+  - param: bias                     # 显式地址参数名（同表出现该参数行才生效）
+    param_hint: "uint64_t|起始地址|地址|偏置"   # 该行出现其中之一才算"地址型参数"
+    source_text: "来源于BiasTable Buffer"
+    append: "，并固定从0地址开始读取"

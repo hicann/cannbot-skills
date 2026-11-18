@@ -1,0 +1,19 @@
+# ---------------------------------------------------------------------------
+# CANN API docs generation - resource file (UTF-8).
+# See LICENSE in the root of the software repository for the full text.
+# Text content below may include Chinese prompt/description lines; this ASCII
+# header keeps the file recognized as text by content-type sniffing tools.
+# ---------------------------------------------------------------------------
+task_content: |
+  从证据中提取约束相关信息：
+  - 操作数地址复用约束
+  - 操作数地址对齐要求
+  - 参数组合使用的约束
+  - 参数组合配置的额外注意事项（跨参数约束及接口级约束；单参数自身约束不在此提取）
+  - 调用后是否需要恢复环境（调用其他API）
+  - 特殊数据类型的支持差异
+  - 开发方式约束（Kernel直调/工程化开发）
+  - 性能相关约束
+
+return_fields: |
+  "约束说明": [{"content": "描述内容", "evidence_id": ["证据ID"]}]
