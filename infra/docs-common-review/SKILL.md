@@ -209,5 +209,6 @@ docs-common-review/
 ├── docs-punctuation-check/     # 原子：标点检查（skill）
 ├── docs-compliance-check/      # 原子：合规检查（skill）
 ├── docs-basic-aicheck/         # 原子：AI 语义检查（skill）
+├── docs-diagram-check/         # 原子：图形规范性检查（skill）
 └── docs-skills-benchmark/      # 家族级基准回归（固定样例 + common_bench.md 基线 + scripts/bench.js 对齐工具，见其 README.md）
 ```

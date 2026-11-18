@@ -1,0 +1,225 @@
+{
+  "version": "1.0.0",
+  "description": "drawio图形规范性检查规则（来源：drawio文稿设计规范.pptx + 计算产品资料操作指导.docx + drawing_template_drawio.xml）",
+  "palette": {
+    "default": [
+      {
+        "hex": "C2D5FE",
+        "priority": 1,
+        "usage": "默认色，优先使用"
+      },
+      {
+        "hex": "B0F0E2",
+        "priority": 2,
+        "usage": "默认色，优先使用"
+      },
+      {
+        "hex": "B9E9FC",
+        "priority": 3,
+        "usage": "默认色，优先使用"
+      },
+      {
+        "hex": "E0E2E6",
+        "priority": 4,
+        "usage": "默认色，优先使用"
+      },
+      {
+        "hex": "FEE2BA",
+        "priority": 5,
+        "usage": "警示色"
+      },
+      {
+        "hex": "FAB9B6",
+        "priority": 6,
+        "usage": "警示色"
+      }
+    ],
+    "neutral": [
+      {
+        "hex": "202329",
+        "priority": 1,
+        "usage": "文字色"
+      },
+      {
+        "hex": "686D75",
+        "priority": 2,
+        "usage": "边框色"
+      },
+      {
+        "hex": "E0E2E6",
+        "priority": 3,
+        "usage": "填充色"
+      },
+      {
+        "hex": "EDEFF2",
+        "priority": 4,
+        "usage": "填充色"
+      },
+      {
+        "hex": "F4F5F7",
+        "priority": 5,
+        "usage": "填充色"
+      },
+      {
+        "hex": "FFFFFF",
+        "priority": 6,
+        "usage": "背景/突出文字"
+      }
+    ],
+    "highlight": [
+      {
+        "hex": "5478FB",
+        "priority": 1
+      },
+      {
+        "hex": "03B5A5",
+        "priority": 2
+      },
+      {
+        "hex": "2AA6F3",
+        "priority": 3
+      },
+      {
+        "hex": "FB8F2B",
+        "priority": 4
+      },
+      {
+        "hex": "CD0000",
+        "priority": 5
+      }
+    ],
+    "stencil": [
+      "5377FB",
+      "000D33",
+      "222E72",
+      "254694",
+      "CFD7FF",
+      "CFD1EA",
+      "315ABB",
+      "FA7305"
+    ],
+    "note": "stencil色为官方Visio导入图形的固有配色，随组件库版本同步"
+  },
+  "font_family": "HarmonyOS Sans",
+  "font_family_match_ci": true,
+  "font_color_whitelist": [
+    "202329",
+    "FFFFFF"
+  ],
+  "font_size": {
+    "min": 10,
+    "recommended": [
+      14,
+      16
+    ],
+    "highlight": 16,
+    "note": "非整数或<10为error；>16为recommended"
+  },
+  "node": {
+    "height": 32
+  },
+  "start_end": {
+    "shape": "ellipse",
+    "diameter": 52
+  },
+  "corner_radius": 4,
+  "container": {
+    "max_width": 1000,
+    "padding_vertical_min": 40
+  },
+  "image_container_widths": [
+    920,
+    600,
+    300
+  ],
+  "node_fill_colors": [
+    "C2D5FE",
+    "B0F0E2",
+    "B9E9FC",
+    "E0E2E6",
+    "FEE2BA",
+    "FAB9B6",
+    "5478FB",
+    "03B5A5",
+    "2AA6F3",
+    "FB8F2B",
+    "CD0000"
+  ],
+  "container_fill_colors": [
+    "EDEFF2",
+    "F4F5F7"
+  ],
+  "neutral_fill_colors": [
+    "FFFFFF",
+    "E0E2E6",
+    "EDEFF2",
+    "F4F5F7"
+  ],
+  "rules": [
+    {
+      "id": "F01",
+      "level": "must",
+      "desc": "中英文必须使用HarmonyOS Sans字体"
+    },
+    {
+      "id": "F02",
+      "level": "must",
+      "desc": "字号必须为整数且>=10px（小数字号如12.7px报error；>16px报recommended）"
+    },
+    {
+      "id": "F03",
+      "level": "must",
+      "desc": "文字颜色∈白名单：#202329(默认)/#FFFFFF(突出)，含label富文本内嵌color"
+    },
+    {
+      "id": "F04",
+      "level": "must",
+      "desc": "节点文字居中对齐于色块（align=center且verticalAlign=middle）"
+    },
+    {
+      "id": "N02",
+      "level": "must",
+      "desc": "开始/结束节点（椭圆）直径52px（width==height==52）"
+    },
+    {
+      "id": "N03",
+      "level": "must",
+      "desc": "流程色块采用4px圆角（rounded=1）"
+    },
+    {
+      "id": "C01",
+      "level": "must",
+      "desc": "fillColor/strokeColor必须在25色白名单内（大小写不敏感）"
+    },
+    {
+      "id": "N01",
+      "level": "recommended",
+      "desc": "节点高度32px（非节点元素不检查，见注意事项7）"
+    },
+    {
+      "id": "C02",
+      "level": "recommended",
+      "desc": "一张图中建议不超过3种颜色（不包含文字、箭头、线条、边框、流程中开始&结束节点等中性色）"
+    },
+    {
+      "id": "C03",
+      "level": "recommended",
+      "desc": "高亮色非必要不使用，避免大面积出现"
+    },
+    {
+      "id": "S02",
+      "level": "recommended",
+      "desc": "组件容器宽度不超过1000px"
+    },
+    {
+      "id": "S03",
+      "level": "recommended",
+      "desc": "容器上下留白>=40px（左右不做检查）"
+    },
+    {
+      "id": "S04",
+      "level": "recommended",
+      "desc": "组件图片容器宽度为920/600/300px三档"
+    }
+  ]
+}

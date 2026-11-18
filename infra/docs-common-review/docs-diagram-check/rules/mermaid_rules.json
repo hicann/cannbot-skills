@@ -1,0 +1,117 @@
+{
+  "version": "1.0.0",
+  "description": "mermaid代码块规范性检查规则（来源：drawing_template_mermaid.md 模板；检查对象为代码源文本，不依赖渲染）",
+  "scope": {
+    "flowchart": "仅限不含判断菱形节点及分支节点的流程图",
+    "sequence": "时序图"
+  },
+  "flowchart_init": {
+    "themeVariables": {
+      "lineColor": "#686D75",
+      "edgeStrokeWidth": "1px",
+      "fontSize": "14px",
+      "fontFamily": "HarmonyOS Sans, sans-serif"
+    },
+    "flowchart": {
+      "padding": 6,
+      "htmlLabels": true,
+      "useMaxWidth": false,
+      "rankSpacing": 24,
+      "nodeSpacing": 24
+    }
+  },
+  "sequence_init": {
+    "themeVariables": {
+      "actorBkg": "#C2D5FE",
+      "actorBorder": "#C2D5FE",
+      "actorLineColor": "#686D75",
+      "activationBkgColor": "#C2D5FE",
+      "activationBorderColor": "#C2D5FE",
+      "signalColor": "#686D75",
+      "fontFamily": "HarmonyOS Sans, sans-serif",
+      "fontSize": "14px"
+    },
+    "themeVariables_optional": [
+      "activationBkgColor",
+      "activationBorderColor"
+    ],
+    "note": "字体已统一为HarmonyOS Sans；activation两键为可选（不带激活条的模板可不配置）"
+  },
+  "font_family_alternatives": [
+    "HarmonyOS Sans, sans-serif"
+  ],
+  "node_div_styles": {
+    "start_end": {
+      "width": "40px",
+      "height": "40px",
+      "border_radius": "50%",
+      "required_fragments": [
+        "display:flex",
+        "align-items:center",
+        "justify-content:center",
+        "color:#ffffff"
+      ]
+    },
+    "content": {
+      "width": "148px",
+      "required_fragments": [
+        "display:flex",
+        "align-items:center",
+        "justify-content:center"
+      ]
+    }
+  },
+  "classdef_fill_whitelist": [
+    "E0E2E6",
+    "C2D5FE",
+    "B0F0E2",
+    "B9E9FC",
+    "FEE2BA",
+    "FAB9B6",
+    "F4F5F7",
+    "EDEFF2",
+    "5478FB",
+    "03B5A5",
+    "2AA6F3",
+    "FB8F2B",
+    "CD0000",
+    "5377FB",
+    "000D33",
+    "222E72",
+    "254694",
+    "CFD7FF",
+    "CFD1EA",
+    "315ABB",
+    "FA7305",
+    "202329",
+    "686D75",
+    "FFFFFF"
+  ],
+  "rules": [
+    {
+      "id": "M01",
+      "level": "must",
+      "desc": "flowchart不得包含判断菱形节点（{...}语法），报错指明改用drawio流程图"
+    },
+    {
+      "id": "M02",
+      "level": "must",
+      "desc": "%%{init}%%配置必须存在且与模板规范值一致（themeVariables/flowchart逐键比对）"
+    },
+    {
+      "id": "M03",
+      "level": "must",
+      "desc": "classDef填充/文字颜色必须在25色白名单内"
+    },
+    {
+      "id": "M04",
+      "level": "must",
+      "desc": "节点内联样式div须包含模板要求的样式片段（宽高/圆角/布局/文字色）"
+    },
+    {
+      "id": "M05",
+      "level": "recommended",
+      "desc": "flowchart连线标签文字（-->|x|）提示确认非分支语义"
+    }
+  ]
+}
