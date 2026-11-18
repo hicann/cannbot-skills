@@ -189,7 +189,7 @@ fi
 
 用户要求 **跑基准回归 / benchmark 对齐检查 / 基线对齐 / 检测 skill 修改后的结果对齐或性能变化** 时：读取并严格遵循 [docs-skills-benchmark/README.md](docs-skills-benchmark/README.md) 的标准执行流程（固定样例全量模式重跑 → `bench.js convert` 转换 → `bench.js compare` 对齐比对（含执行完备性硬校验）→ `bench.js perf convert / perf compare` 耗时对比 → 差异与耗时反馈）。要点：
 
-- 检查对象固定为 `docs-skills-benchmark/cann_sim工具指南.md`，模式固定全量，不询问模式与 csv/md 导出；含耗时对比目的时按 README 预热一次并丢弃首跑结果；
+- 检查对象固定为 `docs-skills-benchmark/bench测试数据集.md`，模式固定全量，不询问模式与 csv/md 导出；含耗时对比目的时按 README 预热一次并丢弃首跑结果；
 - 对齐判定与差异反馈口径以 README"对齐判定口径"为准，不对齐时逐类反馈差异明细，禁止替用户判定可忽略；
 - 执行完备性硬校验：`compare` 的 `--new` 传聚合 JSON，`summary.failed_check` 非空即本次基准不可信（强制不对齐），逐项反馈失败检查项与原因，禁止以部分结果宣称基线对齐；
 - 耗时对比为提示级：按 README"耗时对比口径"输出逐项耗时对比表与显著回归/显著改善标记，不因耗时差异判定基准不通过，仅当同环境连续多次"显著回归"才提示性能劣化嫌疑；

@@ -3,7 +3,7 @@
 /**
  * docs-skills-benchmark 基准工具（bench.js）
  *
- * 用途：docs-common-review 家族的基准回归测试。固定输入样例 cann_sim工具指南.md，
+ * 用途：docs-common-review 家族的基准回归测试。固定输入样例 bench测试数据集.md，
  * 以 common_bench.md 为基线（golden），检测 skill 修改后检查结果是否仍与基线对齐；
  * 不对齐时输出差异明细（漏检 / 多检 / 关键字段变化 / 文案差异）反馈给用户。
  *
@@ -1543,12 +1543,12 @@ function cmdSelftest(args) {
   if (reclassTarget) reclassTarget.engine = 'compliance-check';
   fresh.forEach((r, i) => { r.rawIndex = i + 1; });
   fresh.push(normalizeRecord({
-    engine: 'punctuation-check', type: '规范性', file: 'cann_sim工具指南.md', line: 999,
+    engine: 'punctuation-check', type: '规范性', file: 'bench测试数据集.md', line: 999,
     context: '自检构造样例上下文', description: '自检构造：多检验证', suggestion: '无',
     severity: '提示', rawIndex: fresh.length + 1
   }));
   fresh.push(normalizeRecord({
-    engine: 'markdownlint', type: '规范性', file: 'cann_sim工具指南.md', line: 999,
+    engine: 'markdownlint', type: '规范性', file: 'bench测试数据集.md', line: 999,
     context: '自检构造样例上下文', description: '自检构造：基线外引擎', suggestion: '无',
     severity: '提示', rawIndex: fresh.length + 1
   }));
@@ -1593,10 +1593,18 @@ function cmdSelftest(args) {
   //      仍可配对（对齐），并标注低置信度供人工复核
   const lcBase = cloneAll(golden);
   const lcFresh = cloneAll(golden);
-  const lcSrc = lcFresh[0];
-  lcFresh[0] = normalizeRecord({
+  // 目标记录按引擎动态选择而非按位置硬编码（基线按引擎重排后顺序会变化）：
+  // filename-check 条目的描述与合成描述「文件名规范提示」有确定 bigram 重合，保证描述分有效；
+  // 基线无该引擎时回退取首条，并以原描述前缀构造部分重合
+  const lcTargetIdx = lcFresh.findIndex(r => r.engine.toLowerCase() === 'filename-check');
+  const lcIdx = lcTargetIdx >= 0 ? lcTargetIdx : 0;
+  const lcSrc = lcFresh[lcIdx];
+  const lcDesc = lcTargetIdx >= 0
+    ? '自检构造：文件名规范提示'
+    : '自检构造：' + String(lcSrc.description || '').slice(0, 4);
+  lcFresh[lcIdx] = normalizeRecord({
     engine: lcSrc.engine, type: lcSrc.type, file: lcSrc.file, line: lcSrc.line,
-    context: '自检构造完全无关的上下文内容样例', description: '自检构造：文件名规范提示',
+    context: '自检构造完全无关的上下文内容样例', description: lcDesc,
     suggestion: '', severity: lcSrc.severity
   });
   const lcRes = compareRecords(lcBase, lcFresh, {});
@@ -1610,12 +1618,12 @@ function cmdSelftest(args) {
   const sdBase = cloneAll(golden);
   const sdFresh = cloneAll(golden);
   sdBase.push(normalizeRecord({
-    engine: 'punctuation-check', type: '规范性', file: 'cann_sim工具指南.md', line: 777,
+    engine: 'punctuation-check', type: '规范性', file: 'bench测试数据集.md', line: 777,
     context: '甲乙丙丁', description: '一二三四五六七八', suggestion: '建议样例',
     severity: '提示', rawIndex: sdBase.length + 1
   }));
   sdFresh.push(normalizeRecord({
-    engine: 'punctuation-check', type: '规范性', file: 'cann_sim工具指南.md', line: 777,
+    engine: 'punctuation-check', type: '规范性', file: 'bench测试数据集.md', line: 777,
     context: '前缀甲乙丙丁后缀', description: '一二三四', suggestion: '',
     severity: '一般', rawIndex: sdFresh.length + 1
   }));

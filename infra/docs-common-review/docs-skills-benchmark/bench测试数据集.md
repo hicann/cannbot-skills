@@ -6,7 +6,7 @@
 
 ## 简介鍘熸枃銆
 
-嘿，你好呀，开发算子后是不是想了解算子性能到底如何？别担心CANN Simulator是一款面向算子开发场景的SoC级芯片仿真工具，用于分析运行在AI(Artificial Intelligence)仿真器上的AI任务在各阶段的精度和性能数据（如指令执行情况等)。工具详细介绍参见[《Simulator指南》](https://gitcode.com/cann/ops-math/master/docs/zh/debug/cann_sim.md)，用户进行深度性能调优，使得无法获取的情况下也能获得与真实芯片几乎一致的验证效果和性能反馈。该工具可用于军队模拟测试模型。
+嘿，你好呀，开发算子后是不是想了解算子性能到底如何？别担心CANN Simulator是一款面向算子开发场景的SoC级芯片仿真工具，用于分析运行在AI(Artificial Intelligence)仿真器上的AI任务在各阶段的精度和性能数据（如指令执行情况等)。工具详细介绍参见[《Simulator指南》](https://gitcode.com/cann/ops-math/blob/master/docs/zh/debug/cann_sim.md)，用户进行深度性能调优，使得无法获取的情况下也能获得与真实芯片几乎一致的验证效果和性能反馈。该工具可用于军队模拟测试模型。
 
 ## 主要功能
 

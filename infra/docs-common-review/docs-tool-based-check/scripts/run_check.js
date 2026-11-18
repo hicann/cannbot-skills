@@ -3,9 +3,9 @@
 /**
  * docs-tool-based-check 运行器（零第三方依赖，需 Node.js >= 18）
  *
- * 职责：校验配置 → 解析配置优先级（项目 .doctools/ 优先）→ 拉取/复用 pin 版
- *       docs-ci-v2.js → 组装 ciConfig → 执行检查 → result.json 转换为统一
- *       12 字段结果 JSON → 写入 output → 清理临时目录。
+ * 职责：校验配置 → 解析配置优先级（项目 .doctools/ 优先）→ 拉取 master 最新版
+ *       docs-ci-v2.js（失败自动重试至多 3 次，仍失败则回退本地缓存并提示非最新）→
+ *       组装 ciConfig → 执行检查 → result.json 转换为统一 12 字段结果 JSON → 写入 output → 清理临时目录。
  *
  * 用法：
  *   node run_check.js --targets=<路径1,路径2,...> [--checks=<检查项,...>]
@@ -22,10 +22,9 @@ const os = require("os");
 const { spawn } = require("child_process");
 
 // ---------- 常量 ----------
-// 已验证的脚本版本（与 SKILL.md 记录一致）。更新时：修改此值并重跑 evals 验证。
-const SCRIPT_SHA = "c5ccfec7c5550b2a8a45feb26e7cd5fac4bd607b";
+// 检查脚本取 CANN 社区 master 分支最新版，不 pin 版本，每次运行重新拉取。
 const SCRIPT_URL =
-  "https://raw.gitcode.com/cann/.gitcode/raw/" + SCRIPT_SHA +
+  "https://raw.gitcode.com/cann/.gitcode/raw/master" +
   "/actions/staticcheck/dist/staticcheck/docs-ci/docs-ci-v2.js";
 const LEGAL_CHECKS = [
   "markdownlint",
@@ -218,32 +217,80 @@ if (fileExistsSafe(projUrl)) {
   urlSource.push("项目 .doctools/url.whitelist.txt");
 }
 
-// ---------- 准备 pin 版脚本 ----------
+// ---------- 准备 master 最新版脚本（拉取失败时回退本地缓存并提示非最新） ----------
 const cacheDir = path.join(os.tmpdir(), "docs-tool-based-check");
-const cacheFile = path.join(cacheDir, "docs-ci-v2." + SCRIPT_SHA.slice(0, 10) + ".js");
+const cacheFile = path.join(cacheDir, "docs-ci-v2.master.js");
+let scriptFile = cacheFile;
+function findCachedScript() {
+  let best = null;
+  let bestMtime = -1;
+  if (!fs.existsSync(cacheDir)) {
+    return null;
+  }
+  for (const name of fs.readdirSync(cacheDir)) {
+    if (!/^docs-ci-v2(\..*)?\.js$/.test(name)) {
+      continue;
+    }
+    const full = path.join(cacheDir, name);
+    let st;
+    try {
+      st = fs.statSync(full);
+    } catch {
+      continue;
+    }
+    if (!st.isFile()) {
+      continue;
+    }
+    if (st.mtimeMs > bestMtime) {
+      best = full;
+      bestMtime = st.mtimeMs;
+    }
+  }
+  return best;
+}
+async function fetchScript() {
+  const res = await fetch(SCRIPT_URL);
+  if (!res.ok) {
+    return { reason: "HTTP " + res.status };
+  }
+  const b = Buffer.from(await res.arrayBuffer());
+  if (b.length < 1000 || b.slice(0, 3).toString("utf8").startsWith("<!")) {
+    return { reason: "下载内容异常（非 JS 文件）" };
+  }
+  return { buf: b };
+}
 async function ensureScript() {
-  if (fileExistsSafe(cacheFile)) {
-    console.log("[helper] 复用已缓存的检查脚本（版本 " + SCRIPT_SHA.slice(0, 10) + "）");
+  console.log("[helper] 下载检查脚本（master 最新版）...");
+  fs.mkdirSync(cacheDir, { recursive: true });
+  let buf = null;
+  let reason = "";
+  for (let attempt = 1; attempt <= 3 && !buf; attempt++) {
+    try {
+      const r = await fetchScript();
+      if (r.buf) {
+        buf = r.buf;
+      } else {
+        reason = r.reason;
+      }
+    } catch (e) {
+      reason = e.message;
+    }
+    if (!buf && attempt < 3) {
+      console.log("[helper] 第 " + attempt + "/3 次拉取失败（" + reason + "），1 秒后重试...");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+  if (buf) {
+    fs.writeFileSync(cacheFile, buf);
+    console.log("[helper] 脚本已缓存至 " + toPosix(cacheFile));
     return;
   }
-  console.log("[helper] 下载检查脚本（版本 " + SCRIPT_SHA.slice(0, 10) + "）...");
-  fs.mkdirSync(cacheDir, { recursive: true });
-  let res;
-  try {
-    res = await fetch(SCRIPT_URL);
-  } catch (e) {
-    fail("脚本下载失败（" + e.message + "）。请检查网络/代理后重试，" +
-      "或用浏览器从以下地址下载后放到：" + toPosix(cacheFile) + "\n" + SCRIPT_URL);
+  const cached = findCachedScript();
+  if (!cached) {
+    fail("检查脚本连续 3 次拉取失败（" + reason + "），且本地无可用缓存脚本。请检查网络/代理后重试，下载地址：" + SCRIPT_URL);
   }
-  if (!res.ok) {
-    fail("脚本下载失败，HTTP " + res.status + "。下载地址：" + SCRIPT_URL);
-  }
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length < 1000 || buf.slice(0, 3).toString("utf8").startsWith("<!")) {
-    fail("脚本下载内容异常（非 JS 文件），请检查下载地址：" + SCRIPT_URL);
-  }
-  fs.writeFileSync(cacheFile, buf);
-  console.log("[helper] 脚本已缓存至 " + toPosix(cacheFile));
+  scriptFile = cached;
+  console.log("[helper] 警告：检查脚本连续 3 次拉取失败（" + reason + "），已回退使用本地缓存脚本（非 master 最新版）：" + toPosix(cached));
 }
 
 // ---------- 组装运行时配置 ----------
@@ -295,7 +342,7 @@ if (args.disableExternal) console.log("[helper] 已跳过外链/外部资源检�
 function runScript() {
   return new Promise((resolve) => {
     const scriptArgs = [
-      cacheFile,
+      scriptFile,
       "--repoPath=" + toPosix(repoRoot),
       "--targetOwnerRepo=all",
       "--ciConfigUrl=" + toPosix(ciConfigFile),

@@ -1,7 +1,7 @@
 # docs-skills-benchmark 家族基准回归
 
 > 目的：以人工维护的 `common_bench.md` 为测试集基线、`perf_bench.md` 为耗时基线，固定输入样例
-> `cann_sim工具指南.md`，在 **skill 修改后** 重跑家族检查管线，验证两件事：
+> `bench测试数据集.md`，在 **skill 修改后** 重跑家族检查管线，验证两件事：
 > ① 检查结果是否仍与测试集基线**对齐**；② 各检查项耗时相对耗时基线的变化（提示级）。
 > 不对齐时把差异明细反馈给用户，由用户判断是"预期改进（按保护机制更新基线）"还是"非预期回归（修正 skill）"。
 
@@ -9,15 +9,12 @@
 
 | 文件 | 角色 | 说明 |
 | --- | --- | --- |
-| `cann_sim工具指南.md` | 固定输入样例 | 内置已知问题（标签、链接、拼写、标点、合规、语义等），**禁止修改**——改它等于换考卷，基线随即失效 |
+| `bench测试数据集.md` | 固定输入样例 | 内置已知问题（标签、链接、拼写、标点、合规、语义等），**禁止修改**——改它等于换考卷，基线随即失效 |
 | `common_bench.md` | 测试集基线（人工维护） | 79 条人工维护的标准问题集（缺陷目录口径：一缺陷一条；引擎对同一缺陷的重复报告由 compare 吸收通道收敛）；更新受"测试集保护机制"约束：**只允许修改与新增，删除须逐条证据并通过 `bench.js protect` 校验**（见下） |
 | `perf_bench.md` | 耗时基线（perf golden） | 各检查项标准耗时（逐项毫秒）；**2026-11-17 已按建档流程完成首建档**（基准刷新轮产物，9 项计时、无失败检查项；此前的预置参考值已退役）；头部若含"参考性质"标志行会被 `perf compare` 拒绝；**仅同环境可比** |
 | `scripts/bench.js` | 基准工具 | `convert` / `compare` / `selftest` + `perf convert` / `perf compare` + `protect`（测试集保护校验）/ `format-check`（格式规范校验），均依赖 node；`compare` 在 `--new` 传聚合 JSON 时附带执行完备性硬校验 |
 | `runs/` | 运行产物 | 最近一次重跑的 `common_bench_test.md`、对齐报告 `align_report.md`、耗时快照 `perf_bench_test.md`、耗时对比报告 `perf_report.md` 与保护校验报告 `protect_report.md`（覆盖式写入） |
 | `output/` | 聚合产物 | 全量模式检查的最终 JSON（待检文档同级 output/ 约定，由 hub 生成） |
-
-测试集基线引擎分布（共 79 条）：punctuation-check 35、AICheck 22、compliance-check 16、
-codespell-check / filename-check / link-validity-check / resource-existence-check 各 1、tag-closed-check 2。
 
 > 测试集基线引擎不包括markdownlint，该能力源于[markdownlint项目](https://github.com/DavidAnson/markdownlint/blob/main/README.md)，本项目暂不做变更。
 
@@ -29,7 +26,7 @@ codespell-check / filename-check / link-validity-check / resource-existence-chec
 
 按 [hub 全量模式](../workflows/full-review.md) 对基准样例执行 9 项检查（含 3 个模型项 subagent）：
 
-- 检查对象：`docs-skills-benchmark/cann_sim工具指南.md`（绝对路径）
+- 检查对象：`docs-skills-benchmark/bench测试数据集.md`（绝对路径）
 - 项目根目录：`docs-common-review`（中间产物落其 `output/`，运行前先按门禁模式第 1 步预清理，避免历史遗留污染聚合）
 - 基准场景不询问 csv/md 导出、不询问模式（固定全量模式），聚合完成后直接清理中间产物
 - 最终产物：`docs-skills-benchmark/output/docs-common-review-result.json`
@@ -236,8 +233,8 @@ punct/compliance 为 subagent 墙钟兜底、aicheck 为主会话墙钟）。
   历史别名比较前自动归一）；
 - 位置行号为非负整数，或形如 `287~289` 的**闭区间**（起始 ≤ 结束；用于跨行问题锚定，比对时取起始行参与匹配）；
 - 问题类型 ∈ {规范性 / 正确性 / 可读性 / 完备性}；严重程度 ∈ {严重 / 一般 / 提示}；
-- 本基线的本地约定（`--strict-ctx` 校验）：问题按位置行号升序排列；问题上下文用反引号包裹
-  （上下文自身含反引号时用双反引号定界）。
+- 本基线的本地约定：问题推荐按检查引擎集中分类排列（引擎分组顺序与组内位置可按需调整，调整后须与基线头部「问题分布」表保持一致）；问题上下文用反引号包裹
+  （上下文自身含反引号时用双反引号定界），此包裹约定由 `--strict-ctx` 校验。
 
 ```bash
 node docs-skills-benchmark/scripts/bench.js format-check --input=docs-skills-benchmark/common_bench.md --strict-ctx

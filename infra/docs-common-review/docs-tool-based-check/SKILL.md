@@ -10,7 +10,7 @@ metadata:
 
 # 生态资料工具链静态质检技能
 
-本 skill 调用 CANN 社区 [ci-staticCheck 工具链](https://gitcode.com/cann/.gitcode/blob/master/actions/staticcheck/dist/staticcheck/docs-ci/docs-ci-v2.js)的 `docs-ci-v2.js` 脚本，在用户本地对 Markdown 文档执行静态检查。脚本为自包含打包产物，运行时按 pin 版本拉取并缓存（当前 pin 版本见"维护说明"）；其中 codespell-check 所需 cspell 词典未随脚本内联，运行时从脚本缓存目录解析，本次检查项包含 codespell-check 时须按第 2 步先检查词典环境、缺失时安装，否则普通英文单词会被大量误报。
+本 skill 调用 CANN 社区 [ci-staticCheck 工具链](https://gitcode.com/cann/.gitcode/blob/master/actions/staticcheck/dist/staticcheck/docs-ci/docs-ci-v2.js)的 `docs-ci-v2.js` 脚本，在用户本地对 Markdown 文档执行静态检查。脚本为自包含打包产物，运行时从 CANN 社区 master 分支拉取最新版并缓存（不 pin 版本，每次运行重新拉取，失败自动重试至多 3 次；连续失败时回退复用本地缓存脚本，并明确提示用户当前使用的脚本不是最新的；无可用缓存时停止执行）；其中 codespell-check 所需 cspell 词典未随脚本内联，运行时从脚本缓存目录解析，本次检查项包含 codespell-check 时须按第 2 步先检查词典环境、缺失时安装，否则普通英文单词会被大量误报。
 
 | 检查项 | checkType | 功能说明 |
 | --- | --- | --- |
@@ -195,7 +195,7 @@ node <技能目录绝对路径>/scripts/run_check.js \
 | node 命令不存在 | 按第 1 步「node 运行环境校验」的「协助安装」处理：直接帮用户安装（按操作系统选择命令），复检仍不可用时才停止执行并给出手动安装指引 |
 | 用户声明本地未安装 node，但执行环境中 node 可用 | 以用户声明为准：停止执行，说明执行环境非用户本地环境、无法代为安装，给出各平台安装命令（见第 1 步）；禁止以执行环境的 node 继续执行并产出结果 |
 | 非法检查项 | 停止执行，向用户说明非法值并列出全部 5 项合法值，待修正后重试；禁止将非法值写入 config.json |
-| 脚本下载失败 | 提示检查网络/代理后重试 |
+| 脚本拉取失败 | 自动重试至多 3 次；仍失败则回退复用本地缓存脚本继续执行，并明确提示"当前使用的脚本不是最新的"；本地无可用缓存时停止执行，提示检查网络/代理后重试 |
 | 检查脚本执行失败 | 向用户转述脚本错误输出；helper 会保留运行目录（报错信息中有路径）供诊断 |
 | codespell 对英文行文报大量"拼写错误"（quick、normal 等常用词也被报） | 词典缺失所致：未按第 2 步安装 cspell 词典时，普通英文单词会被整体误报。先完成词典安装后重跑；个别专有名词或领域词误报，再引导用户加入项目 `.doctools/codespell.whitelist.txt` |
 | 安装 cspell 词典失败（npm 不存在或无法访问 npm 源） | 停止执行，向用户说明原因；建议安装/修复 npm 与网络后重试，或本次缩小检查范围（去掉 codespell-check） |
@@ -205,9 +205,9 @@ node <技能目录绝对路径>/scripts/run_check.js \
 
 ## 维护说明
 
-- 检查脚本运行时从 CANN 社区拉取并缓存在系统临时目录，**不固化副本在本仓库**，禁止将脚本副本提交到本仓库。当前 pin 版本：`c5ccfec7c5550b2a8a45feb26e7cd5fac4bd607b`（与 `scripts/run_check.js` 的 `SCRIPT_SHA` 常量一致）。
-- 更新方法：确认社区脚本无接口变更后，修改 `SCRIPT_SHA` 为新 commit，同步更新本节，并重跑 evals 验证。
-- 评测数据集 `evals/dataset/static_check_sample.md` 为 golden 基准：五项检查各埋确定性问题，且无外链与外部资源（结果离线确定、可复现）；修改该文件或更新 `SCRIPT_SHA` 后，必须重跑脚本并以实测结果同步 `evals/evals.json` 中的 golden 描述。
+- 检查脚本运行时从 CANN 社区 **master 分支拉取最新版**并缓存在系统临时目录（不 pin 版本，每次运行重新拉取），**不固化副本在本仓库**，禁止将脚本副本提交到本仓库。
+- 社区脚本更新经 master 自动生效，无需改本仓库代码：当社区脚本出现接口变更、或检查结果与 evals golden 描述出现偏差时，须重跑 evals 验证，并以实测结果同步 `evals/evals.json` 中的 golden 描述。
+- 评测数据集 `evals/dataset/static_check_sample.md` 为 golden 基准：五项检查各埋确定性问题，且无外链与外部资源（结果离线确定、可复现）；修改该文件或社区脚本更新导致 golden 漂移时，必须重跑脚本并以实测结果同步 `evals/evals.json` 中的 golden 描述。
 - 内置白名单与社区 [.doctools 配置](https://gitcode.com/cann/.gitcode/blob/master/actions/staticcheck/dist/staticcheck/docs-ci/.doctools)同源，以社区为真源，禁止在仓内修改；修改社区配置请走 CANN 社区 PR 贡献流程。
 - cspell 词典依赖与社区 [docs-ci 依赖清单 package.json](https://gitcode.com/cann/.gitcode/blob/master/actions/staticcheck/dist/staticcheck/docs-ci/package.json) 同源（当前 `cspell-lib@9.2.1`）：按第 2 步安装在脚本缓存目录（系统临时目录），随缓存清理，不固化副本在本仓库。社区更新该依赖版本时，须同步修改第 2 步 package.json 示例中的版本号。
 - 运行中间产物（ciConfig.json、result.json、output.md）由 helper 自动清理，禁止作为最终结果输出给用户；最终结果以 `output/tool-based-check-result.json` 为准。
