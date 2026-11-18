@@ -1,0 +1,26 @@
+{
+  "skill_name": "regop-comment-review",
+  "evals": [
+    {
+      "id": 1,
+      "title": "评审含 REG_OP 变更的原型头文件片段（PR 场景，本地内联）",
+      "prompt": "请评审下面这个 PR 中的原型头文件变更片段（op_graph/inc/math/hifloat8_cast.h，新增算子）。工作区没有 git 仓库，也不需要切换分支，直接基于以下内容评审（`+` 为新增行、`-` 为删除行）：\n```diff\n /**\n- * @brief Casts tensor to hifloat8.\n+ * @brief: Casts tensor to hifloat8.\n  * @par Inputs\n  * @li x: A tensor. Type is float16/float32.\n  * @par Outputs\n  * @li y: A tensor. Type is hifloat8.\n+ * @attention Constraints\n+ * Only support 910B.\n+ * @par see\n  */\n REG_OP(Hifloat8Cast)\n     .INPUT(x, TensorType({DT_FLOAT16, DT_FLOAT}))\n+    .INPUT(scale, TensorType({DT_FLOAT}))\n     .OUTPUT(y, TensorType({DT_HIFLOAT8}))\n     .OP_END_FACTORY_REG(Hifloat8Cast)\n```\n请输出问题报告。",
+      "expected_output": "输出含概览表的问题报告（列含维度/问题数/最高严重级），问题按严重/高危/一般分组（如有低风险项可另列建议分组），并以片段内行号或字段名定位；至少识别：PC-06 与 PC-02（REG_OP 新增 INPUT(scale) 但注释未同步、输入个数与 .INPUT() 声明不一致，CRITICAL）、BF-01（@brief 后多余冒号）、CT-04（约束中出现芯片代号 910B，应改为产品英文名）、OF-02（@par see 为空且无关联算子，应删除该字段或补充关联算子）；并说明未涉及维度的适用性（无 .ATTR() 声明故 Attributes 不适用、未手写 @par Data Types 符合 DT-01）；报告即最终交付物，不向 GitCode 提交评论",
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "粘贴注释片段的格式与写法检查（无 REG_OP）",
+      "prompt": "检查下面这段原型注释有什么问题（片段模式，未提供 REG_OP 定义）：\n```c++\n/**\n * @brief: Multiplies two tensors element-wise.\n * @par Inputs\n * @li x: A tensor. The data type is\\n float16/float32.\n * @par Outputs\n * @li y: A tensor. The data type is float16/float32.\n * @attention Constraints\n * Only support 910B.\n */\n```",
+      "expected_output": "仅做格式与写法类检查，按规则编号逐条给出问题与修改后写法；至少识别 BF-01（@brief 后多余冒号）、FM-04（仅 1 个输入/输出条目时不用 @li）、FM-02（一句话未写完不得用 `\\n` 强制换行，应直接回车换行）、CT-04（约束中出现芯片代号 910B，应改为产品英文名）；报告备注说明片段模式下无法核对与 REG_OP 的一致性（PC-01~06 不适用）",
+      "files": []
+    },
+    {
+      "id": 3,
+      "title": "两个头文件的批量注释评审（等价于目录检视）",
+      "prompt": "对下面两个原型头文件做批量注释评审（等价于评审 math 目录，批量、多文件）：\n\n文件 A: op_graph/inc/math/add.h\n```c++\n/**\n * @brief: Adds two tensors element-wise.\n * @par Inputs\n * @li x1: A tensor. Type is float16/float32.\n * @li x2: A tensor. Type is float16/float32.\n * @par Outputs\n * @li y: A tensor. Type is float16/float32.\n * @attention Constraints\n * The shapes of x1 and x2 must be the same on 910B.\n * @par Data Types\n * float16/float32\n */\nREG_OP(Add)\n    .INPUT(x1, TensorType({DT_FLOAT16, DT_FLOAT}))\n    .INPUT(x2, TensorType({DT_FLOAT16, DT_FLOAT}))\n    .OUTPUT(y, TensorType({DT_FLOAT16, DT_FLOAT}))\n    .OP_END_FACTORY_REG(Add)\n```\n\n文件 B: op_graph/inc/math/mul.h\n```c++\n/**\n * @brief Multiplies two tensors element-wise.\n * @par Inputs\n * @li x1: A tensor. Type is float16/float32.\n * @par Outputs\n * @li y: A tensor. Type is float16/float32.\n */\nREG_OP(Mul)\n    .INPUT(x1, TensorType({DT_FLOAT16, DT_FLOAT}))\n    .INPUT(x2, TensorType({DT_FLOAT16, DT_FLOAT}))\n    .OUTPUT(y, TensorType({DT_FLOAT16, DT_FLOAT}))\n    .OP_END_FACTORY_REG(Mul)\n```",
+      "expected_output": "批量评审报告：开头为逐文件汇总表（列：文件/算子名/CRITICAL/HIGH/MEDIUM/LOW/结论）；后接问题清单，可按严重级分组，但每条必须带规则编号并用「文件名+片段内行号或字段名」定位；至少识别 add.h 的 BF-01（@brief 后多余冒号）、CT-04（约束出现芯片代号 910B，应改为产品英文名）、DT-01（手写 @par Data Types，应由导出脚本生成并删除）、IN-02 或 OT-02（输入/输出缺 format、shape 等说明）；mul.h 的 PC-02（注释缺 x2，与 .INPUT(x2) 不一致，CRITICAL）、IN-02（输入缺含义/format/shape 说明）；结论需给出两文件均不可直接合入，并优先整改 PC-02 与 CT-04",
+      "files": []
+    }
+  ]
+}
