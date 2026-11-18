@@ -3,6 +3,20 @@
 本表覆盖 spec 的 26 类；category 是计算范式，不是开源仓归属。先尊重用户目标，再结合 spec 的功能、公式和接口选择具体分类。
 同名或关键词只用于找到同类算子，不能把出现 `attention`、`sparse` 或 `fused` 当作完整语义证据。
 
+## 工作流选仓
+
+`op-develop` 的迁移任务先选仓，再按决策迁移；选仓是任务内部步骤。
+确认 `$WORK_DIR` 是本轮的绝对目录；读取 `$USER_PROMPT` 指向的原始需求文件和 `$WORK_DIR/spec/spec.yaml`。
+若需求文件缺失、不可读或为空，从 `$WORK_DIR/.workflow/status.json` 的 `user_prompt` 恢复原文路径，
+核对其绝对路径属于本轮且原文可读、非空。仍不可得则报告输入缺失并使迁移任务失败，
+不生成决策，不用 spec、摘要或旧决策替代原文，也不重复询问已经确认的需求。
+
+工作流默认尝试迁移；原文未提迁移或未指定仓不等于退出，按下述决策顺序选仓。
+只写 `$WORK_DIR/.workflow/migrate-decision.json`，`evidence.prompt_file` 记录实际读取的绝对路径，
+RUN 的 `source_package` 为 `$WORK_DIR/op`。按本页末尾命令校验结构，并独立核对选仓证据。
+选仓时不访问目标仓、不克隆、不构建或修改源包；RUN 不是仓库可访问或迁移已完成的证明。
+独立调用使用用户在当前任务中提供的原始要求，不强制另建 prompt 文件；不能把输入丢失当成“未指定”。
+
 ## 决策顺序
 
 1. 原 prompt 明确拒绝迁移 → `SKIP / user_opt_out`；拒绝同时指定目标仓，或明确指定多个互斥目标 → 任务失败，不能默认消解。
@@ -74,5 +88,5 @@
 ```
 
 RUN reason_code 为 `explicit_target` / `domain_match` / `category_match`；SKIP 为上述四种原因，`op_class=null`，未确定仓时 `target_repo=null`。
-`unsupported_target` 必须保留用户指定的不支持仓名；显式支持仓但分类有歧义也保留该仓。prompt 文件缺失/为空只表示没有显式要求，不能编造用户语句。
+`unsupported_target` 必须保留用户指定的不支持仓名；显式支持仓但分类有歧义也保留该仓。不能编造用户语句；工作流原始需求缺失按“工作流选仓”失败处理。
 运行 `python3 "$SKILL_DIR/scripts/migration_contract.py" decision "$WORK_DIR/.workflow/migrate-decision.json"` 校验字段；语义和证据仍由执行者与 verifier 核实。

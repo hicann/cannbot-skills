@@ -25,13 +25,26 @@
 
 ## 环境与隔离
 
-工作流复用已验证的 CANN 与 `$WORK_DIR/ops-test-kit`；证据在 `ttk-verify/env-info.txt` / `op/examples/verify.log`。
+工作流复用已验证的 CANN 与 `$WORK_DIR/ops-test-kit`；证据在 `$WORK_DIR/ops-test-kit/ttk-verify/env-info.txt` / `$WORK_DIR/op/examples/verify.log`。
 独立调用优先复用任务已提供的路径，缺失时才询问。source 前清理其他 CANN 版本的动态库路径，不临时更换 toolkit。
+每个新 Shell 先核对继承的环境；需要加载时，在执行相关命令的同一个 Shell 内 source 已核实绝对路径的 `set_env.sh`，不假定上次工具调用的环境仍然有效。
 有 GEIR 通路时用 `preflight.sh --require-geir` 检查 `${ASCEND_OPP_PATH}/built-in/op_proto/inc/array_ops.h`。如果缺失，报告环境阻碍，不另选环境；无此通路时记录源包依据，不增加 GEIR 要求。
 
 `preflight.sh` 只检查指定环境和目标；不能用它自动发现“能用的版本”。在目标仓装好 pre-commit。
 `git status`、remote、HEAD、目标目录占用都确认后再建 `feat/{OP}`。已有迁移 checkout 只在远端和迁移基线一致、无无关改动时续用，不能仅凭存在 `.git` 就复用。
 源包、原安装产物、golden、spec、设计及冻结套件保持只读；工作流回归日志与结果统一写 `$WORK_DIR/migration/evidence/`，独立调用使用任务的迁移证据目录。
+
+## 目标仓访问
+
+决策为 RUN 才访问目标仓。`REPO_URL` 取选中 profile 的官方 URL；工作流的 `REPO_DIR` 为
+`$WORK_DIR/migration/<target_repo>`，独立调用使用任务确认的绝对目录。
+首次克隆或确需 fetch 前执行 `timeout 30s env GIT_TERMINAL_PROMPT=0 git ls-remote --exit-code --heads "$REPO_URL" refs/heads/master`，
+记录命令、退出码、stdout/stderr 到迁移证据目录；通过后浅克隆 master 并记录基线 SHA。
+已核验的 checkout 按上述远端、基线和状态条件续用，不为重复已完成检查强制 fetch，也不删除现有目录重试。
+
+探测、clone 或 fetch 失败时，在迁移报告记录 BLOCKED 的目标、命令、退出码、诊断及重试方法，
+在适配前停止并使当前任务失败。工作流决策仍为 RUN；网络、认证或 master 不可用不是 SKIP 原因，
+不能回滚已完成的源包、测试或开发证据。
 
 ## 拷贝与注册
 
@@ -141,6 +154,8 @@ transformer 的 eager cust 会用 ASCEND_CUSTOM_OPP_PATH 首项的父目录重�
 按当前目标的 object target 可见性或已验证的 ABI 导出规则修复，保留所有公开接口及注册入口；不可只改崩溃栈最后一帧或屏蔽析构。
 
 重跑驱动如果硬编码旧 dev-package 路径，把**驱动副本**放 migration/evidence 并只调整路径；不得修改原套件、用例或 golden。
+`parse_result.py` 与 `check_op_binpath.py` 位于已加载的 blackbox-tester skill 的 `SKILL.md` 同级，
+从该实际安装目录解析；GEIR 验证器沿用原门禁记录的位置。验证器及输入、输出、日志参数均使用核实的绝对路径。
 只跑构建、源码检查或一两个 example，不能宣称工作流级回归已通过。
 
 ## 源码核验与提交

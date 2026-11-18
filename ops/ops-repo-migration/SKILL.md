@@ -13,13 +13,16 @@ description: >-
 工作流的源包为 `$WORK_DIR/op`；独立调用使用任务提供的源包路径。
 共用本流程；只读取选中仓的布局文档。仓级 CMake、同类算子和工具目录都是只读参考。
 
+执行前将 `SKILL_DIR` 设为实际加载的本 `SKILL.md` 所在绝对目录，技能资源从此解析，
+不从当前目录或工作流 YAML 的位置反推。文件操作、命令和报告引用使用核实的绝对路径。
+
 ## 输入与目标契约
 
 - `{OP}`：当前 spec 的 snake_case 算子名，与源工程核对后用于目录和构建参数；注册类型 `{OpType}` 以源工程 `OP_ADD` / `REG_OP` 为准，不能用朴素 PascalCase 猜缩写。
 - ACLNN 接口名和签名、输入输出/属性、dtype/format、soc/tiling 目录与 tilingKey、golden、套件及用例数均取当前源工程及已验证产物。安装 vendor 路径从安装记录和实际文件确认，不由注册类型推算。
 - 参考算子和测试 fixture 只说明仓库契约，不限定待迁移算子的名字、计算或接口；不得复制它们的名称、双输入/单输出、dtype、芯片或测试规模作为当前任务参数。
 - 源包、已验证的 CANN 环境、目标仓 checkout，以及目标 `target_repo` / `op_class`。
-- 工作流调用时读取 `$WORK_DIR/.workflow/migrate-decision.json`；独立调用时从用户要求和 spec 确定目标。
+- 工作流按下述调用约定在迁移任务内选仓并执行；独立调用时从用户要求和 spec 确定目标。
 - 选仓依据见 [选仓规则](references/target-selection.md)。显式目标优先；泛类别有歧义时记录原因，不能擅自落入某仓。
 
 | 目标 | 标准分类 | 布局与验证差异 |
@@ -31,6 +34,17 @@ description: >-
 
 [repo-profiles.json](references/repo-profiles.json) 是脚本和工作流共用的仓 URL、分类、包名、vendor 后缀及检查配置。
 `ops-rand` 不在支持范围：随机采样仍走 ops-math/random。
+
+## 工作流调用
+
+`op-develop` 在开发、验证及性能阶段完成后调用本技能，执行者与验证者都读取本节。
+同一个迁移任务内依次完成选仓、迁移和验收：
+
+- 读取选仓规则中的“工作流选仓”，从本轮原始需求和 spec 生成 `$WORK_DIR/.workflow/migrate-decision.json`，用本技能的 `migration_contract.py decision` 校验决策。此时不访问目标仓。
+- SKIP 只在 `$WORK_DIR/migration/MIGRATION-REPORT.md` 记录目标、原因和证据，随后结束，不访问目标仓、不要求迁移产物；RUN 使用已验证的 `$WORK_DIR/op`，执行下述全部流程与完成判据，报告写入同一路径。
+
+任务的依赖、重试和失败退出由调用方 YAML 管理。RUN 的执行失败保留源包与原开发证据，
+在报告中记录失败或未验证项并使节点失败，不改记为 SKIP，也不能宣称整轮交付完成。
 
 ## 仅作分析时的证据边界
 
@@ -56,9 +70,6 @@ soc/tilingKey、安装 vendor 路径、golden 与套件数量；未读到的内�
 10. **提交与报告**。目标算子树形成一个 commit，不 push、不开 PR；不捏造共同作者。报告记录目标/分类/基线/分支/commit、产物清单、用例数、命令退出码和日志。只提交目标树，构建和证据留在工作目录。
 
 ## 完成判据
-
-执行下列命令前，将 `SKILL_DIR` 设置为当前读取的 `SKILL.md` 所在目录的绝对路径，
-即本技能的实际安装目录；不要把算子工作目录当作技能目录。
 
 - `bash "$SKILL_DIR/scripts/post_migration_check.sh" <目标算子目录> <soc> <target_repo> <源注册类型>` 无 FAIL；所有源包支持的 soc 都显式检查过，迁移后的 `OP_ADD` / `REG_OP` 与源类型一致。
 - 仓顶层 `build.sh --pkg --ops={OP} --vendor_name=<vendor> --soc=<soc> -j8` 成功，唯一匹配的 `.run` 已装入隔离目录。包名与 vendor 后缀从 profile 读取。
