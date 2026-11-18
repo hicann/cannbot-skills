@@ -4,131 +4,154 @@
   "evals": [
     {
       "id": 1,
-      "title": "正确区分符号推导和符号计算",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 120000,
-        "eval_mode": "text"
-      },
-      "prompt": "我想给 GE 中的 Reshape 算子补符号能力。请先解释符号推导和符号计算的职责区别，以及分别应该修改什么目录、使用什么注册宏。只做说明，不写代码。",
-      "expected_output": "应激活 ge-symbolic-op-development，并明确符号推导负责输出 SymbolShape，符号计算负责基于 SymbolicValue 生成输出值表达式；分别指向 infer_symbolic_shape/infer 和 symbolic_kernel，分别使用 IMPL_OP_INFER_SYMBOL_SHAPE_INNER 与 REGISTER_SYMBOLIC_KERNEL。",
-      "files": [],
-      "expectations": []
-    },
-    {
-      "id": 2,
-      "title": "数据依赖和动态维度边界",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "我的符号计算需要读取动态 shape 输入中的 perm，并用它重排 SymbolicValue。如果 perm 没有 data dependency，或者输入 Shape 不是常量，应该怎么处理？",
-      "expected_output": "应说明 perm 需要 data dependency 才能保证有 SymbolicValue；缺少参数值时返回 UNSUPPORTED。需要线性索引的计算必须先用 GetConstInputDims 验证 Shape 可确定，不能把动态 Expression 强转为整数。",
-      "files": [],
-      "expectations": []
-    },
-    {
-      "id": 3,
-      "title": "参考资料按需拆分",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "只想了解如何实现符号推导，不需要符号计算细节。我应该优先读取这个 skill 的哪些参考资料？请说明该文档覆盖的符号推导实现要点（典型调用链与上下文/注册 API、Expression 规则与数据依赖、测试要点），并说明为什么不需要先读符号计算参考。",
-      "expected_output": "1. 回复应只推荐 `references/symbolic-shape-inference.md` 作为优先阅读的参考资料，并明确说明不需要先读符号计算参考 `references/symbolic-kernel-compute.md`（那是「符号计算细节」）。\n2. 回复应说明该文件包含符号推导调用链（`SymbolicShapeInference::Infer` 构造 `InferSymbolShapeContext` → `OpImplInferSymbolShapeRegistry` 查找并执行算子推导函数）与上下文 API（`InferSymbolShapeContext`、`IMPL_OP_INFER_SYMBOL_SHAPE_INNER` 注册）。\n3. 回复应说明该文件还包含 Expression 规则/符号约束（`ASSERT_SYMBOL_EQ` 等、`EXPECT_SYMBOL_AND/OR` guard 封装）、数据依赖（`InputsDataDependency`）和测试要点（UT/ST 覆盖与执行门禁）。",
-      "files": [],
-      "expectations": []
-    },
-    {
-      "id": 4,
-      "title": "优先复用同类算子实现",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "我要为一个已有算子补符号推导和符号计算。请说明源码组织时应先做什么，什么时候才新增 .cc 文件？",
-      "expected_output": "应先分析已有实现中的同类算子，并判断能否合并到已有 infer/*.cc 或 symbolic_kernel/*.cc；语义、上下文和测试形态相近时优先合并，只有职责明显不同或合并影响可维护性时才新增文件。",
-      "files": [],
-      "expectations": []
-    },
-    {
-      "id": 5,
-      "title": "UT ST 批量设计和执行确认",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "我只要求实现符号推导并补充测试，没有明确授权运行测试。请说明应该生成哪些测试，以及当前能否直接执行 UT/ST。",
-      "expected_output": "应同时设计符号推导 UT 和 ST：UT 验证注册函数、Expression 和边界，ST 验证真实图传播；没有用户明确确认时只能生成测试或做静态检查，不得执行 UT、ST、tests/run_test.sh 或测试二进制，并应标记为未运行。",
-      "files": [],
-      "expectations": []
-    },
-    {
-      "id": 6,
-      "title": "test_ops 原型和 ES 生成接口",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "我要新增一个算子的符号推导 ST。test_ops.h 里还没有这个算子原型，ST 想调用 es:: 接口并使用 Symbolize。实现前后应该检查和执行哪些步骤？",
-      "expected_output": "应先在 test_ops.h 补充与实际输入输出参数一致的原型，再重新生成 ES 测试接口，阅读生成头文件确认真实函数签名和输出字段；Data 描述 Shape rank 要与实际 GeTensor 一致，之后调用 SymbolicShapeSymbolizer::Symbolize 和 SymbolicShapeInference::Infer。",
-      "files": [],
-      "expectations": []
-    },
-    {
-      "id": 7,
-      "title": "符号推导实现前证据门禁",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "我要给一个新算子补符号推导。目前只找到了同类算子的实现，还没找到目标算子的 ops REG_OP 和 IMPL_OP_INFERSHAPE。可以先照同类算子写代码和 UT 吗？",
-      "expected_output": "应拒绝开始编码，要求先完成 references/symbolic-shape-inference.md 中的实现前证据门禁：定位 ops 仓 REG_OP/OpDef、普通 Shape 推导注册及对应实现函数（现代 gert 风格 IMPL_OP_INFERSHAPE(...).InferShape(Func)，或旧式 AICPU 风格 IMPLEMT_INFERFUNC/INFER_FUNC_REG，二者同为有效证据），逐输出整理 Shape 映射和特殊输出，并核对 test_ops.h、测试运行桩和 add_op_impl.cc 数据依赖配置。同类算子只能用于骨架和风格，不能替代目标算子语义证据。",
-      "files": [],
-      "expectations": []
-    },
-    {
-      "id": 8,
-      "title": "符号计算实现前证据门禁",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "我要给一个算子补符号计算。目前只找到了同类 symbolic kernel，还没定位目标算子的 REGISTER_SYMBOLIC_KERNEL 注册和对应函数。可以先照同类实现写代码和 UT 吗？",
-      "expected_output": "应拒绝开始编码，要求先完成 references/symbolic-kernel-compute.md 中的实现前证据门禁：定位 ops 仓 REG_OP/OpDef、目标算子的 REGISTER_SYMBOLIC_KERNEL 注册及对应 Func，逐输出整理 Shape 来源和 SymbolicValue 的表达式、数量、顺序以及特殊输出，并核对 test_ops.h、测试运行桩和 add_op_impl.cc 数据依赖配置。同类 symbolic kernel 只能用于骨架和风格，不能替代目标算子计算语义证据。",
-      "files": [],
-      "expectations": []
-    },
-    {
-      "id": 9,
-      "title": "支持传入 infershape 代码片段或文字描述",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "我没有在 ops 仓里找到算子的普通 InferShape 源码，但我可以直接给你一段 InferShape 的代码片段，或者用文字描述它的核心 Shape 推导逻辑。你可以据此实现符号推导吗？",
-      "expected_output": "应说明使用者提供的普通 InferShape 代码片段或文字描述可以辅助理解 Shape 推导语义，但不能替代 references/symbolic-shape-inference.md 实现前证据门禁要求的目标算子契约、普通 Shape 推导注册/实现及测试等可核验来源。应继续查找并补齐必填证据；任一必填项缺失时明确停止编码，不得声称门禁已完成或直接开始实现。证据齐备后仍需补全输入输出 index、属性 index、data dependency 和边界条件。",
+      "title": "识别自定义算子场景",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "我的自定义算子在动态 Shape 模型中导致后续节点无法参与自动融合。应该使用什么能力，代码放在哪里？",
+      "expected_output": "应推荐在自定义算子 op_host 中新增 *_symbolic.cpp，并将它加入现有 host 构建，与算子一起产出同一个 host so；实现 InferSymbol；明确说明符号 Shape 用于编译期传播，并决定后续节点能否继续参与自动融合；不应指导修改 GE 或 graph-autofusion 内部源码。",
       "files": [],
       "expectations": []
     },
     {
       "id": 10,
-      "title": "guard 生成优先使用封装与/或接口",
-      "config": {
-        "ascend_platforms": ["A2"],
-        "max_tokens": 100000,
-        "eval_mode": "text"
-      },
-      "prompt": "符号推导里需要组合多个符号约束生成 guard，我可以直接用 C++ 的原生 && 和 || 运算符吗？",
-      "expected_output": "应说明生成 guard/符号约束时应优先使用 EXPECT_SYMBOL_AND、EXPECT_SYMBOL_OR 等封装接口组合多个表达式，避免直接使用原生 &&、|| 运算符；原生运算符会短路，导致短路分支之后的条件不参与 guard 生成、无法得到完备的宏，封装接口会一次性将所有子表达式纳入 LogicalAnd/LogicalOr。",
+      "title": "InferShape 与文字逻辑输入",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "我可以只提供算子的文字 Shape 逻辑吗？如果我有现成的 InferShape 代码，skill 应该如何使用？",
+      "expected_output": "应说明两种输入都可以；已有 InferShape 代码优先，用于提取输入输出关系、属性和边界；文字逻辑只能作为推导草案。无论哪种输入，都必须逐项核对 IR 原型、每个输入索引、每个输出索引、optional/dynamic 输入、数据依赖、目标 CANN 版本的发布头、目标版本注册库及注册库入口、符号化消费链路，不能凭文字猜测接口。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "三种注册方式",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "InferSymbol 有哪些注册方式？请分别说明宏式、OpDef 式和语言无关式能力接口。",
+      "expected_output": "应明确写出 IMPL_OP_INFERSYMBOL(OpType).InferSymbol(Func)、OpDef::SetInferSymbol(Func)、OpDef::GetInferSymbol()，以及继承 ge::SymbolicInferOp 并实现 InferSymbol；应强调三者最终表达同一个符号化推导能力，并要求以目标版本发布头确认入口是否可用。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "回调返回值契约",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "InferSymbol 回调返回 GRAPH_SUCCESS、GRAPH_NOT_CHANGED 和其他错误码时分别代表什么？",
+      "expected_output": "应说明 GRAPH_SUCCESS 需要为所有输出写完整符号 Shape；GRAPH_NOT_CHANGED 表示未提供、丢弃本次写入并继续降级，不表示透传；其他错误码中断编译。同时应提示消费组件必须实现该三态契约，若实际版本不一致要按版本缺陷排查。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "SymbolTensor 三态",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "如何区分 SymbolTensor 没有符号值、显式空值和有符号值？",
+      "expected_output": "应使用 HasValue() 区分无值和已设置，再使用 GetValueCount() 判断数量；HasValue=false/count=0 是无值，HasValue=true/count=0 是显式空值，HasValue=true/count=n 是有值。不能只用 count==0 判断无值。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "广播 Shape 示例",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 120000, "eval_mode": "text"},
+      "prompt": "请为两个输入广播相加的自定义算子设计 InferSymbol 推导逻辑。",
+      "expected_output": "应读取两个输入 SymbolShape，按广播规则从尾维右对齐；低 rank 输入的缺失前导维按 1 处理，逐维处理相等维度和维度为 1 的广播，使用 EXPECT_SYMBOL_EQ 生成约束，成功前用 SetDimNum/SetDim 写出完整输出 Shape；输入缺失或无法安全推导时返回 GRAPH_NOT_CHANGED。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "数据依赖和 Guard",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "算子的 axis 输入决定输出 Shape，我应该如何读取它并生成约束？",
+      "expected_output": "应先确认 IR 中声明了对应数据依赖，再通过输入 SymbolTensor 读取符号值，检查 HasValue 和值数量；无法确定时返回未提供或保留合法符号表达式。必须给出类似 EXPECT_SYMBOL_AND(ge::sym::Eq(axis, ge::Symbol(1)), ge::sym::Ge(length, ge::Symbol(1))) 的组合方式，禁止使用 C++ 原生 &&/||，因为短路会遗漏后续 Guard 条件。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 7,
+      "title": "弱符号和运行机",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "自定义算子 so 如何检查 symbolizer 依赖？只有 run 包的执行机需要加载它吗？",
+      "expected_output": "应建议使用 nm -D --undefined-only 检查 ge:: 相关未定义符号为弱引用；说明符号化只在编译期调用，只有 run 包的执行机应能加载算子 so 且不调用符号化 API；还应明确要求按目标 CANN 版本检查发布头、注册库入口和老环境兼容策略，不能只凭本机编译成功判断兼容。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 8,
+      "title": "职责边界和旧路径隔离",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "我想给 GE 内置算子增加内部符号推导实现并修改 GE 测试。这个 skill 是否适合？",
+      "expected_output": "应说明本 skill 面向自定义算子交付件，不指导修改 GE、metadef 或 graph-autofusion 内部源码，也不指导内部测试资产；应明确建议转到对应组件的内部开发流程。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 9,
+      "title": "验证矩阵",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "InferSymbol 实现后需要验证哪些内容？",
+      "expected_output": "应覆盖注册发现、输出 Shape 正确性、后续符号传播、Guard、弱符号 nm 检查、编译机和 run-only 执行机加载、动态 Shape 自动融合以及参考结果比较；必须明确说执行任何编译、模型运行、执行机加载或端到端命令前先获得用户确认，未确认时标记为未运行。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 11,
+      "title": "Shape 推导和值推导的区别",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "我的算子输入 Shape 已经确定，是否就可以直接推导输出符号值？请说明符号化 Shape 和符号化值的区别。",
+      "expected_output": "应明确 Shape 推导只需要维度、属性和约束；值推导还需要数据依赖、输入符号值、元素数量和逐元素映射。Shape 能成功不代表值能成功；只能推导 Shape 时应保持输出值无值。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 12,
+      "title": "符号化边界与安全降级",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "axis 或 shape 输入是浮点常量、带 hint 的 -1、负轴，或者输入是标量时，InferSymbol 应如何处理？",
+      "expected_output": "应说明整数参数不能把浮点或有理数静默转换为整数，无法证明时返回 GRAPH_NOT_CHANGED；带 hint 的 -1 需要用 Guard 固化假设；负轴按算子规定的 rank 归一化，插入维度通常按输出 rank；零维 Shape 是标量，但标量 Tensor 元素数量为 1。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 13,
+      "title": "值映射和可选输入",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "自定义算子有 optional 输入、负索引和 N-D indices，如何避免符号值推导出错？",
+      "expected_output": "应要求按 IR index 定位 optional 输入，未连接的 optional 输入不应阻断推导；负索引必须按被索引轴的实际长度归一化，不能只按 rank；N-D indices 要按最后一维坐标宽度解释；同时明确验证输入值存在、元素数量、与期望一致的输出 Shape 和输出元素顺序，不能只构造索引表达式。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 14,
+      "title": "EXPECT 与 ASSERT 的分工",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "广播分支和 axis 越界检查都需要 Guard，哪些情况用 EXPECT_SYMBOL，哪些情况用 ASSERT_SYMBOL？",
+      "expected_output": "应说明 EXPECT 用于根据 hint 选择运行时可能成立的分支并登记 Guard；ASSERT 用于必须成立的算子契约、范围和除零等硬约束，失败中断推导。不能用 ASSERT 把动态能力不足当非法输入。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 15,
+      "title": "复合 Guard 避免短路",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "我需要同时判断 a == b 和 c >= 1，可以直接写 EXPECT_SYMBOL_EQ(a, b) && EXPECT_SYMBOL_GE(c, 1) 吗？",
+      "expected_output": "不应使用 C++ 原生 && 或 ||，因为短路会导致后续条件没有进入 Guard。应使用 EXPECT_SYMBOL_AND/OR 或等价的 LogicalAnd/LogicalOr 组合接口，使所有子条件都被记录。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 16,
+      "title": "Hint 与运行时假设",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "目标 Shape 中的 -1 来自带 hint 的符号值，我可以直接按 hint 当作 -1 处理吗？",
+      "expected_output": "不能无条件按 hint 折叠；应使用 EXPECT_SYMBOL_EQ 记录表达式等于 -1 的运行时 Guard，并在无法取得 hint 或无法安全推导时返回 GRAPH_NOT_CHANGED。必须明确指出只保证元素总量相等不能约束 dim == -1 的真实维度语义。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 17,
+      "title": "符号化用例设计",
+      "config": {"ascend_platforms": ["A2"], "max_tokens": 100000, "eval_mode": "text"},
+      "prompt": "已有自定义算子工程和普通测试流程，我只需要验证 InferSymbol，应该设计哪些用例？",
+      "expected_output": "应建议在已有工程中构造动态输入→自定义算子→后继算子的整图，覆盖 Shape-only、数据依赖值、值缺失、Guard 真/假、复合 Guard、标量和显式空值、非整数常量、负轴/负索引、optional 输入缺失。应分别检查输出 Shape、符号值数量与顺序、后继传播和返回值，不应重复展开通用 host so 安装或 OPP 部署流程。",
       "files": [],
       "expectations": []
     }

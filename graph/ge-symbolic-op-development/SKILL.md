@@ -1,93 +1,149 @@
 ---
 name: ge-symbolic-op-development
 description: >-
-  GE 图编译中的符号算子开发与解读。触发：用户需要新增或修改算子的符号推导
-  （infer_symbolic_shape/infer）、符号计算（symbolic_kernel），或排查 SymbolShape、
-  SymbolicValue、数据依赖、guard、算子注册和符号推导链路问题时使用。覆盖需求分析、
-  实现、注册、边界检查、UT/ST 验证和常见问题定位。
+  为 GE 自动融合场景开发自定义算子符号化推导。用户需要为自定义算子补
+  InferSymbol、注册符号 Shape、修复动态 Shape 下的符号传播中断、检查
+  IMPL_OP_INFERSYMBOL/SetInferSymbol/SymbolicInferOp、弱符号部署或
+  符号化推导兼容性时使用。触发：自定义算子符号化推导、InferSymbol、
+  动态 Shape 符号传播、Guard 或符号值推导。
 ---
-# GE 符号算子开发
 
-本 skill 用于指导 GE 图编译中的符号推导和符号计算新增、修改与问题定位。详细内容按任务读取：符号推导见 `references/symbolic-shape-inference.md`，符号计算见 `references/symbolic-kernel-compute.md`。
+# 自定义算子符号化推导
+
+本 skill 面向自定义算子开发者。目标是在算子包的 host 侧实现符号化推导，让动态 Shape 在编译期从输入沿自定义算子继续传播，使自动融合能够继续分析后续节点并扩大可融合范围。
+
+## 回答输出协议
+
+回答用户问题时，不要只引用某个参考章节或给出笼统原则；根据问题类型逐项说出以下可核对结论：
+
+- **自定义算子场景**：说明符号 Shape 用于编译期传播并影响后续自动融合；在 `op_host/` 新增 `*_symbolic.cpp`；将它加入现有 host 构建，与已有 host 代码一起产出同一个 host so；再说明注册方式。
+- **输入材料场景**：明确说文字 Shape 逻辑和 `InferShape` 代码都可以输入，`InferShape` 优先；无论哪种输入，都逐项核对 IR 原型、每个输入索引、每个输出索引、optional/dynamic 输入、数据依赖、目标 CANN 版本发布头、目标版本注册库、注册库入口和符号化消费链路。
+- **兼容性场景**：明确说不能只凭本机编译成功判断兼容，必须检查目标版本发布头、注册库入口、弱符号行为和老环境兼容策略。
+- **值推导场景**：明确检查 `HasValue()`、`GetValueCount()`、输出 Shape 与期望的一致性、输出元素顺序；不能只说“构造索引表达式”。
+- **Guard 场景**：至少给出一个 `EXPECT_SYMBOL_AND(ge::sym::Eq(...), ge::sym::Ge(...))` 或 `EXPECT_SYMBOL_OR(...)` 的具体组合示例，并明确禁止用原生 `&&`/`||` 包裹或串联 `EXPECT_SYMBOL_*`。
+- **内部开发场景**：明确说明 GE、metadef、graph-autofusion 内部改动和内部测试资产不属于本 skill，应转对应组件的内部开发流程。
+
+最终回复前必须做一次显式终检。只要问题涉及对应主题，回复中必须逐项出现以下原文要点，不能只用“按目标版本检查”“注意兼容”“检查值映射”等概括语句替代：
+
+- 输入契约：`IR 原型`、`每个输入索引`、`每个输出索引`、`optional/dynamic`、`数据依赖`、`目标 CANN 版本的发布头`、`目标版本注册库`、`注册库入口`、`符号化消费链路`。
+- 兼容性：`不能只凭本机编译成功判断兼容`，还要检查目标发布头、注册库入口、弱符号行为和老环境兼容策略。
+- 值推导：`HasValue()`、`GetValueCount()`、`输出 Shape 与期望一致`、`输出元素顺序`。
+- Guard：给出 `EXPECT_SYMBOL_AND(ge::sym::Eq(...), ge::sym::Ge(...))` 或 `EXPECT_SYMBOL_OR(...)` 的具体形式，并写明禁止原生 `&&`/`||` 包裹或串联 `EXPECT_SYMBOL_*`。
 
 ## 处理边界
 
-- 符号推导负责根据输入 `SymbolShape`、必要的常量参数和属性生成输出 `SymbolShape`。
-- 符号计算负责根据输入 `SymbolTensor` 的 `SymbolicValue` 构造输出值表达式，同时设置输出 Shape。
-- 两者是独立注册、前后衔接的阶段；不要为了“完整”给只需要 Shape 的算子增加无意义的值计算。
-- 无法安全推导时返回 `UNSUPPORTED`，不要用虚假的维度或值掩盖信息不足。
+- 修改范围是自定义算子工程，通常在 `op_host/` 中新增 `*_symbolic.cpp` 并加入现有 host 构建。
+- 以算子 IR 原型、已有 `InferShape` 实现、目标 CANN 版本的发布头和注册库为事实来源。自然语言描述只能辅助理解，不能替代代码证据。
+- 输入可以是已有 `InferShape` 代码，也可以是对 Shape 数学逻辑的文字描述；优先使用代码，并要求用 IR 原型核对输入输出索引、属性、可选输入和数据依赖。
+- 不修改 GE、metadef 或 graph-autofusion 源码，不新增独立 symbolizer 库，不把符号化逻辑放进 kernel 侧。
+- GE 内置算子注册、metadef 或 graph-autofusion 内部改动，以及 GE 内部测试资产维护，不属于本 skill；遇到这类需求应转到对应组件的内部开发流程。
+- 一个 `InferSymbol` 回调可写输出符号 Shape，也可在数据依赖场景写输出符号值；开发者不需要为同一自定义算子另建独立的符号计算注册。
+- 必须区分两类推导：符号化 Shape 推导只根据输入 Shape、属性和可证明的约束生成输出维度；符号化值推导还需要输入值、元素布局和逐元素映射。能推导 Shape 不代表能推导值。
+- 符号表达式只在编译期使用。算子包对 symbolizer 的公共表达式 API 使用弱引用，运行机不能调用这些 API。
+- `GRAPH_SUCCESS`、`GRAPH_NOT_CHANGED` 和其他错误码的语义必须按发布接口契约处理。若当前安装版本的消费链路未完成 `GRAPH_NOT_CHANGED` 降级，应先核对版本，不能把版本缺陷改写成算子语义。
 
 ## 工作流程
 
-### 1. 需求分析
+### 1. 确认算子契约
 
-先阅读目标算子 IR/host infer 和最接近的已有实现。算子输入、输出、可选性、属性和 dtype/format 以 ops 仓中的 `REG_OP`/`OpDef` 注册定义为准；GE 测试桩、历史生成代码或本地旧定义与其冲突时，应按 ops 定义同步修正。
+用户可以提供以下任一种初始材料：
 
-使用者可直接提供目标算子的普通 `InferShape` 代码片段，或用文字描述其核心 Shape 推导逻辑（如“输出 Shape = 输入 Shape，最后一维替换为 fft_length/2 + 1”），作为需求分析中理解普通 Shape 语义的辅助输入。用户提供的片段或描述不能替代 `references/symbolic-shape-inference.md` 中的实现前证据门禁；仍须定位并核实目标算子的实际定义、注册、实现及测试证据，任一必填项缺失时停止编码并继续查找。明确：
+- **已有 `InferShape` 代码**：作为主要 Shape 语义依据，重点提取输入输出关系、属性读取、边界检查和输出映射。
+- **文字逻辑描述**：例如“输出 Shape 等于输入 Shape，最后一维替换为 `axis/2 + 1`”；只能作为推导草案，必须继续核对 IR 原型和已有实现。
 
-- 输入输出数量、动态输入、optional 输入和实际 index
-- Shape、axis、perm、shape 参数等输入是否为 data dependency
-- 输出 Shape 的数学定义和符号约束
-- 是否需要输出 `SymbolicValue`，以及元素布局/顺序映射
-- 属性 index、dtype、format、layout 和非法输入语义
-- 应返回 `UNSUPPORTED` 还是 `PARAM_INVALID` 的场景
+两种材料都不能单独证明完整契约。缺少 IR 原型、输入顺序、可选/动态输入、数据依赖或目标 CANN 版本信息时，应先标记待核实，不得猜测接口和索引。
 
-实现算子符号推导前，必须完成 `references/symbolic-shape-inference.md` 中的实现前证据门禁；证据必须来自目标算子的实际定义、测试原型、测试运行桩和测试数据依赖配置，不能用同类算子替代。
+无论输入是文字逻辑还是 `InferShape` 代码，都必须逐项核对：IR 原型、每个输入索引、每个输出索引、optional/dynamic 输入、数据依赖、目标 CANN 版本的发布头、目标版本注册库及注册库入口、符号化消费链路。文字逻辑和 `InferShape` 代码都必须执行这套完整核对，不能只核对目标版本名称。
 
-完成证据门禁后才进入源码实现。
+先检查以下信息：
 
-实现算子符号计算前，必须完成 `references/symbolic-kernel-compute.md` 中的实现前证据门禁；证据必须来自目标算子的实际注册和计算实现，不能用同类算子替代。
+- 输入、输出、可选输入、动态输入和属性的 IR 顺序。
+- 每个输出 Shape 相对输入 Shape 的数学关系。
+- Shape 参数、axis、perm、indices 等输入是否声明为数据依赖。
+- 输出是否需要符号值，以及符号值的元素顺序。
+- Shape 推导和符号值推导是否分别具备足够条件：前者看维度关系，后者还要看数据依赖、值数量、元素顺序和索引是否可确定。
+- 输入符号缺失、值无法确定、非法 Shape 和不满足约束时的处理。
+- 目标 CANN 版本是否已经提供所选注册入口和消费链路。
+- 目标 CANN 版本的发布头、注册库入口和符号化消费链路是否彼此匹配。
+- 不能只凭本机编译成功判断兼容；必须按目标 CANN 版本检查发布头、注册库入口、弱符号行为和符号化消费链路。
 
-完成证据门禁后才进入符号计算实现。
+已有 `InferShape` 是 Shape 语义的重要依据。符号化实现必须保留动态维表达式，不得把未知维度未经证明转换成普通整数。
 
-### 2. 源码实现
+证据优先级为：算子 IR 原型和注册定义、已有 `InferShape` 实现、host/kernel 中可核验的 Shape 语义、用户文字描述。文字描述与代码冲突时，以代码和当前版本发布头为准。
 
-- 符号推导代码放在 `compiler/graph/optimize/symbolic/infer_symbolic_shape/infer/`。
-- 符号计算代码放在 `compiler/graph/optimize/symbolic/symbolic_kernel/`。
-- 新增实现前，先分析已有实现中是否存在同类算子；若语义、上下文和测试形态相近，优先合并到已有文件，不要为每个算子机械新增源文件。
-- 实现符号推导时，优先查找同一算子通过 `IMPL_OP_INFERSHAPE(OpType).InferShape(InferShape)` 配置的普通 `InferShape` 方法，借此确认算子语义、输入输出关系、属性读取和边界条件。
-- 普通 `InferShape` 存在两种注册风格：现代 gert 风格 `IMPL_OP_INFERSHAPE(OpType).InferShape(Func).InputsDataDependency({index})`（ops-math/ops-nn），以及旧式 AICPU 风格 `IMPLEMT_INFERFUNC(OpType, FuncName){...}` + `INFER_FUNC_REG(OpType, FuncName);`（canndev/ops/built-in/op_proto/*.cc）；后者用 `op_desc->SetOpInferDepends({field_name})` 声明数据依赖、用 `op.GetInputConstData(field_name, tensor)` 读常量。两种风格同为普通 Shape 推导的有效证据，不可因只搜到旧式风格就判为“无 Shape 推导实现”。
-- 实现符号计算时，优先查找同一算子通过 `REGISTER_SYMBOLIC_KERNEL(OpType, Func)` 注册的已有符号计算方法，借此确认 `SymbolicValue` 的构造、元素顺序和输出写回方式。
-- 推导使用 `IMPL_OP_INFER_SYMBOL_SHAPE_INNER(OpType).InferSymbolShape(Func)` 注册。
-- 计算使用 `REGISTER_SYMBOLIC_KERNEL(OpType, Func)` 注册。
-- 新增符号推导方法必须在方法定义上方添加完整注释，且注释必须包含“算子功能”“算子约束”“推导逻辑”“举例”四项内容；示例必须与实际输入输出和 Shape 推导结果一致。四项描述每项独占一行开头，某项内容超宽时在句号、逗号、分号处手动断行（下一行缩进对齐），不要让 clang-format 机械折行把下一描述项挤到行尾。
-- 保留输入维度中的 `Expression`，只在确实需要线性索引时将 Shape 验证为常量。
-- 对轴、广播、整除、除零、负索引、零维、空输入和 SymbolicValue 长度做显式校验。
-- 使用常量符号 `Symbol(0)`、`Symbol(1)`、`Symbol(2)` 时，改用 `kSymbolZero`、`kSymbolOne`、`kSymbolTwo` 等预定义常量（定义于 `compiler/graph/optimize/symbolic/infer_symbolic_shape/symbolic_infer_util.h` 的 `ge` 命名空间）。
-- 读取输入、输出、属性时，仅当“多输入/多输出/多属性且数字 index 不易区分”（如 index 出现 2、3、5 等）时才把数字索引定义为具名 `constexpr` 常量（如 `constexpr size_t kXIdx = 0U;`、`constexpr size_t kAxisAttrIdx = 0U;`）；仅用 0、1 且语义清晰（如单输入单输出）的场景直接写数字即可，不必抽取。常量统一放在文件顶部匿名命名空间，用常量名避免与已有函数定义冲突，不得放在函数内。
-- 生成 guard/符号约束时，优先使用 `EXPECT_SYMBOL_AND`、`EXPECT_SYMBOL_OR`（以及 `ASSERT_SYMBOL_*`、`EXPECT_SYMBOL_*` 等封装接口）组合多个表达式，避免直接使用原生 `&&`、`||` 运算符。原生运算符会短路，导致短路分支之后的条件不参与 guard 生成，无法得到完备的宏；封装接口会一次性将所有子表达式纳入 `LogicalAnd`/`LogicalOr`，hint 为 true/false 时分别生成对应的正/反 guard。
-- 符号维度比较用 `ASSERT_SYMBOL_EQ`/`EXPECT_SYMBOL_*`，不要用 `std::equal`、`==` 等整值比较——未定值的符号维度会让整值比较失败或崩溃。
-- 输入 symbol shape/tensor/value 缺失时用 `GE_UNSUPPORTED_IF_NULL` 返回 `UNSUPPORTED` 优雅降级，不要用 `GE_ASSERT_NOTNULL`（会导致进程崩溃）；仅上下文、属性、输出容器保留 `GE_ASSERT`。
-- 可选输入用 `GetOptionalInputSymbolTensor` 读取，缺省时用默认值，不要用 `GetInputSymbolTensor` 取可选输入。
-- 含 -1 的 Reshape 未知维度用整除求解（`ResolveIntegralDim`），不要用符号除法（会产生 Rational 分数表达式污染下游）；更多避坑见 `references/symbolic-shape-inference.md` 第 6 章。
+### 2. 选择注册方式
 
-### 3. 测试与复核
+支持的接口形态如下：
 
-- 实现符号推导时，同时设计并补充 UT 和 ST：UT 验证注册函数、Expression 和边界，ST 验证真实图中的符号信息传播。
-- 实现符号计算时，同时设计并补充符号计算 UT 和 ST；不能只生成 UT 而遗漏整图 ST。
-- 新增算子的 UT 或 ST 用例前，必须先检查 `test_ops.h` 是否已有该算子的原型定义；如果没有，先在对应的 `test_ops.h` 中补充原型，再编写用例，避免测试因算子接口缺失而无法编译。
-- 新增 UT 用例时，必须检查 `tests/depends/op_stub/op_impl/add_op_impl.cc` 是否存在目标算子的 `InputsDataDependency` 配置；如果不存在，必须根据符号推导实际读取的输入值补充配置，并确保未参与 Shape 推导的输入配置为空集合。
-- ST 构图优先参考同文件已有用例，使用由 `test_ops.h` 生成的 `es::` 算子接口；只有 `es::` 接口无法表达目标场景时，才使用 `OP_CFG` 或手工 `OpDesc`，并说明原因。
-- 修改 `test_ops.h` 后，编写或编译依赖该原型的 ST 前必须重新生成 ES 测试接口，并以生成头文件中的真实函数签名和输出成员名为准；不能凭算子语义猜测 wrapper 字段名称。
-- ST 使用 `SymbolicShapeSymbolizer::Symbolize` 时，Data 输入的描述 Shape rank 必须与传入 `GeTensor` 的实际 Shape 一致；需要动态符号时将 Data 描述维度设为对应的未知维度，再传入实际 Shape。
-- ST 断言符号结果时，应读取 `Symbolize` 后输入 Tensor 的实际 `SymbolicDescAttr` 作为期望值，避免硬编码 `s0` 等可能随图输入顺序变化的符号编号。
-- 新增任何 UT 或 ST 用例时，必须在测试用例定义上方添加注释，说明测试场景、测试输入和期望输出；三项内容都要与用例实际构造和断言一致。
-- ST 通过 `SymbolicShapeSymbolizer::Symbolize` 和 `SymbolicShapeInference::Infer` 检查整图传播。
-- 测试正常、符号维度、边界、非法参数、缺少值、非 const 参数和注册函数查找失败路径。
-- 执行任何 UT/ST 或测试二进制前，必须先获得用户明确确认；仅“实现”“补充测试”“验证一下”不等同于确认执行测试。未确认时只分析、修改测试文件或做静态检查，不得运行 `tests/run_test.sh`。
-- 获得确认后，读取仓库中的 `docs/zh/build.md`，遵循当前版本的构建和 `tests/run_test.sh` 流程；优先使用 `--ut=ge` 和 `--st=ge` 等文档列出的目标，并记录完整命令和结果。
+| 方式 | 入口 | 适用工程 |
+| --- | --- | --- |
+| 宏式 | `IMPL_OP_INFERSYMBOL(OpType).InferSymbol(Func)` | 使用算子实现注册表的自定义算子包 |
+| OpDef 式 | `OpDef::SetInferSymbol(Func)` / `GetInferSymbol()` | 通过 OpDef 封装注册的算子工程 |
+| 语言无关式 | 继承 `ge::SymbolicInferOp` 并实现 `InferSymbol` | 使用 `graph/custom_op.h` 能力接口的工程 |
 
-## 交付要求
+三种方式最终表达同一个 `InferSymbol` 能力。使用前应以目标环境的发布头和注册库为准；如果某种入口在目标版本不存在，切换到已发布入口或明确标记该版本不支持。
 
-回复或交付中说明：
+### 3. 实现回调
 
-- 修改的源码和测试路径
-- 推导与计算分别覆盖的语义和不支持范围
-- 注册项、数据依赖和关键约束
-- 实际执行的验证命令及结果；未执行项标为“未运行”并说明原因
-- 若只完成静态分析，明确证据来自哪些源码文件
+在自定义算子工程的 `op_host/` 新增 `*_symbolic.cpp` 后，必须把该文件加入现有 host 构建，与算子已有 host 代码一起产出并安装同一个 host so；不能只新增文件和注册入口而遗漏构建接线。
+
+回调签名为：
+
+```cpp
+graphStatus InferSymbolMyOp(gert::InferSymbolContext *ctx);
+```
+
+实现规则：
+
+- 用 `GetInputSymbolShape`、可选/动态/必选输入对应的定位接口读取输入符号 Shape。
+- 需要读取输入符号值时，先声明数据依赖，再使用对应的 SymbolTensor 定位接口。
+- 读取输入和输出指针后立即判空；输入符号缺失时按接口契约返回 `GRAPH_NOT_CHANGED`。
+- 用 `GetDimNum`、`GetDim`、`SetDimNum`、`SetDim`、`AppendDim` 和 `Clear` 逐维读写 Shape。
+- 标量使用零维 Shape 表示：读取时检查 `GetDimNum() == 0`，写出时使用 `SetDimNum(0)`。
+- 使用 `ge::Expression`、`ge::Symbol` 和 `ge::sym::*` 构造表达式；需要常量值时使用表达式提供的常量读取接口并检查返回值。
+- 用 `EXPECT_SYMBOL_*` 表达可通过运行时 Shape 约束选择的分支，用 `EXPECT_SYMBOL_AND/OR` 组合多个条件，避免 C++ 短路导致约束缺失。
+- 用 `ASSERT_SYMBOL_*` 表达不满足即应终止编译的约束。
+- 复合条件必须显式写成 `EXPECT_SYMBOL_AND(ge::sym::Eq(a, b), ge::sym::Ge(c, ge::Symbol(1)))` 或对应的 `EXPECT_SYMBOL_OR`；禁止用原生 `&&`/`||` 包裹或串联 `EXPECT_SYMBOL_*`，因为短路会遗漏后续 Guard。
+- 例如多个数据依赖条件应写成 `EXPECT_SYMBOL_AND(ge::sym::Eq(axis, ge::Symbol(1)), ge::sym::Ge(length, ge::Symbol(1)))`，不能只笼统描述“使用复合 Guard”。
+- Guard 不是普通的编译期判断：`EXPECT` 选择当前 hint 对应的分支并登记运行时假设，`ASSERT` 检查必须成立的算子契约；不得用 hint 折叠后继续无 Guard 地传播结果。
+- `GRAPH_SUCCESS` 返回前，为每一个输出写出完整符号 Shape；透传算子也必须显式写出输出。
+- 不要把“没有写输出”当作透传，也不要把 `GRAPH_NOT_CHANGED` 当作输出等于输入。
+
+### 4. 自检
+
+逐项检查：
+
+- 注册名称与 IR 算子类型完全一致。
+- 所有输出都被写入，输出维度顺序和 `InferShape` 一致。
+- 可选输入使用对应的可选定位接口，动态输入使用 IR index 加相对 index。
+- Shape 数据依赖和值数据依赖没有混淆。
+- 无值、显式空值和有值三种 SymbolTensor 状态按 `HasValue()` 与 `GetValueCount()` 区分。
+- 不能确定输入值时返回未提供状态或保留合法符号表达式，不强转成整数。
+- 值推导用例必须同时验证输入值存在、元素数量、输出 Shape 和输出元素顺序；索引表达式构造正确不等于输出顺序已经验证。
+- 常量表达式必须检查类型和值域；整数参数只接受整数常量，浮点或有理数不能静默转换为整数。
+- 负轴按算子语义规定的 rank 归一化，插入维度通常相对输出 rank；负索引按被索引轴的实际长度归一化，二者不能混用。
+- 标量 Shape 是零维，但标量 Tensor 的元素数量是 1；Shape 的 rank 和值符号化的元素数量不能混用。
+- 可选输入必须按 IR index 定位；未连接的可选输入不应被当成普通输入参与校验或阻断其他输入的推导。
+- 相同算子的 Shape 路径、值路径和降级路径必须使用同一套轴、索引、广播和空输入语义。
+- `EXPECT_SYMBOL_AND/OR` 覆盖了需要一起进入 Guard 的全部条件。
+- 每个依赖运行时 Shape 或值的分支都能列出对应 Guard；已覆盖 hint 为真、hint 为假、无法取得 hint 和常量输入场景。
+- 算子包没有新增对运行机专有库的强依赖。
+- 弱符号检查、构建检查和端到端测试使用了目标版本对应的发布包。
+
+### 5. 验证和交付
+
+按 `references/infer-symbol-verification.md` 执行静态检查、动态库检查和动态 Shape 端到端验证。执行任何编译、模型运行、执行机加载或端到端命令前，必须先向用户确认完整命令；未确认时只做静态检查并标记动态验证为“未运行”。
+
+交付内容应包含：
+
+- 修改的自定义算子源文件和构建入口。
+- 选择的注册方式及目标 CANN 版本。
+- 每个输出的 Shape 公式、值依赖和 Guard 约束。
+- 未提供、非法输入和错误返回路径。
+- 实际执行的检查命令及结果；未执行的项目标记为“未运行”。
+- 发布头和运行环境的版本要求。
 
 ## 参考资料
 
-- `references/symbolic-shape-inference.md`：符号推导调用链、上下文 API、Expression 规则和测试要点
-- `references/symbolic-kernel-compute.md`：符号计算调用链、SymbolicValue 处理、元素映射和测试要点
+- `references/infer-symbol-interface.md`：发布接口、三种注册方式、回调和符号值语义。
+- `references/infer-symbol-verification.md`：算子包结构、弱符号检查、版本兼容和端到端验证。
