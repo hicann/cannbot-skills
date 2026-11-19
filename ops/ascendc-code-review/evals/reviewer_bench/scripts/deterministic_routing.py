@@ -75,13 +75,13 @@ def _read_text(path: Path) -> str:
 INDEX_TABLE_RE_4COL = re.compile(
     r"\|\s*(RB-[\d.]+|SEC-[\d.]+|API-[\d.]+|PERF-[\d.]+|TOPK-[\d.]+|SIMT-[\d.]+"
     r"|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+|HOST-[\d.]+"
-    r"|RED-[\d.]+|KERNEL-[\d.]+|LOG-[\d.]+|ERR-[\d.]+)"
+    r"|RED-[\d.]+|KERNEL-[\d.]+|LOG-[\d.]+|STYLE-[\d.]+)"
     r"\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|"
 )
 INDEX_TABLE_RE_3COL = re.compile(
     r"\|\s*(RB-[\d.]+|SEC-[\d.]+|API-[\d.]+|PERF-[\d.]+|TOPK-[\d.]+|SIMT-[\d.]+"
     r"|MC2-[\d.]+|GEN-[\d.]+|CMP-[\d.]+|PY-[\d.]+|TIL-[\d.]+|PREC-[\d.]+|HOST-[\d.]+"
-    r"|RED-[\d.]+|KERNEL-[\d.]+|LOG-[\d.]+|ERR-[\d.]+)"
+    r"|RED-[\d.]+|KERNEL-[\d.]+|LOG-[\d.]+|STYLE-[\d.]+)"
     r"\s*\|\s*(.+?)\s*\|\s*(.+?)\s*\|"
 )
 SIDE_TAG_RE = re.compile(r"\[适用:\s*(All|Kernel|Tiling|Host)\]")

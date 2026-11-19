@@ -13,7 +13,7 @@
     <tr><td>2</td><td>ascendc-topk.md</td><td>12</td><td>检视实践中沉淀的topN风险点清单</td><td>TOPK</td><td>C++</td><td>All</td></tr>
     <tr><td>3</td><td rowspan="4">AscendC通用规则</td><td>ascendc-kernel-rules.md</td><td>13</td><td>AscendC Kernel侧代码规则</td><td>KERNEL</td><td>C++</td><td>Kernel</td></tr>
     <tr><td>4</td><td>ascendc-host-rules.md</td><td>4</td><td>AscendC Host侧代码规则</td><td>HOST</td><td>C++</td><td>Host</td></tr>
-    <tr><td>5</td><td>ascendc-log.md</td><td>6</td><td>Host 侧日志与错误码规范</td><td>LOG, ERR</td><td>C++</td><td>Host</td></tr>
+    <tr><td>5</td><td>ascendc-log.md</td><td>6</td><td>Host 侧日志与错误码规范</td><td>LOG</td><td>C++</td><td>Host</td></tr>
     <tr><td>6</td><td>ascendc-sunset-api.md</td><td>2</td><td>官方废弃机制驱动的 API 兼容性约束</td><td>SUNSET</td><td>C++</td><td>All</td></tr>
     <tr><td>7</td><td rowspan="3">C++通用规则</td><td>cpp-secure.md</td><td>15</td><td>C++安全编码规范</td><td>SEC</td><td>C++</td><td>All</td></tr>
     <tr><td>8</td><td>cpp-general.md</td><td>39</td><td>C++通用编码规范</td><td>GEN</td><td>C++</td><td>All</td></tr>

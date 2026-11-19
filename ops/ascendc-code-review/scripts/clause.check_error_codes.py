@@ -396,7 +396,7 @@ def main() -> int:
         else:
             for finding in findings:
                 print(
-                    f"{finding.path}:{finding.line}: ERR-1 {finding.code} via {finding.entry} [{finding.revision}]"
+                    f"{finding.path}:{finding.line}: LOG-3 {finding.code} via {finding.entry} [{finding.revision}]"
                 )
             if findings:
                 print(
