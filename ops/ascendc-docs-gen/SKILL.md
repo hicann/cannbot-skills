@@ -1,6 +1,6 @@
 ---
 name: ascendc-docs-gen
-description: Ascend C 算子文档生成与写作参考。触发：用户要求结合算子规格、需求、设计文档和源码生成或更新 aclnn 接口文档、算子 README，或生成需求分析、详细设计、迭代计划等标准文档。
+description: Ascend C 算子文档生成与写作参考。触发：用户要求结合算子规格、需求、设计文档和源码生成或更新 aclnn 接口文档、算子 README（含基于同算子不同版本对比的增量更新），或生成需求分析、详细设计、迭代计划等标准文档。
 ---
 
 # Ascend C 算子文档生成
@@ -70,6 +70,8 @@ README的示例位置为`operators/exp/README.md`，即算子根目录；仓库�
 ## 源码驱动生成
 
 实际新建或重新生成完整 ACLNN API 文档时，由主 Agent 使用 [完整生成流程](references/aclnn-full-api-docs-gen/WORKFLOW.md)，命令以模块目录为根。将资料状态、来源定位和设计意图交给模块，在其输入确认关口处理缺项，不先扩大范围搜索源码。模块负责预处理、阶段依赖、候选审阅及交付；本节的证据优先级、权威模板和 README 全入口约定继续适用。局部修订和其他文档不以完整生成会话为前提。
+
+实际基于算子版本变更增量更新既有 ACLNN API 文档时，由主 Agent 使用 [增量生成流程](references/aclnn-incremental-api-docs-gen/WORKFLOW.md)，命令以组件目录为根。组件以同一算子的两个不同版本（original / modified）为输入，做快照构建、变更检测，基于新版本代码仅重写受影响的文档章节，产出修改后的文档；运行需要 `INCREMENTAL_LLM_*` 环境变量与 `requirements.txt` 依赖，详见该 WORKFLOW.md。
 
 ### 1. 发现接口并提取事实
 

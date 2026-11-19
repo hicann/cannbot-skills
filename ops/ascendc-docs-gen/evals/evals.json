@@ -665,6 +665,60 @@
       "expected_output": "先读取适用的父级指南、模板和示例。过程产物保留 outputs/<interface>，正式文档为算子目录下 docs/<interface>.md，README 在算子根目录；README 逐一列出全部接口及实际文档和样例链接，不链接过程目录，不因仅重生成单个接口而删除其他入口。咨询不运行生成工具。",
       "expectations": [],
       "files": []
+    },
+    {
+      "id": 43,
+      "title": "增量生成流程：版本变更路由与边界",
+      "config": {
+        "max_tokens": 160000,
+        "eval_mode": "text"
+      },
+      "prompt": "某算子仓库的一次版本变更修改了 aclnnXxx 的 tiling 实现并新增一个属性，算子目录下已有基于旧版代码生成的 aclnnXxx 文档。请说明如何只更新受影响的文档章节，以及是否需要重新完整生成整篇文档。本轮不要生成文件。",
+      "expected_output": "说明应使用增量生成流程（references/aclnn-incremental-api-docs-gen/WORKFLOW.md，命令以组件目录为根）：以同一算子修改前后两个版本（original / modified 双仓检出，如不同 commit / tag / 分支的检出）为输入，主入口为 src/run_all_cli.py，经快照构建、变更检测、生成校验、文档回填四阶段，基于新版本代码仅重写受影响的文档章节，不需要整篇重新生成；完整生成流程仅用于新建或整篇重新生成。",
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "增量",
+          "description": "输出路由到增量生成流程"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 44,
+      "title": "增量生成流程：环境变量与依赖前置",
+      "config": {
+        "max_tokens": 160000,
+        "eval_mode": "text"
+      },
+      "prompt": "打算使用增量生成组件处理某次算子版本变更的文档更新，但当前没有配置任何 LLM 网关环境变量。请说明组件的运行前置条件与缺失时的行为。",
+      "expected_output": "说明必填环境变量为 INCREMENTAL_LLM_KEY 与 INCREMENTAL_LLM_URL：任一缺失时入口在启动期以 exit 2 退出并报出变量名，不静默回退公共网关；INCREMENTAL_LLM_MODEL 可选、默认模型名定义于 src/settings.py。依赖以组件根 requirements.txt 为唯一来源（含 clang/libclang 代码图解析依赖），命令从组件目录执行。",
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "INCREMENTAL_LLM",
+          "description": "输出给出必填环境变量名"
+        }
+      ],
+      "files": []
+    },
+    {
+      "id": 45,
+      "title": "增量生成流程：交付物位置与完成判据",
+      "config": {
+        "max_tokens": 160000,
+        "eval_mode": "text"
+      },
+      "prompt": "我用增量生成组件的主入口跑完了同一算子两个版本的对比，但不知道最终文档生成到哪里、怎样才算跑成功，中间产物要不要清理。请说明交付物位置与命名、完成判据，以及 --output_data_path 目录的性质和处理建议。本轮不要生成文件。",
+      "expected_output": "说明组件不原地修改原文档：主入口 run_all_cli.py 的最终 Markdown 位于 <output_data_path>/<算子名>/<md_stem>/results/，命名为 [new]<md_stem>_<时间戳>.md（[new] 前缀新文件，是否替换原文档由使用者决定）；完成判据为该 [new] 文件存在且校验通过（results/detailed_results.json 中相应 doc_part 的 success 为 true，且未出现在阻止回填清单中，校验失败的 doc_part 不会回填进最终文档）；--output_data_path 是运行中间产物目录（快照、anchor 证据、style、re_detection、results 等），仅用于问题排查与结果追溯，组件不提供清理手段，建议置于临时目录或在确认交付物后择机主动清理。",
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": "[new]",
+          "description": "输出给出最终交付物的 [new] 命名约定"
+        }
+      ],
+      "files": []
     }
   ],
   "skill_name": "ascendc-docs-gen"

@@ -29,6 +29,8 @@
             <filefilter name="defaultPolicyFilter" desc="Filters for compatibility，license header policies">
                 <filteritem type="filename" name="requirements*.txt" desc="Dependency manifest files, license header not applicable"/>
                 <filteritem type="filename" name="*.jsonl" desc="JSON Lines data files, cannot carry license header"/>
+                <filteritem type="filename" name="*.python-version" desc="pyenv version pin file containing a single version string; license header not applicable"/>
+                <filteritem type="filepath" name="ops/ascendc-docs-gen/references/aclnn-incremental-api-docs-gen/src/change_detection/anchor_redirect_file/ancor_match_file说明\.txt$" desc="Plain-text algorithm notes for the file-matching module, not distributable source code; covered by the repository LICENSE."/>
                 <filteritem type="filepath" name="runtime/runtime_migration/assets/src/.*" desc="MIT-0 licensed runtime compat shims (Huawei-authored permissive migration assets), exempt from CANN-2.0 header policy"/>
                 <filteritem type="filepath" name="plugins-official/tilelang-op-orchestrator/workflows/Ascend950/.*" desc="DeepSeek-derived Ascend950 workflow assets retain upstream MIT licensing; exempt from repository CANN-2.0 header policy"/>
                 <filteritem type="filename" name="*.yaml" desc="YAML configuration files, no license header required"/>
@@ -54,6 +56,7 @@
                 <filteritem type="filepath" name="ops/ops-theoretical-performance-estimation/tests/calibration/instruments/regbase-microbench/data/task5_raw\.jsonl$" desc="JSON Lines calibration data; comment headers would break line-by-line JSON parsing. Covered by the repository LICENSE."/>
                 <filteritem type="filepath" name="ops/ops-theoretical-performance-estimation/tests/calibration/instruments/regbase-microbench/data/overlap_raw\.jsonl$" desc="JSON Lines calibration data; comment headers would break line-by-line JSON parsing. Covered by the repository LICENSE."/>
                 <filteritem type="filepath" name="ops/ops-theoretical-performance-estimation/tests/calibration/instruments/regbase-microbench/docs/softmax_cases\.jsonl$" desc="JSON Lines calibration data; comment headers would break line-by-line JSON parsing. Covered by the repository LICENSE."/>
+                <filteritem type="filepath" name="ops/ascendc-docs-gen/references/aclnn-incremental-api-docs-gen/src/change_detection/anchor_redirect_file/ancor_match_file说明\.txt$" desc="Plain-text algorithm notes for the file-matching module, not distributable source code; covered by the repository LICENSE."/>
                 <filteritem type="filepath" name="runtime/runtime_migration/assets/src/.*" desc="MIT-0 licensed runtime compat shims (Huawei-authored permissive migration assets), exempt from CANN-2.0 header policy"/>
                 <filteritem type="filepath" name="plugins-official/tilelang-op-orchestrator/workflows/Ascend950/.*" desc="DeepSeek-derived Ascend950 workflow assets retain upstream MIT licensing; exempt from repository CANN-2.0 header policy"/>
                 <filteritem type="filename" name="*.yaml" desc="YAML configuration files, no license header required"/>
@@ -63,6 +66,7 @@
                 <filteritem type="filename" name="*.png" desc="PNG image files for documentation"/>
                 <filteritem type="filename" name="*.tpl" desc="Code generation templates with placeholder variables, license header injected at generation time"/>
                 <filteritem type="filename" name="requirements*.txt" desc="Dependency manifest files, license header not applicable"/>
+                <filteritem type="filename" name="*.python-version" desc="pyenv version pin file containing a single version string; license header not applicable"/>
                 <!--filteritem type="filename" name="*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="abcdefg/.*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="projectroot/[a-zA-Z0-9]{20,}.sh" desc="Temp files"/-->
@@ -80,6 +84,8 @@
             <filefilter name="binaryFileTypePolicyFilter" desc="Filters for binary file policies">
                 <filteritem type="filepath" name="ops/cannbot-dsl-op-design/templates/.*\.md\.templ" desc="UTF-8 Markdown design templates; text assets, not binary files"/>
                 <filteritem type="filename" name="*.tpl" desc="UTF-8 code generation templates; text assets, not binary files"/>
+                <filteritem type="filepath" name="ops/ascendc-docs-gen/references/aclnn-incremental-api-docs-gen/resources/.*\.yaml" desc="UTF-8 YAML chip mapping config; text asset, not binary file"/>
+                <filteritem type="filename" name="chip_map.yaml" desc="UTF-8 YAML chip mapping config; text asset, not binary file"/>
                 <!--filteritem type="filename" name="*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="abcdefg/.*.uvwxyz" desc="Describe the reason for filtering scan results"/-->
                 <!--filteritem type="filepath" name="projectroot/[a-zA-Z0-9]{20,}.sh" desc="Temp files"/-->

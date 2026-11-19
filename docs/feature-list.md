@@ -37,7 +37,7 @@
 | **ops-profiling** | NPU 性能采集与分析，CSV 指标解读、瓶颈定位、优化建议 | — |
 | **ops-perf-routing-plan** | Shape 级 tiling 路由规划：理论下限估算、worst-first 分组、tiling 可行性校验与冻结路由计划 | [入口](../ops/ops-perf-routing-plan/SKILL.md) |
 | **ops-precision-standard** | 算子精度标准，按 dtype 分类提供 atol/rtol 精度比对标准 | — |
-| **ascendc-docs-gen** | 算子文档写作与 ACLNN API 完整生成，按需加载取证、审阅及交付流程 | [入口](../ops/ascendc-docs-gen/SKILL.md) |
+| **ascendc-docs-gen** | 算子文档写作与 ACLNN API 完整/增量生成，按需加载取证、审阅及交付流程 | [入口](../ops/ascendc-docs-gen/SKILL.md) |
 | **ascendc-api-docs-gen** | Ascend C API 文档写作参考，按需加载源码完整生成流程 | [入口](../ops/ascendc-api-docs-gen/SKILL.md) |
 | **ascendc-api-docs-review** | Ascend C API 文档（Markdown）质检：结构完整性、规范性、语言通顺性 | — |
 | **ascendc-docs-review** | aclnn 算子 API 说明文档质检：规范性、完备性、可读性、正确性 | — |
