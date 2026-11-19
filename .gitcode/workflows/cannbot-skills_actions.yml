@@ -48,6 +48,9 @@ stages:
         container:
           image: swr.cn-north-4.myhuaweicloud.com/ci_cann/ubuntu20.04.05_x86:k8s_v1.1006
       JOB_pre:
+        permissions:
+          repository: read
+          id-token: write
         name: Test_PreBuild
         uses: cann/.gitcode/.gitcode/workflows/pre_action.yml@master
     pre:
@@ -57,6 +60,9 @@ stages:
     name: Compile
     jobs:
       JOB_AI_review:
+        permissions:
+          repository: read
+          id-token: write
         name: CodeCheck_AI_review
         uses: .gitcode/workflows/check_action.yml
         with:
@@ -109,6 +115,9 @@ stages:
         container:
           image: swr.cn-north-4.myhuaweicloud.com/ci_cann/ubuntu20.04.05_x86:k8s_v1.1006
       JOB_codecheck:
+        permissions:
+          repository: read
+          id-token: write
         name: CodeCheck
         uses: cann/.gitcode/.gitcode/workflows/codecheck_action.yml@master
         with:
@@ -122,6 +131,9 @@ stages:
     jobs:
       # 聚合静态门禁：一次请求跑完（Security_Vet / Skillspector_Vet / Bandit_Vet / Semgrep_Vet /Content_Critique
       JOB_static_vet:
+        permissions:
+          repository: read
+          id-token: write
         name: Static_Vet
         steps:
           - name: check_static_vet_script
@@ -143,6 +155,15 @@ stages:
                 --gitcode-repo cann/cannbot-skills \
                 --timeout 1800
           # 完整 md 报告上传 OBS（`always()`：门禁未通过也上传；`continue-on-error`：上传异常不染红）
+          -
+            name: oidc_auth
+            uses: huaweicloud-oidc-auth
+            with:
+              audience: ${{ secrets.audience }}
+              agency_urn: ${{ secrets.agency_urn }}
+              provider_urn: ${{ secrets.provider_urn }}
+              region: cn-north-4
+              duration: 3600
           - name: upload_static_vet_report
             if: ${{ always() }}
             continue-on-error: true
@@ -150,14 +171,15 @@ stages:
             with:
               endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
               bucket: "ascend-ci"
-              access-key: ${{ secrets.AK }}
-              secret-key: ${{ secrets.SK }}
               artifact-path: "${{ env.ci_report_dir }}/static-vet/*.md"
               object-prefix: ${{ env.obs_path }}/
         runs-on:
           - self-hosted
           - runner_name=A5_skill_tester_02
       JOB_ut:
+        permissions:
+          repository: read
+          id-token: write
         name: UT_cannbot-skills
         uses: .gitcode/workflows/ut_action.yml
         with:
@@ -170,6 +192,9 @@ stages:
     name: Skill_Test
     jobs:
       JOB_st_test:
+        permissions:
+          repository: read
+          id-token: write
         name: ST_test
         steps:
           - name: check_script
@@ -189,6 +214,15 @@ stages:
                 --poll-interval 60 \
                 --strict
           # 完整 md 报告上传 OBS：ST 失败/超时/取消时同样上传（`if: always()`），
+          -
+            name: oidc_auth
+            uses: huaweicloud-oidc-auth
+            with:
+              audience: ${{ secrets.audience }}
+              agency_urn: ${{ secrets.agency_urn }}
+              provider_urn: ${{ secrets.provider_urn }}
+              region: cn-north-4
+              duration: 3600
           - name: upload_st_report
             if: ${{ always() }}
             continue-on-error: true
@@ -196,8 +230,6 @@ stages:
             with:
               endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
               bucket: "ascend-ci"
-              access-key: ${{ secrets.AK }}
-              secret-key: ${{ secrets.SK }}
               artifact-path: "${{ env.ci_report_dir }}/st/*.md"
               object-prefix: ${{ env.obs_path }}/
         if: "${{ default() }}"
