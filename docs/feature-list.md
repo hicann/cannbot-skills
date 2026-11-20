@@ -321,7 +321,7 @@
 | **tool-hdc** | HarmonyOS Device Connector（hdc）命令行：设备连接管理、HAP 安装/卸载、文件传输、设备端 shell 与日志抓取、错误码速查，支撑端侧验证的设备侧操作 | — |
 | **tool-exception-dump** | AI Core Error 系统化诊断工作流（34 步）：环境与输入检查、场景判定与报错行定位、错误类型解码、单算子复现、证据链汇聚与修复建议，输出六段式证据链诊断报告，与 tool-msaicerr/tool-asys 分工协作 | — |
 | **tool-npu-compute** | 使用 npu-compute 选择和采集 NPU 性能指标、确认采集结果、解包 `.npu-rep`，并分析带宽、流水线、存储访问、缓存和资源冲突等数据；支持由多个采集项组成的指标集合（Set）和可单独选择的采集项（Section） | [查看](skills-usage.md#tool-npu-compute) |
-| **tool-npu-check** | `memcheck` 设备全局内存（GM）访问检查、`synccheck` 同步操作配对检查、命令执行及检查报告解读 | — |
+| **tool-npu-check** | 使用 npu-check 进行算子运行正确性检查：内存访问检查（memcheck）、同步配对检查（synccheck）、未初始化检查（initcheck）和访问竞争检查（racecheck）；支持检查类型选择、运行配置、日志采集与诊断解读，辅助定位算子问题 | — |
 | **npu-objdump-toolkit** | npu-objdump/msobjdump 算子编译产物分析：查看元数据与 ELF、提取 device ELF、反汇编 Ascend AICore 指令，并将异常 PC 定位到 OPP 对象、MIX AIC/AIV 物理符号和窄指令窗口 | — |
 | **tool-aml** | 为 oam-tools-diag 的 AICore STL 诊断模块（aicore_stl_detect）新增算子：自动生成 .cpp（host 规格+下发+注册）、.asc（kernel 下发包装）与 aic/aiv .cce 文件，并完成 host so 编译与注册校验 | — |
 
