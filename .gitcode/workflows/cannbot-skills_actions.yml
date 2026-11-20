@@ -27,6 +27,7 @@ env:
   obs_path: "${{ env.org_name }}/${{ env.repo_name }}/ci/package/${{ env.MERGE_ID }}"
   # RDV 报告（md）本地暂存根目录：每个 Job 一个子目录（见各 Job 的 CI_REPORT_DIR）
   ci_report_dir: "/tmp/cannbot-ci-reports/${{ env.MERGE_ID }}"
+  st_report_dir: "${{ env.ci_report_dir }}/st/${{ atomgit.run_id }}-${{ atomgit.run_attempt }}"
   online: ${{ vars.APPLY_LABEL }}
 
 stages:
@@ -205,7 +206,7 @@ stages:
             env:
               ATOMGIT_RUN_ATTEMPT: ${{ atomgit.run_attempt }}
               ADMIN_PASSWORD: ${{ secrets.ST_PLATFORM_ADMIN_PASSWORD }}
-              CI_REPORT_DIR: "${{ env.ci_report_dir }}/st"
+              CI_REPORT_DIR: ${{ env.st_report_dir }}
             run: |
               bash /opt/cannbot-skills-rdv/scripts/ci-pr-verify.sh \
                 --pr-number "${{ env.MERGE_ID }}" \
@@ -213,9 +214,25 @@ stages:
                 --timeout 3600 \
                 --poll-interval 60 \
                 --strict
-          # 完整 md 报告上传 OBS：ST 失败/超时/取消时同样上传（`if: always()`），
+          # 仅发布当前尝试生成的报告，ST 失败后仍可认证并上传。
+          - name: check_st_report
+            identifier: check_st_report
+            if: ${{ always() && !canceled() }}
+            continue-on-error: true
+            env:
+              CI_REPORT_DIR: ${{ env.st_report_dir }}
+            run: |
+              for report in "$CI_REPORT_DIR"/*.md; do
+                if [ -f "$report" ] && [ -s "$report" ]; then
+                  printf 'present=true\n' >> "$ATOMGIT_OUTPUT"
+                  break
+                fi
+              done
           -
             name: oidc_auth
+            identifier: st_report_oidc
+            if: ${{ always() && !canceled() && steps.check_st_report.outputs.present == 'true' }}
+            continue-on-error: true
             uses: huaweicloud-oidc-auth
             with:
               audience: ${{ secrets.audience }}
@@ -224,13 +241,13 @@ stages:
               region: cn-north-4
               duration: 3600
           - name: upload_st_report
-            if: ${{ always() }}
+            if: ${{ always() && !canceled() && steps.st_report_oidc.outcome == 'success' }}
             continue-on-error: true
             uses: obs-upload
             with:
               endpoint: "https://obs.cn-north-4.myhuaweicloud.com"
               bucket: "ascend-ci"
-              artifact-path: "${{ env.ci_report_dir }}/st/*.md"
+              artifact-path: "${{ env.st_report_dir }}/*.md"
               object-prefix: ${{ env.obs_path }}/
         if: "${{ default() }}"
         runs-on:
