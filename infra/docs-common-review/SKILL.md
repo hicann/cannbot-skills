@@ -12,6 +12,8 @@ metadata:
 
 本 skill 是 docs-common-review 家族的编排入口：自身不实现任何检查，职责限定为 模式路由 → 调度原子检查能力 → 聚合统一报告。各检查能力的规则真源在原子 skill / 脚本处（知识依赖单向：本 skill 只消费，不复制、不修改它们的规则定义）。
 
+> 家族内另含领域专项检查 `docs-api-review/`（API 参考模板规则质检）：独立 skill，用户点名 API 参考/模板类检查时直接使用，不参与本入口 9 项通用检查的门禁/全量/自定义模式编排。
+
 ## 质检能力项（canonical 命名）
 
 | 检查项 | 功能说明 | 执行方式 | 执行入口（相对本 skill 根目录） |
@@ -214,5 +216,6 @@ docs-common-review/
 ├── docs-compliance-check/      # 原子：合规检查（skill）
 ├── docs-basic-aicheck/         # 原子：AI 语义检查（skill）
 ├── docs-diagram-check/         # 原子：图形规范性检查（skill）
+├── docs-api-review/            # 原子：API 参考模板规则质检（skill）
 └── docs-skills-benchmark/      # 家族级基准回归（固定样例 + common_bench.md 基线 + scripts/bench.js 对齐工具，见其 README.md）
 ```

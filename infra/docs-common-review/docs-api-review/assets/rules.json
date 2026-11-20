@@ -1,0 +1,263 @@
+[
+  {
+    "rule_no": "1",
+    "rule_item_name": "API章节结构要求",
+    "rule_name": "API章节结构完整性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】文档（或其组成部分）为接口介绍类：存在函数原型章节，或存在接口名+产品支持情况/功能说明/参数说明结构的接口小节；接口简介/总览类与自定义数据类型介绍类文档不执行本规则（文档类型判定见SKILL.md）。\n位置：接口介绍部分（单接口文档中产品支持情况/功能说明/函数原型/参数说明等为二级标题；多接口合并文档中为三级标题，需对每个接口逐一检查）。\n规则：每个接口必须包含以下必需章节，缺一不可：功能说明、函数原型、参数说明、返回值说明。\n检查要点：1) 产品支持情况为条件必需章节，存在以下任一豁免情形时缺失不报问题：文档明确说明该API参考对所有产品通用、无需区分支持情况；该API参考为每种硬件产品独立成册（不按系列维度描述支持度）；接口为预留接口（文档已标注“预留接口，暂不支持”）；2) 约束说明与调用示例为可选章节，缺失不报问题；3) 缺失必需章节时报问题，问题描述须注明缺少的章节名。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "2",
+    "rule_item_name": "文档标题层级规范",
+    "rule_name": "接口文档标题层级",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】文档（或其组成部分）为接口介绍类（判定标准见规则1前提条件）；接口简介/总览类与自定义数据类型介绍类文档不执行本规则（其标题层级无模板强制形态）。\n位置：文档标题结构。\n规则：接口文档的标题层级必须符合以下两种形态之一：\n1) 单接口单文件：一级标题（#）为接口名，二级标题（##）为产品支持情况、功能说明、函数原型、参数说明等部分；\n2) 多接口合并单文件：一级标题（#）为功能名或模块名，二级标题（##）为接口名，三级标题（###）为产品支持情况、功能说明、函数原型、参数说明等部分。\n不符合任一形态（如章节层级错位、接口名与部分标题同级）时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "3",
+    "rule_item_name": "类介绍规范",
+    "rule_name": "类介绍完整性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】文档（或其组成部分）为接口介绍类（判定标准见规则1前提条件），且其介绍的接口涉及类（接口为类的成员函数，或文档内容明确提及所属类）。\n位置：接口介绍之前。\n规则：需在介绍接口前增加一节，介绍类的作用、使用场景、涉及的头文件以及Public成员函数；继承/派生关系为可选内容，存在继承关系时需列出继承关系图，图中应包含基类及其所有派生类，继承关系通过箭头表示（子类指向父类），当前类用主题色突出显示。\n检查要点：缺少类介绍小节，或小节缺失“类的作用、使用场景、头文件、Public成员函数”中必需内容时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "4",
+    "rule_item_name": "接口简介规范",
+    "rule_name": "接口简介完备性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】以下两种情形之一适用本规则：a) 文档被判定为接口简介/总览类（无函数原型章节、无接口小节结构，内容为接口主要功能/使用场景/接口分类/头文件和库文件概述），整篇文档按本规则检查；b) 接口介绍类文档中存在接口简介章节（标题可按需调整，如“概述/简介”等同义标题）。\n位置：接口简介章节（或接口简介类文档全文）。\n规则：接口简介应概述本文档中接口的主要功能、使用场景、接口分类、头文件和库文件等信息；明显缺失主要功能、使用场景、接口分类、头文件和库文件等核心信息时报问题。\n检查要点：接口简介类文档不执行章节结构类规则（规则1/2），本规则是其唯一适用结构规则，禁止因缺少功能说明/函数原型/参数说明/返回值说明章节而报问题。",
+    "rule_level": "提示",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "5",
+    "rule_item_name": "产品支持情况规范",
+    "rule_name": "产品支持情况列表形式",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】仅当“产品支持情况”章节存在时才执行此检查。\n位置：产品支持情况章节。\n规则：小节标题必须为“产品支持情况”，各产品的支持情况必须以列表形式呈现（每个产品单独一个列表项）。\n举例：正确写法为“- Ascend 950PR&950DT系列产品：支持”，每个产品一行列表项；错误写法为纯段落罗列，如“Atlas A3系列产品：支持，Ascend 950PR&950DT系列产品：支持。”\n备注：对于部分系列产品，若API只支持该系列产品中的部分产品，则需要区分说明；该点涉及产品知识，仅当文档或上下文提供型号清单时核对，否则不检查。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "6",
+    "rule_item_name": "产品支持情况规范",
+    "rule_name": "产品排列顺序",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】仅当“产品支持情况”章节存在时才执行此检查。\n位置：产品支持情况列表。\n规则：列表自上而下按产品发布先后顺序排列，最新的产品置于最上方。判定参考序（自上而下即新到旧，依据《文档写作规范》“产品型号命名规范”章节的产品型号列举顺序）：Ascend 950PR&950DT系列 → Atlas A3系列 → Atlas A2系列 → Atlas 200I/500 A2推理产品 → Atlas推理系列产品 → Atlas训练系列产品 → IPV350 → Hisilicon5162A → KirinX90处理器系列 → Kirin9020处理器系列 → Kirin9030处理器系列 → Kirin9050处理器系列 → KirinDev0001处理器系列 → KirinDev0002处理器系列 → KirinDev0003处理器系列。\n检查要点：仅当参与比较的产品都在该参考序内时才检查相对顺序；出现参考序之外的产品时跳过该次比较，禁止臆断发布先后。",
+    "rule_level": "提示",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/specification/document_writing_specs.md#%E4%BA%A7%E5%93%81%E5%9E%8B%E5%8F%B7%E5%91%BD%E5%90%8D%E8%A7%84%E8%8C%83"
+  },
+  {
+    "rule_no": "7",
+    "rule_item_name": "产品支持情况规范",
+    "rule_name": "试验特性须知",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】文档内容表明接口为非商用/试验特性（出现“试验特性”“非商用”等表述）时才执行。\n位置：产品支持情况章节之前。\n规则：需添加说明且置于“产品支持情况”小节之前，参考写法：“**须知：本接口为试验特性，后续版本可能会存在变更，不支持应用于生产环境中。**”表述需完整包含变更风险与生产环境限制。\n检查要点：须知位置不在“产品支持情况”之前，或表述缺失关键信息（变更风险、生产环境限制）时报问题。",
+    "rule_level": "提示",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "8",
+    "rule_item_name": "产品支持情况规范",
+    "rule_name": "预留接口须知",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】文档内容表明接口为预留接口（出现“预留接口/暂不支持”等表述）时才执行。\n位置：接口介绍开头。\n规则：需在文档中备注为预留接口，模板写法为建议写法（非强制）：“**须知：本接口为预留接口，暂不支持。**”\n检查要点：只检查是否已明确备注预留接口；备注措辞与模板建议写法不一致（如表述顺序、用词不同但语义明确为预留接口）不报问题。若接口为预留接口，则无需“产品支持情况”小节，此时该小节缺失不报问题，规则6/7亦不再执行。",
+    "rule_level": "提示",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "9",
+    "rule_item_name": "功能说明规范",
+    "rule_name": "功能说明完整性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当“功能说明”章节存在时才执行此检查（章节缺失由API章节结构要求规则报告）。\n位置：功能说明章节。\n规则：必须介绍接口功能；若存在使用场景限制，需说明清楚。\n检查要点：功能说明为空、仅有标题无实质功能描述时报问题。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "10",
+    "rule_item_name": "功能说明规范",
+    "rule_name": "术语缩写解释",
+    "rule_type": "完备性",
+    "rule_desc": "位置：功能说明章节。\n规则：功能说明中若涉及术语或其缩写，需给出解释，或参见术语解释章节。\n检查要点：以常识通用缩写（如CPU、GPU、API、NPU）之外的专业术语或缩写为判定对象；术语/缩写无解释且无“参见术语解释”类指引时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "11",
+    "rule_item_name": "函数原型规范",
+    "rule_name": "函数原型代码块规范",
+    "rule_type": "规范性",
+    "rule_desc": "位置：函数原型章节。\n规则：函数原型必须使用代码块样式并设置语言类型（按接口语言选择，如cpp、python等），使函数原型中的字符串高亮显示；未使用代码块、或代码块未设置语言类型时报问题。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "12",
+    "rule_item_name": "函数原型规范",
+    "rule_name": "函数原型与头文件一致性",
+    "rule_type": "正确性",
+    "rule_desc": "【前提条件】能获取到接口对应的头文件（获取方式见下）。无法获取头文件时跳过本规则，不视为已通过，不得臆断。\n位置：函数原型章节。\n头文件获取方式（按顺序尝试）：1) 默认在当前仓根目录下的 include 目录中查找接口对应的头文件；2) 未找到时，交互询问用户提供头文件路径或头文件内容；用户明确拒绝或未提供时跳过本规则。\n规则：文档中的函数原型必须与头文件中的函数定义/声明严格一致，逐字符比对，包括但不限于：函数名、模板参数、返回值类型、入参类型、参数名、参数默认值、const修饰符位置、引用符号&与指针符号*的位置、参数顺序、括号与空格。任何字符级别的差异都必须报告为问题，禁止以“风格差异”或“语义相同”为由跳过；头文件中的换行、多余空白仅做规整化处理后忽略。\n检查要点：文档函数原型与头文件声明存在任一字符级差异时报问题；头文件中不存在该接口声明时报告问题（可能文档描述的接口名有误）。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "13",
+    "rule_item_name": "函数原型规范",
+    "rule_name": "函数原型格式规范",
+    "rule_type": "规范性",
+    "rule_desc": "位置：函数原型章节。\n规则：函数原型不加粗（不得使用 ** 包裹），且结尾不加分号。\n检查要点：函数原型被加粗、或结尾带分号时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "14",
+    "rule_item_name": "函数原型规范",
+    "rule_name": "多函数原型呈现规范",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】函数原型章节存在多个函数原型（如重载形式）。\n位置：函数原型章节。\n规则：多个函数原型需以列表形式呈现，并说明不同原型之间的区别（如参数差异、适用场景）。\n检查要点：未用无序列表区分多个原型，或未说明区别时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "15",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "参数说明表格规范",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当“参数说明”章节存在时才执行此检查。\n位置：参数说明章节。\n规则：必须包含参数表格，且表格必须有“参数名”、“输入/输出”、“说明”三列（第三列列名可为“说明”或“描述”）。“说明”列包括但不限于参数含义、单位、数据类型、取值范围、默认值及其他约束信息，不涉及的内容可删除。\n检查要点：缺少参数表格、或缺少任一必需列时报问题。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "16",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "参数名一致性",
+    "rule_type": "正确性",
+    "rule_desc": "位置：参数说明章节的参数表格“参数名”列。\n规则：参数名必须与函数原型中的参数名保持一致（名称、数量均一致；存在多个函数原型时，需与各原型中对应接口的参数逐一核对）。\n检查要点：参数名拼写不一致、遗漏或多出时报问题。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "17",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "输入输出标识规范",
+    "rule_type": "正确性",
+    "rule_desc": "位置：参数说明章节的参数表格“输入/输出”列。\n规则：1) 标识取值应使用规范表述：“输入”表示入参、“输出”表示出参、既入参又出参时可用“输入&输出”，按实际情况正确填写；2) 与头文件中接口注释中的说明保持一致。\n检查要点：若参数表格整体缺少“输入/输出”列，由“参数说明表格规范”规则报告，本规则不重复报告；标识表述不规范时报问题。第2点【前提条件】仅当用户提供了头文件路径或接口注释内容时才执行核对；无法获取头文件时跳过核对，不视为已通过，也不得臆断。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "18",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "Python参数数据类型",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】接口为Python接口（函数原型为def定义或Python风格签名）。\n位置：参数说明章节。\n规则：Python接口的函数原型中无数据类型，需在参数说明中体现各参数的数据类型。\n检查要点：参数说明缺失数据类型描述时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "19",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "自定义数据类型跳转",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】接口为C/C++接口（非Python）。\n位置：参数说明章节的参数表格。\n规则：函数原型已展示各参数的数据类型，参数说明中无需重复C/C++基本数据类型；但除C/C++基本数据类型外的自定义数据类型需提供跳转至其详细解释（链接至“自定义数据类型介绍”对应小节或权威定义位置）。\n检查要点：参数为自定义类型而参数说明中无任何跳转链接时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "20",
+    "rule_item_name": "参数说明规范",
+    "rule_name": "枚举结构体参数说明",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】参数为自定义的枚举或结构体。\n位置：参数说明章节。\n规则：需说明枚举的定义以及各枚举项的含义，或结构体的定义以及各成员变量的含义与用法。\n检查要点：枚举/结构体参数的定义或各项含义说明缺失、不完整时报问题。“枚举和结构体的定义要与软件保持一致”【前提条件】仅当用户提供了软件侧定义（头文件/源码）时才核对；无法获取时跳过一致性核对，不得臆断。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "21",
+    "rule_item_name": "返回值说明规范",
+    "rule_name": "返回值说明完整性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当“返回值说明”章节存在时才执行此检查（章节缺失由API章节结构要求规则报告）。\n位置：返回值说明章节。\n规则：有返回值时，需说明返回值的具体含义（如“返回0表示成功，返回其他值表示失败，请参见aclError”）；无返回值时注明“无”，结尾不加句号。\n检查要点：章节为空或无实质说明时报问题。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "22",
+    "rule_item_name": "返回值说明规范",
+    "rule_name": "无返回值格式规范",
+    "rule_type": "规范性",
+    "rule_desc": "位置：返回值说明章节。\n规则：无返回值时注明“无”，结尾不加句号。\n检查要点：无返回值场景下写为“无。”（带句号）时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "23",
+    "rule_item_name": "约束说明规范",
+    "rule_name": "约束列表形式",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】仅当“约束说明”章节存在时才执行此检查。\n位置：约束说明章节。\n规则：若存在多条约束，需以无序列表形式展示（每条约束一个列表项）。\n检查要点：使用有序列表或段落罗列多条约束时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "24",
+    "rule_item_name": "调用示例规范",
+    "rule_name": "调用示例代码块规范",
+    "rule_type": "规范性",
+    "rule_desc": "【前提条件】仅当“调用示例”章节存在时才执行此检查。\n位置：调用示例章节。\n规则：使用代码块包裹示例代码，并设置语言类型。\n检查要点：示例代码未用代码块包裹，或代码块未设置语言类型时报问题。",
+    "rule_level": "严重",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "25",
+    "rule_item_name": "调用示例规范",
+    "rule_name": "调用示例代码片段与注释规范",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】仅当“调用示例”章节存在时才执行此检查。\n位置：调用示例章节。\n规则：1) 必须提供代码片段（关键代码片段即可，无需完整可编译代码，但要能说明用法；章节为空或无任何代码片段时报问题）；2) 复杂代码逻辑需添加注释说明，解释为什么这样调用（示例代码中存在多步骤组合调用、条件分支、循环、资源申请/释放等复杂逻辑而全文无任何注释时报问题；简单直白的调用不强制要求注释）。注释写法本身（注释符号与文字间空格等）不属本规则检查范围。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "26",
+    "rule_item_name": "自定义数据类型规范",
+    "rule_name": "返回码介绍完备性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】文档包含“返回码”部分（自定义数据类型介绍下的返回码小节）。\n位置：返回码部分。\n规则：需介绍接口返回码的定义规则、每个返回码的定义、可能原因以及解决方法。\n检查要点：返回码的定义、可能原因、解决方法任一要素缺失时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "27",
+    "rule_item_name": "自定义数据类型规范",
+    "rule_name": "枚举介绍完备性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】文档包含“Enumerations”（枚举）部分。\n位置：Enumerations部分。\n规则：需介绍每个枚举的定义、每个枚举项的含义以及使用说明。\n检查要点：枚举定义、枚举项含义、使用说明任一要素缺失时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "28",
+    "rule_item_name": "自定义数据类型规范",
+    "rule_name": "结构体介绍完备性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】文档包含“Structs”（结构体）部分。\n位置：Structs部分。\n规则：需介绍结构体的定义、每个成员变量的含义以及使用说明。\n检查要点：结构体定义、成员变量含义、使用说明任一要素缺失时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  },
+  {
+    "rule_no": "29",
+    "rule_item_name": "自定义数据类型规范",
+    "rule_name": "Typedef介绍完备性",
+    "rule_type": "完备性",
+    "rule_desc": "【前提条件】文档包含“Typedefs”部分。\n位置：Typedefs部分。\n规则：需介绍每个Typedef的定义；如有特殊注意事项，也需说明。\n检查要点：Typedef定义缺失时报问题。",
+    "rule_level": "一般",
+    "reference_doc_path": "https://gitcode.com/cann/docs/blob/master/writing_template/API_reference.md"
+  }
+]

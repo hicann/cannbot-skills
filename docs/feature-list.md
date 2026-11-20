@@ -325,6 +325,14 @@
 | **npu-objdump-toolkit** | npu-objdump/msobjdump 算子编译产物分析：查看元数据与 ELF、提取 device ELF、反汇编 Ascend AICore 指令，并将异常 PC 定位到 OPP 对象、MIX AIC/AIV 物理符号和窄指令窗口 | — |
 | **tool-aml** | 为 oam-tools-diag 的 AICore STL 诊断模块（aicore_stl_detect）新增算子：自动生成 .cpp（host 规格+下发+注册）、.asc（kernel 下发包装）与 aic/aiv .cce 文件，并完成 host so 编译与注册校验 | — |
 
+## 文档通用质检
+
+### Skills
+
+| Skill | 功能 | 使用样例 |
+|-------|------|---------|
+| **docs-api-review** | 通用 API 参考（API Reference）文档质检：依据《API参考写作模板》沉淀 29 条规则，覆盖章节结构、标题层级、产品支持情况、功能说明、函数原型（含与头文件一致性比对）、参数说明、返回值、约束与调用示例，输出结构化问题清单与修改建议 | — |
+
 ## 领域目录入口（自 README 索引表移入）
 
 > 目录级入口，非官方插件；官方插件索引保留在 [README](../README.md)。

@@ -1,0 +1,51 @@
+{
+  "skill_name": "docs-api-review",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "通用 API 参考文档质检全流程（关键能力）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "对 infra/docs-common-review/docs-api-review/evals/dataset/sample_api.md 做质量检查，按全部规则执行。",
+      "expected_output": "1. 按 SKILL.md 四步工作流执行并逐个输出 CHECKPOINT：数据准备（文件路径模式、读取 assets/rules.json 全部规则按 rule_item_name 分组、读取 assets/exclude-files.json 生成文档列表、删除历史 output/api-markdown-check-result.json）→ 执行分析（带行号读取文档全文、逐条规则按 rule_desc 逐字逐行检查、带【前提条件】的规则先判定条件且条件不满足时跳过不视为已通过、同一行发现问题后继续扫描该行剩余内容、行号从带行号文档内容直接获取）→ 汇总输出（直接从上下文汇总写入 output/api-markdown-check-result.json）→ 清理 output/docs-api-review 临时目录。\n2. 汇总结果 issue 对象数组：rule_group 固定为 通用API模板规则，rule_item/rule_type/rule_name/rule_level 取自命中规则的对应字段，description 与 suggestion 不包含行号，location 为可点击跳转的绝对路径行链接；未发现问题的规则不产生任何条目。\n3. 对该文档应检出基准集（evals/api_reference_bench.md，共 11 条）对应问题：术语缩写未解释、产品支持情况未以列表形式呈现、产品排列顺序不符合最新在上方、函数原型代码块未设置语言、函数原型结尾带分号、参数表格缺少输入/输出列、自定义类型未提供跳转、枚举参数未说明定义与枚举项含义、缺少返回值说明章节、多条约束未用无序列表、示例代码块未设置语言。仅报告 assets/rules.json 已定义规则覆盖的问题，质检期间除 CHECKPOINT 外不输出解释性文字或总结。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 2,
+      "title": "行号与结论定位纪律（禁止心算）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "检查 sample_api.md 时我凭印象记得第 9 行附近的产品支持情况有问题，把行号 9 直接写进质检结果可以吗？",
+      "expected_output": "不可以直接写。SKILL.md 结论验证规则要求：行号必须从步骤 1 读取的带行号文档内容中直接获取，禁止凭记忆、心算或人工计数推算；每条结论必须先在原文中定位到具体字符后再判定，无法精确定位时必须回溯原文重新确认，禁止跳过。正确做法是回到带行号的文档内容，定位产品支持情况实际所在行，确认该行内容确实命中规则（如产品支持情况未以列表形式呈现、产品排列顺序不符合最新在上方）后再记录真实行号；判定依据须在上下文中留有原文对照记录；并说明该要求来源于本技能 SKILL.md 的《结论验证规则》。",
+      "expectations": [],
+      "files": []
+    },
+    {
+      "id": 3,
+      "title": "接口简介类文档不误报章节结构问题（文档类型判定）",
+      "config": {
+        "max_tokens": 160000,
+        "ascend_platforms": [
+          "A2"
+        ],
+        "eval_mode": "text"
+      },
+      "prompt": "对 infra/docs-common-review/docs-api-review/evals/dataset/接口简介.md 做质量检查，按全部规则执行。",
+      "expected_output": "1. 先执行文档类型判定：该文档无“函数原型”章节、无接口名+产品支持情况/功能说明/参数说明结构的接口小节，内容为接口主要功能/使用场景/接口分类概述，判定为接口简介/总览类，且判定依据在上下文中留有记录。\n2. 按规则适用范围映射：跳过规则1（API章节结构完整性）、规则2（接口文档标题层级）等接口介绍类规则，不得产生“缺少功能说明/函数原型/参数说明/返回值说明”类章节结构问题。\n3. 仅规则4（接口简介完备性）适用：检出接口简介缺失头文件和库文件信息，提示级，行号5，rule_group 固定为 通用API模板规则；除该 1 条外无其他问题。\n4. CHECKPOINT 流程与输出文件契约（output/api-markdown-check-result.json、11字段 issue）与全流程用例一致。",
+      "expectations": [],
+      "files": []
+    }
+  ]
+}
