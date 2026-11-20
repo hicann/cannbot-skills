@@ -5,7 +5,7 @@
 ## 一键定位命令
 
 ```bash
-grep -E "SetGraphUnknownFlag|Mark.*unknown|Collect.*as unknown|force unknown|cannot support no tiling|DT_STRING|HCCL|ACLNN|DVPP" ge_compiler.log | head -50
+grep -iE "SetGraphUnknownFlag|Mark .*unknown|Collect.*as unknown|force unknown|cannot support no tiling|DT_STRING|HCCL|ACLNN|DVPP" ge_compiler.log | head -50
 ```
 
 ## GE 判定场景（算子级别根因）
@@ -54,8 +54,8 @@ GE 在动态拆分阶段设置 `ATTR_NAME_FORCE_UNKNOWN_SHAPE=true`，总开关�
 |---|---|---|
 | TilingDepend 不支持 sink | `force unknown as dynamic tilingDependent` | Dynamic TilingDepend 不支持 tiling sink |
 | 不支持地址刷新 | `force unknown as it does not support address refresh` | 算子不支持地址刷新机制 |
-| Stage 分割节点 | `Stage`, `ATTR_STAGE_LEVEL` | 节点被标记为 Stage 分割节点 |
-| DataFlow 算子 | `DataFlow`, `MarkDataFlowOpAttr` | 动态数据流算子 |
+| Stage 分割节点 | `Mark stage_level node`, `tail stage` | 节点被标记为 Stage 分割节点 |
+| DataFlow 算子 | `data flow` | 动态数据流算子 |
 
 ### TilingDepend 不支持 sink
 
@@ -81,8 +81,8 @@ force unknown as it does not support address refresh
 
 ```text
 日志示例：
-marked force unknown node forcibly
-Stage partition: node xxx marked with ATTR_STAGE_LEVEL
+Mark stage_level node xxx, stage_level=1
+Set node xxx as tail stage 2 node
 ```
 
 - 根因：节点被标记为 Stage 分割节点，强制 unknown。
@@ -91,8 +91,7 @@ Stage partition: node xxx marked with ATTR_STAGE_LEVEL
 
 ```text
 日志示例：
-marked force unknown node forcibly
-MarkDataFlowOpAttr: node xxx is DataFlow op
+Get data flow node xxx, handle 0 is success.
 ```
 
 - 根因：动态数据流算子，必须走动态调度。
@@ -120,8 +119,8 @@ grep -E "DT_STRING|data_type is DT_STRING" ge_compiler.log
 # HCCL算子
 grep -E "AllToAll|AllGather|ReduceScatter|unknown shape value is set|memory size exceeds|taskNum" ge_compiler.log
 
-# DVPP算子
-grep -E "DVPP|强制设置为动态算子" ge_compiler.log
+# DVPP算子（DVPP 引擎日志文本为小写 dvpp，需 -i）
+grep -iE "DVPP|强制设置为动态算子" ge_compiler.log
 
 # ACLNN算子
 grep -E "ACLNN|aclnn_only|is an aclnn_only operation" ge_compiler.log
@@ -135,13 +134,17 @@ HCCL 算子限制典型 FE 日志：`node [xxx] op type [AllToAllV] unknown shap
 
 ## 图级别根因
 
-| 场景名称 | 日志关键字 | 触发条件 |
+`do not need dynamic shape partition` 一行对应三种触发条件，按行内字段值区分：
+
+| 场景名称 | 日志关键字 / 判别 | 触发条件 |
 |---|---|---|
-| 纯 Data+NetOutput 图 | `Graph.*do not need dynamic shape partition` | 图中只有 Data(-1) 和 NetOutput，无中间算子 |
+| 纯 Data+NetOutput 图 | 该行 + `host_flag = 0` + `static_model_ops_lower_limit != -1` | 图中只有 Data(-1/-2) 和 NetOutput，无中间算子，整图直接置 unknown |
+| Host 执行模式 | 该行 + `host_flag = 1` | 开启 Host 执行，整图置 unknown 不做动态分区 |
+| 全图合并 unknown 配置 | 该行 + `static_model_ops_lower_limit = -1` | 静态算子数下限配置为 -1，整图合并进 unknown 子图 |
 | 纯常量无输入子图 | （待补充） | 子图仅含 NetOutput/Const/Variable，无外部数据输入 |
 | 原始模型动态 Shape | 无日志关键字 | 模型输入/输出本身含 -1/-2 |
 
-- 纯 Data+NetOutput 图典型日志：`Graph xxx do not need dynamic shape partition, only has Data and NetOutput`
+- 典型日志：`Graph = xxx do not need dynamic shape partition, host_flag = 0, static_model_ops_lower_limit = 4.`
 - 原始模型动态 Shape 排查方法：用 Netron 查看模型原始输入/输出 Shape 是否含 -1/-2，属于原生动态模型。
 
 ## 属性与常量定义

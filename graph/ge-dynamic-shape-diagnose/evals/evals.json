@@ -36,7 +36,7 @@
         "max_tokens": 120000,
         "eval_mode": "text"
       },
-      "prompt": "编译日志有 `mark graph subgraph_1 as unknown` 和 `Mark host cpu node NonMaxSuppression_1 unknown as host engine as it relies on the runtime scheduler for execution`，帮我看看为什么走了动态调度。",
+      "prompt": "编译日志有 `mark graph [subgraph_1] unknown status success! value is 1` 和 `Mark host cpu node NonMaxSuppression_1 unknown as host engine as it relies on the runtime scheduler for execution`，帮我看看为什么走了动态调度。",
       "expected_output": "应确认图被标记 unknown 后，按 GE 判定场景命中“HostCpu 引擎算子”：根因算子 NonMaxSuppression_1 引擎为 DNN_VM_HOST_CPU，依赖运行时调度器执行，因此必须动态调度。",
       "files": [],
       "expectations": []
@@ -88,8 +88,8 @@
         "max_tokens": 120000,
         "eval_mode": "text"
       },
-      "prompt": "日志里没有命中任何算子级别的关键字，只有一行 `Graph xxx do not need dynamic shape partition, only has Data and NetOutput`。这是什么场景？",
-      "expected_output": "应定位为图级别场景“纯 Data+NetOutput 图”：图中只有 Data(-1) 和 NetOutput 节点，无中间算子；可补充说明该图形态导致不需要动态 shape 分区的原因。",
+      "prompt": "日志里没有命中任何算子级别的关键字，只有一行 `Graph = subgraph_1 do not need dynamic shape partition, host_flag = 0, static_model_ops_lower_limit = 4.`。这是什么场景？",
+      "expected_output": "应按行内字段判别：host_flag = 0 排除 Host 执行模式，static_model_ops_lower_limit = 4（非 -1）排除全图合并 unknown 配置，定位为图级别场景“纯 Data+NetOutput 图”：图中只有 Data(-1/-2) 和 NetOutput 节点、无中间算子，整图直接置 unknown 不做动态分区。",
       "files": [],
       "expectations": []
     }

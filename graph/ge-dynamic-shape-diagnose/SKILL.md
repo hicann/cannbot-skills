@@ -28,12 +28,13 @@ description: >-
 ### Step 1. 确认是否触发动态调度
 
 ```bash
-grep -E "SetGraphUnknownFlag|mark graph.*unknown|Graph.*do not need dynamic shape partition" ge_compiler.log
+# "Mark " 后的空格不可省略：不带空格的 Mark.*unknown 会误匹配 [GEPERFTRACE] 耗时行中的 pass 名（如 MarkForceUnknownForCondPass，每次编译必现）
+grep -iE "SetGraphUnknownFlag|Mark .*unknown|Graph.*do not need dynamic shape partition" ge_compiler.log
 ```
 
-- 命中 unknown 标记 → 图走了动态调度，进入 Step 2。
-- 命中 `do not need dynamic shape partition` → 图级别场景，直接跳到 Step 2 的图级别排查。
-- 都没命中且用户怀疑动态调度 → 让用户确认日志级别（`atc --log=info` 起步）和日志文件是否为本次编译产物，再重新采集。
+- 命中 unknown 标记 → 图走了动态调度，进入 Step 2。注意 `mark graph [x] unknown status success! value is 0` 行静态子图同样输出（每个子图无条件打印），须 `value is 1` 才判定 unknown。
+- 命中 `do not need dynamic shape partition` → 图级别场景，按行内 `host_flag`、`static_model_ops_lower_limit` 值区分三种触发条件（Host 执行 / 全图合并 unknown 配置 / 纯 Data+NetOutput），见速查表图级别节。
+- 都没命中且用户怀疑动态调度 → 让用户确认日志级别（unknown 标记日志多为 debug 级，建议 `atc --log=debug` 重采）和日志文件是否为本次编译产物，再重新采集。
 
 ### Step 2. 按层级定位根因场景
 
@@ -43,8 +44,8 @@ grep -E "SetGraphUnknownFlag|mark graph.*unknown|Graph.*do not need dynamic shap
 # 第一步：GE 判定场景
 grep -E "cannot support no tiling|unknown as host engine|unknown as subgraph unknown" ge_compiler.log
 
-# 第二步：GE 设置场景
-grep -E "force unknown as dynamic tilingDependent|force unknown as it does not support address refresh|Stage|DataFlow" ge_compiler.log
+# 第二步：GE 设置场景（Stage/DataFlow 不能用裸词：GEPERFTRACE 耗时行的 pass 名含 OptimizeStage1_1/DataFlowPreparePass，每次编译必现）
+grep -E "force unknown as dynamic tilingDependent|force unknown as it does not support address refresh|Mark stage_level node|tail stage|data flow" ge_compiler.log
 
 # 第三步：FE 设置场景（先找总开关，再按场景追溯）
 grep "marked force unknown node forcibly" ge_compiler.log
@@ -52,13 +53,13 @@ grep "marked force unknown node forcibly" ge_compiler.log
 
 命中第三步的 `marked force unknown node forcibly` 时，必须继续追溯 FE 日志关键词（`DT_STRING` / `AllToAll` / `memory size exceeds CCL buffer` / `taskNum` / `DVPP` / `ACLNN` / `TfOptimizer`）才能确定具体场景，详见 `references/trigger-scenarios.md`。
 
-算子级无果后做图级别排查（纯 Data+NetOutput 图、纯常量无输入子图、原始模型动态 Shape）。原始模型动态 Shape 无日志关键字，用 Netron 查看模型原始输入/输出 Shape 是否含 -1/-2。
+算子级三层均未命中时做图级别排查：`do not need dynamic shape partition` 行的判别见 Step 1 与速查表图级别节；纯常量无输入子图（待补充）；原始模型动态 Shape 无日志关键字，用 Netron 查看模型原始输入/输出 Shape 是否含 -1/-2。
 
 每个场景的日志示例、根因解释和解决方案对照 `references/trigger-scenarios.md` 输出，不要凭记忆编造日志内容。
 
 ### Step 3. 定位根因算子（可选）
 
-用户需要具体算子名时，开启完整日志后搜 InferShape 记录：
+根因算子通常已在 Step 2 命中行中点名（`Mark`/`Collect` 行均含算子名），可直接引用；需追溯 shape unknown 传播源头或向子图内部下钻（子图 unknown 传播场景）时，开启完整日志搜 InferShape 记录（info 级即可）：
 
 ```bash
 export ASCEND_SLOG_PRINT_TO_STDOUT=1
