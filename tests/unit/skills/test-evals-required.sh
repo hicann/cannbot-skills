@@ -19,6 +19,7 @@
 #     - parses as valid JSON
 #     - declares a non-empty top-level "skill_name"
 #   A "skill_name" mismatch against the directory name is a warning only.
+#   In PR UT, also check the expectations shape and required fields in changed evals.json files.
 #
 # This is a full-repo check: it iterates ALL one-level skills under
 # ops/ model/ graph/ runtime/ infra/ tools/ regardless of incremental mode,
@@ -101,6 +102,47 @@ if not isinstance(d, dict) or not isinstance(d.get("skill_name"), str) or not d[
     print_pass "S-EVAL-01: $skill_dir"
     pass_count=$((pass_count + 1))
 done <<< "$SKILL_FILES"
+
+# The PR UT Job downloads this manifest alongside ut.sh.
+PR_FILELIST="$SKILLS_DIR/pr_filelist.txt"
+if [ -f "$PR_FILELIST" ]; then
+    if ! python3 -B - "$SKILLS_DIR" "$PR_FILELIST" "$TESTS_DIR/system/scripts" <<'PY'
+import json
+from pathlib import Path
+import sys
+
+repo, manifest, parser_dir = map(Path, sys.argv[1:])
+sys.path.insert(0, str(parser_dir))
+from evals_json_parser import iter_invalid_expectations
+
+failed = False
+repo = repo.resolve()
+for changed in dict.fromkeys(manifest.read_text(encoding="utf-8-sig").splitlines()):
+    if not changed.endswith("/evals/evals.json"):
+        continue
+    source = (repo / changed).resolve()
+    if not source.is_relative_to(repo):
+        print(f"[ERROR] {changed}: evals.json must be inside the repository", file=sys.stderr)
+        failed = True
+        continue
+    if not source.is_file():  # Deleted files are outside the PR check.
+        continue
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        print(f"[ERROR] {changed}: could not read valid JSON", file=sys.stderr)
+        failed = True
+        continue
+    for error in iter_invalid_expectations(data, require_fields=True):
+        print(f"[ERROR] {changed}: {error}", file=sys.stderr)
+        failed = True
+sys.exit(int(failed))
+PY
+    then
+        print_fail "S-EVAL-01: invalid expectations or unreadable changed evals.json"
+        fail_count=$((fail_count + 1))
+    fi
+fi
 
 echo ""
 echo "========================================"

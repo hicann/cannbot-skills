@@ -32,18 +32,37 @@ from typing import Any, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 
+def iter_invalid_expectations(data, *, require_fields=False):
+    """Locate invalid assertion containers or entries without reporting their values."""
+    if not isinstance(data, dict) or not isinstance(data.get("evals", []), list):
+        return
+    for case_index, item in enumerate(data.get("evals", [])):
+        if not isinstance(item, dict):
+            continue
+        field = f"evals[{case_index}].expectations"
+        case_id = item.get("id")
+        case_label = f" (case id {case_id})" if type(case_id) is int else ""
+        expectations = item.get("expectations", [])
+        if not isinstance(expectations, list):
+            yield f"{field}{case_label}: expected an array"
+            continue
+        for index, expectation in enumerate(expectations):
+            if not isinstance(expectation, dict):
+                yield f"{field}[{index}]{case_label}: expected an object"
+            elif require_fields:
+                missing = {"type", "pattern"} - expectation.keys()
+                if missing:
+                    names = ", ".join(sorted(missing))
+                    yield f"{field}[{index}]{case_label}: missing {names}"
+
+
 def _has_valid_containers(data) -> bool:
     if not isinstance(data, dict) or not isinstance(data.get("evals", []), list):
         return False
-    for item in data.get("evals", []):
-        if not isinstance(item, dict) or not isinstance(item.get("config", {}), dict):
-            return False
-        expectations = item.get("expectations", [])
-        if not isinstance(expectations, list) or not all(
-            isinstance(exp, dict) for exp in expectations
-        ):
-            return False
-    return True
+    return all(
+        isinstance(item, dict) and isinstance(item.get("config", {}), dict)
+        for item in data.get("evals", [])
+    ) and next(iter_invalid_expectations(data), None) is None
 
 
 def parse_evals_json(file_path: Path) -> Optional[Dict[str, Any]]:
