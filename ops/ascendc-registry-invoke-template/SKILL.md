@@ -33,7 +33,7 @@ description: 完整自定义算子工程模板。通过提供标准工程结构�
 | 平台注册与架构 helper | `references/arch-registration.md`；核对工程注册方式、helper 版本、目标展开配置与链接依赖 |
 | SIMT 算子开发 | `references/simt-engineering-guide.md` |
 
-#### ACLNN 接口开发指南
+### ACLNN 接口开发指南
 
 基于 `add_example/op_api/` 创建新算子：
 

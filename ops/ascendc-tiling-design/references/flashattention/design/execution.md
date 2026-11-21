@@ -42,7 +42,7 @@ FA 类算子的 softmax 采用 FlashAttention-2 的 online 算法,分 V1/V2 两�
 
 > ⚠️ **`isBasicBlock` 模板参数必须与 TilingFunc 一致**。`SoftmaxFlashV2<T, isUpdate, ..., isBasicBlock>` 的 `isBasicBlock`(布尔模板参数)与 `SoftMaxFlashV2TilingFunc(..., isBasicBlock)` 传入的值**必须相同**;不一致会导致 expMax 的 UB 布局与 kernel 预期错位 → 逐行 rescale 读到错误偏移 → 精度错(编译能过,静默数值错)。isBasicBlock 的生效条件(尾轴/行数对齐)及一致性用法以目标版本 SoftmaxFlashV2 文档与样例为准。
 
-#### Padding 行 / causal mask 值处理
+### Padding 行 / causal mask 值处理
 
 softmax 之前必须对 P 矩阵的 padding 行(`[mEff, mPad)`)以及 causal 屏蔽位写入屏蔽值。**无论选择哪条路径,padding / mask 都不可省略。**
 
