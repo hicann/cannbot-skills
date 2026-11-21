@@ -83,7 +83,7 @@ __simt_vf__ __aicore__ LAUNCH_BOUND(THREADS) inline void ScatterFiberVF(
 
 | 参数 | 作用 |
 |---|---|
-| `RED` | reduce 语义提到编译期，消除 VF 内的运行期分支（见 [simt/optimization-guide.md](../simt/optimization-guide.md) Rule 001） |
+| `RED` | reduce 语义提到编译期，消除 VF 内的运行期分支（见 [simt/optimization-guide.md](../common/arch35/simt/optimization-guide.md) Rule 001） |
 | `COMP_T` | 索引运算宽度。所有线性下标都 `< 2^31` 时用 `int32_t`。**实测本族零收益**，但保留（对寄存器压力大的 VF 仍有意义） |
 | `ACC_T` / `UPD_T` | 输出/累加器类型与 updates 类型分离。二者相同即普通路径；fp16/bf16 的累积型 reduce 走 `ACC_T=float` |
 
