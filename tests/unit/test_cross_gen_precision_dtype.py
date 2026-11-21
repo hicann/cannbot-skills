@@ -27,6 +27,7 @@ class PrecisionDtypeTests(unittest.TestCase):
         # Header/API stand-ins deliberately use non-contiguous scalar enums.
         source = r"""
 #include <cstdio>
+#include <initializer_list>
 #include <stdexcept>
 namespace at {
 enum class ScalarType { Float=6, Half=5, Float8_e5m2=23, Float8_e4m3fn=24, Unknown=99 };
