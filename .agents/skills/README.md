@@ -18,6 +18,7 @@
 | `gitcode-issue-handler/` | `infra/gitcode-issue-handler/` | GitCode Issue 分诊、跟进与修复交付 |
 | `gitcode-pr-handler/` | `infra/gitcode-pr-handler/` | GitCode PR 标题 / 描述重新生成并写回 |
 | `gitcode-toolkit/` | `infra/gitcode-toolkit/` | GitCode 协作共享基础库（内部参考，不直接触发） |
+| `cannbot-skill-reviewer/` | `infra/cannbot-skill-reviewer/` | CANNBot Skill 入库审查（自动门禁+判例法评分+整改建议） |
 
 ## 维护约定
 
