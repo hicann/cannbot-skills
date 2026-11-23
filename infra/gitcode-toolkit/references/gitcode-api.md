@@ -111,10 +111,26 @@ curl -X POST 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}
 | `path` | Y | string | 文件相对路径（如 `src/main.py`） |
 | `position` | Y | int | PR 分支版本文件中的绝对行号（1-based）。通过 `git clone` + `git checkout pr_{number}` 后，用 Read 工具读取本地文件得到的行号即为该值。不是 diff 相对行号，不是 diff hunk 索引。已在多个 PR 实测验证。 |
 | `commit_id` | | string | 提交 SHA（可选，默认使用最新） |
-| `in_reply_to` | | int | 回复的评论 ID（用于回复） |
+| `in_reply_to` | | int | 回复的评论 ID（实测传入后静默落成独立普通评论，不形成回复串） |
 
 > 行号核对、防重、回查与删除的完整流程见
 > [pr-inline-comment-workflow.md](pr-inline-comment-workflow.md)。
+> 实测 `in_reply_to` 传入不报错，但静默落成一条独立普通评论（`pr_comment`），不形成回复串。
+
+### 解决行内评论讨论（resolve）
+
+行内评论（`diff_comment`）讨论可通过 API 标记解决：
+
+```bash
+PUT /repos/{owner}/{repo}/pulls/{number}/comments/{discussion_id}
+
+curl -X PUT "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}/comments/${discussion_id}?access_token={token}" \
+  -H 'Content-Type: application/json' \
+  -d '{"resolved": true}'
+```
+
+- URL 中的 `{discussion_id}` 是讨论 ID，不是评论 ID——误用评论 ID 返回 404；
+- 成功返回空体 200，以 GET 评论列表回读 `resolved=true` 为准。
 
 ### 提交整体评论
 
@@ -138,6 +154,8 @@ curl -X POST 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}
 -d '{"body": "compile"}'
 ```
 
+> 实测 robot 命令表没有 `/retest`，CI 触发与重跑统一用 `compile` 评论。
+
 > 脚本封装：`bash scripts/trigger_pr_pipeline.sh --repo <owner/repo> --pr <N>`。
 
 > CLI 输出一行 JSON。成功时 `comment_id` 保留 API 返回的字符串或数字类型，
@@ -158,6 +176,17 @@ curl -X PATCH "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number
   --data-urlencode "title=PR标题" \
   --data-urlencode "body=PR描述内容"
 ```
+
+关闭 PR 用同一端点、JSON body 指定状态：
+
+```bash
+curl -X PATCH "https://api.gitcode.com/api/v5/repos/{owner}/{repo}/pulls/{number}?access_token={token}" \
+  -H 'Content-Type: application/json' \
+  -d '{"state": "closed"}'
+```
+
+> 关闭 PR 的 body 是 `{"state":"closed"}`，`state_event` 形态返回 400。注意与 Issue 关闭动词
+> 不同——Issue 侧传 `close`（见「关闭 Issue」一节），两侧形态不能互套。
 
 ### 创建 PR
 
@@ -182,6 +211,9 @@ GET /repos/{owner}/{repo}/pulls
 
 curl "https://api.gitcode.com/api/v5/repos/${owner}/${repo}/pulls?state=opened&source_branch=${branch_name}&access_token=${token}"
 ```
+
+> **注意**：closed PR 的列表端点 `merged_at` 字段置空，按 `merged_at` 过滤会漏掉已合入项——
+> closed 列表按 `updated_at` 截断拉取，候选 PR 逐笔 `GET /pulls/{number}` 核对真实终态。
 
 ### 读取和新增 PR 关联 Issue
 
@@ -234,7 +266,7 @@ cat "$COMMENTS_FILE" | jq -c '.[]' | while read -r comment; do
         -d "{\"body\": \"$body\", \"path\": \"$path\", \"position\": $position}")
 
     http_code=$(echo "$response" | tail -n1)
-    if [ "$http_code" -eq 201 ]; then
+    if [ "$http_code" -eq 200 ] || [ "$http_code" -eq 201 ]; then
         echo "  成功"
     else
         echo "  失败: HTTP $http_code"
@@ -436,7 +468,7 @@ curl 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/contents/{path}?ref={b
 
 | 状态码 | 说明 | 处理方式 |
 |--------|------|----------|
-| 200 | 成功（GET/PATCH） | 正常处理响应 |
+| 200 | 成功（GET/PATCH；部分写端点也返回 200） | 正常处理响应 |
 | 201 | 创建成功（POST） | 正常处理响应 |
 | 401 | Token 无效或过期 | 提示用户提供新 token |
 | 403 | 无权限访问 | 确认用户是否有仓库写权限 |
@@ -444,6 +476,11 @@ curl 'https://api.gitcode.com/api/v5/repos/{owner}/{repo}/contents/{path}?ref={b
 | 409 | 冲突 | PR 可能已更新，重新获取代码 |
 | 422 | 参数验证失败 | 检查参数格式和有效性 |
 | 429 | 请求频率限制 | 按 `Retry-After`/reset 设置共享 cooldown 后重试；总计最多 3 次 attempt |
+
+> **写操作成功判据**：勿按状态码断言——实测 Issue 评论 POST 成功返回 200（非 201），PR 评论
+> POST 200 与 201 均出现过。以回查确认在位为准（响应体含资源 `id` 时可按 `id` 定位；resolve
+> 等空体 200 端点只能回查）。`scripts/trigger_pr_pipeline.sh` 目前仍只认 201，遇 200 会误报
+> 失败，须以回查为准。
 
 `api_post` 与 `api_post_json` 仅对明确的 429 限流拒绝重试。连接异常、超时或 5xx 可能发生在写入完成之后，因此直接抛出错误；调用方应先只读回查实际结果，再决定是否重新提交。GET 等原有读取重试策略保持不变。
 
