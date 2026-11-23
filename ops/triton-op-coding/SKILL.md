@@ -195,6 +195,8 @@ KB 卡片加载方式：用 Read 工具直接读取 `$KB_ROOT/<卡相对路径>`
 
 - KB 卡 `ops/triton/guides/triton_ascend/programming_basics.md` + `ops/triton/guides/triton_ascend/api_reference.md` + `ops/triton/guides/triton_ascend/grid_launch_limits.md` — API 参考、编程基础、Grid 配置、内存优化、调试清单
 - KB 卡 `ops/triton/guides/triton_ascend/code_examples.md` — PyTorch + Triton Ascend 完整示例代码（更多示例见 `$KB_ROOT/ops/triton/examples/` 目录）
+- KB 卡 `ops/triton/optimizations/techniques/bf16_reference_rounding.md` — 参考 bf16 GEMM 的 1-ulp 舍入；先做 reference-g 反证再调 kernel
+- KB 卡 `ops/triton/optimizations/techniques/large_tensor_gm_addressing.md` — 大缓冲 2D store 非法地址；用 1D 平铺 + int64 + M 切块
 
 ### 按算子类型选择的知识
 
@@ -241,6 +243,7 @@ KB 卡片加载方式：用 Read 工具直接读取 `$KB_ROOT/<卡相对路径>`
 3. 判断算子类型，加载对应的知识文档
 4. 选择合适的并行化策略和内存访问模式
 5. 生成 kernel 函数和 `ModelNew` 类
+6. **`single_launch_required=true` 时**：先保留 multi-kernel 基线，再在其上做 fused epilogue，最后融合为 1 jit/1 launch；直接写单 kernel 视为 `delivery_path_violation`，不得提交。
 
 ### 模式 2: 代码修改（有 previous_code + user_requirements）
 
@@ -315,6 +318,7 @@ class ModelNew(nn.Module):
 | 无测试代码            | 不需要生成测试代码                                                                                           |
 | 权重一致              | 含随机权重的算子（Conv2d/Linear 等）必须通过固定种子确保权重一致                                             |
 | **禁止 PyTorch 退化** | **forward() 中所有核心计算必须在 @triton.jit kernel 中实现，禁止使用 torch._/F._/tensor 方法/tensor 运算符** |
+| **路径契约** | `single_launch_required=true` 时必须先有 multi-kernel 基线，再做 fused epilogue，最后 1 jit/1 launch；直接单 kernel 视为 `delivery_path_violation` |
 
 ### 含随机权重算子的权重一致性（关键！）
 
@@ -375,3 +379,4 @@ class ModelNew(nn.Module):
 - 包含必要的导入和包装函数
 - 数值正确性优先，性能次之
 - **严格遵守禁止 PyTorch 退化的约束** — 所有核心计算必须在 @triton.jit kernel 中实现
+- **`single_launch_required=true` 时遵守路径契约** — 先 multi-kernel 基线，再 fused epilogue，最后单 launch；直接写单 kernel 视为 `delivery_path_violation`

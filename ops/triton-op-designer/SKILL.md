@@ -196,6 +196,23 @@ sketch op_name { ... }
 
 **Layer 1 自检**：输出草图前，必须在思考过程中逐条核对 `{category}_constraints.md` 卡（KB）的 Layer 1 约束，确认草图架构不触发任何禁止项。若存在冲突，必须在最终草图中修正，不得输出冲突架构。
 
+**路径契约**：`single_launch_required=true` 时，sketch 必须写出 multi-kernel baseline（>=2 jit）→ stage-level fused epilogue → 单 launch 融合三阶段；直接写单 kernel 视为 `delivery_path_violation`。
+
+**交付路径章节（必填，缺失即本 skill 自检失败）**：`single_launch_required=true` 时，sketch 必须在交付路径设计中给出 `delivery_path`，逐项写清：
+
+```
+delivery_path: multi-kernel baseline -> fused epilogue -> single launch
+stage_files:
+  baseline:
+    - dev/multi_kernel_baseline.py  # 可列多个文件，合计 >=2 jit
+  fused_epilogue: dev/fused_epilogue.py
+final: output/generated_code.py  # 1 个 @triton.jit / 1 次 launch
+```
+
+- prompt 里的“只允许单个 Triton kernel / 不得拆分为多个 kernel 串联”约束的是 `final`；`stage_files` 是过程证据，写在 `{工作目录}/dev/`，不进 `output/`，不违反该约束。
+- 不得因为 prompt 要求单 kernel 而省略 `stage_files`；没有 `stage_files` 的 sketch 会在 Phase 3 `3.2c 交付路径断言` 被判 `delivery_path_violation`。
+- 在各 stage 旁写明实际参考语义与最小对拍输入。涉及索引累加时显式覆盖重复目标；涉及非线性消费 bf16 GEMM 输出时记录舍入发生的位置。将阶段语义诊断与全量精度结果分开记录。若跨 program GEMM 消费带稀疏更新的中间量，在 sketch 中比较独立 GM scatter 与由生产者在片上完成更新后整块写出的方案，记录 tile 归属、重复索引累加和中间量舍入位置。
+
 ---
 
 ## 设计原则
@@ -207,6 +224,7 @@ sketch op_name { ... }
 - 数值正确性优先，性能次之
 - **历史经验优先**：若 `{category}_constraints.md` 卡（KB）存在，其 Layer 1 约束为**硬性规则**，草图架构必须与之兼容。若通用设计模板与 Layer 1 冲突，**必须以 Layer 1 为准**
 - **禁止冲突架构**：草图中不得出现与 Layer 1 禁止项同义的抽象（如 Layer 1 禁止单 kernel 展平时，草图中不得出现 `map_output_to_input` 式的一维线性映射）
+- **`single_launch_required=true` 时遵守路径契约**：先 multi-kernel baseline，再 fused epilogue，最后单 launch；直接写单 kernel 视为 `delivery_path_violation`。三阶段的代码落点写进 sketch 的 `delivery_path` 章节（`dev/` 下的 `stage_files` + `output/` 下的 `final`），prompt 的单 kernel 约束只作用于 `final`
 
 ## 草图特点
 
@@ -215,6 +233,7 @@ sketch op_name { ... }
 - **高层抽象**: 关注算法逻辑和优化策略，而非实现细节
 - **易于理解**: 便于 triton-op-coding 转换为可执行的 Triton Ascend 代码
 - **包含优化提示**: 标注并行化、内存优化、循环展开等机会
+- **三阶段交付路径**: `single_launch_required=true` 时 sketch 必须包含 multi-kernel baseline → fused epilogue → 单 launch，并在 `delivery_path` 章节列出 `dev/` 下的 `stage_files` 与 `output/` 下的 `final`
 
 ## 思考要求
 

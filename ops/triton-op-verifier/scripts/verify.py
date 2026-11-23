@@ -28,6 +28,8 @@ import importlib
 import json
 import logging
 import os
+import hashlib
+from pathlib import Path
 import shutil
 import sys
 import subprocess
@@ -50,8 +52,22 @@ except ImportError:
 ERROR_MSG_LIMIT = 2000
 
 REQUIRED_MATCHED_RATIO = 0.9
-# golden 优先落在 CPU；CPU 跑不起来时回退到 NPU
-GOLDEN_DEVICE_CPU = "cpu"
+# golden device: npu / cpu / auto
+# auto: 默认 NPU（Ascend 算子），NPU 不可用时回退 CPU
+_raw_golden = os.environ.get("CANNBOT_VERIFY_GOLDEN_DEVICE", "auto").strip().lower()
+if _raw_golden == "auto":
+    try:
+        import torch_npu  # noqa: F401
+
+        _raw_golden = "npu"
+    except Exception:
+        _raw_golden = "cpu"
+GOLDEN_DEVICE_CPU = _raw_golden
+# 只有 auto 模式允许在 CPU golden 执行失败时回退 NPU；显式 npu/cpu 均保留首次失败。
+GOLDEN_DEVICE_AUTO = (
+    os.environ.get("CANNBOT_VERIFY_GOLDEN_DEVICE", "auto").strip().lower() == "auto"
+)
+GOLDEN_DEVICE_USED = GOLDEN_DEVICE_CPU
 
 # allclose 判定阈值 (atol, rtol)：|actual - golden| <= atol + rtol * |golden|
 ALLCLOSE_TOLS_STR = {
@@ -1272,8 +1288,8 @@ def _attempt_case(modules, case_ctx, inputs, device, golden_device, non_compute)
 def _try_run_case(modules, case_ctx: CaseContext, inputs, device, non_compute=False):
     """执行单个 case：成功返回 (True, None)；失败返回 (False, failure_dict)。
 
-    golden 优先跑 CPU；CPU 跑不起来（参考实现调 npu:: 专有算子、CPU 不支持该 dtype 等）
-    时回退到 NPU。只有回退后仍失败才判该用例失败。精度判定本身不受 golden 落点影响。
+    按配置的 golden 设备执行。CPU 路径遇到运行时异常时保留已有 NPU 回退；
+    golden 已在 NPU 上时，直接记录首次失败的异常。
     """
     try:
         try:
@@ -1286,6 +1302,8 @@ def _try_run_case(modules, case_ctx: CaseContext, inputs, device, non_compute=Fa
         except AssertionError:
             raise
         except Exception as cpu_err:
+            if not GOLDEN_DEVICE_AUTO:
+                raise
             logger.info(
                 "  [用例 %d/%d] golden 落 CPU 时执行失败，回退 golden 到 NPU 重试: %s: %s",
                 case_ctx.case_idx,
@@ -1293,6 +1311,8 @@ def _try_run_case(modules, case_ctx: CaseContext, inputs, device, non_compute=Fa
                 type(cpu_err).__name__,
                 str(cpu_err)[:160],
             )
+        global GOLDEN_DEVICE_USED
+        GOLDEN_DEVICE_USED = "npu"
         _attempt_case(modules, case_ctx, inputs, device, device, non_compute)
         return True, None
     except Exception as e:
@@ -1424,7 +1444,23 @@ def verify_implementations(op_name, verify_dir, options=None):
     if preflight is None:
         return 0, 0
 
+    impl_path = Path(verify_dir) / f"{op_name}_{options.triton_impl_name}.py"
+    impl_sha256 = hashlib.sha256(impl_path.read_bytes()).hexdigest()
     modules = _load_verify_modules(op_name, verify_dir, options.triton_impl_name)
+    verify_root = Path(verify_dir).resolve()
+    local_sources = {}
+    for module in tuple(sys.modules.values()):
+        filename = getattr(module, "__file__", None)
+        if not isinstance(filename, str) or not filename.endswith(".py"):
+            continue
+        path = Path(filename).resolve()
+        if (
+            path.is_relative_to(verify_root)
+            and path != Path(modules["torch_module"].__file__).resolve()
+        ):
+            local_sources[str(path.relative_to(verify_root))] = hashlib.sha256(
+                path.read_bytes()
+            ).hexdigest()
     import torch
 
     # 在获取输入之前设置种子，确保随机生成的输入可复现
@@ -1440,6 +1476,13 @@ def verify_implementations(op_name, verify_dir, options=None):
     passed_cases, failures = _run_all_cases(
         modules, input_groups, total_cases, device, non_compute
     )
+    if hashlib.sha256(impl_path.read_bytes()).hexdigest() != impl_sha256:
+        raise RuntimeError(f"Implementation changed during verification: {impl_path}")
+    for relative, digest in local_sources.items():
+        if hashlib.sha256((verify_root / relative).read_bytes()).hexdigest() != digest:
+            raise RuntimeError(
+                f"Verification source changed during execution: {relative}"
+            )
 
     # 既有 5 个字段的名称、含义、顺序保持不变，environment 只作为新增的尾部字段，
     # 以保证 benchmark.py 的 L1 verify 闸门等下游读取逻辑完全不受影响。
@@ -1451,6 +1494,9 @@ def verify_implementations(op_name, verify_dir, options=None):
         "failures": failures,
         "npu_preflight": preflight,
         "environment": environment,
+        "implementation_sha256": impl_sha256,
+        "local_source_sha256": local_sources,
+        "golden_device_used": GOLDEN_DEVICE_USED,
     }
     _write_verify_result(output_path, result)
     _log_verify_summary(passed_cases, total_cases, output_path)

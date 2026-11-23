@@ -250,6 +250,8 @@ NaN/Inf 位置不一致）是判定结论，直接上报不重试，避免把真
     ↓
 [0. Triton 退化预检查] → scripts/validate_triton_impl.py (AST 静态分析)
     ↓ (通过)
+[0.5 交付路径检查] → scripts/check_launch_path.py --phase iteration (仅 single_launch_required=true)
+    ↓ (存在 multi-kernel 基线，否则 delivery_path_violation)
 [1. 创建验证项目] → 两个文件
     ↓
 [2. 执行验证脚本] → scripts/verify.py --op_name ...
@@ -262,6 +264,8 @@ NaN/Inf 位置不一致）是判定结论，直接上报不重试，避免把真
     ↓
 输出：验证结果 + 性能数据
 ```
+
+参考卡：`ops/triton/optimizations/techniques/bf16_reference_rounding.md`、`ops/triton/optimizations/techniques/large_tensor_gm_addressing.md`。
 
 ---
 
@@ -327,6 +331,26 @@ python3 <本skill所在目录的绝对路径>/scripts/validate_triton_impl.py \
 
 ---
 
+## Step 0.5: 交付路径检查（`single_launch_required=true` 时，强制）
+
+**执行时机**：Step 0 通过后、Step 1 创建验证项目之前。**不要**等到 verify 通过后才补跑——那时已经消耗了整轮精度验证时间，且违规代码会先进入精度流程。
+
+```bash
+python3 scripts/check_launch_path.py --op-dir {工作目录} \
+  --phase iteration --baseline dev/multi_kernel_baseline.py
+```
+
+按 sketch 的 `stage_files` 传入基线文件，拆为多个文件时重复 `--baseline`。
+
+| `verdict` | 含义 | 处理 |
+|---|---|---|
+| `pass_iteration` | 契约有效、声明的 `dev/` 基线至少含两个真实 JIT 定义 | 继续 Step 1 |
+| `delivery_path_violation` | 契约、基线或静态产物检查失败 | 中止本轮并返回编排器；不得调用 `verify.py` / `benchmark.py` |
+
+Phase 4 首次融合前执行 `--phase fusion --baseline-verify <基线正式验证报告>`，核对全部用例通过且报告覆盖所声明阶段源码。Phase 5 保留该报告参数并使用 `--phase final --fused-epilogue <阶段文件> --final-code <实际交付文件>`，同时保留 `--baseline`。脚本将 `pass_final_shape` 和最终文件的 SHA256 写入 `output/launch_path.json`；编排器以绑定该哈希的逐 case launch 和全部必测用例精度确认交付，并用同一文件的性能证据填写 `target_reached`。候选精度全过且 launch 合规时可交付，性能未达标记 `target_reached=false`。Phase 4 取证后仍无该类候选时，多 kernel 回退可传 `--fallback`，返回 `contract_conflict`（exit 2）。
+
+---
+
 ## Step 1: 创建验证项目
 
 在当前迭代的验证目录（如 `{output-path}/iter_{iteration}/verify/`）下创建两个文件：
@@ -387,6 +411,8 @@ python3 /path/to/triton-op-verifier/scripts/verify.py \
 - 禁止对计算类算子（含数值运算）传 `--non-compute`；该开关仅适用于不做数值运算、只做形状变换 / 维度重排 / 切分拼接 / 索引 / 类型转换等数据重组操作的算子（如 Reshape、Transpose、Concat、Split、Gather、Cast、Pad）。误用会强制走二进制完全一致判定，把正常的浮点舍入差异判为失败
 - 对非计算类算子（例如形状变换、维度重排、切分拼接、索引、类型转换等数据重组操作的算子）**一定要**传 `--non-compute`；漏传会让此类算子按浮点三项判定走，容许超出预期的差异，无法识别真正的位级不一致
 - 禁止用 `rm -rf ~/.triton/cache` 清缓存：会破坏并发跑的其他算子 / 其他会话的缓存，且不可回滚。需要空缓存一律走 `--fresh-cache`（靠独立目录隔离）
+
+**路径检查（`single_launch_required=true` 时）**：已在 **Step 0.5** 前置执行（见上）；verify 通过后只需复核同一命令仍为 PASS。任何阶段出现 `delivery_path_violation`，不得进入 benchmark。
 
 ---
 
@@ -577,7 +603,7 @@ python3 /path/to/triton-op-verifier/scripts/benchmark.py \
 | `--warmup` | 否 | warmup 次数，默认 5 |
 | `--repeats` | 否 | 正式测试次数，默认 50 |
 | `--output` | 否 | 性能报告输出路径（JSON 格式）|
-| `--verify_not_required` | 否 | 跳过 L1 verify 闸门（默认强制要求 verify_result 全过）|
+| `--verify_not_required` | 否 | 在独立诊断中跳过 L1 verify 闸门（工作流内拒绝）|
 | `--lock-frequency` / `--no-lock-frequency` | 否 | 性能测试前是否对 NPU 锁频并在测试期间监控频率（默认开启）|
 | `--lock-frequency-fail-action` | 否 | 锁频失败或频率漂移时的处理方式：`warn`（默认）或 `error`|
 | `--freq-check-interval` | 否 | 频率监控采样间隔，单位秒（默认 `1.0`）|
@@ -595,7 +621,7 @@ benchmark.py 启动时按 `--triton_impl_name` 推导对应的 verify_result 文
 | `triton_optimized`（Phase 4 optimized）| `verify_result_optimized.json` |
 | 其他 `triton_xxx` | `verify_result_xxx.json` |
 
-**判定规则**（默认开启，传 `--verify_not_required` 可跳过）：
+**判定规则**（工作流内强制；独立诊断可传 `--verify_not_required`）：
 
 | 情况 | 退出码 | 说明 |
 |------|-------|------|

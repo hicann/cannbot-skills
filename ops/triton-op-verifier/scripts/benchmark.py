@@ -31,12 +31,17 @@ import numpy as np
 # with after Phase 1 freeze. See _baseline_integrity.py for exit codes.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 try:
-    from _baseline_integrity import _check_baseline_integrity, BaselineGateError
+    from _baseline_integrity import (
+        _check_baseline_integrity,
+        _resolve_work_dir,
+        BaselineGateError,
+    )
 except ImportError:
     _check_baseline_integrity = None  # graceful: gate disabled if module missing
 
     class BaselineGateError(Exception):  # fallback: never raised when gate disabled
         pass
+
 
 # A5 NPU frequency locking helpers — optional, failures are warnings by default
 try:
@@ -61,7 +66,7 @@ except ImportError:
 
 # 确保同目录下的 _log_utils 可被导入（脚本可能从其他工作目录调用）
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _log_utils import setup_logger as _setup_logger_shared  # noqa: E402	 
+from _log_utils import setup_logger as _setup_logger_shared  # noqa: E402
 from _common_utils import describe_input as _describe_input_shared  # noqa: E402
 from _common_utils import move_to_device  # noqa: E402
 from npu_preflight import load_preflight_options, run_preflight, write_preflight_result  # noqa: E402
@@ -92,9 +97,11 @@ BAD_ROW_FLOOR_US = 10.0
 # 数据类
 # ============================================================================
 
+
 @dataclass
 class BenchmarkConfig:
     """性能测试配置"""
+
     op_name: str
     verify_dir: str
     triton_impl_name: str = TRITON_IMPL_NAME_DEFAULT
@@ -103,17 +110,17 @@ class BenchmarkConfig:
     skip_framework: bool = False
     framework_latency_ms: float = 0.0
     clear_l2_cache: bool = False  # 是否清除 L2 cache
-    keep_res: bool = False        # 是否保留 profiling 结果目录
-    max_retries: int = 3          # 采集失败时的最大重试次数
+    keep_res: bool = False  # 是否保留 profiling 结果目录
+    max_retries: int = 3  # 采集失败时的最大重试次数
     lock_frequency: bool = True
     lock_frequency_fail_action: str = "warn"  # "warn" | "error"
     freq_check_interval: float = 1.0
 
 
-
 @dataclass
 class CaseContext:
     """单个测试用例在整体序列中的定位（1-based）。"""
+
     case_idx: int
     total_cases: int
 
@@ -121,6 +128,7 @@ class CaseContext:
 @dataclass
 class MeasureContext:
     """单次 profiling 测量所需的全部参数。"""
+
     model: Any
     inputs: List[Any]
     warmup: int
@@ -132,6 +140,7 @@ class MeasureContext:
 @dataclass
 class Measurement:
     """单次 profiling 测量结果三元组：算子分项耗时 / 平均时延 / 峰值显存。"""
+
     operators: Dict[str, float]
     latency_ms: Optional[float]
     peak_memory: float
@@ -140,6 +149,7 @@ class Measurement:
 @dataclass
 class ModelPair:
     """framework / impl 模型成对。"""
+
     framework: Any
     impl: Any
 
@@ -147,6 +157,7 @@ class ModelPair:
 @dataclass
 class BenchmarkModelSpec:
     """单 shape benchmark 所需的模型工厂三元组。"""
+
     framework_cls: Any
     impl_cls: Any
     get_init_inputs: Any
@@ -155,6 +166,7 @@ class BenchmarkModelSpec:
 @dataclass
 class SpeedupBuckets:
     """按 classify_speedup 把通过的 shape 分桶后的结果。"""
+
     valid_speedups: List[float] = field(default_factory=list)
     nan_indices: List[int] = field(default_factory=list)
     inf_indices: List[int] = field(default_factory=list)
@@ -166,6 +178,7 @@ class SpeedupBuckets:
 @dataclass
 class PerfAggregate:
     """跨 shape 的 latency / memory / 算子分项耗时聚合结果。"""
+
     avg_fw: float
     avg_impl: float
     avg_fw_mem: float
@@ -182,6 +195,7 @@ class PerformanceResult:
     operators: {Name: {"avg_us": 单次调用耗时(us)}}；per-shape 结果额外含 launch_count
     （一次 forward 内发射次数，为 per-shape 属性，不跨 shape 聚合）。
     """
+
     avg_latency_ms: float
     peak_memory_mb: float
     operators: Dict[str, Dict[str, Any]]
@@ -196,9 +210,10 @@ class SingleShapeResult:
     通过用例但 speedup 异常（NaN/Inf/0/负数）时 status="pass"，
     speedup_vs_torch 落盘为 null，case_idx 收集到 BenchmarkResult 的对应分类列表。
     """
+
     case_idx: int
     input_desc: List[Dict[str, Any]]
-    status: str = "pass"           # "pass" | "fail"
+    status: str = "pass"  # "pass" | "fail"
     framework: Optional[PerformanceResult] = None
     implementation: Optional[PerformanceResult] = None
     speedup_vs_torch: Optional[float] = None
@@ -214,6 +229,7 @@ class BenchmarkResult:
     *_indices: 五类异常 shape 的 case_idx 列表(从 1 开始),与 passed_cases 不冲突,
                异常 shape 仍计入 passed_cases,只是 s_i 不进入几何平均。
     """
+
     op_name: str
     warmup: int
     repeats: int
@@ -237,6 +253,7 @@ class BenchmarkResult:
 @dataclass
 class OverallAggregate:
     """compute_overall 的聚合结果：跨 shape 的整体均值与异常索引分类。"""
+
     framework: Optional[PerformanceResult]
     implementation: Optional[PerformanceResult]
     speedup_vs_torch: Optional[float]
@@ -250,6 +267,7 @@ class OverallAggregate:
 # ============================================================================
 # 通用辅助函数
 # ============================================================================
+
 
 def truncate_error(msg: str, limit: int = ERROR_MSG_LIMIT) -> str:
     """截断过长错误信息：保留头尾各 limit/2 字符。"""
@@ -275,16 +293,20 @@ def cleanup_npu_memory() -> None:
     try:
         import torch
         import torch_npu  # noqa: F401
+
         torch.npu.empty_cache()
     except Exception as e:
         # 例外：非 NPU 环境或 torch_npu 不可用时清理无意义，仅记录调试信息，不影响主流程
-        logger.debug("跳过 NPU 显存清理（环境不支持 torch_npu）: %s: %s", type(e).__name__, e)
+        logger.debug(
+            "跳过 NPU 显存清理（环境不支持 torch_npu）: %s: %s", type(e).__name__, e
+        )
     gc.collect()
 
 
 # ============================================================================
 # 输入解析
 # ============================================================================
+
 
 def resolve_inputs(op_name: str, verify_dir: str):
     """解析任务文件的输入提供方式。
@@ -297,6 +319,7 @@ def resolve_inputs(op_name: str, verify_dir: str):
         输入组列表 (List[List[Any]])
     """
     import torch  # noqa: F401
+
     sys.path.insert(0, verify_dir)
     torch_module = importlib.import_module(f"{op_name}_torch")
 
@@ -305,9 +328,7 @@ def resolve_inputs(op_name: str, verify_dir: str):
     elif hasattr(torch_module, "get_inputs"):
         return [torch_module.get_inputs()]
     else:
-        raise AttributeError(
-            "模块必须提供 get_inputs() 或 get_input_groups() 方法"
-        )
+        raise AttributeError("模块必须提供 get_inputs() 或 get_input_groups() 方法")
 
 
 def prepare_model_fn(model: Any, inputs: List[Any], device: Any) -> callable:
@@ -343,6 +364,7 @@ def cleanup_profile_path(profile_path: str) -> None:
 # 性能分析逻辑
 # ============================================================================
 
+
 def _find_profile_file(profile_path: str, filename: str) -> Optional[str]:
     """在 profile_path 下递归查找精确文件名的路径。"""
     for root, _, files in os.walk(profile_path):
@@ -351,7 +373,9 @@ def _find_profile_file(profile_path: str, filename: str) -> Optional[str]:
     return None
 
 
-def _find_profile_file_prefix(profile_path: str, prefix: str, suffix: str) -> Optional[str]:
+def _find_profile_file_prefix(
+    profile_path: str, prefix: str, suffix: str
+) -> Optional[str]:
     """在 profile_path 下递归查找文件名以 prefix 开头、suffix 结尾的路径。"""
     for root, _, files in os.walk(profile_path):
         for f in files:
@@ -360,7 +384,9 @@ def _find_profile_file_prefix(profile_path: str, prefix: str, suffix: str) -> Op
     return None
 
 
-def _aggregate_kernel_rows(name: str, durations, active_count: int) -> Tuple[float, int]:
+def _aggregate_kernel_rows(
+    name: str, durations, active_count: int
+) -> Tuple[float, int]:
     """做法 B：以中位数为基准剔除坏行，再按迭代段内求和、跨迭代取均值。
 
     kernel_details.csv 与 msprof 旧格式（op_summary / task_time）共用的聚合逻辑：
@@ -377,7 +403,8 @@ def _aggregate_kernel_rows(name: str, durations, active_count: int) -> Tuple[flo
     if abs(launch_count_f - launch_count) > 0.01:
         logger.warning(
             "kernel %s 的发射次数 %.3f 非整数（CSV 混入了非 active 行或 forward 内条件分支）",
-            name, launch_count_f,
+            name,
+            launch_count_f,
         )
     if launch_count <= 0:
         return 0.0, 0
@@ -390,7 +417,10 @@ def _aggregate_kernel_rows(name: str, durations, active_count: int) -> Tuple[flo
     if removed > 0:
         logger.warning(
             "kernel %s 剔除 %d 个异常采样（阈值 %.2fus，中位数 %.2fus）",
-            name, removed, thr, median_m,
+            name,
+            removed,
+            thr,
+            median_m,
         )
     n = len(clean)
     n -= n % active_count  # 只保留末尾可整除段，避免剔除坏行后 reshape 错位
@@ -402,8 +432,9 @@ def _aggregate_kernel_rows(name: str, durations, active_count: int) -> Tuple[flo
     return avg_us, launch_count
 
 
-def _parse_msprof_fallback(profile_path: str, active_count: int
-                           ) -> Tuple[Optional[Dict[str, Dict[str, Any]]], Optional[float]]:
+def _parse_msprof_fallback(
+    profile_path: str, active_count: int
+) -> Tuple[Optional[Dict[str, Dict[str, Any]]], Optional[float]]:
     """kernel_details.csv 缺失时回退解析 msprof 旧格式（mindstudio_profiler_output）。
 
     优先 op_summary_*.csv（Op Name / Task Duration(us)），其次 task_time_*.csv
@@ -424,33 +455,43 @@ def _parse_msprof_fallback(profile_path: str, active_count: int
             df = pd.read_csv(op_summary_file)
             for name, group in df.groupby("Op Name"):
                 avg_us, launch_count = _aggregate_kernel_rows(
-                    name, group["Task Duration(us)"].to_numpy(), active_count)
+                    name, group["Task Duration(us)"].to_numpy(), active_count
+                )
                 operator_times[name] = {"avg_us": avg_us, "launch_count": launch_count}
         elif task_time_file:
             source = os.path.basename(task_time_file)
             df = pd.read_csv(task_time_file)
             for name, group in df.groupby("kernel_name"):
                 avg_us, launch_count = _aggregate_kernel_rows(
-                    name, group["task_time(us)"].to_numpy(), active_count)
+                    name, group["task_time(us)"].to_numpy(), active_count
+                )
                 operator_times[name] = {"avg_us": avg_us, "launch_count": launch_count}
     except Exception as e:
-        logger.warning("msprof 旧格式回退解析失败 %s: %s: %s", profile_path, type(e).__name__, e)
+        logger.warning(
+            "msprof 旧格式回退解析失败 %s: %s: %s", profile_path, type(e).__name__, e
+        )
         return None, None
 
     if not operator_times:
-        logger.warning("msprof 旧格式回退解析为空（无有效 kernel 数据）: %s", profile_path)
+        logger.warning(
+            "msprof 旧格式回退解析为空（无有效 kernel 数据）: %s", profile_path
+        )
         return None, None
 
     total_avg_ms = sum(v["avg_us"] for v in operator_times.values()) / 1e3
     logger.info(
         "kernel_details.csv 缺失，已回退 msprof 旧格式解析（%s，%d 个 kernel，共 %.4f ms）",
-        source, len(operator_times), total_avg_ms,
+        source,
+        len(operator_times),
+        total_avg_ms,
     )
     return operator_times, round(total_avg_ms, 4)
 
 
 def parse_operator_latency(
-    profile_path: str, active_count: int, keep_res: bool = False,
+    profile_path: str,
+    active_count: int,
+    keep_res: bool = False,
 ) -> Tuple[Optional[Dict[str, Dict[str, Any]]], Optional[float]]:
     """从 kernel_details.csv 提取算子时延，计算每次 test_fn() 调用的平均总耗时（毫秒）。
 
@@ -474,11 +515,17 @@ def parse_operator_latency(
             operator_times = {}
             for name, group in df.groupby("Name"):
                 avg_us, launch_count = _aggregate_kernel_rows(
-                    name, group["Duration(us)"].to_numpy(), active_count)
+                    name, group["Duration(us)"].to_numpy(), active_count
+                )
                 operator_times[name] = {"avg_us": avg_us, "launch_count": launch_count}
             total_avg_ms = sum(v["avg_us"] for v in operator_times.values()) / 1e3
         except Exception as e:
-            logger.warning("kernel_details.csv 解析失败 %s: %s: %s", kernel_details_file, type(e).__name__, e)
+            logger.warning(
+                "kernel_details.csv 解析失败 %s: %s: %s",
+                kernel_details_file,
+                type(e).__name__,
+                e,
+            )
         else:
             if not keep_res:
                 cleanup_profile_path(profile_path)
@@ -497,8 +544,13 @@ def parse_operator_latency(
     return None, None
 
 
-def run_profiler_with_config(test_fn: callable, warmup: int, repeats: int, profile_name: str,
-                             clear_l2_cache: bool = False) -> str:
+def run_profiler_with_config(
+    test_fn: callable,
+    warmup: int,
+    repeats: int,
+    profile_name: str,
+    clear_l2_cache: bool = False,
+) -> str:
     """运行NPU profiler并返回生成的性能分析目录路径。
 
     schedule 的 warmup 阶段执行 warmup 次预热（不进入采集）；
@@ -534,7 +586,9 @@ def run_profiler_with_config(test_fn: callable, warmup: int, repeats: int, profi
     # 总 step 数 = warmup + repeats（wait=0、repeat=1 时的推荐公式 warmup + active）
     with torch_npu.profiler.profile(
         activities=[torch_npu.profiler.ProfilerActivity.NPU],
-        schedule=torch_npu.profiler.schedule(wait=0, warmup=warmup, active=repeats, repeat=1),
+        schedule=torch_npu.profiler.schedule(
+            wait=0, warmup=warmup, active=repeats, repeat=1
+        ),
         on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(profile_path),
         record_shapes=False,
         profile_memory=False,
@@ -558,9 +612,9 @@ def run_profiler_with_config(test_fn: callable, warmup: int, repeats: int, profi
 
 
 def measure_single(
-        ctx: MeasureContext,
-        clear_l2_cache: bool = False,
-        keep_res: bool = False,
+    ctx: MeasureContext,
+    clear_l2_cache: bool = False,
+    keep_res: bool = False,
 ) -> Tuple[Optional[Dict[str, Dict[str, Any]]], Optional[float], float]:
     """测量单次性能（warmup + profiling）"""
     import torch
@@ -570,10 +624,15 @@ def measure_single(
     test_fn = prepare_model_fn(ctx.model, ctx.inputs, ctx.device)
 
     profile_path = run_profiler_with_config(
-        test_fn, ctx.warmup, ctx.repeats, ctx.profile_name,
+        test_fn,
+        ctx.warmup,
+        ctx.repeats,
+        ctx.profile_name,
         clear_l2_cache=clear_l2_cache,
     )
-    operators, latency_ms = parse_operator_latency(profile_path, ctx.repeats, keep_res=keep_res)
+    operators, latency_ms = parse_operator_latency(
+        profile_path, ctx.repeats, keep_res=keep_res
+    )
 
     peak_memory = torch.npu.max_memory_allocated() / (1024 * 1024)
     return operators, latency_ms, round(peak_memory, 2)
@@ -582,6 +641,7 @@ def measure_single(
 # ============================================================================
 # 主测试逻辑
 # ============================================================================
+
 
 def _move_inputs_to_device(inputs: List[Any], device: Any) -> List[Any]:
     """把张量类输入搬到目标 device（含嵌套 list/tuple），标量原样透传。
@@ -602,11 +662,16 @@ def _measure_framework(
 ) -> Tuple[Dict[str, Dict[str, Any]], Optional[float], float]:
     """测量 framework 端时延 / 显存 / 算子分项；skip_framework 时直接返回参考值。"""
     if config.skip_framework:
-        logger.info("    跳过 Framework 测试，使用参考延迟: %.4f ms", config.framework_latency_ms)
+        logger.info(
+            "    跳过 Framework 测试，使用参考延迟: %.4f ms",
+            config.framework_latency_ms,
+        )
         return {}, config.framework_latency_ms, 0.0
 
     inputs_framework = _move_inputs_to_device(inputs, device)
-    logger.info("    测试 Framework (warmup=%d, active=%d)...", config.warmup, config.repeats)
+    logger.info(
+        "    测试 Framework (warmup=%d, active=%d)...", config.warmup, config.repeats
+    )
     operators, latency_ms, peak_memory = measure_single(
         MeasureContext(
             model=framework_model,
@@ -630,7 +695,11 @@ def _measure_impl(
     case_idx: int,
 ) -> Tuple[Dict[str, Dict[str, Any]], Optional[float], float]:
     """测量 impl 端时延 / 显存 / 算子分项。"""
-    logger.info("    测试 Implementation (warmup=%d, active=%d)...", config.warmup, config.repeats)
+    logger.info(
+        "    测试 Implementation (warmup=%d, active=%d)...",
+        config.warmup,
+        config.repeats,
+    )
     operators, latency_ms, peak_memory = measure_single(
         MeasureContext(
             model=impl_model,
@@ -698,14 +767,26 @@ def run_single_benchmark(
 
     inputs_impl = _move_inputs_to_device(inputs, device)
 
-    framework_operators, framework_latency_ms, framework_peak_memory = _measure_framework(
-        models.framework, inputs, config, device, case_idx,
+    framework_operators, framework_latency_ms, framework_peak_memory = (
+        _measure_framework(
+            models.framework,
+            inputs,
+            config,
+            device,
+            case_idx,
+        )
     )
     impl_operators, impl_latency_ms, impl_peak_memory = _measure_impl(
-        models.impl, inputs_impl, config, device, case_idx,
+        models.impl,
+        inputs_impl,
+        config,
+        device,
+        case_idx,
     )
 
-    if (not config.skip_framework and framework_latency_ms is None) or impl_latency_ms is None:
+    if (
+        not config.skip_framework and framework_latency_ms is None
+    ) or impl_latency_ms is None:
         raise ProfilerCollectError(
             f"[用例 {case_idx}/{total_cases}] PROFILER_COLLECT_FAIL: 无法从 profiler 提取有效时延数据"
         )
@@ -789,7 +870,9 @@ def _aggregate_perf(passed) -> PerfAggregate:
             fw_ops[op] = fw_ops.get(op, 0) + t["avg_us"]
         for op, t in r.implementation.operators.items():
             impl_ops[op] = impl_ops.get(op, 0) + t["avg_us"]
-    return PerfAggregate(avg_fw, avg_impl, avg_fw_mem, avg_impl_mem, fw_ops, impl_ops, n)
+    return PerfAggregate(
+        avg_fw, avg_impl, avg_fw_mem, avg_impl_mem, fw_ops, impl_ops, n
+    )
 
 
 def _geomean_speedup(valid_speedups):
@@ -813,7 +896,10 @@ def compute_overall(results: List[SingleShapeResult]) -> OverallAggregate:
         OverallAggregate；全部 shape 均失败时，framework/implementation/speedup 为 None，
         索引列表为空。
     """
-    passed = [r for r in results if r.status == "pass" and r.framework and r.implementation]
+    passed = []
+    for result in results:
+        if result.status == "pass" and result.framework and result.implementation:
+            passed.append(result)
     buckets = _classify_passed_results(passed)
 
     if not passed:
@@ -835,12 +921,16 @@ def compute_overall(results: List[SingleShapeResult]) -> OverallAggregate:
         framework=PerformanceResult(
             avg_latency_ms=round(agg.avg_fw, 4),
             peak_memory_mb=round(agg.avg_fw_mem, 2),
-            operators={k: {"avg_us": round(v / agg.n, 4)} for k, v in agg.fw_ops.items()},
+            operators={
+                k: {"avg_us": round(v / agg.n, 4)} for k, v in agg.fw_ops.items()
+            },
         ),
         implementation=PerformanceResult(
             avg_latency_ms=round(agg.avg_impl, 4),
             peak_memory_mb=round(agg.avg_impl_mem, 2),
-            operators={k: {"avg_us": round(v / agg.n, 4)} for k, v in agg.impl_ops.items()},
+            operators={
+                k: {"avg_us": round(v / agg.n, 4)} for k, v in agg.impl_ops.items()
+            },
         ),
         speedup_vs_torch=overall_speedup,
         nan_indices=buckets.nan_indices,
@@ -862,6 +952,7 @@ def _load_benchmark_modules(config: BenchmarkConfig):
 def _instantiate_bench_models(framework_cls, impl_cls, get_init_inputs, device):
     """同种子分别实例化 framework 与 impl 模型。"""
     import torch
+
     init_params = get_init_inputs()
     torch.manual_seed(0)
     torch.npu.manual_seed(0)
@@ -879,17 +970,25 @@ def _safe_del_model(name, model_ref):
         logger.debug("%s 未创建，无需删除", name)
 
 
-def _bench_once(config, model_spec: BenchmarkModelSpec,
-                inputs, device, case_ctx: CaseContext) -> SingleShapeResult:
+def _bench_once(
+    config, model_spec: BenchmarkModelSpec, inputs, device, case_ctx: CaseContext
+) -> SingleShapeResult:
     """跑一次 benchmark（不含重试）；成功返回 pass 结果，失败向上抛异常。"""
     framework_model = None
     impl_model = None
     try:
         framework_model, impl_model = _instantiate_bench_models(
-            model_spec.framework_cls, model_spec.impl_cls, model_spec.get_init_inputs, device,
+            model_spec.framework_cls,
+            model_spec.impl_cls,
+            model_spec.get_init_inputs,
+            device,
         )
         fw_perf, impl_perf, speedup = run_single_benchmark(
-            ModelPair(framework_model, impl_model), inputs, config, device, case_ctx,
+            ModelPair(framework_model, impl_model),
+            inputs,
+            config,
+            device,
+            case_ctx,
         )
         return SingleShapeResult(
             case_idx=case_ctx.case_idx,
@@ -913,13 +1012,18 @@ def _log_bench_retry(config, case_ctx: CaseContext, attempt, error_type, exc):
         return
     logger.warning(
         "  [用例 %d/%d] 第 %d/%d 次尝试失败: %s: %s，将重试...",
-        case_ctx.case_idx, case_ctx.total_cases, attempt + 1,
-        config.max_retries, error_type, exc,
+        case_ctx.case_idx,
+        case_ctx.total_cases,
+        attempt + 1,
+        config.max_retries,
+        error_type,
+        exc,
     )
 
 
-def _run_shape_case(config, model_spec: BenchmarkModelSpec,
-                    inputs, device, case_ctx: CaseContext) -> SingleShapeResult:
+def _run_shape_case(
+    config, model_spec: BenchmarkModelSpec, inputs, device, case_ctx: CaseContext
+) -> SingleShapeResult:
     """执行单个 shape 的 benchmark；失败时重试，最终仍失败则返回 status=fail 的结果。"""
     last_error_type = None
     last_error_msg = None
@@ -938,7 +1042,10 @@ def _run_shape_case(config, model_spec: BenchmarkModelSpec,
 
     logger.error(
         "  [用例 %d/%d] 失败（已重试 %d 次）: %s",
-        case_ctx.case_idx, case_ctx.total_cases, config.max_retries, last_error_type,
+        case_ctx.case_idx,
+        case_ctx.total_cases,
+        config.max_retries,
+        last_error_type,
     )
     return SingleShapeResult(
         case_idx=case_ctx.case_idx,
@@ -949,13 +1056,17 @@ def _run_shape_case(config, model_spec: BenchmarkModelSpec,
     )
 
 
-def _run_preflight_gate(config: BenchmarkConfig) -> Tuple[Dict[str, Any], Optional[BenchmarkResult]]:
+def _run_preflight_gate(
+    config: BenchmarkConfig,
+) -> Tuple[Dict[str, Any], Optional[BenchmarkResult]]:
     """执行 NPU preflight 并落盘 npu_preflight.json。
 
     ready 时返回 (preflight, None)；未 ready 时返回 (preflight, 阻塞态 B 类 BenchmarkResult)。
     """
     preflight = run_preflight(**load_preflight_options())
-    write_preflight_result(preflight, os.path.join(config.verify_dir, "npu_preflight.json"))
+    write_preflight_result(
+        preflight, os.path.join(config.verify_dir, "npu_preflight.json")
+    )
     if preflight["status"] == "ready":
         return preflight, None
     return preflight, BenchmarkResult(
@@ -983,8 +1094,11 @@ def _benchmark_all_shapes(
     total_cases = len(input_groups)
     return [
         _run_shape_case(
-            config, model_spec,
-            inputs, device, CaseContext(case_idx=case_idx, total_cases=total_cases),
+            config,
+            model_spec,
+            inputs,
+            device,
+            CaseContext(case_idx=case_idx, total_cases=total_cases),
         )
         for case_idx, inputs in enumerate(input_groups, start=1)
     ]
@@ -1046,7 +1160,10 @@ def _perf_dict(p: PerformanceResult, with_launch: bool) -> Dict[str, Any]:
         "peak_memory_mb": p.peak_memory_mb,
         "operators": {
             name: (
-                {"avg_us": round(item["avg_us"], 4), "launch_count": item["launch_count"]}
+                {
+                    "avg_us": round(item["avg_us"], 4),
+                    "launch_count": item["launch_count"],
+                }
                 if with_launch
                 else {"avg_us": round(item["avg_us"], 4)}
             )
@@ -1097,8 +1214,12 @@ def result_to_dict(result: BenchmarkResult) -> Dict[str, Any]:
             "case_idx": r.case_idx,
             "input_desc": r.input_desc,
             "status": r.status,
-            "framework": _perf_dict(r.framework, with_launch=True) if r.framework else None,
-            "implementation": _perf_dict(r.implementation, with_launch=True) if r.implementation else None,
+            "framework": _perf_dict(r.framework, with_launch=True)
+            if r.framework
+            else None,
+            "implementation": _perf_dict(r.implementation, with_launch=True)
+            if r.implementation
+            else None,
             "speedup_vs_torch": _normalize_shape_speedup(r.speedup_vs_torch),
             "error_type": r.error_type,
             "error_msg": r.error_msg,
@@ -1136,7 +1257,7 @@ def resolve_verify_json_name(triton_impl_name: str) -> str:
         return "verify_result.json"
     suffix = triton_impl_name
     if suffix.startswith("triton_"):
-        suffix = suffix[len("triton_"):]
+        suffix = suffix.removeprefix("triton_")
     return f"verify_result_{suffix}.json"
 
 
@@ -1229,54 +1350,92 @@ def check_verify_gate(verify_dir: str, triton_impl_name: str) -> None:
 def _build_argparser():
     parser = argparse.ArgumentParser(description="性能测试脚本")
     parser.add_argument("--op_name", required=True, help="算子名称")
-    parser.add_argument("--verify_dir", default=".", help="验证目录路径（默认当前目录）")
-    parser.add_argument("--triton_impl_name", default=TRITON_IMPL_NAME_DEFAULT,
-                       help="Triton 实现模块名")
-    parser.add_argument("--warmup", type=int, default=WARMUP_DEFAULT, help="warmup 次数（默认 5）")
-    parser.add_argument("--repeats", type=int, default=REPEATS_DEFAULT, help="正式测试次数（默认 5）")
+    parser.add_argument(
+        "--verify_dir", default=".", help="验证目录路径（默认当前目录）"
+    )
+    parser.add_argument(
+        "--triton_impl_name", default=TRITON_IMPL_NAME_DEFAULT, help="Triton 实现模块名"
+    )
+    parser.add_argument(
+        "--warmup", type=int, default=WARMUP_DEFAULT, help="warmup 次数（默认 5）"
+    )
+    parser.add_argument(
+        "--repeats", type=int, default=REPEATS_DEFAULT, help="正式测试次数（默认 5）"
+    )
     parser.add_argument("--output", help="输出文件路径（JSON 格式）")
-    parser.add_argument("--skip_framework", action="store_true",
-                       help="跳过 framework 性能测试（GPU Kernel 模式使用）")
-    parser.add_argument("--framework_latency_ms", type=float, default=0.0,
-                       help="预设的 framework 参考延迟（毫秒），用于计算 speedup")
-    parser.add_argument("--verify_not_required", action="store_true",
-                       help="跳过 L1 verify 闸门（默认强制要求 verify_result 全过）")
-    parser.add_argument("--clear_l2_cache", action="store_true",
-                       help="每次迭代前清除 L2 cache")
-    parser.add_argument("--keep_res", action="store_true",
-                       help="保留 profiling 结果目录（默认清理）")
-    parser.add_argument("--max_retries", type=int, default=3,
-                        help="采集失败时的最大重试次数（默认 3）")
-    parser.add_argument("--lock-frequency", action=argparse.BooleanOptionalAction,
-                        default=True,
-                        help="性能测试前对 NPU 锁频并在测试期间监控频率（默认开启）")
-    parser.add_argument("--lock-frequency-fail-action", default="warn",
-                        choices=["warn", "error"],
-                        help="锁频失败或频率漂移时的处理方式（默认 warn）")
-    parser.add_argument("--freq-check-interval", type=float, default=1.0,
-                        help="频率监控采样间隔，单位秒（默认 1.0）")
+    parser.add_argument(
+        "--skip_framework",
+        action="store_true",
+        help="跳过 framework 性能测试（GPU Kernel 模式使用）",
+    )
+    parser.add_argument(
+        "--framework_latency_ms",
+        type=float,
+        default=0.0,
+        help="预设的 framework 参考延迟（毫秒），用于计算 speedup",
+    )
+    parser.add_argument(
+        "--verify_not_required",
+        action="store_true",
+        help="跳过 L1 verify 闸门（默认强制要求 verify_result 全过）",
+    )
+    parser.add_argument(
+        "--clear_l2_cache", action="store_true", help="每次迭代前清除 L2 cache"
+    )
+    parser.add_argument(
+        "--keep_res", action="store_true", help="保留 profiling 结果目录（默认清理）"
+    )
+    parser.add_argument(
+        "--max_retries", type=int, default=3, help="采集失败时的最大重试次数（默认 3）"
+    )
+    parser.add_argument(
+        "--lock-frequency",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="性能测试前对 NPU 锁频并在测试期间监控频率（默认开启）",
+    )
+    parser.add_argument(
+        "--lock-frequency-fail-action",
+        default="warn",
+        choices=["warn", "error"],
+        help="锁频失败或频率漂移时的处理方式（默认 warn）",
+    )
+    parser.add_argument(
+        "--freq-check-interval",
+        type=float,
+        default=1.0,
+        help="频率监控采样间隔，单位秒（默认 1.0）",
+    )
     return parser
 
 
 def _emit_summary(result_dict):
     logger.info("\n性能测试结果:")
-    logger.info("  通过率: %s/%s", result_dict["passed_cases"], result_dict["total_cases"])
+    logger.info(
+        "  通过率: %s/%s", result_dict["passed_cases"], result_dict["total_cases"]
+    )
     if result_dict["speedup_vs_torch"] is not None:
-        logger.info("  框架实现 - 平均延迟: %.4f ms", result_dict["framework"]["avg_latency_ms"])
-        logger.info("  生成实现 - 平均延迟: %.4f ms", result_dict["implementation"]["avg_latency_ms"])
+        logger.info(
+            "  框架实现 - 平均延迟: %.4f ms", result_dict["framework"]["avg_latency_ms"]
+        )
+        logger.info(
+            "  生成实现 - 平均延迟: %.4f ms",
+            result_dict["implementation"]["avg_latency_ms"],
+        )
         logger.info("  加速比 (几何平均): %.4fx", result_dict["speedup_vs_torch"])
     else:
         logger.info("  无可用加速比数据（全部 shape 失败或 speedup 异常）")
 
     excluded_total = (
-        len(result_dict["nan_indices"]) + len(result_dict["inf_indices"])
-        + len(result_dict["zero_indices"]) + len(result_dict["negative_indices"])
+        len(result_dict["nan_indices"])
+        + len(result_dict["inf_indices"])
+        + len(result_dict["zero_indices"])
+        + len(result_dict["negative_indices"])
         + len(result_dict["none_indices"])
     )
     if excluded_total > 0:
         logger.info(
-            "  异常 shape (不计入几何平均): "
-            "nan=%s, inf=%s, zero=%s, neg=%s, none=%s",
+            "  异常 shape (不计入几何平均): nan=%s, inf=%s, zero=%s, neg=%s, none=%s",
             result_dict["nan_indices"],
             result_dict["inf_indices"],
             result_dict["zero_indices"],
@@ -1320,6 +1479,13 @@ def _check_gates(args, verify_dir):
     内部函数不直接调用 sys.exit。
     """
     if args.verify_not_required:
+        managed_run = os.environ.get("CANNBOT_VERIFY_REQUIRED") == "1" or (
+            _check_baseline_integrity is not None
+            and (_resolve_work_dir(verify_dir) / "precheck.json").is_file()
+        )
+        if managed_run:
+            logger.error("[L1 闸门] 工作流内不可使用 --verify_not_required")
+            raise VerifyGateError("工作流要求正式 verify 全部通过")
         logger.warning(
             "[L1 闸门] 已通过 --verify_not_required 跳过 verify 闸门检查 "
             "(triton_impl_name=%s)",
@@ -1344,9 +1510,8 @@ class FrequencyLockError(Exception):
 
 def _handle_lock_failure(config, lock_messages):
     """锁频未完全成功时按配置决定告警还是抛错终止。"""
-    msg = (
-        "NPU 锁频未完全成功；messages: "
-        + "; ".join(f"dev{k}={v}" for k, v in lock_messages.items())
+    msg = "NPU 锁频未完全成功；messages: " + "; ".join(
+        f"dev{k}={v}" for k, v in lock_messages.items()
     )
     if config.lock_frequency_fail_action == "error":
         logger.error("[锁频] %s", msg)
