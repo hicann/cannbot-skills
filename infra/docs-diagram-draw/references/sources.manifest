@@ -1,0 +1,17 @@
+# -----------------------------------------------------------------------------------------------------------
+# Copyright (c) 2026 Huawei Technologies Co., Ltd.
+# This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+# CANN Open Software License Agreement Version 2.0 (the "License").
+# Please refer to the License for details. You may not use this file except in compliance with the License.
+# THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+# INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+# See LICENSE in the root of the software repository for the full text of the License.
+# -----------------------------------------------------------------------------------------------------------
+# 规范源版本指纹（docs-diagram-draw）
+# 源仓：gitcode.com/cann/docs（master 分支，公开仓）
+# 记录每个源文件最后一次人工核实（提炼速查表/样式库/矩阵）时所对应的源仓 commit。
+# 校验：bash scripts/check_sources.sh —— 按路径查源仓最新 commit，与本指纹比对。
+# 漂移处理：下载新版（curl raw 地址）人工 diff，重新提炼受影响内容，更新本文件 SHA 与日期。
+# 格式：<源文件路径> <commit SHA> <核实日期> <commit 主题>
+specification/drawing_specs.md cb483ab79311abe1c9b35a0ca525177095052875 2026-11-20 docs/drawing-specs-update
+writing_template/drawing_template_drawio.xml 54bce5edfc91b5903680333ea20a3d38de0a45c4 2026-11-20 README增加模板和规范章节，更新绘图模板（drawio组件样式、Mermaid横向流程图）

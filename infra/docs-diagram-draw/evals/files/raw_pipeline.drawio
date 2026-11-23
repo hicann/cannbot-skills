@@ -1,0 +1,34 @@
+<!--
+    Copyright (c) 2026 Huawei Technologies Co., Ltd.
+    This program is free software, you can redistribute it and/or modify it under the terms and conditions of
+    CANN Open Software License Agreement Version 2.0 (the "License").
+    Please refer to the License for details. You may not use this file except in compliance with the License.
+    THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED,
+    INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT, MERCHANTABILITY OR FITNESS FOR A PARTICULAR PURPOSE.
+    See LICENSE in the root of the software repository for the full text of the License.
+-->
+<mxfile host="app.diagrams.net" type="device">
+  <diagram id="page-1" name="Page-1">
+    <mxGraphModel dx="800" dy="600" grid="0" page="1" pageWidth="850" pageHeight="400">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="n1" value="矢量加载" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FF0000;strokeColor=#000000;fontFamily=Arimo;fontSize=16;fontColor=#FFFFFF;" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="140" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="n2" value="矩阵计算" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#A0C4E8;strokeColor=#808080;fontFamily=Noto Serif SC;fontSize=16;fontColor=#000000;" vertex="1" parent="1">
+          <mxGeometry x="240" y="40" width="140" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="n3" value="结果搬运" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#00B050;strokeColor=#333333;fontFamily=Noto Sans SC;fontSize=16;fontColor=#FFFFFF;" vertex="1" parent="1">
+          <mxGeometry x="440" y="40" width="140" height="32" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="endArrow=block;endSize=2;strokeColor=#000000;strokeWidth=2;fontFamily=Arimo;" edge="1" parent="1" source="n1" target="n2">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="endArrow=block;endSize=2;strokeColor=#000000;strokeWidth=2;fontFamily=Arimo;" edge="1" parent="1" source="n2" target="n3">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,76 @@
+{
+  "skill_name": "docs-diagram-draw",
+  "eval_mode": "file_based",
+  "evals": [
+    {
+      "id": 1,
+      "title": "画新图：流程图交付形态与关键规范",
+      "config": {
+        "timeout": 1200,
+        "eval_mode": "file_based"
+      },
+      "prompt": "给 CANN 文档画一张 Ascend C 算子开发流程图：开始→环境准备→创建算子工程→编写核函数→实现 tiling→编译算子→运行验证→结束；「实现 tiling」后判断「tiling 是否完成」，未完成用虚线返回「编写核函数」。按仓库绘图规范输出 .drawio.svg，产物放当前工作目录（不要写回 skill 目录），文件名英文小写加下划线。",
+      "expected_output": "产出符合规范的 .drawio.svg 流程图：content 属性内嵌 <mxfile> 绘图副本、文字固化为 <image> 位图；9 个节点齐备（8 个流程节点 + 1 个判断菱形 #FEE2BA）；流程节点主色 #C2D5FE、连线 #686D75 且线宽 0.75、开始/结束为 52×52 圆 #686D75 白字；「未完成」为虚线返回边；全图字体 harmonyOS sans。渲染依赖不可用时，明确说明缺少 drawio 32.4.1 CLI 及安装方法，不交付半成品。",
+      "files": [],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": ".drawio.svg",
+          "description": "回复提及交付的 .drawio.svg 产物（兼容渲染依赖不可用的降级分支）"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "改图：定点修改且其余元素零改动",
+      "config": {
+        "timeout": 900,
+        "eval_mode": "file_based"
+      },
+      "prompt": "输入文件是 `.opencode/skills/docs-diagram-draw/evals/files/demo_flow.drawio.svg`，文档里的已有配图。帮我改两处：「矢量加法」节点换成强调色（深色底）；第一个节点文字「环境准备」改成「数据搬运」。其余不要动。产物放当前工作目录（不要写回 skill 目录），不要覆盖原文件。",
+      "expected_output": "走改图工作流（extract → edit 白名单校验 → render 另存）：输出新的 .drawio.svg，文件名带英文下划线后缀，原文件保持不变，content 内嵌改后绘图副本；「矢量加法」填充 #5478FB、白字；「环境准备」改为「数据搬运」；其余元素（画布、第三个节点、两条连线）的 style、geometry、value 零改动（render 造成的画布视口归一化不计）。依赖不可用时告知安装方法并停止。",
+      "files": [
+        "infra/docs-diagram-draw/evals/files/demo_flow.drawio.svg"
+      ],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": ".drawio.svg",
+          "description": "回复提及交付的 .drawio.svg 产物（兼容渲染依赖不可用的降级分支）"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "规范化：颜色入板、字体统一、容器归档",
+      "config": {
+        "timeout": 1200,
+        "eval_mode": "file_based"
+      },
+      "prompt": "输入文件是 `.opencode/skills/docs-diagram-draw/evals/files/raw_pipeline.drawio.svg`。按仓库规范规范化一下：颜色自动映射，字体统一规范字体，容器归档。产物放当前工作目录（不要写回 skill 目录），不要覆盖原文件。",
+      "expected_output": "另存新的 .drawio.svg（文件名带英文下划线后缀、不覆盖原图）：颜色全部入板，#FF0000→#5478FB（白字）、#A0C4E8→#C2D5FE（字色 #202329）、#00B050→#03B5A5（白字），顶点描边统一 #686D75；全元素 fontFamily=harmonyOS sans；新建白底无边框画布容器并归档（宽度 600pt 档）；三个节点几何与连线拓扑不变。依赖不可用时告知安装方法并停止。",
+      "files": [
+        "infra/docs-diagram-draw/evals/files/raw_pipeline.drawio.svg"
+      ],
+      "expectations": [
+        {
+          "type": "contains",
+          "pattern": ".drawio.svg",
+          "description": "回复提及交付的 .drawio.svg 产物（兼容渲染依赖不可用的降级分支）"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "负向：数据可视化请求应拒接",
+      "config": {
+        "timeout": 600,
+        "eval_mode": "text"
+      },
+      "prompt": "帮我把这组性能数据画成图：三种算子方案在 Atlas 800T 上的耗时对比，A 方案 120ms、B 方案 95ms、C 方案 140ms，要一图直观展示差距，放文档里用。",
+      "expected_output": "不使用本技能产出 .drawio.svg；明确说明柱状图/数据可视化不在本技能范围（本技能只做流程图、时序图、架构图等文档配图），并给出替代途径（Markdown 表格或 matplotlib 等图表库）。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}
