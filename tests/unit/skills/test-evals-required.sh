@@ -19,7 +19,7 @@
 #     - parses as valid JSON
 #     - declares a non-empty top-level "skill_name"
 #   A "skill_name" mismatch against the directory name is a warning only.
-#   In PR UT, also check the expectations shape and required fields in changed evals.json files.
+#   In PR UT, validate all cases in affected Skills and directly changed evals files.
 #
 # This is a full-repo check: it iterates ALL one-level skills under
 # ops/ model/ graph/ runtime/ infra/ tools/ regardless of incremental mode,
@@ -106,26 +106,74 @@ done <<< "$SKILL_FILES"
 # The PR UT Job downloads this manifest alongside ut.sh.
 PR_FILELIST="$SKILLS_DIR/pr_filelist.txt"
 if [ -f "$PR_FILELIST" ]; then
-    if ! python3 -B - "$SKILLS_DIR" "$PR_FILELIST" "$TESTS_DIR/system/scripts" <<'PY'
+    if ! python3 -B - "$SKILLS_DIR" "$PR_FILELIST" "$TESTS_DIR/system/scripts" "${DOMAIN_DIRS[@]}" <<'PY'
 import json
+import os
 from pathlib import Path
 import sys
 
-repo, manifest, parser_dir = map(Path, sys.argv[1:])
+repo, manifest, parser_dir = map(Path, sys.argv[1:4])
 sys.path.insert(0, str(parser_dir))
-from evals_json_parser import iter_invalid_expectations
+from evals_json_parser import iter_pr_evals_errors
+
+repo = repo.resolve()
+# The PR scan also covers existing community, communication and embedded Skills.
+domains = tuple(map(Path, [*sys.argv[4:], "community/ops", "community/model", "communication"]))
+
+
+def owning_skill(path):
+    owner = None
+    for directory in path.parents:
+        if directory == repo:
+            break
+        if (directory / ".git").exists():
+            return None
+        if owner is None and (directory / "SKILL.md").is_file():
+            owner = directory
+    if owner is not None:
+        relative = owner.relative_to(repo)
+        if any(relative != domain and relative.is_relative_to(domain) for domain in domains):
+            return owner
+        if "skills" in relative.parts[:-1]:
+            return owner
+    return None
+
+
+def skill_suites(skill):
+    for directory, subdirs, files in os.walk(skill):
+        path = Path(directory)
+        if path != skill and ("SKILL.md" in files or ".git" in files or ".git" in subdirs):
+            subdirs.clear()
+            continue
+        subdirs[:] = [name for name in subdirs if name not in (".git", "node_modules")]
+        if path.name == "evals" and "evals.json" in files:
+            yield path / "evals.json"
+
+
+suites = {}
+affected_skills = set()
+for changed in dict.fromkeys(manifest.read_text(encoding="utf-8-sig").splitlines()):
+    if not changed:
+        continue
+    path = Path(os.path.abspath(repo / changed))
+    if Path(changed).parts[-2:] == ("evals", "evals.json"):
+        suites[path] = changed
+    if path.is_relative_to(repo) and path.resolve().is_relative_to(repo):
+        owner = owning_skill(path)
+        if owner is not None:
+            affected_skills.add(owner)
+
+for skill in sorted(affected_skills):
+    for path in sorted(skill_suites(skill)):
+        suites.setdefault(path, path.relative_to(repo).as_posix())
 
 failed = False
-repo = repo.resolve()
-for changed in dict.fromkeys(manifest.read_text(encoding="utf-8-sig").splitlines()):
-    if not changed.endswith("/evals/evals.json"):
-        continue
-    source = (repo / changed).resolve()
-    if not source.is_relative_to(repo):
+for source, changed in suites.items():
+    if not source.resolve().is_relative_to(repo):
         print(f"[ERROR] {changed}: evals.json must be inside the repository", file=sys.stderr)
         failed = True
         continue
-    if not source.is_file():  # Deleted files are outside the PR check.
+    if not source.is_file():  # Deleted suites are outside the PR check.
         continue
     try:
         data = json.loads(source.read_text(encoding="utf-8"))
@@ -133,13 +181,13 @@ for changed in dict.fromkeys(manifest.read_text(encoding="utf-8-sig").splitlines
         print(f"[ERROR] {changed}: could not read valid JSON", file=sys.stderr)
         failed = True
         continue
-    for error in iter_invalid_expectations(data, require_fields=True):
+    for error in iter_pr_evals_errors(data):
         print(f"[ERROR] {changed}: {error}", file=sys.stderr)
         failed = True
 sys.exit(int(failed))
 PY
     then
-        print_fail "S-EVAL-01: invalid expectations or unreadable changed evals.json"
+        print_fail "S-EVAL-01: invalid evaluation input in changed files"
         fail_count=$((fail_count + 1))
     fi
 fi

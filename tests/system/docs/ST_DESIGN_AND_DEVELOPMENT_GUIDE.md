@@ -4,129 +4,42 @@
 
 ### 1.1 分层看护策略
 
-cannbot-skills 项目的质量看护体系分为三层：
-
-| 层级 | 看护类型 | 看护对象 | 方式 |
-|------|---------|---------|------|
-| **第一层：UT** | Plugin / Agent / Skill 规范看护 | 静态结构、格式校验 | 静态看护 |
-| **第二层：ST** | Plugin / Agent / Skill 独立能力的正确性、稳定性看护 | 语义评测、行为验证 | 动态看护 |
-| **第三层：冒烟** | Cannbot 整体算子生成能力看护 | 端到端业务验证（对接 bench） | 集成看护 |
-
-ST（System Test）处于看护体系的核心位置，负责验证每个 Skill / Agent / Plugin 的独立功能正确性和稳定性。
+| 层级 | 看护对象 | 方式 |
+| --- | --- | --- |
+| UT | Plugin、Team、Skill 的结构及题库格式 | 静态校验 |
+| ST | 所选 Skill 或 Team 的场景行为及输出 | 语义评审、确定性断言或算子评测 |
+| 冒烟 | Cannbot 的端到端算子生成能力 | 集成看护 |
 
 ### 1.2 看护流程
 
-```
-第一步：代码检查、Code Check
-第二步：UT 检查 & ST 检查
-第三步：代码上库
-第四步：bench 冒烟任务 Daily 看护
-```
-
-ST 用例在代码合入前执行，由 `gate_check.sh` 在 CI 流水线中自动触发。
+GitCode PR 的 `UT_cannbot-skills` 随现有 PR 流水线执行，`ST_test` 调用 RDV 运行符合条件的文本题。两者的范围见 [PR 校验与执行入口](#224-pr-校验与执行入口)。
 
 ### 1.3 ST 用例看护维度
 
-设计 ST 用例时需要从以下五个维度综合考虑：
+| 目标 | 设计方法 |
+| --- | --- |
+| 正向触发 | 对本地 Skill 用例配置 `config.distractor_skills`，用 `skill_activated` 检查实际加载的 Skill。 |
+| 负向行为 | 给出边界场景，用 `expected_output` 或 `not_contains` 验证回复不出现指定结果。现有断言没有专用的「未加载某个 Skill」类型。 |
+| 内容正确性 | 在 `expected_output` 中写出关键语义要点。 |
+| 交付文件 | 用本地文件断言检查文件名、路径或关键内容。现有断言没有通用的工具调用序列检查。 |
+| 资源消耗 | 本地语义评审包含 Token 维度。可通过 `max_tokens` 或 `max_tokens_by_model` 加上硬上限。 |
 
-| 看护维度 | 测试目标 | 当前能力 | 设计要点 |
-|----------|---------|---------|---------|
-| **正向看护** | 显式 / 隐式提示词 → 调用到目标 skill | **具备** | 在 `config.distractor_skills` 配置干扰技能，验证即使存在多个类似 skill，AI 仍能正确选择目标 skill |
-| **负向看护** | 不该调用的提示词 → 不会误调用 skill | 不具备 | 设计边界场景 prompt 验证 skill 不会被错误触发 |
-| **正确性看护** | 黑盒场景验证、确保结果正确 | **具备** | 设计典型用户场景，描述预期输出要点，验证 AI 回复语义覆盖 |
-| **调用流程看护** | 关键工具被调用、交付件完整输出 | **具备** | 验证 skill 执行过程中关键工具是否被调用、关键文件是否生成 |
-| **资源消耗看护** | Token 消耗监控、防止资源浪费 | **具备** | 评测 session 自动检查 Token 消耗合理性（占总分 10 分） |
+### 1.4 本地测试执行流程
 
-### 1.4 测试执行流程
+1. `tests/system/scripts/main.py` 根据 `--changed-files` 识别受影响的 Skill/Team，或用 `--all` 扫描配置目录中的题库。两种方式均受本地白名单限制。
+2. 对所选对象检查 OpenCode 可用性，再执行基础检查。Skill 检查题库及 `SKILL.md`，Team 检查题库、`AGENTS.md`、`.claude-plugin/plugin.json` 和 `init.sh`。仅基础检查通过且有评测用例的对象进入评测。只做静态检查时可直接运行相应的 pytest 文件。
+3. 为每题创建沙箱。Skill 放入沙箱的 `.opencode/skills/`，Team 执行 `init.sh project opencode <sandbox>` 安装。随后按评测模式运行。
+4. HTML 报告写入 `tests/system/results/`，运行日志和导出的会话写入 `tests/system/logs/`。没有符合条件的对象时会产生跳过报告。查具体对象的基础检查和题目结果时同时查看日志。
 
-```
-输入：repo_root + changed_files
-    │
-    ├─ 步骤1：识别受影响的 skills / teams
-    │   └─ 从变更文件路径中提取 skill 或 team 名称
-    │
-    ├─ 步骤2：加载评测用例
-    │   └─ 从 Skill/Team 本地目录读取 evals/evals.json
-    │       （Skill: {skill_dir}/{skill_name}/evals/evals.json）
-    │       （Team: {team_dir}/{team_name}/evals/evals.json）
-    │
-    ├─ 步骤3：执行评测 — 逐个 target 进行
-    │   ├─ Phase 1: 静态结构验证
-    │   │   ├─ Skill: test_skill_basic.py — evals.json 结构/格式/ID 校验 + SKILL.md frontmatter 校验
-    │   │   └─ Team: test_team_basic.py — evals.json 校验 + AGENTS.md / plugin.json / init.sh 存在性校验
-    │   │   耗时：秒级，无需 AI 调用
-    │   │   ⚠️ Phase 1 失败的 target 不进入 Phase 2（需先修复基础结构问题）
-    │   │
-    │   └─ Phase 2: AI 语义评测（仅通过 Phase 1 的 target 进入）
-    │       ├─ 支持重试：EVAL_EXEC_RETRIES 控制重试次数（默认 1）
-    │       ├─ Skill: test_skill_evals.py — 沙箱部署 symlink skill 目录到 .opencode/skills/
-    │       ├─ Team: test_team_evals.py — 沙箱部署执行 init.sh project opencode <sandbox>
-    │       ├─ cann_bench 模式额外部署 cann-bench 仓库副本 + 任务定义文件 + 工程模板
-    │       ├─ 执行 Session：opencode 加载 target，发送 prompt → 收集 AI 回复
-    │       ├─ 评测（评分标准详见 1.6 节）：
-    │       │   ├─ AI 评审模式（text/file_based）：独立 session 按四维标准评审（总分 ≥60 且各维度 ≥ 阈值）
-    │       │   │   └─ 评审方式：Agent 通过 Write 工具填写 review-template.md 模板
-    │       │   └─ cann_bench 模式：执行 run_evaluation.sh，通过条件为编译通过 + 精度达标 + 综合得分 > 50
-    │       └─ 断言验证：contains / not_contains / file_exists / file_list / file_contains / skill_activated
-    │       耗时：分钟级，需要 opencode CLI
-    │
-    ├─ 步骤4：保存结果
-    │   └─ results/[<平台>_]ST_validation_report_<ts>.html   # Skill+Team 统一报告
-    │       └─ results/<name>_<timestamp>.json                # 结构化结果
-    │
-    └─ 返回：0（全部通过）/ 1（存在失败）
-```
+### 1.5 本地执行与评审
 
-### 1.5 测试执行架构：双 Agent 协同
+`text` 和 `file_based` 先执行题目，再用独立 OpenCode 会话评审结果。评审 Agent 填写 [review-template.md](../config/review-template.md)，框架读取判定和各维度分数。两种模式还会执行配置的结构化断言。配置 Token 硬上限时，另按执行会话的实际消耗核对。`cann_bench` 在生成算子后调用 cann-bench 打分。
 
-每个 ST 用例的执行涉及两个独立的 AI Agent（均为 opencode CLI 会话），与其各自的评测机制协同工作：
-
-```
-ST 评测用例（Prompt + Expected Output + Expectations）
-    │
-    ▼
-执行 Agent（Execution Session）
-    ├─ 加载目标 skill + 干扰 skills → 发送 Prompt
-    ├─ AI 理解 + 工具调用 → 生成回复/文件
-    └─ 产出：AI 回复文本、工具调用记录、生成的文件
-    │
-    ▼
-┌─ 评测 Agent（Review Session） ──── ┌─ 模式匹配引擎 ── ┌─ Token 预算检查 ─
-│ 读取 Expected Output + AI 回复     │ contains/       │ 读取 session JSON
-│ 按四维标准打分（40/30/20/10）       │ not_contains/   │ 计算总 token 消耗
-│ 总分 ≥ 60 且各维度 ≥ 阈值           │ file_exists/    │ 对比 max_tokens
-│                                   │ file_list/      │ 上限
-│                                   │ file_contains/  │
-│                                   │ skill_activated │
-└────────────┬──────────────────────┴────────┬────────┴───────┬─────────┘
-             │                               │                │
-             ▼                               ▼                ▼
-最终判定（Test Result）：总分 ≥ 60 AND 各维度 ≥ 阈值 AND 所有 Expectations 通过 AND Token 未超限
-结果：Passed / Failed + 详细原因
-```
-
-**角色说明**：
-
-| 角色 | 能力 | 职责 |
-|------|------|------|
-| **执行 Agent** | 通用 AI 能力 + skill 知识 | 模拟真实用户与 skill 交互，执行测试任务 |
-| **评测 Agent** | 评审能力（另一个 AI 实例） | 以评分标准为框架，判断 AI 回复是否覆盖预期要点 |
-| **模式匹配引擎** | 确定性字符串/文件匹配 | 精确断言：关键词、文件存在性、skill 激活检查 |
-| **Token 预算检查** | 数值比较 | 防止资源滥用，保障测试经济性 |
-
-**关键特性**：
-- **双 Agent 解耦**：执行和评测使用独立的 opencode 会话，避免评审偏差污染执行过程
-- **语义 + 确定性双通道**：Expected Output 走语义评测（灵活），Expectations 走精确匹配（严格），互补验证
-- **正向看护**：`skill_activated` 从 session 导出 JSON 中提取工具调用记录，不依赖评审 Agent
-- **沙箱隔离**：每个用例有独立沙箱，skill 通过软链接部署（team 通过 init.sh 部署），干扰 skill 同等待遇
-- **评审模板化**：评审 Agent 通过 Write 工具填写 `review-template.md` 模板，框架正则解析提取状态/评分/各维度得分，不再依赖 JSON 输出格式
-- **重试机制**：通过 `EVAL_EXEC_RETRIES` 环境变量控制评测用例的重试次数（默认 1，即不重试）
-- **模型 Token 预算**：支持 `config.max_tokens_by_model` 按模型指定 Token 上限，与 `--eval-model` 参数或 `EVAL_MODEL` 环境变量配合使用
-- **安全环境隔离**：opencode 子进程仅传递最小环境变量（PATH、HOME 及 LLM API 密钥），剥离继承的敏感信息，防止不可信 prompt 泄露令牌
+`EVAL_EXEC_RETRIES` 表示初次执行后的额外重试次数。默认 `1`，最多两次尝试。`0` 表示只执行一次。硬性 Token 上限失败直接退出当前用例。
 
 ### 1.6 评分维度与阈值
 
-ST 评测支持两种评分体系，根据 `eval_mode` 自动选择：
+本地 ST 按有效的 `eval_mode` 选择评分方式。
 
 #### 标准四维评分（text / file_based 模式）
 
@@ -140,38 +53,11 @@ ST 评测支持两种评分体系，根据 `eval_mode` 自动选择：
 
 **维度名称归一化**：AI 评审输出中可能出现同义变体，框架自动映射为标准名。例如 `技术准确性` → `准确性`、`回复质量` → `质量`、`Token 消耗`/`token` → `Token`。
 
-各维度阈值可在用例 `config.dim_thresholds` 中单独覆盖，如 `{"覆盖度": 25}`。
+总分 60 是评审模板的判定口径。运行器检查评审为通过、附有理由且各维度达标。可在用例的 `config.dim_thresholds` 中覆盖维度阈值。
 
 #### 确定性评测（cann_bench 模式）
 
-cann_bench 模式使用 cann-bench 项目的确定性评测管道，替代 AI 评审打分：
-
-| 维度 | 满分 | 说明 |
-|------|:----:|------|
-| 编译通过 | 1 | 二元判定：算子工程能否成功编译 |
-| 精度达标 | 1 | 二元判定：算子输出精度是否满足要求 |
-| 综合得分 | 100 | cann-bench 管道输出的综合性能评分（HAP 评分） |
-
-**通过条件**：编译通过 = 1 且 精度达标 = 1 且 综合得分 > 50
-
-**工作流程**：
-1. AI Agent 在沙箱中根据 cann-bench 任务定义生成算子代码到 `output/` 目录
-2. 框架自动执行 `run_evaluation.sh` 三阶段评测（编译/精度/性能）
-3. 解析 cann-bench 生成的 JSON 报告，提取编译/精度/性能评分
-4. 将 cann-bench 生成的 HTML 报告通过 iframe 嵌入 pytest-html 最终报告
-
-**cann_bench 模式专属配置项**（配置在用例 `config` 中）：
-
-| 配置项 | 类型 | 说明 | 默认值 |
-|--------|------|------|--------|
-| `cann_bench_operator` | string | 必填：目标算子名称（如 `mish`） | - |
-| `cann_bench_level` | string | 任务难度等级（`level1`/`level2`/`level3`） | `level1` |
-| `cann_bench_device` | string | NPU 设备 ID | `0` |
-| `cann_bench_no_perf` | bool | 跳过性能评测，仅验证编译和精度 | `false` |
-| `cann_bench_warmup` | int | 性能评测预热次数 | 框架默认 |
-| `cann_bench_repeat` | int | 性能评测重复次数 | 框架默认 |
-
----
+本地运行器以 cann-bench 报告的综合分 `≥ 30` 为通过条件。报告另列编译和精度结果。执行失败或缺少可读评分报告时可得到零分。运行前准备 NPU 环境、cann-bench 仓库和题目所需的任务定义、工程模板。
 
 ## 2. 用例设计
 
@@ -184,49 +70,23 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 {team_dir}/{team_name}/evals/evals.json      # Team 评测用例
 ```
 
-支持的目录（由 `st-test.config` 配置）：`ops/`、`graph/`、`model/`、`infra/`、`runtime/`、`plugins-official/`、`plugins-community/`。
-
-> **注意**：评测用例与 Skill/Team 代码同目录存放，便于维护和版本控制。测试框架会自动扫描配置的目录，发现包含 `evals/evals.json` 的实体。
+本地扫描目录和白名单以 [st-test.config](../config/st-test.config) 为准。当前 Skill 目录为 `ops/`、`community/ops/`、`graph/`、`model/`、`infra/`、`runtime/`、`tools/`，Team 目录为 `plugins-official/`、`plugins-community/`。
 
 ### 2.2 用例文件格式（evals.json）
 
 #### 2.2.1 基本结构
 
-每个用例文件为 JSON 格式，由顶层元数据和 `evals[]` 数组组成，由 `evals_json_parser.py` 解析：
-
-```json
-{
-  "skill_name": "cann-env-setup",
-  "eval_mode": "text",
-  "evals": [
-    {
-      "id": 1,
-      "title": "检查NPU驱动安装命令",
-      "config": {
-        "max_tokens": 160000,
-        "ascend_platforms": ["A2"],
-        "eval_mode": "text"
-      },
-      "prompt": "我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？",
-      "expected_output": "回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装",
-      "files": [],
-      "expectations": [
-        { "type": "contains", "pattern": "npu-smi info", "description": "回复中提到了 npu-smi info" }
-      ]
-    }
-  ]
-}
-```
+题库由顶层元数据和 `evals` 数组组成，由 [evals_json_parser.py](../scripts/evals_json_parser.py) 解析。单题最小示例见 [PR 校验与执行入口](#224-pr-校验与执行入口)，包含本地断言的示例见 [完整用例示例](#27-完整用例示例)。
 
 #### 2.2.2 顶层字段说明
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
 | `skill_name` | Skill 必填 | 目标 skill 名称，需与 SKILL.md 中的 `name` 字段一致。与 `team_name` 二选一 |
-| `team_name` | Team 必填 | 目标 team 名称，需与 plugin.json 中的 `name` 字段一致。与 `skill_name` 二选一 |
+| `team_name` | Team 必填 | 目标 team 名称，需与 `.claude-plugin/plugin.json` 中的 `name` 一致。与 `skill_name` 二选一 |
 | `eval_mode` | 否 | 评测模式，可选值：`text`（默认，语义评审）、`file_based`（验证生成文件）、`cann_bench`（cann-bench 确定性评测）。详见 2.4 节 |
 
-> **注意**：`skill_name` 和 `team_name` 只能设置一个。解析器根据顶层字段自动确定 target 类型（`target_type: "skill"` 或 `"team"`）。
+按对象类型只填写一个目标名称。本地解析器在两个字段均有值时优先使用 `team_name`。
 
 #### 2.2.3 用例字段说明
 
@@ -234,47 +94,78 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `id` | int | **是** | 用例编号，从 1 开始连续递增 |
+| `id` | int | **是** | 文件内唯一的整数。新题集建议从 1 开始连续编号，已有题集保留稳定 ID |
 | `title` | string | **是** | 用例标题 |
 | `prompt` | string | **是** | 发送给 AI 的测试问题，应模拟真实用户场景 |
 | `expected_output` | string | **是** | 对 AI 回复的语义预期。**不要求逐字匹配**，描述应覆盖的关键要点即可 |
-| `config` | object | 是 | 用例级配置，可用字段见下方 |
-| `expectations` | array | 否 | 断言列表，条目见下方 |
-| `files` | string[] | 否 | 输入文件路径列表（skill-creator 使用，ST 框架忽略） |
+| `config` | object | 否 | 用例级配置，可用字段见下方。可写 `{}`，省略时使用默认值 |
+| `expectations` | array | 启用的 `file_based` 题必填 | 文件题至少写一条原始结构化断言。其他模式可省略，条目见下方 |
+| `files` | string[] | 否 | 输入文件相对路径。平台是否准备附件取决于实际执行入口，见下方说明 |
 
 **`config` 字段说明**：
 
 | 键 | 类型 | 说明 | 默认值 |
 |-----|------|------|--------|
 | `max_tokens` | int | Token 消耗硬上限，超过则测试失败 | 无限制 |
-| `max_tokens_by_model` | object | 按模型的 Token 上限，如 `{"deepseek-v4-flash": 140000}` | `{}` |
-| `ascend_platforms` | string[] | 适用平台，如 `["A2"]`（端侧用例用 `["Kirin"]`）。配合 `--ascend-platform` 参数按平台过滤 | `[]` |
+| `max_tokens_by_model` | object | 按执行会话导出的实际模型名匹配 Token 上限，未匹配时用 `max_tokens` | `{}` |
+| `ascend_platforms` | string[] | 适用平台，可用 `A2`、`A3`、`A5`、`Kirin`。本地通过 `--ascend-platform` 筛选 | 未声明平台限制 |
 | `disabled` | bool | `true` 跳过该用例 | `false` |
 | `distractor_skills` | string[] | 正向看护：干扰 skill 名称列表 | `[]` |
-| `timeout` | int | 执行超时秒数 | `600` |
+| `timeout` | int | 单题执行超时，填 1–2147483647 之间的整数秒数。题目层的 `timeout` 不生效 | `600` |
 | `eval_mode` | string | 覆盖文件级评测模式 | 同文件级 |
 | `dim_thresholds` | object | 维度阈值覆盖，如 `{"覆盖度": 25}` | `{}` |
-| `truncate_len` | int | AI 回复截断长度（字符） | `30000` |
+| `truncate_len` | int | 传入本地评审的执行回复及推理各自的截断长度（字符） | `30000` |
 | `cann_bench_operator` | string | cann_bench 模式：目标算子名称 | - |
 | `cann_bench_level` | string | cann_bench 模式：难度等级 | `level1` |
 | `cann_bench_device` | string | cann_bench 模式：NPU 设备 ID | `0` |
 | `cann_bench_no_perf` | bool | cann_bench 模式：跳过性能评测 | `false` |
-| `cann_bench_warmup` | int | cann_bench 模式：性能预热次数 | 框架默认 |
-| `cann_bench_repeat` | int | cann_bench 模式：性能重复次数 | 框架默认 |
+| `cann_bench_warmup` | int | 性能预热次数 | 未设置时由 cann-bench 决定 |
+| `cann_bench_repeat` | int | 性能重复次数 | 未设置时由 cann-bench 决定 |
+
+#### 2.2.4 PR 校验与执行入口
+
+GitCode PR 现有流水线的 `UT_cannbot-skills` 通过 `ut.sh` 无参数调用 `tests/run-tests.sh`，运行默认 fast 测试集，其中包括 S-EVAL-01。本地可选的 `--incremental` 用于选择测试，和该流水线使用的 PR 文件清单是两套入口。
+
+- 原有全仓基础检查扫描 `ops/`、`model/`、`graph/`、`runtime/`、`infra/`、`tools/` 下的一级 Skill，检查题库是否存在、能否读取 JSON 及是否声明 `skill_name`。原有变更题库 `expectations` 结构检查继续执行。
+- 逐题格式检查根据 PR 文件清单和候选版本中的 `SKILL.md` 确定归属。新增或受修改的 Skill 检查其题库的全部题目。只改该 Skill 的 `SKILL.md`、脚本或参考资料时，也会查其题库。直接变更且仍存在的 `evals/evals.json` 同样纳入，包括 Team 题库及只做排版、重排或改名的题库。只改仓根文档不会把无关 Skill 纳入逐题检查。
+
+- 新题所在题库填写 `skill_name` 或 `team_name`。每题使用 `title`、`prompt`、`expected_output`，将单题执行限时放在 `config.timeout`。同一文件的 ID 不重复。语义要求放在 `expected_output`，结构化断言写 `expectations`，使用下文列出的 `type` 和非空字符串 `pattern`。单题的 `name`、`assertions` 不作相应字段的别名。
+- 本地 ST 可执行 `text`、`file_based` 和 `cann_bench`。使用对应模式的本地判定，`files` 不会将输入附件放入沙箱。单题执行默认 600 秒。`main.py` 还给整个 pytest 子进程设置时限。指定单题时取该题的 `config.timeout`，未配用 1200 秒。批量执行取已配最大值，至少 1200 秒。
+- GitCode 的 `ST_test` 调用 runner 上的 RDV `ci-pr-verify.sh`。普通 PR 选择启用且平台匹配的 `text` 题，按 `expected_output` 做文本评审。要执行结构化断言、文件内容评审或算子评测，使用支持相应模式的入口。RDV 的单题执行限时读取 `config.timeout`，未配置时默认 600 秒。现有工作流给 `ci-pr-verify.sh` 传入 `--timeout 3600`，这是整次等待时限。
+- RDV Core 正式采用固定 PR 文本题输入附件能力后，才能在这条普通 PR 链路用 `files`。填写插件相对路径，或带同一插件前缀的仓库相对路径。执行器按固定 PR 合并版本和原题 ID 读取同插件目录内的普通文件，以原文件名放入题目工作目录。路径越界、LFS 指针、缺少文件或目标文件名冲突会报错。
+
+最小文本题示例：
+
+```json
+{
+  "skill_name": "cann-env-setup",
+  "evals": [
+    {
+      "id": 1,
+      "title": "查看 NPU 信息",
+      "prompt": "我想确认这台昇腾服务器能识别 NPU，应该用什么命令？",
+      "expected_output": "说明使用 npu-smi info，并指出应查看的设备信息。",
+      "config": {"timeout": 600}
+    }
+  ]
+}
+```
 
 ### 2.3 Expectations 类型详解
 
 `expectations` 为断言数组，每条含 `type`（断言类型）、`pattern`（匹配模式）与可选 `description`：
 
 ```json
-"expectations": [
-  { "type": "contains", "pattern": "npu-smi info", "description": "回复中提到了 npu-smi info" }
-]
+{
+  "expectations": [
+    { "type": "contains", "pattern": "npu-smi info", "description": "回复中提到了 npu-smi info" }
+  ]
+}
 ```
 
 #### contains — 文本包含检查
 
-检查 AI **最终回复**（`ai_text`）中是否包含指定字符串（**不区分大小写**）。
+检查本地执行会话的完整输出是否包含指定字符串（不区分大小写）。过程输出也可能满足该断言。若要求命令出现在最终回复，在 `expected_output` 中明确说明。
 
 ```json
 { "type": "contains", "pattern": "npu-smi info" }
@@ -284,7 +175,7 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 
 #### not_contains — 文本排除检查
 
-检查 AI **最终回复文本**中是否**不**包含指定字符串。用于负向看护场景。
+检查最终回复是否排除了指定字符串，区分大小写。
 
 ```json
 { "type": "not_contains", "pattern": "- [ ]" }
@@ -294,7 +185,7 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 
 #### file_exists — 文件存在检查
 
-检查指定文件是否被创建或修改。搜索顺序：`sandbox/<path>` → `sandbox/skill/<path>` → `skill_dir/<path>`。
+检查路径是否存在。依次检查沙箱、沙箱的 `.opencode/skills/<skill>`、原目标目录，必要时递归搜索沙箱。已有文件也能满足该断言。
 
 ```json
 { "type": "file_exists", "pattern": "todo.md", "description": "文件 todo.md 已生成" }
@@ -302,7 +193,7 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 
 #### file_list — 文件列表匹配检查
 
-检查沙箱中是否存在匹配 glob pattern 的文件。适用于需要验证生成文件但不确定确切路径的场景。
+在沙箱及其 `.opencode/skills/` 下各 Skill 子目录中按 glob 查找匹配项。
 
 ```json
 { "type": "file_list", "pattern": "*.md" }
@@ -310,7 +201,7 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 
 #### skill_activated — 程序化 skill 激活检查
 
-**程序化**检查 AI 执行过程中是否加载了指定 skill。不依赖 AI 评审模型，直接从 tool_use 事件中精确匹配 skill 名称。用于正向看护场景。
+**程序化**检查 AI 执行过程中是否加载了指定 skill。不依赖 AI 评审模型，从导出的会话或执行事件流中精确匹配 Skill 名称。用于正向看护场景。
 
 ```json
 { "type": "skill_activated", "pattern": "cann-env-setup" }
@@ -336,41 +227,29 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 
 #### text 模式（默认）
 
-适用于大多数场景，AI 回复以文本方式输出。评测流程：
-1. 执行 session：向 skill 发送 prompt，收集 AI 文本回复
-2. 评测 session：独立 session 基于 Expected Output 评审回复质量
-3. 模式匹配：检查 expectations 中的 contains/not_contains/file_contains 规则
+适合验证最终回复。执行 Agent 响应 `prompt`，本地评审 Agent 按 `expected_output` 评审。配置了 `expectations` 时，本地运行器也执行对应断言。
 
 #### file_based 模式
 
-适用于验证 AI 生成文件的场景（如生成代码、配置文件等）。评测流程：
-1. 系统自动向 prompt 末尾追加 `FILE_BASED_HINT`（要求 AI 列出创建/修改的文件清单并说明用途，不输出完整文件内容）
-2. 执行 session：AI 在沙箱中创建/修改文件
-3. 评测 session：独立 session 读取沙箱中的生成文件，基于文件内容评审质量
-4. 模式匹配：检查 expectations 中的 file_exists/file_list/file_contains 规则
+适合验证代码、配置、文档等生成文件。本地执行器补充交付文件提示，评审会话从沙箱读取文件并依据 `expected_output` 评审。普通 GitCode PR ST 仍选取 `text` 题。
+
+受 PR UT 检查的启用文件题必须在 `expectations` 声明至少一条原始结构化断言，包括继承题库顶层 `file_based` 的题。RDV 的文件评测入口需要这些断言才能执行，并支持 `file_exists`、`file_list`、`file_contains` 和 `contains`。例如可用 `{"type": "file_exists", "pattern": "output/diagram.svg"}` 检查输出文件，再用 `expected_output` 描述质量要求。[Expectations 类型详解](#23-expectations-类型详解)
 
 #### cann_bench 模式
 
-适用于验证 AI 生成算子代码并通过 cann-bench 项目进行确定性评测的场景。评测流程：
-1. 沙箱部署：额外部署 cann-bench 仓库、任务定义文件和算子工程模板
-2. 系统自动向 prompt 末尾追加 `CANN_BENCH_HINT`（要求 AI 将生成的算子代码输出到 `output/` 目录）
-3. 执行 session：AI 在沙箱中根据 cann-bench 任务定义生成算子代码
-4. 合并式目录复制：将 AI 生成的代码合并到算子工程模板中（保留模板文件，覆盖同名文件）
-5. 确定性评测：执行 cann-bench 评测管道（`run_evaluation.sh`），三阶段评测（编译检查 → 精度验证 → 性能评分）
-6. 结果解析与报告嵌入：从 JSON 报告提取评分，HTML 报告通过 iframe 嵌入 pytest-html
-
-**配置示例**：
+本地执行器将 cann-bench 任务定义和工程模板复制到沙箱，提示 Agent 把算子输出到 `output/`，再将生成内容合并到工程模板。运行 `cann-bench/scripts/run_evaluation.sh`，从 JSON 报告读取评分。有 HTML 报告时会带入 pytest 报告。可在 `config` 中指定算子、设备和评测选项。
 
 ```json
-"config": {
+{
   "eval_mode": "cann_bench",
-  "max_tokens": 10000000,
-  "timeout": 10800,
   "ascend_platforms": ["A5"],
+  "timeout": 10800,
   "cann_bench_operator": "mish",
   "cann_bench_level": "level1"
 }
 ```
+
+以上对象放在单题的 `config` 中。先确认指定算子位于所选 cann-bench 版本的 `tasks/<level>/<operator>/`。示例中的 10800 秒用于作答和外层单题运行。cann-bench 评测子进程自身仍使用每次 600 秒的限时。
 
 ### 2.5 用例设计原则
 
@@ -398,17 +277,14 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 
 #### 2.5.4 Expectations 使用建议
 
-- `contains` / `not_contains` 用于精确的关键词 / 结构断言，是对 expected_output 语义评测的**补充**，不是替代
+- 用本地 `contains` 或 `not_contains` 验证必要的关键词或输出结构，语义要点写进 `expected_output`
 - 不要用 `contains` 逐一验证 expected_output 中的每个要点——语义评测已经做了这件事
 - `contains` 适用于验证关键 API 名称、命令、文件结构标记等
 - `not_contains` 适用于负向验证（如验证不应创建任务计划的场景）
 
 ### 2.6 用例 ID 规范
 
-- 用例 ID 从 1 开始，**连续递增**
-- 不允许跳号、重复
-- ID 顺序应与用例逻辑顺序一致（从简单到复杂、从核心到边缘）
-- Phase 1 静态验证会自动检查 ID 唯一性和连续性
+PR UT 要求受影响 Skill 或直接变更题库的每道题使用文件内唯一的有符号 32 位整数 ID。本地 Skill 和 Team 基础检查还要求文件里的 ID 按题序连续递增，起点不限。新题库建议从 1 开始，维护已有题库时保留现有 ID。
 
 ### 2.7 完整用例示例
 
@@ -453,7 +329,7 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
   "config": {
     "max_tokens": 160000,
     "ascend_platforms": ["A2"],
-    "distractor_skills": ["ascendc-runtime-debug", "ascendc-task-focus", "npu-arch", "ascendc-docs-search"]
+    "distractor_skills": ["ascendc-runtime-debug", "npu-arch", "ascendc-docs-search"]
   },
   "prompt": "我有一台昇腾服务器，想检查NPU驱动是否已安装，应该用什么命令？",
   "expected_output": "回复应说明使用 npu-smi info 命令检查驱动，并解释如何根据命令输出判断驱动是否已安装。应成功激活并使用了 cann-env-setup skill。",
@@ -466,107 +342,50 @@ ST 用例以 **JSON 文件**（`evals/evals.json`）的形式存放在每个 Ski
 
 ### 2.8 用例开发工作流
 
+1. 阅读目标 Skill 的 `SKILL.md` 或 Team 的 `AGENTS.md`，从实际使用场景写题。
+2. 在目标目录的 `evals/evals.json` 编辑用例。用 `expected_output` 表达期望效果，需要本地验证关键文字或文件时追加 `expectations`。
+3. 从仓库根目录安装依赖，再按目标类型运行 Skill 或 Team 基础检查。
+
+```bash
+python -m pip install -r tests/system/scripts/requirements.txt
+python -m pytest tests/system/scripts/test_skill_basic.py -k cann-env-setup -v
+python -m pytest tests/system/scripts/test_team_basic.py -k ops-registry-invoke -v
 ```
-1. 确定目标 Skill
-       │
-2. 分析 Skill 功能
-   ├─ 阅读 SKILL.md 了解 skill 的核心功能
-   ├─ 阅读 references/ 了解详细的领域知识
-   └─ 确定 skill 的适用场景和边界
-       │
-3. 设计用例场景（参考 1.3 看护维度）
-   ├─ 正向看护：典型使用场景
-   ├─ 负向看护：不应触发的场景
-   └─ 正确性看护：关键信息覆盖验证
-       │
-4. 编写 evals.json 文件
-   ├─ 填写顶层字段（skill_name / team_name）
-   ├─ 编写各个用例（prompt + expected_output + expectations）
-   └─ 检查 ID 连续递增、格式正确
-       │
-5. 本地验证（开发调试）
-   ├─ Phase 1: python -m pytest tests/system/scripts/test_skill_basic.py -v -k "<skill>"
-   └─ Phase 2: python -m pytest tests/system/scripts/test_skill_evals.py --skill <skill> -v
-       │
-6. 提交到 {skill_dir}/{skill_name}/evals/ 目录
-       │
-7. CI 自动验证（PR 时 gate_check.sh 自动触发）
+
+在 Linux 终端运行指定题的本地 ST 时，使用 `main.py` 先做基础检查，再执行评测。评测需要 PATH 中的 OpenCode 和可用的模型配置。评测沙箱依赖 Python 的 `fcntl`，原生 Windows 可单独运行上面的基础检查。
+
+```bash
+python tests/system/scripts/main.py --repo-root . --changed-files ops/cann-env-setup/evals/evals.json --eval-id 1 --ascend-platform A2
 ```
+
+按变更集运行本地评测时，可以使用 `tests/gate_check.sh` 包装器。未显式选择且未设置 `ASCEND_PLATFORM` 时，该包装器默认使用 A2。GitCode PR 页面分别查看 UT 和 `ST_test` 结果。
 
 ### 2.9 配置新的 Skill / Team 扫描路径
 
-如需为新 Skill 目录添加 ST 看护，在 `tests/system/config/st-test.config` 中配置：
+在 [tests/system/config/st-test.config](../config/st-test.config) 中设置本地扫描范围。
 
-```yaml
-skill_dirs:
-  - "ops"
-  - "graph"
-  - "model"
+- `skill_dirs` 和 `team_dirs` 填相对仓库根目录的扫描路径。
+- `skill_whitelist` 和 `team_whitelist` 填对应对象名称。列表非空时仅运行列出的对象，空列表不限制名称。
 
-skill_whitelist:            # 白名单：仅这些 skill 触发评测（为空表示全部生效）
-  - "ascendc-task-focus"
-  - "cann-env-setup"
-
-team_dirs:                  # Team 扫描目录
-  - "plugins-official"
-  - "plugins-community"
-
-team_whitelist:             # Team 白名单：仅这些 team 触发评测
-  - "catlass-op-generator"
-```
-
-> **注意**：`skill_whitelist` 非空时仅列出的 skill 会被评测。如果要新增 skill 的白名单支持，需要同时添加到此列表。Team 的白名单机制同理。
+GitCode 普通 PR ST 的题目选择由 RDV 执行。此配置用于仓内 ST。
 
 ### 2.10 常见问题
 
-**Q1: expected_output 检查持续失败？**
+**本地评审无法解析或判定失败**
 
-检查 `expected_output` 是否过于严格——不要描述"AI 应该说什么话"，描述"AI 回复应覆盖哪些要点"。
+查看 `tests/system/logs/` 的评审会话及题目沙箱中填写后的 `review-template.md`。确认判定、理由和各维度分数齐全。预期结果应描述可以判断的要点。
 
-**Q2: 评测 session 返回"无法解析判定结果"？**
+**本地执行偶发失败**
 
-该问题已在 2026-06 版本解决：评审机制已从易出错的 JSON 解析改为 **review-template.md 模板化方案**。评审 Agent 通过 Write 工具填写沙箱中的 `review-template.md` 模板，框架通过正则提取结构化评审结果。
+初次执行后可按 `EVAL_EXEC_RETRIES` 额外重试。以 Bash 为例，下列命令允许最多三次尝试。
 
-如仍有问题，检查 `logs/<skill>_case_X_review_ses.json` 中的原始评测输出，确认 `review-template.md` 是否被正确填写。
-
-**Q3: 如何给一个 Skill 新增第一个 ST 用例？**
-
-1. 在 `{skill_dir}/{skill_name}/evals/` 下创建 `evals.json`
-2. 确保 `config/st-test.config` 中的 `skill_dirs` 包含该 skill 所在目录
-3. 如果启用了 `skill_whitelist`，将 skill 名称加入白名单
-4. 运行 Phase 1 静态验证确认格式正确
-
-**Q4: file_based 模式和 text 模式如何选择？**
-
-- 需要验证 AI 生成的文件内容（代码、配置、文档等）→ 使用 `file_based`
-- 只需要验证 AI 文本回复的正确性 → 使用 `text`（默认）
-
-**Q5: 如何给 Team 新增第一个 ST 用例？**
-
-与 Skill 类似，但注意：
-1. evals.json 的顶层字段使用 `team_name` 而非 `skill_name`
-2. Phase 1 额外校验 AGENTS.md、plugin.json、init.sh 的存在性
-3. 沙箱部署方式不同：Team 通过执行 `init.sh project opencode <sandbox>` 部署
-4. 确保 `config/st-test.config` 的 `team_dirs` 和 `team_whitelist` 包含该 team
-
-**Q6: 偶发性评测执行失败如何排查？**
-
-设置环境变量 `EVAL_EXEC_RETRIES` 启用重试（默认 1）：
 ```bash
-EVAL_EXEC_RETRIES=3 python -m pytest tests/system/scripts/test_skill_evals.py --skill cann-env-setup -v
+EVAL_EXEC_RETRIES=2 python tests/system/scripts/main.py --repo-root . --changed-files ops/cann-env-setup/evals/evals.json --eval-id 1 --ascend-platform A2
 ```
-重试会重新执行 opencode session 并重新评审，适用于网络抖动或 AI 服务器偶发错误。
 
-**Q7: cann_bench 模式评测失败如何排查？**
+**cann_bench 找不到仓库、任务或报告**
 
-1. **cann-bench 仓库不存在**：检查 `CANN_BENCH_PATH` 环境变量或默认路径 `<repo_root>/../cann-bench`
-2. **编译失败**：检查 AI 生成的算子代码是否完整，特别是 CMakeLists.txt 配置
-3. **精度不达标**：检查 kernel 实现的数值稳定性，特别是 fp16/bf16 的混合精度计算
-4. **任务定义文件缺失**：检查 `cann-bench-task/` 目录下的 proto.yaml、cases.yaml 是否存在
-
-查看 cann-bench 生成的 HTML 报告（在沙箱目录的 `cann_bench_report.html`）获取详细评测结果。
-
----
+设置 `CANN_BENCH_PATH` 指向实际安装的 cann-bench 仓库。未设置时，本地运行器默认查找 `<Skills 仓库>/../../cann-bench`。核对算子任务、工程模板和设备。结果 JSON 保存在沙箱的 `cann_bench_reports/`，生成的 HTML 会复制为 `cann_bench_report.html`。
 
 ## 参考文档
 

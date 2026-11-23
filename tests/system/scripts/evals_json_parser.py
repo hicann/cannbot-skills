@@ -30,6 +30,37 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+EVAL_MODES = ("text", "file_based", "cann_bench")
+ASSERTION_TYPES = (
+    "contains", "not_contains", "file_exists", "file_list", "file_contains", "skill_activated",
+)
+
+
+def _iter_case_expectations(item, case_index, *, require_fields, check_values=False, require_file_assertions=False):
+    field = f"evals[{case_index}].expectations"
+    case_id = item.get("id")
+    case_label = f" (case id {case_id})" if type(case_id) is int else ""
+    expectations = item.get("expectations", [])
+    if not isinstance(expectations, list):
+        yield f"{field}{case_label}: expected an array"
+        return
+    if require_file_assertions and not expectations:
+        yield f"{field}{case_label}: enabled file_based case requires at least one source assertion"
+    for index, expectation in enumerate(expectations):
+        if not isinstance(expectation, dict):
+            yield f"{field}[{index}]{case_label}: expected an object"
+            continue
+        if require_fields:
+            missing = {"type", "pattern"} - expectation.keys()
+            if missing:
+                names = ", ".join(sorted(missing))
+                yield f"{field}[{index}]{case_label}: missing {names}"
+        if check_values:
+            value_field = f"evals[{case_index}]{case_label}.expectations[{index}]"
+            if "type" in expectation and expectation["type"] not in ASSERTION_TYPES:
+                yield f"{value_field}.type: unsupported assertion type"
+            if "pattern" in expectation and not _nonblank(expectation["pattern"]):
+                yield f"{value_field}.pattern: expected a non-empty string"
 
 
 def iter_invalid_expectations(data, *, require_fields=False):
@@ -37,23 +68,95 @@ def iter_invalid_expectations(data, *, require_fields=False):
     if not isinstance(data, dict) or not isinstance(data.get("evals", []), list):
         return
     for case_index, item in enumerate(data.get("evals", [])):
-        if not isinstance(item, dict):
+        if isinstance(item, dict):
+            yield from _iter_case_expectations(item, case_index, require_fields=require_fields)
+
+
+def _nonblank(value):
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _id(value):
+    return type(value) is int and -(2**31) <= value < 2**31
+
+
+def _relative_file(value):
+    return (
+        _nonblank(value)
+        and "\\" not in value
+        and ":" not in value
+        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+        and all(part not in ("", ".", "..") for part in value.split("/"))
+    )
+
+
+def _case_errors(case, field):
+    for key in ("title", "prompt", "expected_output"):
+        if not _nonblank(case.get(key)):
+            yield f"{field}.{key}: expected a non-empty string"
+    if "timeout" in case:
+        yield f"{field}.timeout: use config.timeout (integer seconds)"
+    if "assertions" in case:
+        yield f"{field}.assertions: use expectations for structured checks or expected_output for prose"
+    config = case.get("config", {})
+    if not isinstance(config, dict):
+        yield f"{field}.config: expected an object (use {{}} when empty)"
+    else:
+        if "timeout" in config and (not _id(config["timeout"]) or config["timeout"] <= 0):
+            yield f"{field}.config.timeout: expected integer seconds in 1..2147483647"
+        if "eval_mode" in config and config["eval_mode"] not in EVAL_MODES:
+            yield f"{field}.config.eval_mode: expected text, file_based or cann_bench"
+        if "disabled" in config and type(config["disabled"]) is not bool:
+            yield f"{field}.config.disabled: expected a boolean"
+        for key in ("ascend_platforms", "distractor_skills"):
+            if key in config and (not isinstance(config[key], list) or not all(map(_nonblank, config[key]))):
+                yield f"{field}.config.{key}: expected an array of non-empty strings"
+    files = case.get("files", [])
+    if not isinstance(files, list):
+        yield f"{field}.files: expected an array of relative path strings"
+    else:
+        for index, value in enumerate(files):
+            if not _relative_file(value):
+                yield f"{field}.files[{index}]: expected a normalized relative path"
+
+
+def iter_pr_evals_errors(data):
+    """Validate every raw case in a suite selected by PR UT."""
+    if not isinstance(data, dict) or not isinstance(data.get("evals"), list):
+        yield "evals: expected an array in a JSON object"
+        return
+
+    target = data.get("team_name") or data.get("skill_name")
+    if not _nonblank(target):
+        yield "expected a non-empty top-level skill_name or team_name"
+    suite_mode = data.get("eval_mode", "text")
+    if suite_mode not in EVAL_MODES:
+        yield "eval_mode: expected text, file_based or cann_bench"
+
+    seen_ids = set()
+    for index, case in enumerate(data["evals"]):
+        field = f"evals[{index}]"
+        if not isinstance(case, dict):
+            yield f"{field}: expected an object"
             continue
-        field = f"evals[{case_index}].expectations"
-        case_id = item.get("id")
-        case_label = f" (case id {case_id})" if type(case_id) is int else ""
-        expectations = item.get("expectations", [])
-        if not isinstance(expectations, list):
-            yield f"{field}{case_label}: expected an array"
-            continue
-        for index, expectation in enumerate(expectations):
-            if not isinstance(expectation, dict):
-                yield f"{field}[{index}]{case_label}: expected an object"
-            elif require_fields:
-                missing = {"type", "pattern"} - expectation.keys()
-                if missing:
-                    names = ", ".join(sorted(missing))
-                    yield f"{field}[{index}]{case_label}: missing {names}"
+        case_id = case.get("id")
+        if not _id(case_id):
+            yield f"{field}.id: expected a signed 32-bit integer"
+        else:
+            field = f"{field} (case id {case_id})"
+            if case_id in seen_ids:
+                yield f"{field}.id: duplicate ID {case_id}"
+            seen_ids.add(case_id)
+        yield from _case_errors(case, field)
+        config = case.get("config", {})
+        require_file_assertions = (
+            isinstance(config, dict)
+            and config.get("eval_mode", suite_mode) == "file_based"
+            and config.get("disabled") is not True
+        )
+        yield from _iter_case_expectations(
+            case, index, require_fields=True, check_values=True, require_file_assertions=require_file_assertions,
+        )
 
 
 def _has_valid_containers(data) -> bool:
@@ -126,7 +229,7 @@ def parse_evals_json(file_path: Path) -> Optional[Dict[str, Any]]:
         eval_mode = "text"
     else:
         eval_mode = eval_mode.strip().lower()
-        if eval_mode not in ("text", "file_based", "cann_bench"):
+        if eval_mode not in EVAL_MODES:
             logger.warning("Invalid eval_mode '%s', falling back to 'text'", eval_mode)
             eval_mode = "text"
 
