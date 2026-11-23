@@ -142,7 +142,7 @@
     },
     {
       "name": "model-recommend-skills",
-      "description": "推荐模型推理整网优化 Skill（18 个）。覆盖环境基线、模型分析、单卡基线、并发与限核策略、精度门禁、性能分析与四项专项、GE 图模式、算子与图适配、FA 融合、多线程、访存、融合规划、Kernel 生成、自定义算子、运行时诊断、回归验收与持续优化循环编排。",
+      "description": "推荐模型推理整网优化 Skill。覆盖环境基线、模型分析、单卡基线、并发与限核策略、精度门禁、性能分析与四项专项、GE 图模式、算子与图适配、FA 融合、多线程、访存、融合规划、Kernel 生成、自定义算子、运行时诊断、回归验收与持续优化循环编排。",
       "source": "./community/model",
       "strict": false,
       "version": "1.0.0",
@@ -176,7 +176,7 @@
         "./model-recommend-profiling-deep-analysis",
         "./model-recommend-regression-baseline-mgmt",
         "./model-recommend-runtime-debug",
-        "./model-recommend-structure-analysis"
+        "./model-recommend-adaptation"
       ]
     },
     {

@@ -1,6 +1,6 @@
 # drawio 结构图集规范（推荐模型版）
 
-[structure-analysis](../SKILL.md) 的 drawio 产物规范：**单文件多页**——P1 主题结构图（模型级拓扑）+ P2..Pn 各模块详细展开图。
+`model-recommend-adaptation` 的 drawio 产物规范：**单文件多页**——P1 主题结构图（模型级拓扑）+ P2..Pn 各模块详细展开图。
 
 ## 1. 文件组织
 
