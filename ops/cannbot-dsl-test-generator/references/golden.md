@@ -64,7 +64,7 @@ numerical_tolerance:
 | bfloat16 | 2^-8 | 2^-16 | 2^-3 |
 | float32 / float64 | 2^-14 | 2^-30 | 2^-8 |
 
-`error_ratio_limit` 默认 2。`reference_mode` 默认 `native`，准备和缓存加载时必须存在独立 `NATIVE_REFERENCE_FUNCTION`；执行时按需调用，缺失或调用失败明确失败，不自动替换为主参考截断。显式兼容策略 `native_or_truncated` 有参考时调用它，否则使用主参考已转换到输出 dtype 的结果；`native` 强制独立同精度参考存在，`truncated` 明确仅采用主参考截断。截断输出不是同精度计算；只有已确认的显式 `truncated` / `native_or_truncated` 契约允许采用该替代，默认完整两阶段不允许；显式契约要求同精度计算时必须选 native 并提供绑定；参考存在但调用失败时明确失败，不降级。Golden 可增加 `NATIVE_REFERENCE_FUNCTION = <独立的具名CPU函数>`，不能绑定主参考或候选。固定 runner 在实际需要阶段二时，使用本次同一份物化输入与属性的隔离副本调用，按原输出契约校验；同一调用的多个输出共享该次参考计算，不重物化输入，不缓存候选或阶段二通过状态。
+`error_ratio_limit` 默认 2。`reference_mode` 默认 `native`，准备和缓存加载时必须存在独立 `NATIVE_REFERENCE_FUNCTION`；准备缓存时计算并保存，执行时按需读取同一缓存条目；缺失或计算失败明确失败，不自动替换为主参考截断。显式兼容策略 `native_or_truncated` 有参考时调用它，否则使用主参考已转换到输出 dtype 的结果；`native` 强制独立同精度参考存在，`truncated` 明确仅采用主参考截断。截断输出不是同精度计算；只有已确认的显式 `truncated` / `native_or_truncated` 契约允许采用该替代，默认完整两阶段不允许；显式契约要求同精度计算时必须选 native 并提供绑定；参考存在但调用失败时明确失败，不降级。Golden 可增加 `NATIVE_REFERENCE_FUNCTION = <独立的具名CPU函数>`，不能绑定主参考或候选。固定 runner 在实际需要阶段二时，使用本次同一份物化输入与属性的隔离副本调用，按原输出契约校验；同一调用的多个输出共享该次参考计算，不重物化输入，不缓存候选或阶段二通过状态。
 
 两阶段数值比较支持连续和非连续 Tensor，布局/连续性限制仅在输出契约明确要求时单独验收；有限输入的误差中间运算溢出采用缩放计算，不能删除该位置或当作空集合通过，无法可靠判定时明确失败。该策略的 NaN 按位置一致匹配（显式 match_golden_nan 仍须实际触发预期 NaN），双侧同号 Inf 排除比较、异号失败，单侧 Inf 用目标 dtype 最大有限值替换后继续判断；无有效点或合法空张量按原输出契约处理。两阶段函数从已转换到输出 dtype 的主参考计算误差，不能以最终输出 dtype 相同推断参考中间精度。
 
@@ -96,3 +96,8 @@ numerical_tolerance:
 需要独立交叉核验或高精度误差诊断时，按既有任务范围记录来源、实际比较范围和结果；诊断参考不自动成为生产准入门槛，也不替换主参考。设计舍入链模拟只能说明对应路径与输入，不单独证明完整算子正确。实现与参考不一致时先核对实际输入、参考职责及数值契约，不直接归咎设计或擅自增加补偿。
 
 CPU 缓存 v4 保存同一配方对应的输入、主参考结果及输出模板；Golden 源码、绑定的既有输出契约、PyTorch 版本、配方、seed、调用序列和断言共同决定身份。旧版本缓存不复用，避免沿用通过 `simulate()` 生成的期望值；格式不符、参考或绑定契约变化后重建，命中时仍检查输出契约，不给旧测试结果补签。已有运行保持其冻结 runner、契约和缓存工具，新生成资产使用本版本；不自动迁移旧运行或冻结规格。
+
+
+## Native reference 执行设备
+
+`NATIVE_REFERENCE_FUNCTION` 必须保持输入设备无关：内部创建的输出和临时 Tensor 应使用输入 Tensor 的 device。固定 runner 通过 `CANNBOTDSL_NATIVE_REFERENCE_DEVICE=cpu|npu` 选择 native reference 的执行设备；选择 `npu` 时将同一物化输入搬到 NPU 执行，结果搬回 CPU 后写入 cache。reference device 属于缓存身份，切换设备会生成新的 cache 条目。

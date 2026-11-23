@@ -24,7 +24,7 @@ from pathlib import Path
 
 import torch
 
-CACHE_VERSION = 4
+CACHE_VERSION = 5
 
 
 def _output_spec(spec=None):
@@ -293,6 +293,18 @@ def load_golden(path):
     return module
 
 
+def _move_tensors(value, device):
+    if isinstance(value, torch.Tensor):
+        return value.to(device)
+    if isinstance(value, dict):
+        return {key: _move_tensors(item, device) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_move_tensors(item, device) for item in value)
+    if isinstance(value, list):
+        return [_move_tensors(item, device) for item in value]
+    return value
+
+
 def _check_cpu_data(value):
     if isinstance(value, torch.Tensor):
         if value.device.type != "cpu":
@@ -315,13 +327,43 @@ class CaseCache:
         self.root = Path(cache_dir).expanduser() if cache_dir else Path(test_dir) / ".case_cache"
         self.golden = golden
         self.spec = _output_spec(spec)
+        self.native_device = os.environ.get("CANNBOTDSL_NATIVE_REFERENCE_DEVICE", "cpu").strip().lower()
+        if self.native_device not in {"cpu", "npu"}:
+            raise ValueError("CANNBOTDSL_NATIVE_REFERENCE_DEVICE must be cpu or npu")
+        if self.native_device == "npu":
+            if not hasattr(torch, "npu") or not torch.npu.is_available() or torch.npu.device_count() < 1:
+                raise RuntimeError("NPU native reference requested but no NPU is available")
         self.identity = {
             "version": CACHE_VERSION,
             "golden": golden.__cannbotdsl_source_hash__,
             "torch": str(torch.__version__),
+            "native_device": self.native_device,
         }
         self.hits = 0
         self.built = 0
+
+    def _needs_native(self):
+        has_native = callable(getattr(self.golden, "NATIVE_REFERENCE_FUNCTION", None))
+        has_native_policy = any(
+            isinstance(value, dict)
+            and value.get("metric") == "staged_relative"
+            and value.get("fallback", {}).get("reference_mode", "native") in {"native", "native_or_truncated"}
+            for value in getattr(self.golden, "TOLERANCE", {}).values()
+        )
+        return has_native and has_native_policy
+
+    def _reference_kwargs(self, inputs):
+        kwargs = {name: inputs[name] for name in self.golden.INPUT_NAMES if name in inputs}
+        kwargs.update(self.golden.ATTR_DEFAULTS)
+        for name in list(self.golden.ATTR_DEFAULTS) + self.golden.REQUIRED_ATTR_NAMES:
+            if name in inputs:
+                kwargs[name] = inputs[name]
+        return kwargs
+
+    def _call_native(self, reference, kwargs):
+        native_kwargs = _move_tensors(kwargs, self.native_device)
+        result = reference(**copy.deepcopy(native_kwargs))
+        return _move_tensors(result, "cpu")
 
     def get(self, row, call, index):
         recipe = {
@@ -368,7 +410,7 @@ class CaseCache:
     def _validate(self, data, key, recipe, dst_args=False):
         if (
             not isinstance(data, dict)
-            or set(data) != {"version", "key", "inputs", "expected", "outputs"}
+            or set(data) != {"version", "key", "inputs", "expected", "native", "outputs"}
             or data["version"] != CACHE_VERSION
             or data["key"] != key
             or not isinstance(data["inputs"], dict)
@@ -379,6 +421,11 @@ class CaseCache:
         reference = None
         if recipe["expected"] in ("match_golden", "match_golden_nan"):
             reference = self.validate_output(data["expected"], data["inputs"], recipe["outputs"])
+        if recipe["expected"] in ("match_golden", "match_golden_nan") and self._needs_native():
+            native = data.get("native")
+            if native is None:
+                raise ValueError("native reference cache is missing")
+            self.validate_output(native, data["inputs"], recipe["outputs"])
         if dst_args:
             supplied = {name for name, value in recipe["outputs"].items() if value is not None}
             if set(data["outputs"]) != supplied:
@@ -402,18 +449,20 @@ class CaseCache:
     def _build(self, recipe, key, dst_args=False):
         inputs = self.golden.make_inputs(recipe["inputs"], seed=recipe["seed"])
         expected = None
+        native = None
         if recipe["expected"] in ("match_golden", "match_golden_nan"):
+            kwargs = self._reference_kwargs(inputs)
             primary = getattr(self.golden, "GOLDEN_FUNCTION", None)
             if not callable(primary):
                 raise ValueError("GOLDEN_FUNCTION must bind a callable primary reference")
-            kwargs = {name: inputs[name] for name in self.golden.INPUT_NAMES if name in inputs}
-            kwargs.update(self.golden.ATTR_DEFAULTS)
-            for name in list(self.golden.ATTR_DEFAULTS) + self.golden.REQUIRED_ATTR_NAMES:
-                if name in inputs:
-                    kwargs[name] = inputs[name]
             # Reference and target use the same materialization. Isolate reference
             # mutations without losing aliases within its input/attribute mapping.
             expected = primary(**copy.deepcopy(kwargs))
+            if self._needs_native():
+                reference = getattr(self.golden, "NATIVE_REFERENCE_FUNCTION", None)
+                if not callable(reference) or reference is primary:
+                    raise ValueError("NATIVE_REFERENCE_FUNCTION must bind a separate independent reference")
+                native = self._call_native(reference, kwargs)
         outputs = {}
         if recipe["outputs"]:
             supplied = {name: value for name, value in recipe["outputs"].items() if value is not None}
@@ -425,6 +474,7 @@ class CaseCache:
             "key": key,
             "inputs": inputs,
             "expected": expected,
+            "native": native,
             "outputs": outputs,
         }
         self._validate(data, key, recipe, dst_args)

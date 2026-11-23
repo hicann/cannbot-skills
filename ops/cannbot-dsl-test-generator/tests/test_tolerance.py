@@ -423,7 +423,7 @@ class StagedRelativeTests(unittest.TestCase):
                 self.assertIn("unsupported staged_relative fields", result.stdout + result.stderr)
             self.assertFalse(list((test / "testcase_output").rglob("verify_result*.csv")))
 
-    def test_noncontiguous_tensor_list_keeps_lazy_native_reference(self):
+    def test_noncontiguous_tensor_list_uses_cached_native_reference(self):
         g = torch.ones(3, 4, dtype=torch.float16).t()
         a = g * 1.1
         self.assertFalse(a.is_contiguous())
@@ -461,7 +461,8 @@ class StagedRelativeTests(unittest.TestCase):
         cache = SimpleNamespace(golden=golden, validate_output=lambda value, *_: value)
         expected = {name: inputs["x"] * 3 for name in ["z", "other"]}
         actual = {name: value * 1.1 for name, value in expected.items()}
-        records = RUNNER._compare_outputs(actual, expected, cache, inputs, None)
+        native = reference(**{"x": inputs["x"].clone(), "scale": 3})
+        records = RUNNER._compare_outputs(actual, expected, cache, inputs, None, native=native)
         self.assertEqual(calls, [3])
         self.assertTrue(torch.equal(inputs["x"], torch.ones_like(inputs["x"])))
         self.assertTrue(all(record["stage"] == 2 for record in records))

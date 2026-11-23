@@ -62,6 +62,24 @@ class ReferencePolicyTests(unittest.TestCase):
         self.assertTrue(torch.equal(again["expected"], data["expected"]))
         self.assertEqual((self.calls, cache.built, cache.hits), (1, 1, 1))
 
+    def test_native_or_truncated_uses_bound_native_cache(self):
+        def native(x):
+            return x + torch.tensor([2.0], dtype=x.dtype)
+
+        self.golden.TOLERANCE = {
+            "float16": {
+                "metric": "staged_relative",
+                "rtol": 0.1,
+                "max_relative_rtol": 0.2,
+                "fallback": {"reference_mode": "native_or_truncated"},
+            }
+        }
+        self.golden.NATIVE_REFERENCE_FUNCTION = native
+        cache = CACHE.CaseCache(self.root, self.golden)
+        data = cache.get(self.row, self.call, 0)
+        self.assertIsNotNone(data["native"])
+        self.assertEqual(data["native"].item(), 2050)
+
     def test_reference_source_change_invalidates_cache(self):
         first = CACHE.CaseCache(self.root, self.golden).get(self.row, self.call, 0)
         self.golden.__cannbotdsl_source_hash__ = "high-precision"

@@ -167,28 +167,18 @@ def _compare(actual, expected, tolerance, path="output", equal_nan=False, native
     return _compare_tensor(actual, expected, tolerance, path, equal_nan, native)
 
 
-def _compare_outputs(actual, expected, cache, inputs, output_map, equal_nan=False):
+def _compare_outputs(actual, expected, cache, inputs, output_map, equal_nan=False, native=None):
     expected = cache.validate_output(expected, inputs, output_map)
     actual = cache.validate_output(actual, inputs, output_map)
     records = []
-    native_result = []
 
     def get_native():
-        if not native_result:
-            callback = getattr(cache.golden, "NATIVE_REFERENCE_FUNCTION", None)
-            if not callable(callback):
-                raise ValueError("NATIVE_REFERENCE_FUNCTION must bind an independent CPU reference")
-            kwargs = {name: inputs[name] for name in cache.golden.INPUT_NAMES if name in inputs}
-            kwargs.update(cache.golden.ATTR_DEFAULTS)
-            for name in list(cache.golden.ATTR_DEFAULTS) + cache.golden.REQUIRED_ATTR_NAMES:
-                if name in inputs:
-                    kwargs[name] = inputs[name]
-            result = callback(**copy.deepcopy(kwargs))
-            checked = cache.validate_output(result, inputs, output_map)
-            _assert_device(checked, "cpu")
-            native_result.append(checked)
-        return native_result[0]
-    has_native = getattr(cache.golden, "NATIVE_REFERENCE_FUNCTION", None) is not None
+        if native is None:
+            raise ValueError("native reference cache is missing")
+        checked = cache.validate_output(native, inputs, output_map)
+        _assert_device(checked, "cpu")
+        return checked
+    has_native = native is not None
     for name, reference in expected.items():
         value = actual[name]
         path = f"output.{name}"
@@ -536,72 +526,117 @@ def _staged_relative_errors(actual, expected, epsilon):
 
 
 def _compare_staged_relative(actual, expected, limits, path, equal_nan, native=None):
-    """Complete staged decision, used by all fixed-runner execution modes."""
+    """Complete staged decision with FP32, bounded-memory chunked statistics."""
     dtype = str(expected.dtype).removeprefix("torch.")
     policy = staged_policy(dtype, limits)
-    a, g = actual.double().clone(), expected.double().clone()
-    if not torch.equal(torch.isnan(a), torch.isnan(g)):
-        raise AssertionError(f"{path}: NaN positions or policy mismatch")
-    both_inf = torch.isinf(a) & torch.isinf(g)
-    if bool((both_inf & (torch.sign(a) != torch.sign(g))).any()):
-        raise AssertionError(f"{path}: Inf signs mismatch")
-    one_inf = torch.isinf(a) ^ torch.isinf(g)
+    chunk_elems = 1 << 20
+    a_all = actual.float().reshape(-1)
+    g_all = expected.float().reshape(-1)
+    if a_all.numel() != g_all.numel():
+        raise AssertionError(f"{path}: shape mismatch")
+    native_checked = None
+    native_callback = native if callable(native) else None
+    if native is not None and native_callback is None:
+        native_checked = native.float().reshape(-1)
+        if native_checked.numel() != g_all.numel():
+            raise ValueError(f"{path}: native reference shape mismatch")
+        if native.dtype != expected.dtype or native.shape != expected.shape:
+            raise ValueError(f"{path}: native reference shape/dtype mismatch")
+    elif native is None and policy["reference_mode"] == "native":
+        raise ValueError("staged_relative requires NATIVE_REFERENCE_FUNCTION")
+
+    epsilon = limits.get("epsilon", 1e-7)
     maximum = torch.finfo(expected.dtype).max
-    a[one_inf & torch.isinf(a)] = torch.sign(a[one_inf & torch.isinf(a)]) * maximum
-    g[one_inf & torch.isinf(g)] = torch.sign(g[one_inf & torch.isinf(g)]) * maximum
-    valid = ~(torch.isnan(a) | torch.isnan(g) | both_inf)
-    diff = (a - g).abs()
-    errors = _staged_relative_errors(a, g, limits.get("epsilon", 1e-7))
-    if bool(torch.isnan(errors[valid]).any()):
-        raise ValueError(f"{path}: relative error computation produced NaN")
-    error = errors[valid]
-    mere = float(error.mean()) if error.numel() else 0.0
-    mare = float(error.max()) if error.numel() else 0.0
+
+    def chunk_values(begin, end):
+        a, g = a_all[begin:end], g_all[begin:end]
+        nan_mismatch = torch.isnan(a) != torch.isnan(g)
+        both_inf = torch.isinf(a) & torch.isinf(g)
+        one_inf = torch.isinf(a) ^ torch.isinf(g)
+        a = a.clone()
+        g = g.clone()
+        a[one_inf & torch.isinf(a)] = torch.sign(a[one_inf & torch.isinf(a)]) * maximum
+        g[one_inf & torch.isinf(g)] = torch.sign(g[one_inf & torch.isinf(g)]) * maximum
+        valid = ~(torch.isnan(a) | torch.isnan(g) | both_inf)
+        diff = (a - g).abs()
+        errors = _staged_relative_errors(a, g, epsilon)
+        return a, g, valid, diff, errors, nan_mismatch, both_inf
+
+    stage1_sum = 0.0
+    stage1_max = 0.0
+    finite_count = 0
+    stage1_nan_mismatch = False
+    inf_sign_mismatch = False
+    for begin in range(0, g_all.numel(), chunk_elems):
+        end = min(begin + chunk_elems, g_all.numel())
+        a, g, valid, diff, errors, nan_mismatch, both_inf = chunk_values(begin, end)
+        stage1_nan_mismatch = stage1_nan_mismatch or bool(nan_mismatch.any())
+        inf_sign_mismatch = inf_sign_mismatch or bool((both_inf & (torch.sign(a) != torch.sign(g))).any())
+        if bool(torch.isnan(errors[valid]).any()):
+            raise ValueError(f"{path}: relative error computation produced NaN")
+        if bool(valid.any()):
+            values = errors[valid]
+            stage1_sum += float(values.sum())
+            stage1_max = max(stage1_max, float(values.max()))
+            finite_count += int(valid.sum())
+    mere = stage1_sum / max(finite_count, 1)
+    mare = stage1_max
+    if stage1_nan_mismatch:
+        raise AssertionError(f"{path}: NaN positions or policy mismatch")
+    if inf_sign_mismatch:
+        raise AssertionError(f"{path}: Inf signs mismatch")
     detail = dict(path=path, dtype=dtype, metric="staged_relative", mere=mere, mare=mare,
-                  finite_count=int(valid.sum()), stage=1, passed=True, policy=policy)
+                  finite_count=finite_count, stage=1, passed=True, policy=policy)
     if mere < limits["rtol"] and mare < limits["max_relative_rtol"]:
         return [detail]
-    mode = policy["reference_mode"]
-    if mode == "native" and native is None:
-        raise ValueError("staged_relative requires NATIVE_REFERENCE_FUNCTION")
-    if mode != "truncated" and native is not None:
-        reference = native()
-        if not isinstance(
-                reference, torch.Tensor) or reference.shape != expected.shape or reference.dtype != expected.dtype:
+    if native_callback is not None:
+        reference = native_callback()
+        if (
+            not isinstance(reference, torch.Tensor)
+            or reference.shape != expected.shape
+            or reference.dtype != expected.dtype
+        ):
             raise ValueError(f"{path}: native reference shape/dtype mismatch")
-        n = reference.to(device=g.device, dtype=torch.float64)
-        if not torch.equal(torch.isnan(n), torch.isnan(expected)):
-            raise ValueError(f"{path}: native reference NaN positions mismatch")
-        detail["reference"] = "native"
-    else:
-        # Preserve the original Golden for the explicit truncated-reference path,
-        # including one-sided Inf saturation semantics.
-        n = expected.double()
-        detail["reference"] = "truncated"
-    native_diff = (n - g).abs()
-    native_error = _staged_relative_errors(n, g, limits.get("epsilon", 1e-7))
-    small = valid & (g.abs() < policy["small_value_threshold"])
-    cancel = valid & (
-        a.abs() < policy["cancel_zero_threshold"]) & (
-        g.abs() >= policy["small_value_threshold"]) & (
-            g.abs() < policy["cancel_boundary"])
-    normal = valid & ~small & ~cancel
-    candidate_bad = errors > limits["max_relative_rtol"]
-    native_bad = native_error > limits["max_relative_rtol"]
-    detail.update(stage=2, passed=True)
-    for name, mask, bad, refbad in (
-        ("small_value", small, diff > policy["small_value_error"], native_diff > policy["small_value_error"]),
-        ("cancel", cancel, candidate_bad, native_bad),
-        ("normal", normal, candidate_bad, native_bad),
-    ):
-        count, refcount = int((mask & bad).sum()), int((mask & refbad).sum())
-        passed = (
-            (count == 0 or (refcount > 0 and count / refcount <= policy["error_ratio_limit"]))
-            if name == "normal"
-            else count / max(refcount, 1) <= policy["error_ratio_limit"]
+        native_checked = reference.float().reshape(-1)
+    detail["reference"] = "native" if native_checked is not None else "truncated"
+    counts = {name: [0, 0, 0] for name in ("small_value", "cancel", "normal")}
+    expected_flat = expected.reshape(-1)
+    for begin in range(0, g_all.numel(), chunk_elems):
+        end = min(begin + chunk_elems, g_all.numel())
+        a, g, valid, diff, errors, _, _ = chunk_values(begin, end)
+        if native_checked is not None:
+            n = native_checked[begin:end].clone()
+            if bool((torch.isnan(n) != torch.isnan(expected_flat[begin:end])).any()):
+                raise ValueError(f"{path}: native reference NaN positions mismatch")
+            native_diff = (n - g).abs()
+            native_error = _staged_relative_errors(n, g, epsilon)
+        else:
+            native_diff = diff
+            native_error = errors
+        small = valid & (g.abs() < policy["small_value_threshold"])
+        cancel = (
+            valid
+            & (a.abs() < policy["cancel_zero_threshold"])
+            & (g.abs() >= policy["small_value_threshold"])
+            & (g.abs() < policy["cancel_boundary"])
         )
+        normal = valid & ~small & ~cancel
+        candidate_bad = errors > limits["max_relative_rtol"]
+        native_bad = native_error > limits["max_relative_rtol"]
+        for name, mask, bad, refbad in (
+            ("small_value", small, diff > policy["small_value_error"], native_diff > policy["small_value_error"]),
+            ("cancel", cancel, candidate_bad, native_bad),
+            ("normal", normal, candidate_bad, native_bad),
+        ):
+            counts[name][0] += int((mask & bad).sum())
+            counts[name][1] += int((mask & refbad).sum())
+            counts[name][2] += int(mask.sum())
+    detail.update(stage=2, passed=True)
+    for name, (count, refcount, total) in counts.items():
+        passed = ((count == 0 or (refcount > 0 and count / refcount <= policy["error_ratio_limit"]))
+                  if name == "normal" else count / max(refcount, 1) <= policy["error_ratio_limit"])
         detail.update({name + "_error_count": count, name + "_reference_error_count": refcount,
-                       name + "_total_count": int(mask.sum()), name + "_passed": passed})
+                       name + "_total_count": total, name + "_passed": passed})
         detail["passed"] = detail["passed"] and passed
     if not detail["passed"]:
         raise AssertionError(json.dumps(detail, ensure_ascii=False))
@@ -695,6 +730,7 @@ def _run_case(row, invocation, cache):
                         expected,
                         cache, data["inputs"], output_map,
                         equal_nan=expectation == "match_golden_nan",
+                        native=data.get("native"),
                     )
                 )
             observable = [

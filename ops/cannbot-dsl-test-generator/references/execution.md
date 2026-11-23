@@ -8,7 +8,7 @@ sheet 内的部分用例使用 `--grep` 按 case_id 正则筛选 active 行，�
 
 筛选结果写入 `testcase_output/<sheet>/verify_result_<sheet>_grep_<正则SHA256前16位>.csv`，与全量及单例结果分开。Red、Green 和回归阶段分别归档本次结果及日志，记录对应实现版本，避免后续调用覆盖前次证据；没有筛选时原有全量结果路径不变。
 
-`prepare_golden.py` 随 runner 安装 `cannbotdsl_case_cache.py`。`build_tdd_cases.py` 完成校验后，在 `TEST_DIR/.case_cache/` 为blackbox、whitebox、tdd 及非空 performance 分组全部 active 用例按调用保存 CPU 输入、数值 Golden 输出和初始输出缓冲区模板；行为断言与预期异常不计算 Golden，不导入目标实现。后续测试按需加载，缺失、过期或读取失败的条目自动重建；重建或保存失败返回非零。生成阶段必须为当前全部 active 调用准备成功，不以部分缓存完成宣布测试生成通过。
+`prepare_golden.py` 随 runner 安装 `cannbotdsl_case_cache.py`。`build_tdd_cases.py` 完成校验后，在 `TEST_DIR/.case_cache/` 为blackbox、whitebox、tdd 及非空 performance 分组全部 active 用例按调用保存 CPU 输入、主参考 Golden 输出、同精度 native Golden 输出和初始输出缓冲区模板；行为断言与预期异常不计算 Golden，不导入目标实现。后续测试按需加载，缺失、过期或读取失败的条目自动重建；重建或保存失败返回非零。生成阶段必须为当前全部 active 调用准备成功，不以部分缓存完成宣布测试生成通过。
 
 缓存键包含格式版本、Golden 源码哈希、绑定的既有输出契约、PyTorch 版本、分组、case_id、调用序号、输入与输出配方、seed、预期类型和断言。修改目标实现可复用缓存；修改用例、Golden 或绑定契约后自动使用新条目。数值缓存准备和命中均核对实际主参考输出符合已有输出契约；不合法时不能放行，重建后仍不合法则失败。每次目标调用使用独立输入与输出模板副本，序列、repeat、bitwise、AICPU 前处理、实际算子调用及结果检查保持执行。数值比较前同样核对目标输出；合法空张量保留检查记录，未声明的空容器不能以零条比较记录通过。沿用现有 detail 记录结构，不新增外部字段。缓存固定在 CPU 加载并限制反序列化内容，使用临时文件和原子替换写入。
 
