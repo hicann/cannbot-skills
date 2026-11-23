@@ -122,6 +122,23 @@ if (-not $Version) {
     return
 }
 
+function Test-InstallPathEntry {
+    param(
+        [string]$PathValue,
+        [string]$Directory
+    )
+
+    $separators = [char[]]'\/'
+    $expected = $Directory.TrimEnd($separators)
+    foreach ($entry in ($PathValue -split ';')) {
+        $normalized = $entry.Trim().Trim('"').TrimEnd($separators)
+        if ([string]::Equals($normalized, $expected, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+    return $false
+}
+
 # 3. Check if already installed and up-to-date
 $InstallDir = Join-Path $env:USERPROFILE ".cannbot\bin"
 $BinaryDest = Join-Path $InstallDir "install-helper.exe"
@@ -137,7 +154,7 @@ if (Test-Path $BinaryDest) {
             $UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
             if (-not $UserPath) {
                 [Environment]::SetEnvironmentVariable("Path", $InstallDir, "User")
-            } elseif ($UserPath -notlike "*$InstallDir*") {
+            } elseif (-not (Test-InstallPathEntry -PathValue $UserPath -Directory $InstallDir)) {
                 [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
             }
             Write-Host " Launching install-helper..." -ForegroundColor Cyan
@@ -249,7 +266,7 @@ if (-not $UserPath) {
     [Environment]::SetEnvironmentVariable("Path", $InstallDir, "User")
     Write-Host " [OK] Added to PATH (restart terminal to take effect)" -ForegroundColor Green
     Write-Host ""
-} elseif ($UserPath -notlike "*$InstallDir*") {
+} elseif (-not (Test-InstallPathEntry -PathValue $UserPath -Directory $InstallDir)) {
     [Environment]::SetEnvironmentVariable("Path", "$UserPath;$InstallDir", "User")
     Write-Host " [OK] Added to PATH (restart terminal to take effect)" -ForegroundColor Green
     Write-Host ""
