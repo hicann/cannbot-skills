@@ -285,6 +285,8 @@ python scripts/generate_test_cases.py \
 
 > **空tensor用例**：L0和L1用例均自动生成空tensor用例（从正常用例派生），确保算子空tensor场景覆盖。详见 [empty-tensor-guide.md](references/empty-tensor-guide.md)。
 
+对涉及浮点均值、中心二阶矩或归一化统计量的接口，按[浮点归约的定向精度用例](references/numerical-reductions.md)构造可解析的 L1 数值探针及相邻对照，并在实际张量上核验命中情况。
+
 ### 9. 测试设计结果总结
 
 在 `operators/{operator_name}/tests/st/` 目录总结算子测试设计过程与结果：
