@@ -107,6 +107,22 @@
 
 [cannbot 中的 catlass-op-generator](https://gitcode.com/cann/cannbot/tree/master/plugins-official/catlass-op-generator) 使用本仓 `catlass-cpp-interface`、`catlass-cpp-reference`、`catlass-cpp-design`、`catlass-cpp-develop`、`catlass-cpp-test` 和横向知识查询 `catlass-cpp-knowledge`，覆盖通用 CATLASS 算子与注意力家族。
 
+## Catlass Python 算子开发
+
+> 以下 Skill 位于 `community/ops/` 目录；静态知识来自 [cannbot-knowledge](https://gitcode.com/cann/cannbot-knowledge) 的 `knowledge/ops/catlass-dsl/`，插件入口见 cannbot 的 `plugins-community/catlass-python-generator`。
+
+### Skills
+
+| Skill | 功能 |
+|-------|------|
+| **catlass-python-workflow** | 入口：阶段路由、门禁与真实执行证据要求 |
+| **catlass-python-design** | 生成算子规格、Torch 精度标杆与 workload 用例 |
+| **catlass-python-develop** | 按设计实现、调试、评审与交付 |
+| **catlass-python-bench** | 正确性验证与性能测量 |
+| **catlass-python-optimize** | 独立优化已有算子 |
+| **catlass-python-knowledge** | 查询 CATLASS Python 知识并沉淀项目经验 |
+| **catlass-python-knowledge-upgrade** | 维护者：知识库与版本基线升级（不随插件安装） |
+
 ## PyPTO 算子开发
 
 ### Skills

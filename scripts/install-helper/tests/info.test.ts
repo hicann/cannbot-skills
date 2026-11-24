@@ -79,7 +79,7 @@ describe("info", () => {
   });
 
   it("resolves community plugins via the repository scan", async () => {
-    // community plugins (autoresearch, catlass-dsl-generator, ...) are
+    // community plugins shipped in this repo's plugins-community/ are
     // discovered by mergeDynamicPlugins in ensureRepoAndScan — info must
     // trigger the scan, not just cannbot discovery
     const installerRoot = join(testDir, "installer-community");

@@ -1,0 +1,26 @@
+{
+  "name": "vector_add",
+  "op_type": "elementwise",
+  "description": "Element-wise addition of two tensors.",
+  "axes": {},
+  "inputs": {
+    "x": {
+      "shape": null,
+      "dtype": null,
+      "description": "Left operand."
+    },
+    "y": {
+      "shape": null,
+      "dtype": null,
+      "description": "Right operand."
+    }
+  },
+  "outputs": {
+    "output": {
+      "shape": null,
+      "dtype": "float32",
+      "description": "Element-wise sum."
+    }
+  },
+  "reference": "import torch\n\n\ndef run(x, y):\n    return torch.add(x, y)\n"
+}

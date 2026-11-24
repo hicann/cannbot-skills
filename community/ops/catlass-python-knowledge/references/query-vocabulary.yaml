@@ -1,0 +1,27 @@
+schema_version: "1"
+operator_families:
+  linear-attention:
+    aliases:
+      - kda-linear-attention
+  flash-attention:
+    aliases:
+      - fa
+      - fag
+      - flash-attn
+      - flash-attn-grad
+      - flash-attention-backward
+      - flash-attention-grad
+      - flash-attention-score-grad
+  gated-delta-rule:
+    aliases:
+      - gdn
+      - gdn2
+  sparse-attention:
+    aliases:
+      - bsa
+      - bsag
+      - sfag
+      - block-sparse-attention
+      - block-sparse-attention-backward
+      - sparse-flash-attention
+      - sparse-flash-attention-grad

@@ -1,0 +1,347 @@
+---
+name: catlass-python-optimize
+description: Iteratively optimize, speed up, benchmark, and profile one existing CATLASS Python operator source file on Ascend NPU with a text-tracked round ledger, noise-aware best selection, and profiler-guided tuning. Use for CATLASS Python performance optimization or repeated kernel tuning.
+---
+
+# CATLASS Python 算子优化（门禁引导）
+
+> **入口**：本阶段开始前先加载 `catlass-python-workflow` 并输出阶段卡。
+
+> **入口门禁**：`python3 <workflow>/scripts/gate.py fulltest --workspace <ws>` 必须通过，
+> 即当前 kernel 已有全量测试（full test #1 / #2 / #3）`passed`；`merge_required: true` 时
+> 当前 kernel 必须是已通过 `full test #2` 的融合版。未通过不得开始优化，也不得用
+> focused test 或 optimize 自测代替。
+
+> **自动执行**：遇到问题只要有可行方案就逐步尝试，一个方案失败就换下一个，不停下来找
+> 用户确认。等待远端任务、编译、benchmark、设备或长跑用例时直接等待并轮询，不结束回合，
+> 也不用进展汇报代替继续执行。仅当缺少只有用户能提供的信息、或可行路径已穷尽时才提问。
+
+> **超时纪律**：编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块；
+> 编译单独成块、不套 60s，但必须带明确上限（默认 `timeout 600s`）；单例运行一条命令只跑
+> 一个 case/shape，加 `timeout -k 5 60s`；批量按 2~5 片拆分，分片命令用分片级超时（用例数
+> × 60s + 余量），片内逐例 60s 硬超时，禁止整批套一次性 60s 或裸跑。
+> 远端/容器调试时，`timeout` 必须写在最终执行环境的命令内，外层只负责连接。
+> 超时或卡住立即终止，不得死等或加大超时。终止后先做卡健康判定：同一张卡的小探针或
+> 官方算子能过 → 判本算子死锁并转 debug；探针也失败 → 判设备问题并换卡重试一次。
+
+驱动 profile → hypothesis → modify → correctness → benchmark → record 闭环，直到达到性能
+目标或满足停止条件。**本版本没有 `optimize_state.py`**：轮次账本、best 恢复和停止条件由
+`ITERATIONS.md` 的 `## Performance Rounds` 表与本文规则维护。
+
+## First action
+
+先浏览工作区和用户提示，识别：
+
+- workspace 与主实现文件；
+- `solution.json`、`definition.json`、`workload.jsonl`、`workload_dev.jsonl`；
+- correctness 与 benchmark 命令；
+- NPU device、性能指标、目标、迭代上限和 stall threshold；
+- operator/optimization 知识、既有 `ITERATIONS.md`。
+
+不要机械询问可从文件系统确定的信息。执行任何测试或修改前展示：
+
+**📋 Resolved Plan**
+
+- **Workspace / Kernel** — `<path>`
+- **Benchmark inputs** — `<solution.json>, <definition.json>, <workload_dev.jsonl>`
+- **Correctness / benchmark** — `<resolved argv>`
+- **Device** — `<npu:index>`
+- **Target** — `<metric direction threshold；用户未给数值门槛时写 explore（模式 B）>`
+- **Iteration limit** — `<max_iterations>; stall=<stall_threshold>`
+- **Knowledge** — `<operator family, keywords, adopted concept paths>`
+
+用户未指定迭代上限时默认最多 30 轮。
+
+## 两种模式
+
+| 模式 | 触发条件 | 停止条件 |
+|---|---|---|
+| A 达标 | 用户明确给出的数值门槛（`DESIGN.md` 仅转述用户原话；agent 自定、知识/基线/roofline 推算值不算） | best candidate 达到 threshold 且至少完成 1 轮 |
+| B 探索 | 没有明确性能目标 | 完成 2~3 轮已记录迭代（下限 2 轮、上限 3 轮）；develop 回测 `skeleton_ratio ≥ 0.80` 时 0 轮收口 |
+
+门槛只能来自用户提示或用户确认。由知识条目、基线实现或 roofline 推算出的数值只能作为
+轮次内的参考目标，不得写入 `threshold` 触发模式 A；`DESIGN.md` 中由 agent 自定的数值
+目标不构成模式 A 的依据。用户只提出“更快”“性能差”“需要优化”等相对诉求而未给具体
+指标时，按模式 B 执行（`threshold: none`），性能采集要求按 `性能要求` 行单独判定。
+
+唯一例外：baseline 之后按同一份 device profile 重算的 `skeleton_ratio ≥ 0.80` 时，optimize
+不做任何探索轮，`Optimization Policy` 记 `mode: explore` +
+`early_stop: skeleton_ratio >= 0.80`，直接进入 finalization。该例外不改写 mode，也不虚构
+用户门槛，见 Setup and baseline 第 5 步。
+
+模式在开始时确定并写入 `ITERATIONS.md`，中途不得切换。模式 B 在无用户确认时按 2~3 轮执行
+（下限两轮、上限三轮）：低于两轮不得以“感觉差不多了”提前收口；满两轮且归因第一名已被
+针对性攻过、无新轴可试时即可收口，不得为凑轮次做空转轮；达到三轮后停止新增轮次。模式 A
+即使 baseline 已经达标也必须记录至少一轮，避免把未优化的首版实现直接当作达标交付。
+骨架达成率命中时的 0 轮收口例外见 Setup and baseline 第 5 步。
+
+停止条件只看账本：模式 B 未满 2 轮（`early_stop` 命中时为 0 轮）、模式 A 未满 1 轮或未
+达标时必须继续下一轮。不得中途
+结束回合、不得汇报“优化完成”、不得询问用户是否继续。认为没有新方向时，仍要选一个可
+证伪的优化轴完成本轮并如实记录 `rejected`。
+
+## 轮次账本
+
+`ITERATIONS.md` 中维护：
+
+```markdown
+## Optimization Policy
+- mode: target | explore
+- metric: performance.candidate.mean_ms (end2end 口径, lower is better)
+- threshold: <value | none>
+- early_stop: skeleton_ratio >= 0.80        # 仅命中骨架达成率收口时出现
+- device: npu:<id>
+- dev workload: workload_dev.jsonl (<n> cases)
+
+## Performance Rounds
+| Round | Axis | Bottleneck | Before (ms) | After (ms) | Decision | Evidence |
+|-------|------|------------|-----------|----------|----------|----------|
+| 1 | ... | ... | 1.20 | 1.05 | adopted | evidence/round-001/result.json |
+```
+
+每轮必须填全：
+
+- `Axis`：本轮唯一改动轴；
+- `Bottleneck`：从本轮 fresh profile 指出主导 pipe、占比、搬运还是计算受限、理论下限；
+- `Before (ms)`：进入本轮时 best 的 candidate `end2end_ms`；
+- `After (ms)`：本轮正确性通过且完成计时后的 candidate `end2end_ms`，未通过写 `null`；
+  本轮改动涉及 host 侧或分配/缓存时，Evidence 需附 `device_ms`/`host_gap_ms` 拆分；
+- `Decision`：越过噪声门禁为 `adopted`，否则 `rejected`；
+- `Evidence`：本轮结果 JSON 与 profile 目录的项目相对路径。
+
+账本逐轮追加，禁止事后补写。模式 B 不足两轮（`early_stop` 命中时为 0 轮）、模式 A 不足
+一轮时不得进入 finalization。
+
+## 评测口径（控温仅在 optimize 阶段执行）
+
+- 性能计时只使用 design 冻结的 `workload_dev.jsonl`（用户用例 ≥30 条时为 30~40 条；
+  不足 30 条时全选；无用户用例时按覆盖需要自定，总数 ≤40），所有轮次共用同一份样本。
+- 逐例配对：同一用例先跑 candidate 再跑 reference，在同一张卡相邻时间完成，抵消温度
+  漂移；有对标实现时不得只跑 candidate。测量契约见
+  [`catlass-python-bench`](../catlass-python-bench/SKILL.md)。
+- Before/After 统一为 `end2end_ms`（结果中的 `performance.candidate.mean_ms`，含 `run`
+  内的 host 侧成本），reference 使用同一 warmup 与采样口径；不得通过改变入口契约把成本
+  移到 `run` 外。
+- host 侧关键路径（首 kernel 前的大块分配、padding 拷贝、wrapper 构造）是合法优化轴，
+  但必须用 `host_gap_ms` 的 host/device 拆分或 `step_trace_time` 证明它确实落在关键路径上。
+- 控温：同用例内各实现温差 ≤3℃；执行前校验 AICore 频率为 1650 MHz；温度超过 85℃ 停机，
+  降温后重新配对测量该例。full test 与 benchmark 不控温。
+- 单例 60 秒硬超时；分片命令按分片级超时、片内逐例 60 秒。超时判定卡死，换卡重试一次，
+  二次仍超时判定 kernel 问题，不得加大超时绕过。
+
+## Setup and baseline
+
+1. 按 `catlass-python-knowledge` 读取 operator 与 optimization 证据，读已有 `ITERATIONS.md`，
+   避免重复已证伪方向。
+2. 确认优化对象是一个现有、无符号链接的主实现文件，允许包含多个 DSL kernel。继承
+   design/develop 的 `fusion.mode`：默认 performance，允许多 executor、GM 中间张量和
+   变体分派。
+3. 运行全部 correctness 命令，再用已解析命令生成 baseline；确认结果的
+   `solution.source_sha256` 与当前 kernel SHA-256 一致。
+4. 在 `ITERATIONS.md` 写入 `## Optimization Policy` 与第 0 行 baseline。
+5. **骨架达成率收口（仅模式 B，在 baseline 之后判定）**：用 baseline 的同一份 device
+   profile 重算 `skeleton_ratio = Σ 有实测的骨架 gemm_ms ÷ Σ 全部 GEMM 实现段耗时`。
+   `waived` 组按实测计入分子（须写了饱和理由：`mac ≥ 0.99` 或对应带宽管 `≥ 0.95`），
+   `failed` 组分子记 0、其实现段仍计入分母；用例取 DESIGN / spec 登记的每个 GEMM 最大
+   dev shape，分子与分母逐段配对；单 kernel 或多段共用一个 kernel 拆不开时，实现侧取该
+   kernel 单轮 task duration 总量，并写明按什么区分不同 launch。`skeleton_ratio ≥ 0.80`
+   时不做任何探索轮，直接进入 finalization：`Optimization Policy` 记 `mode: explore` 与
+   `early_stop: skeleton_ratio >= 0.80`，`## Performance Rounds` 只保留表头（0 轮），
+   Final Verdict 写明未做优化轮次及依据。不命中或回测为 `not_run` 时按 2~3 轮执行——缺少
+   骨架数据（如纯 vector 算子）不构成豁免理由，不得以“骨架不适用”跳过优化，也不得把该
+   例外改写成模式 A 或虚构 `threshold`。
+
+## Optimization loop
+
+每轮只探索一个可证伪的优化轴，严格按以下顺序执行：
+
+1. **Analyze.** 从保留的 `kernel_details.csv`、`step_trace_time.csv` 和历史指标识别当前
+   瓶颈。不要盲目调参；先形成可用于检索的 operator family、瓶颈类型、相关 DSL API、
+   shape/dtype/layout 和架构关键词。
+
+   每轮先产出**结构差异对照**，再选优化轴：把当前 best 实现与 DESIGN.md 登记的主参考
+   样例、原始 golden（任务书提供的高精度参考实现）逐项对齐——数据流与中间量（落 GM 的
+   中间量个数/dtype/字节数）、epilogue 结构（在哪个 pipe 融合、扫描遍数、每 tile 的
+   barrier 次数）、tile 与块映射、舍入位置与次数、同步原语。每个差异项必须标注代价来源
+   （fresh profile 的 pipe 占比、消融实测 ms，或 `not measured`）；标 `not measured` 的
+   差异项不得作为本轮优化轴的依据。骨架阶段有同 shape 数据时，同时写出 kernel 时间与
+   骨架 GEMM 的比值，并把差值落到具体段（epilogue / scatter / 写出 / barrier）。
+
+   有 kernel 级产物时，整个 optimize 阶段至少完成一次针对 profile 占比最高段的单变量
+   消融（关闭该段、换回骨架等价写法或只保留 GEMM），把差值折算成 ms；best 结构与 shape
+   未变时可复用该结果，不重复消融。消融用交付主实现的临时副本，在
+   `evidence/round-NNN/ablation/` 下计时，不改动交付主实现，也不占 Performance Rounds 行。
+
+   有 kernel 级产物时，若 `device_ms / end2end_ms < 0.5`（小 shape）或
+   `host_gap_ms / end2end_ms > 0.05`（大 shape），先按 host 关键路径归因：首 kernel 前的
+   大块分配、padding 拷贝、wrapper 构造、launch 间隙。不得直接归因为 kernel 慢，也不得
+   把这些成本移出计时窗口。
+
+   若 fresh profile 中 `mac` 或 `mte2` 单项达到墙钟的 0.7 以上，本轮轴按
+   `knowledge/ops/catlass-dsl/guides/implementation_patterns/gemm_optimization_ladder` 的阶梯顺序选取（波次量化 → L1 双缓冲
+   → L0 双侧双缓冲），不要在同一阶段反复微调参数。
+
+   若同时满足 `mac < 0.5`、`mte2 > 0.8`、`mac + mte2 < 1.5`，先排除带宽受限：若
+   `mte2 ≥ 0.95` 且实测耗时已接近 DESIGN 的搬运下界（按有效 MTE2 带宽折算，或不超过同
+   shape `torch.mm`），
+   说明该 shape 贴住带宽上限，本轮轴改为减流量、铺放或波次量化，不得按“缺流水”处理。
+   排除带宽受限后，唯一结论是**缺少流水、拷贝链与 MMAD 串行**；本轮轴只能是双缓冲、
+   `BK > SK` 或同步协议修复，禁止选铺放、减流量类改动。`cube_utilization` 接近 100%
+   不能推翻这个判断。
+
+   若 `kernel_details.csv` 缺失、目标 kernel 行 task duration 为 0，或在
+   `device_ms / end2end_ms ≥ 0.5` 的用例上该时长与配对计时相差一个数量级，先按
+   `knowledge/ops/catlass-dsl/guides/profiling/torch_npu_profiler_dsl_kernels.md` 的
+   Level1 + AiCMetrics 配置重采（上限 2 次）；仍不可用时，在账本写明「profiling 不可用」
+   及原因，本轮允许用 makespan 算术与单变量消融归因。benchmark 交付前仍须有 kernel 级
+   产物，或写明「profiling 不可用」。
+
+2. **Query knowledge.** 读 `knowledge/ops/catlass-dsl/optimizations/index.md` 与相关分类索引，按算子族、
+   `c310`、瓶颈关键词定位候选条目，再完整读取实际采用的条目；检查适用条件、验证记录和
+   版本新鲜度。不得把知识结论当作性能证据。把采用的条目路径写入本轮记录；零命中时明确
+   记录，并仅在 profile 证据足以支撑 hypothesis 时继续。
+
+3. **Pre-register.** 在 `## Performance Rounds` 增加一行草稿，填写 `Axis`、
+   `Bottleneck`、至少 2 个候选根因、能区分这些根因的判别性实验、预期收益和判伪条件；
+   Expected 必须在 benchmark 前写入。
+4. **Snapshot.** 修改前把当前 best kernel 复制到 `evidence/round-NNN/kernel-before.py`，
+   便于 rejected 后恢复。
+5. **Modify.** 只修改主实现文件，修改后同步更新 `solution.json` 的源码包；不改变
+   reference、workload、容差或计时边界。默认允许多 launch、融合范围及显式 dispatch
+   调整，以完整 `run` 的性能为准；严格模式禁止多 kernel、多 launch 或独立变体。核内
+   同步保持 `tla.mutex`，跨核交棒保持 `cross_flag`，不得更换同步原语。
+6. **Correctness.** 运行全部 required correctness 命令。失败时立即停止本轮，不得
+   benchmark；记录 `After ms = null`、`Decision = rejected`。
+7. **Benchmark.** 正确后使用同一 device、`workload_dev.jsonl`、环境和采样配置测量，逐例
+   配对。默认 warmup 1 次、采集 2 次；需要更稳时可加到 5，统计口径（`mean_ms` 算术平均、
+   `median_ms`/`all_ms` 作噪声参考）按 `catlass-python-bench`。不得为得到更好数字临时改变
+   配置。
+8. **Record immediately.** benchmark 返回后立即补齐本轮行、`## Structural Delta` 对应行与
+   `evidence/round-NNN/result.json`；在关闭本轮前不得 profile、读新资料、修改 kernel 或
+   规划下一轮。failed/partial 轮也必须记录。
+9. **Decide.** 按下方噪声门禁判断 adopted / rejected。rejected 时从
+   `evidence/round-NNN/kernel-before.py` 恢复 best；不要手工重建候选。
+   实测方向与预登记预期相反（例如预测 ≥1.3×、实得 <1.0×，或指标应升反降、应降反升）
+   时，不得直接 rejected 收工：必须写一条重新诊断记录（新的候选根因与判别实验），再用
+   不同的轴进入下一轮。幅度不足但方向一致时按普通 rejected 记录。
+10. **Continue.** 只有本轮已记录后才分析下一优化轴。不得复用上一轮检索结果跳过本轮核对，
+    但可以复用仍适用的条目。
+
+正确候选只有越过噪声门禁才更新 best：
+
+```text
+required_improvement = max(
+  min_improvement_fraction,
+  best_std_ms / best_mean_ms,
+  candidate_std_ms / candidate_mean_ms)
+```
+
+candidate 相对 best 的提升小于 `required_improvement` 时记 `rejected`，不得因为“看起来
+更快”就更新 best。
+
+## Stall 与停止条件
+
+连续 `stall_threshold` 轮没有产生 adopted 结果时进入 stall 处理，不得直接收口：
+
+1. 重新分析保留的 `kernel_details.csv`、`step_trace_time.csv`、best 与 rejected 结果；
+2. 采集一次 fresh profile，保存到对应轮的 `evidence/round-NNN/profile/`；
+3. 选择与上一轮不同的改动轴，写明新的机制与判伪条件后继续。
+
+即使已满足模式 A 的一轮下限，若 fresh profile 的归因第一名还没有作为任何一轮的 Axis，
+也不得停止；至少完成一轮针对该归因的候选改动。归因第一名指 `kernel_details.csv` 中
+task duration 占比最高的 pipe（mac / mte2 / mte1 / fix / vec）；`op_summary` 只有在该
+版本确实带 pipe 指标时才可作为替代。按阶梯映射到轴：MTE2 → 波次量化或 L1 双缓冲；
+MTE1 → L0 双侧双缓冲或 `BK > SK`；CUBE → 铺放或结构上限；FIX → epilogue 归并。若该
+映射轴已被 DESIGN 判定不可用，或已有 rejected 轮次的实测证据，可停止，并在 Final
+Verdict 写明依据。命中骨架达成率收口（`early_stop: skeleton_ratio >= 0.80`）时，本要求
+不适用。
+
+仅在以下条件停止迭代并进入 Finalization：
+
+- 模式 A 达到 threshold 且至少完成 1 轮，且满足上方“归因第一名已尝试”要求；
+- 模式 B 已完成 2~3 轮（上限 3 轮），且归因第一名已被针对性攻过；
+- 模式 B 命中 `early_stop: skeleton_ratio >= 0.80`（Setup and baseline 第 5 步），未做
+  任何探索轮；
+- 达到 `max_iterations`（默认 30）；
+- 环境缺失导致无法继续，记录 `blocked` / `not_run` 与精确重跑命令。
+
+达到 `max_iterations` 仍未达标时，如实记录未达标、剩余瓶颈和下一步建议，不得伪造成达标。
+
+## 保持循环高效
+
+- 每轮 warmup 1、采集 2 次，用 candidate latency 排序正确候选。
+- 候选变化时只重新采集 candidate profile；不变的 Torch reference 可以复用已有 profile。
+- 不改变 correctness oracle、workload、tolerance、reference 或已确认的 benchmark 语义来
+  缩短时间。
+- 把完整 correctness、同配置 benchmark 和 fresh profiling 留给最终验收；快速信号不能
+  替代最终复测。
+
+## Finalization
+
+满足停止条件后，对当前 best kernel 做一次最终验收：
+
+1. 运行全部 correctness 命令，记录退出码与逐 case 结果；
+2. 用 `workload_dev.jsonl` 做一次 fresh 配对 benchmark；
+3. 采集 fresh profiling，保留每例 `kernel_details.csv` 与 `step_trace_time.csv`；
+4. 在 `ITERATIONS.md` 写 `## Final Verdict`：模式、轮次数、best 前后耗时、加速比、
+   剩余瓶颈、下一步建议，并记录**交付 kernel SHA-256**（当前主实现文件的 SHA）；
+   交付 kernel 与 best kernel 不同时（例如后续 review 修复了源码）说明差异原因；
+   Final Verdict 引用的证据路径必须真实存在，不得引用未产出的文件；
+5. 把 best kernel 保留为工作区主实现文件，并确认 `solution.json` 与之一致。
+
+最终验收证据只服务 optimize 自身，不移交 develop；交回 develop 后先跑
+`gate.py optimize` 确认账本完整，再按 final review → 全量测试验收：采纳改动导致 kernel
+变化时补跑 `full test #3`（无融合阶段时记 `#2`），全部轮次 rejected、kernel 未变化时可
+复用最近一次全量记录（有融合时是 `full test #2`）。
+`DESIGN.md` 声明 `性能要求：requested` 时继续执行 benchmark，`gate.py benchmark` 通过后
+才算 optimize 真正交付；声明 `none` 时当前 kernel 全量测试通过后直接 finish，不再做交付
+benchmark 与 profiling。缺少当前 kernel 的全量测试记录时不得进入 benchmark 或 finish，
+也不得把本阶段的 dev 子集结果当作全量正确性证据。若后续 review 修复了源码，只需补跑
+focused test 与新一轮全量测试（有融合时记 `full test #3`）；优化轮次按其 evidence 中的
+kernel SHA 说明适用范围，不要求对最终 kernel 重跑。
+
+## 知识沉淀
+
+final 验收通过后，对 adopted 方向做一次去重检查：按 operator family、改动轴、关键 DSL
+API、shape/dtype/layout 和最终 profiler 瓶颈，读 `knowledge/ops/catlass-dsl/optimizations/index.md` 与
+`.catlass-python/knowledge/learned/index.md`；已有条目覆盖同一机制与适用条件时，只在 `ITERATIONS.md`
+引用，不重复录入。
+
+同时满足以下条件才写入 learned：
+
+- final correctness、fresh benchmark 和 profiling 均通过；
+- best 相对 baseline 越过噪声门限，且达到 Resolved Plan 的提升阈值（未指定时至少 5%）；
+- 知识库未覆盖同一优化机制与适用条件；
+- 能从 accepted 结果与 final 证据说明 hypothesis、实际修改、适用条件、性能前后和
+  profiler 观察。
+
+每个独立机制一条 learned concept，`kernel_sha256` 使用 final best，evidence 引用 final
+correctness/benchmark，profiling 通过时附 CSV 路径。结束前一次性写入，不逐轮写入，也不
+录入 rejected/failed 方向。写入后把 concept 路径追加到 `ITERATIONS.md` 的 Final Verdict。
+
+## Gotchas
+
+- 追求真实 latency 降低，不做 reward hacking：不得跳过计算、返回未初始化输出或规避计时。
+- host 侧 workspace/wrapper 缓存是允许的优化面，但必须每次调用完整重写有效区并清零尾部、
+  形状切换不累积常驻显存，并记录多轮迭代的 mem_alloc 曲线。
+- 只报 warm 态数字、或把一次性成本移出计时窗口，不算性能提升。
+- 不得为了调参方便把 tile、dtype、shape、params 或开关移到模块级，也不得用可变全局状态
+  或 closure 生成隐式编译期特化。
+- 异常大幅提升先核对 correctness、kernel hash、workload 和 profiler CSV，再下结论。
+- 不把仅调整 benchmark 参数、仅停留在 Torch 或跳过 profiling 当成 kernel 优化。
+- 不因为工具不可用而静默停止；按 stall/blocked 协议保留证据和重跑入口。
+
+## 产物布局
+
+```text
+.catlass-python/optimize-runs/<run-id>/
+├── ITERATIONS.md
+├── baseline/{kernel.py,result.json}
+└── evidence/
+    ├── round-001/{kernel-before.py,result.json,profile/case-NNNN/*.csv}
+    ├── round-002/...
+    └── final/{kernel.py,result.json,profile/case-NNNN/*.csv}
+```
+
+长期只保留 `ITERATIONS.md`、每轮结果 JSON、best kernel 快照和最终 profile CSV；不保存
+完整 profiler trace。

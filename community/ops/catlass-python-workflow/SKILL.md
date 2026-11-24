@@ -1,0 +1,336 @@
+---
+name: catlass-python-workflow
+description: Use when the user asks for any CATLASS Python operator task (design, implementation, debugging, benchmark, optimization, knowledge) or mentions catlass.tla, to route stages and apply the gate-checked workflow rules before any other catlass-python skill runs. 当用户提及 CATLASS Python 算子开发、实现、复现、调试、精度对齐、benchmark、优化或上板时，必须先加载本 Skill。
+---
+
+# CATLASS Python 工作流入口（门禁引导）
+
+本 Skill 是 `catlass-python-generator` 插件的唯一入口。**本版本不提供状态机**：
+`develop_state.py`、`optimize_state.py`、`bench.py`、`verification.py`、
+`validate_reference.py`、`record_knowledge.py` 均已移除。阶段推进和证据核对由本文件、
+目标阶段 `SKILL.md` 与只读门禁脚本 `scripts/gate.py` 共同承担；门禁不保存状态文件，
+只校验工作区产物和 `ITERATIONS.md` 记录。
+
+唯一不可放松的要求：**任何“通过”都必须对应真实执行记录**。没有命令、退出码和输出文件的
+结果一律视为未执行，写 `blocked` / `not_run`，不得写成通过。
+
+## 知识库定位
+
+CATLASS Python 知识位于 cannbot-knowledge 仓库的 `knowledge/ops/catlass-dsl/`：安装
+`catlass-python-generator` 后位于项目
+`.cannbot/dependencies/catlass-python-generator/cannbot-knowledge/knowledge/ops/catlass-dsl/`，
+也可用 `CANNBOT_KNOWLEDGE_ROOT` 指向知识仓 checkout。各阶段 SKILL.md 中
+`knowledge/ops/catlass-dsl/` 下的路径都相对该根目录解析；项目经验只写
+`<项目>/.catlass-python/knowledge/learned/`。
+
+> **自动执行**：默认自主推进，不把阶段边界或阶段卡变成等待用户的理由。门禁通过并记录
+> 里程碑后，立即进入下一阶段；只有缺少只有用户能提供的信息、环境缺失或可行路径穷尽时
+> 才停下提问。
+
+## 1. 启动检查（每个新任务的第一条回复前）
+
+依次完成：
+
+1. **定阶段**：按 §2 路由表确定唯一阶段；无法归属时先向用户确认。
+2. **定执行模式**：按 §3.1 确定 `remote-detached` / `remote-connected` / `local`，只依据
+   用户说明或工作区已有声明，禁止本地探测环境；无法判断时先向用户确认一次。
+3. **读全文**：完整读取目标阶段 `SKILL.md`，禁止只读摘要或标题。
+4. **查产物**：确认工作区已有文件（`DESIGN.md`、`reference.py`、`definition.json`、
+   `workload.jsonl`、`workload_dev.jsonl`、主实现文件、`solution.json`、`ITERATIONS.md`）。
+   以文件系统为准，不凭对话记忆续跑。
+5. **定 DSL 版本**：用户提示或任务文件已声明时直接采用；否则读取当前 Python 环境已安装
+   版本（`importlib.metadata.version("ascend-catlass-python")`）。本地未安装时，可交互则先向
+   用户确认一次；无法交互时默认 `2.2.0`。这里只确定版本号，不得把 site-packages 里的
+   实现或源码当作 catlass 样例。目标版本写入阶段卡与 `DESIGN.md`；远端实际版本不一致时
+   先停下确认。
+6. **刷新参考源码（design / develop 的硬前置）**：删除已存在的
+   `.catlass-python/references/catlass`，按 §6 重新下载并解压 master 归档包。下载结果必须
+   是 ZIP；若得到 HTML 页面、空文件，或解压后没有 `examples/python/tla_dsl`，视为阻塞：
+   记录失败原因与重试命令，停止推进，不得进入 design / develop，也不得用知识库、已安装
+   Python 包源码或残留旧目录替代。只有确认样例树可 `find` 到 `.py` 后才继续。
+7. **跑门禁**：执行 `python3 <SKILL_DIR>/scripts/gate.py status --workspace <项目根>`，
+   按输出定位最上游未通过项；该阶段就是当前阶段卡里的阶段。门禁失败原因必须原样带进
+   阶段卡，不得省略。
+8. **输出阶段卡**，然后立即执行该阶段第一个动作，不等待用户确认：
+
+   ```text
+   📋 阶段卡
+   阶段：<design | develop | bench | optimize | knowledge>
+   依据：<SKILL.md 绝对路径> ｜ 关键约束：<该文件中的一条原文>
+   DSL 版本：<目标版本 + 来源：用户指定 / 本地已安装 / 默认>
+   执行模式：<remote-detached | remote-connected | local>（来源：用户说明 / DESIGN.md）
+   工作区：<项目根> ｜ 已有产物：<列出实际存在的关键文件>
+   参考源码：<已下载 / 缺失（阻塞）> ｜ 路径：`.catlass-python/references/catlass`
+   门禁：<gate.py status 的输出摘要，或未通过项与原因>
+   下一步：<该阶段第一个必做动作>
+   ```
+
+9. **建立或更新里程碑日志**：工作区没有 `ITERATIONS.md` 时创建，表头为
+   `| Iter | Stage | Kernel SHA256 | Command | Result | Evidence |`。后续每次阶段推进
+   都追加一行真实记录；已创建的文件只允许追加或定点 `Edit`，禁止整文件重写。
+   首次写表前先读 `scripts/gate.py` 的 `read_iterations` / `section_rows` /
+   `milestone_rows` / `status_of` / `require_evidence` / `optimization_rounds`，
+   按实际解析规则一次写对；每次改表后立即跑对应 `gate.py <stage>` 验证。
+
+## 2. 阶段路由
+
+| 用户意图 | 唯一 Skill | 前置产物 |
+|---|---|---|
+| 设计新算子、写规格、reference、workload | `catlass-python-design` | 无 |
+| 按设计实现、调试、测试、交付 | `catlass-python-develop` | `DESIGN.md`、`reference.py`、`definition.json`、`workload.jsonl` 齐备 |
+| 独立正确性校验与性能测量 | `catlass-python-bench` | 已有 `solution.json` / `workload.jsonl` / `definition.json` |
+| 已通过算子的性能优化 | `catlass-python-optimize` | 已有可运行的实现、`solution.json` 与冻结的 `workload_dev.jsonl` |
+| 知识查询与记录 | `catlass-python-knowledge` | 无 |
+
+- 一次只在一个阶段工作：同一时刻只做当前阶段的动作、只按当前阶段的口径记录；阶段切换由
+  实际产物和门禁决定，不因“感觉可以了”或用户催促而切换。
+- 用户未指定阶段时，选最上游未满足的产物：无 `DESIGN.md` → design；有设计未交付 →
+  develop；已有交付 → bench / optimize。
+- **阶段隔离不是停止点**：禁止把多个阶段的动作混在同一次执行/校验里（例如 design 未冻结
+  就写实现、focused test 未过就跑 optimize），但当前阶段门禁通过并记录后，必须立即进入
+  下一阶段继续推进；不得停在阶段边界等用户确认，也不得用阶段卡或进展汇报代替继续执行。
+  门禁 FAIL 只禁止向下游阶段推进，不禁止在本阶段继续诊断和修复；失败用例应回到本阶段的
+  debug 循环，批量修复、逐例复验后重跑该门禁，不得把“如实汇报失败”当作阶段终点。
+- 禁止在 develop 里重做设计与 reference；禁止在 optimize 里改语义、容差或计时口径。
+
+## 3. 阶段推进（带门禁）
+
+主流程固定为：
+
+```text
+design → develop → full test #1 → merge → full test #2 → optimize → full test #3 → [benchmark] → finish
+```
+
+`merge` 是条件阶段：`DESIGN.md` 声明 `merge_required: true` 时执行融合并进入 `full test #2`；
+否则记一条 `not_applicable` 的 merge 里程碑，直接进入 optimize（此时不产生 `full test #2`）。
+
+`benchmark` 是条件阶段：`DESIGN.md` 的 `性能要求：requested` 时执行，`none` 时跳过并直接
+finish。
+
+每一步进入前必须先跑对应门禁，未通过不得继续；跳步、合并步骤或“先做完再补记录”一律
+视为无效执行：
+
+| 门禁 | 命令（`<ws>` 为工作区根） | 强制要求 |
+|---|---|---|
+| design | `python3 <SKILL_DIR>/scripts/gate.py design --workspace <ws>` | 五件交付物齐备；definition/workload 合法；dev 子集总数 ≤40（用户用例 ≥30 条时为 30~40 条；不足 30 条时全选，不要求补齐；无用户用例时按覆盖需要自定，不以下限 30 为目标）；DESIGN.md 记录三个文件的 SHA-256；声明执行模式、性能要求与独立成行的 `merge_required` |
+| develop | `python3 <SKILL_DIR>/scripts/gate.py develop --workspace <ws>` | design 通过；skeleton 与 focused test 记录；`solution.json` 与实现文件一致 |
+| fulltest | `python3 <SKILL_DIR>/scripts/gate.py fulltest --workspace <ws>` | 当前 kernel 的 full test passed 记录与证据（#1 / #2 / #3 任一） |
+| merge | `python3 <SKILL_DIR>/scripts/gate.py merge --workspace <ws>` | 验收门禁，在融合版 `focused test` 与 `full test #2` 之后执行：当前 kernel 的 `merge`、`focused test`、`full test #2` 均 passed 且有证据；`merge_required: false` 时接受 `not_applicable` 记录 |
+| optimize | `python3 <SKILL_DIR>/scripts/gate.py optimize --workspace <ws>` | full test #1 或 #2 通过（`merge_required: true` 时应为融合版 #2，由 merge 门禁保证）；模式 A ≥1 轮或模式 B 2~3 轮的完整账本；`early_stop`（`skeleton_ratio ≥ 0.80`）记 0 轮 |
+| benchmark | `python3 <SKILL_DIR>/scripts/gate.py benchmark --workspace <ws>` | 当前 kernel 有全量测试 passed（优化改动了 kernel 时须为 full test #3）；`性能要求：requested` 时还要求当前 kernel 的 benchmark passed；`none` 时跳过 benchmark 与 profiling |
+| finish | `python3 <SKILL_DIR>/scripts/gate.py finish --workspace <ws>` | `性能要求：requested` 时 benchmark 已通过；`merge_required: true` 时存在 `merge` passed 记录及其对应 SHA 的 `full test #2`；final review passed；Final Verdict 存在 |
+
+`gate.py` 是只读脚本：只检查产物和 `ITERATIONS.md`，不执行算子，也不写状态文件。
+`PASS` 只代表记录齐备，结果真实性仍由 §4 约束；`FAIL` 是硬阻断，不得绕过或手改记录蒙混。
+
+### 3.1 执行模式与推进上限
+
+执行模式在启动检查第 2 步确定，写入 `DESIGN.md` 的 `执行模式：` 行；`gate.py` 只读这一行：
+
+| 模式 | 适用场景 | 推进上限 |
+|---|---|---|
+| `remote-detached` | 本地生成，当前拿不到远端连接，也没有本机 NPU | 只能推进到 develop 的代码生成完成；focused test 记 `deferred`，之后必须先连上远端 |
+| `remote-connected` | 本地生成，远端调试环境可连接 | 全流程真实执行，不允许 `deferred` |
+| `local` | 本地生成、本地调试（本机有 NPU） | 全流程真实执行，不允许 `deferred` |
+
+- 判定只依据用户说明或 `DESIGN.md` 已有声明，禁止在本地跑 `npu-smi`、导入 `torch_npu`
+  或做任何环境探测；无法判断时先向用户确认一次。
+- `remote-detached` 下 develop 门禁可以在代码生成完成后通过：`skeleton` 记 `blocked` /
+  `not_run`（附编译与最小 shape 的精确重跑命令），focused test 记 `deferred` 并在 `Command`
+  列写远端恢复后可原样执行的精确命令；缺命令按 FAIL 处理。此时工作到此为止，必须等待连接，
+  不得继续 full test 或 optimize。
+- full test #1 及之后的所有阶段都不接受推迟，门禁要求真实 `passed` 记录与证据；连接
+  恢复后按 `Command` 列补跑 focused test，把该行改为 `passed` 再继续。
+- `deferred` 只表示“代码已生成、验证未执行”，不得用来掩盖失败；真实执行后失败仍记
+  `failed`。`design` 与 `finish` 永不豁免，`gate.py finish` 见到任何 `deferred` 行即 FAIL。
+
+### design → develop
+
+- 门禁 `design` 通过；
+- `DESIGN.md`、`reference.py`、`definition.json`、`workload.jsonl`、`workload_dev.jsonl`
+  存在且内容自洽；
+- reference 已在真实环境（远端服务器或本机 NPU 机器）按 L2 口径跑过（能跑全 shape
+  就跑完；算力不足时用小 shape 冒烟，并记录 `blocked` 与精确重跑命令）。纯本地生成模式
+  下本地不代跑，记 `blocked` / `not_run` 并附精确命令后即可进入 develop；
+- `DESIGN.md` 写明目标 DSL 版本、基准命令、指标路径与 required cases。
+
+默认直接进入 develop，不等待用户批准；只有用户明确要求先评审时才暂停展示。
+
+### develop → merge → optimize 顺序
+
+```text
+skeleton → implement（自然多 kernel）→ focused test → full test #1 →
+merge（仅 merge_required: true）→ full test #2 → optimize →
+targeted review（high risk）/ final review → full test #3（优化改动 kernel 时）→ [benchmark] → finish
+```
+
+- `merge` 是独立阶段：以 `full test #1` 通过的多 kernel 版为基线，按 DESIGN 边界清单融合
+  为单 kernel；融合版先跑 focused test（与基线逐位对比），再跑 `full test #2`。同进程配对
+  计时回退必须 ≤5%，超过时继续优化融合版，不得退回多 kernel 版本收口。`gate.py merge` 是
+  验收门禁，在融合版 focused 与 FT#2 之后执行；`finish` 会复核 `merge` passed 记录及其
+  对应 SHA 的 FT#2，未融合不得交付。`merge_required: false` 时追加一行 `Stage=merge`、
+  `Result=passed`、Command 注明 `not_applicable`，直接进入 optimize。
+- `benchmark` 只在 `DESIGN.md` 声明 `性能要求：requested` 时执行；`none` 时当前 kernel
+  全量测试通过后直接 finish，不采集性能，也不写 benchmark 里程碑。
+- 每个里程碑先在 `ITERATIONS.md` 追加一行，再进入下一步；写实现文件前至少已有
+  `skeleton` 记录（可运行则记 `passed`，无 NPU 则记 `blocked` / `not_run` 并附重跑命令）。
+  包含 MMAD 的算子（纯 matmul 与 CV 融合都算）在 `remote-connected` / `local` 模式下，
+  **每个 matmul 阶段**都必须按性能 DoD 各自判定为 `passed` 或 `passed (waived)`，不得
+  只测主 GEMM、不得因整体不是 GEMM 主导而跳过，也不得用“能跑通”记过。
+- 代码变化后，受影响的测试、评审与性能结论需要重新评估；交付只认当前 kernel 的全量测试
+  与 final review。优化全部未采纳、kernel 未变化时复用最近一次全量测试（有融合时 `#2`，
+  无融合时 `#1`）；采纳改动导致 kernel 变化时必须补跑 `full test #3`，优化轮次作为过程证据
+  保留，不要求重跑。
+- 全量测试编号按发生顺序递增：`#1` = develop 收口（自然划分版，单或多 kernel）；
+  `#2` = merge 收口（融合版，仅 `merge_required: true` 时存在）；`#3` = optimize 收口
+  （仅采纳改动导致 kernel 变化时补跑）。没有融合时，optimize 后的复验记 `#2`；
+  优化未采纳且 kernel 未变化时复用上一次记录。`ITERATIONS.md` 的 `Stage` 列按实际记录写
+  `full test #1` / `#2` / `#3`，门禁据此识别。`remote-detached` 下需要执行的每一次全量
+  测试都必须等连接远端后真实执行，不得推迟。
+- `finish` 前必须对**当前源码**完成一次全量测试与最终评审；声明 `性能要求：requested`
+  时还要完成配对 benchmark 和 profiling。`Final Verdict` 必须记录交付 kernel SHA-256
+  （与当前源码及 `solution.json` 一致），引用的最终证据路径必须真实存在；交付 kernel
+  与 optimize best kernel 不同（例如 review 修复）时写明差异。
+- optimize 采纳改动后，当前 kernel 的 `full test #3`（无融合时为 `#2`）可同时作为
+  fulltest / benchmark / finish 门禁的完成证据；kernel 未变化时最近一次全量测试（有融合时
+  `#2`，无融合时 `#1`）继续作为交付证据，不要求对最终 kernel 重跑。
+
+### 测试与性能口径
+
+- full test 使用完整 `workload.jsonl`，必须分 2~5 片并行执行；每片一条命令、写独立
+  `--output`，分片命令用分片级超时，片内逐例 60s 硬超时。全部 required cases 逐例
+  通过后才算通过。失败用例一次收集、批量修复、逐例复验后再重跑整轮。
+- benchmark 使用完整 `workload.jsonl`，逐例配对 candidate/reference；正确性已在 full test
+  覆盖时可跳过逐例校验，但必须在结果中引用 full test 的证据路径。
+- 计时边界与 host/device 分层按 `catlass-python-bench` 的「算子耗时的边界与分层」执行：
+  `end2end_ms` 含 `run` 内 host 成本，`device_ms`/`host_gap_ms` 只用于归因。
+- optimize 使用 design 冻结的 `workload_dev.jsonl`（用户用例 ≥30 条时为 30~40 条；不足
+  30 条时全选；无用户用例时按覆盖需要自定，总数 ≤40），
+  所有轮次共用同一份样本。
+
+## 4. 证据真实性
+
+- `passed` 必须能指向实际执行的命令、退出码和输出文件；环境缺失写 `blocked` / `not_run`。
+- 禁止手写、推测或复制旧结果冒充本轮执行；无法复现的结果按未通过处理。
+- 关键参数（kernel SHA-256、definition/workload 摘要、命令、设备、CANN/DSL 版本）
+  记录在 `ITERATIONS.md` 与结果文件中。
+- `finish` 前随机抽 1~2 个用例重跑，确认结果可复现；重跑失败则回到 debug。
+- 门禁 `gate.py` 只核对产物与记录，不代替真实执行；发现 FAIL 时补跑真实命令并补记录，
+  不得手写凑数行或改 kernel SHA 蒙混通过。
+
+## 5. 执行纪律
+
+> **自动执行**：遇到问题只要有可行方案就逐步尝试，一个方案失败就换下一个，不停下来找
+> 用户确认。等待远端任务、编译、benchmark、设备或长跑用例时直接等待并轮询，不结束回合，
+> 也不用进展汇报代替继续执行。仅当缺少只有用户能提供的信息、或可行路径已穷尽时才提问。
+
+> **超时纪律**：编译、算子运行、benchmark、profiling 与普通 shell 命令必须拆成独立命令块，
+> 一次只做一类动作，禁止串成一条长命令。编译单独成块、不套 60s，但必须带明确上限（默认
+> `timeout 600s`）；单例运行一条命令只跑一个 case/shape，加 `timeout -k 5 60s`；批量按
+> 2~5 片拆分，分片命令用分片级超时（用例数 × 60s + 余量），片内逐例 60s 硬超时，禁止整批
+> 套一次性 60s 或裸跑。超时、无输出增长或卡住时立即终止命令，不得死等或加大超时。
+> **重要！本地生成、远端调试时**，不得用一条超时命令打包传输、编译与运行；传输、编译、
+> 运行命令各自独立，单例调试时运行算子逐例拆成单条命令并加 `timeout -k 5 60s`；
+> full test / benchmark 的分片命令按分片级超时、片内逐例 60s。
+> `timeout` 必须写在最终执行环境的命令内（ssh 直连或 `docker exec` 均如此），外层只负责连接。
+> 终止后先做卡健康判定：在同一张卡跑一个 60s 内的小探针或官方算子；探针能过就判定为本
+> 算子实现的死锁，直接转 debug 定位；探针也失败才判定为设备问题，换卡重试一次。
+
+- **控温只在 optimize 阶段执行**：同用例内各实现温差 ≤3℃，执行前 AICore 频率须为
+  1650 MHz，温度超过 85℃ 停机；full test 与 benchmark 不做控温。
+- **optimize 轮次**：有明确性能目标时（模式 A）至少完成 1 轮；没有目标时（模式 B）完成
+  2~3 轮（下限 2 轮、上限 3 轮），逐轮写入 `ITERATIONS.md` 的 `## Performance Rounds`。
+  不足两轮不得以“已收敛”“收益不大”或询问用户换取提前收口；满两轮且归因第一名已被针对性
+  攻过后可收口，不得为凑轮次做空转轮。例外：baseline 之后重算的 `skeleton_ratio ≥ 0.80`
+  时按 `early_stop` 记 0 轮。optimize 只能在最近一次全量测试（`full test #1` 或融合后的
+  `full test #2`）通过后开始，结束后必须确认当前 kernel 有全量测试记录（kernel 变化时补跑
+  `full test #3`，无融合时为 `#2`）；`性能要求：requested` 时再进入 benchmark。
+- **性能采集看用户要求**：`DESIGN.md` 的 `性能要求：none` 表示用户没有明确提性能，
+  当前 kernel 全量测试通过后直接 finish，不跑 benchmark、不做 profiling，也不得自行补测；
+  `requested` 才按 §5 口径采集性能并作为交付证据。
+- **先生成、再推进**：不论环境在哪，都先完成设计与代码生成，再进入验证。一开始就拿到
+  服务器信息，或本来就在服务器上，同样要先生成文件再推进；不得先做环境探测、装环境、
+  跑标杆或其它准备动作。
+- **本地生成、远端验证**：本地只负责设计与代码生成。reference（标杆）运行、静态检查、
+  模拟/打桩检查、编译、上板、精度、benchmark、profiling 一律留到远端真实环境执行，
+  本地一件都不做；不得在本地安装或配置 CANN / CATLASS Python。远端暂不可用时记 `blocked` /
+  `not_run` 并保留精确命令，环境就绪后直接在真实环境执行，不重建代码。
+- 缺 NPU / CANN / CATLASS 环境时记 `blocked` / `not_run`，不得写成通过。
+
+## 6. 参考与产物
+
+建议的工作区布局：
+
+```text
+<workspace>/
+├── DESIGN.md
+├── reference.py
+├── definition.json
+├── workload.jsonl
+├── workload_dev.jsonl
+├── solution.json
+├── src/<kernel>.py
+├── ITERATIONS.md
+├── evidence/                 # 每阶段命令输出、结果 JSON、profile CSV
+└── .catlass-python/references/catlass/   # catlass master 样例
+```
+
+- 文档中的 `<SKILL_DIR>` 指当前 `SKILL.md` 所在目录，跨 Skill 引用写成
+  `<SKILL_DIR>/../catlass-python-<name>/...`。
+- **本地 API 与样例参考**：以启动阶段冻结的目标版本为准，catlass 源码统一从 master
+  归档包获取，不使用 git clone：
+
+  1. 若 `.catlass-python/references/catlass` 已存在，先删除整个目录，不复用旧内容；
+  2. 下载 master 归档包
+     `https://raw.gitcode.com/cann/catlass/archive/refs/heads/master.zip`。该地址会先返回
+     302 跳转到对象存储的签名地址，下载器必须跟随重定向；不要改用
+     `gitcode.com/cann/catlass/archive/...`，那是仓库网页而不是归档包；
+  3. 下载完成后先校验产物是 ZIP：文件头应为 `PK`，大小应为几十 MB 级。若文件以
+     `<html` 开头或只有几百字节，说明没有跟随重定向、下载到了网页，必须删除并从第 2 步
+     重试，不得直接解压；
+  4. 解压到临时目录（路径尽量短；Windows 上过深的路径会触发 260 字符限制），再把解压
+     出的内容移动到 `.catlass-python/references/catlass/`，使最终样例位于
+     `.catlass-python/references/catlass/examples/...`；
+  5. 确认该目录存在且包含 `examples/python/tla_dsl`，且 `find ... -name '*.py'` 能列出
+     样例。下载、校验或解压任一失败即为阻塞：记录失败原因与重试命令，停止推进，不得进入
+     design / develop，也不得用知识库、已安装 Python 包源码或残留旧目录替代。
+
+  下载、解压和移动的具体命令按当前平台选择，只要求每次任务启动都重新获取最新 master。
+
+  样例分布在 `examples/python/tla_dsl/` 下的 `tla/kernel`、`experimental/kernel`、
+  `dsl_tutorials`、`helpers` 四类目录，挑选参考前先全量浏览（例如
+  `find <refs>/examples/python/tla_dsl -name '*.py' | sort`），避免只看顶层或单个子树
+  而漏掉 `experimental/kernel/matmul/...` 这类深层样例。同一归档里还有官方 API 文档
+  `python/tla_dsl/docs/`（含 `zh/`、`en/`），查接口语义、数据搬运规则时先看这里，再回退
+  到样例。按结构优先看：Cube-only →
+  `tla/kernel/matmul/basic_mmad/basic_matmul.py`；Cube-Vector →
+  `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+  Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
+  纯 vector → `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
+  `dsl_tutorials/vector_simt_ops/`。整体结构优先：先选阶段序列、数据流、任务映射、同步方式都接近的
+  主参考；主参考是基线不是约束，偏离写清理由。没有足够契合的主参考时，可以组合多个
+  分步样例，但要显式设计整体结构并照常跑 skeleton DoD。同名样例不存在时按结构检索
+  等价样例，不得凭记忆引用。
+- 用户指定标杆代码并禁止参考兄弟目录时：标杆文件、其用例文件与 catlass 参考源码仍可读，
+  禁止扫描同工程其他算子目录。
+- 用户暂未提供上板信息时：design 与代码生成照常推进，验证与性能记 `blocked` /
+  `not_run`，待信息补齐后重试。
+
+## 7. 用户要求暂停评审或跳过步骤
+
+- **先评审设计**：design 完成后停止并展示 `DESIGN.md` 与 reference 结果；用户回复
+  “继续”即进入 develop。
+- **跳过步骤**：说明影响与风险，取得用户明确书面确认，并在 `ITERATIONS.md` 记录跳过的
+  步骤和理由。证据真实性、环境缺失标记和最终全量验证不允许跳过。
+
+## 8. 每轮回复自检
+
+```text
+🔎 流程自检 ｜ 阶段：<...> ｜ 依据：<SKILL.md 约束原文> ｜ 本轮执行：<命令或文件> ｜ 证据：<路径> ｜ 下一步：<动作>
+```
+
+自检不是停止点：输出后立即执行“下一步”，除非该动作需要用户提供信息。
+
+## 9. 语言
+
+始终使用中文与用户交流。

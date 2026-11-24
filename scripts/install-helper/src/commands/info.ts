@@ -22,7 +22,7 @@ export async function infoCommand(pluginName: string): Promise<void> {
   // Same precondition as list/install/init/update: discovery merges the
   // installed installer's plugins into the registry so cannbot-only ids
   // (no embedded entry, no tombstone) resolve here too. Community plugins
-  // (autoresearch, catlass-dsl-generator, ...) are discovered by the
+  // shipped in this repo's plugins-community/ are discovered by the
   // repository scan (mergeDynamicPlugins), so run that too — same as the
   // wizard flow which calls ensureRepoAndScan() before listing.
   await ensureCannbotDiscovery();
