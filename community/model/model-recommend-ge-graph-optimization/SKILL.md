@@ -11,9 +11,9 @@ description: GE 图模式与 shape 策略优化（工作流条目 6）。推荐�
 
 ## Prerequisites
 
-- [baseline-run](../model-recommend-baseline-run/SKILL.md) 已跑通（GE Session v2 执行链路正常）
-- [structure-analysis](../model-recommend-structure-analysis/SKILL.md) 的动态维分布与显存估算
-- [performance-analysis](../model-recommend-performance-analysis/SKILL.md) 基线性能数据（可选，用于收益判定）
+- `model-recommend-baseline-run` 已跑通（GE Session v2 执行链路正常）
+- `model-recommend-adaptation` 的动态维分布与显存估算
+- `model-recommend-analysis` 基线性能数据（可选，用于收益判定）
 
 ## 目标
 
@@ -31,9 +31,9 @@ description: GE 图模式与 shape 策略优化（工作流条目 6）。推荐�
 
 - **图模式是基座不是选项**：不存在"是否上图"的决策，只有"图怎么编译得更好"
 - **保持模型语义**：shape 策略只影响建图提示（`parser_shape`），不得改计算逻辑
-- **每次只改一个变量**：mode / batch / 精度模式 / 融合开关逐一变更，性能与精度同时记录（精度验证走 [precision-comparison](../model-recommend-precision-comparison/SKILL.md)）
+- **每次只改一个变量**：mode / batch / 精度模式 / 融合开关逐一变更，性能与精度同时记录（精度验证走 `model-recommend-precision-comparison`）
 - **数据 shape 与建图 shape 是两回事**：`runtime_shape` 来自 `.npy` 实际数据；`parser_shape` 是给 GE 的建图提示（`all_static` 下 batch 维按 `batch_size` 静态化，数据自动沿第 0 维扩展/裁剪）
-- **改动校验双门禁（强制）**：本 skill 的每次策略/选项变更都是对模型执行的改动——落地前必须**串行 verify 全 pass**（精度门禁）且**同口径主指标不劣化超过噪声带**（性能门禁，编译时间可作辅助指标但主指标为 avg/TP99/QPS）；切换策略若造成性能回退，即使精度通过也必须回退并在 perf_ledger 记录；详见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md) 全局约束
+- **改动校验双门禁（强制）**：每次策略/选项变更落地前过精度 + 性能门禁；策略切换若性能回退，即使精度通过也须回退并记录；规则见 `model-recommend-ascend-env-baseline` 全局约束。
 
 ## shape 策略决策表
 
@@ -74,14 +74,14 @@ description: GE 图模式与 shape 策略优化（工作流条目 6）。推荐�
 `bash run.sh <id> --dump_graph` → `models/M<id>/.cache/dump_graph`（最多保留 3 份）：
 
 - 查看编译各阶段图（解析图 → 优化图 → 执行图），验证预期 pass 生效（融合、转换消除、布局优化）
-- 配合 `.cache/run/fusion_result.json` 量化融合命中，为 [fusion-operator-adaptation](../model-recommend-fusion-operator-adaptation/SKILL.md) 提供证据
+- 配合 `.cache/run/fusion_result.json` 量化融合命中，为 `model-recommend-fusion-pass-dev` 提供证据
 
 ### Step 5: 编译选项调优（逐项）
 
 | 选项 | 入口 | 作用 | 权衡 |
 |------|------|------|------|
-| `CORE_NUM`（`ge.aicoreNum`，"AIC\|AIV"） | `run.sh --cores` | 限核 | 与 [concurrency-strategy-analysis](../model-recommend-concurrency-strategy-analysis/SKILL.md) 联动 |
-| `FORCE_16` / `ENABLE_HF32` | `test.sh` 环境变量 | 精度模式 | 性能 vs 精度，逐项过 [precision-comparison](../model-recommend-precision-comparison/SKILL.md) |
+| `CORE_NUM`（`ge.aicoreNum`，"AIC\|AIV"） | `run.sh --cores` | 限核 | 与 `model-recommend-core-limit-stress` 联动 |
+| `FORCE_16` / `ENABLE_HF32` | `test.sh` 环境变量 | 精度模式 | 性能 vs 精度，逐项过 `model-recommend-precision-comparison` |
 | `ge.exec.precision_mode` / `ge.exec.op_precision_mode` | GE 选项（改 main.cc 或环境注入） | 全局/算子级精度路由 | 精细控制，变更须记录 |
 | `ge.fusionSwitchFile` | GE 选项 | 融合开关文件 | 关闭/开启特定融合 pass，归因与回退用 |
 | `GRAPH_MAX_PARALLEL` | `run.sh --graph-max-parallel` | 图实例并行上限 | 与 `THREAD_NUM` 联动 |
@@ -100,11 +100,11 @@ description: GE 图模式与 shape 策略优化（工作流条目 6）。推荐�
 
 ## 产物目录约束
 
-- **文档格式约束（GFM 删除线）**：Markdown 文档禁止裸单波浪线 `~`——同段落/同表格单元内成对出现会被 GFM 渲染为删除线；数值区间用全宽 `～`（`-15%～-30%`）或 `-`/`至`，约数用 `≈`；交付前 grep 确认文档无裸 `~`（详见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md) 全局约束）
+- **文档格式**：禁止裸单波浪线（GFM 删除线），规则见 `model-recommend-ascend-env-baseline` 全局约束。
 - **文档类交付件** → `docs/{model_name}/ge-graph-optimization/`：策略选型与选项调优方案、验证报告（--show/dump_graph 证据、性能/编译时间对比、重编译结论）
 - **数据类交付件** → `data/{model_name}/ge-graph-optimization/`：配置对比结构化数据（mode/batch/选项 → 性能指标，供回归引用）
 - **中间产物** → `tmp/{model_name}/ge-graph-optimization/`：试验性 shape_config、dump_graph 原始分析数据、调试日志
-- 全局约定与判定标准见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md)；违反目录约定的产物视为未交付
+- 全局约定与判定标准见 `model-recommend-ascend-env-baseline`；违反目录约定的产物视为未交付
 
 ## 验收标准
 

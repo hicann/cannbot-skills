@@ -12,7 +12,7 @@ description: 运行时问题诊断与调试保障（工作流条目 13，贯穿�
 
 ## 目标
 
-任一环节报错/卡死时，按标准路径快速定界修复，不阻塞主流程。核心理念：**先定位再修复**（二分法逐步缩小故障范围）。不覆盖精度问题（精度走 [precision-comparison](../model-recommend-precision-comparison/SKILL.md)）。
+任一环节报错/卡死时，按标准路径快速定界修复，不阻塞主流程。核心理念：**先定位再修复**（二分法逐步缩小故障范围）。不覆盖精度问题（精度走 `model-recommend-precision-comparison`）。
 
 ## 诊断路径总览
 
@@ -23,7 +23,7 @@ description: 运行时问题诊断与调试保障（工作流条目 13，贯穿�
   │     日志自动落 models/M<id>/report/run_debug_<时间戳>.log）
   │     ├── GEInitialize failed → PYTHONPATH 含 numpy/tbe（test.sh 已设置）；检查 CANN set_env
   │     ├── onnx 解析失败 → 非标 domain / 自定义算子插件缺失
-  │     │     → 非标 domain 折叠改写 / custom-op-development 接入
+  │     │     → 非标 domain 折叠改写（model-recommend-plugin-dev）/ 自定义算子接入（model-recommend-custom-op-dev）
   │     ├── Invalid tensor data type → dtype 支持集合 → inspect_config.py
   │     ├── aicore timeout (507014) → 二分法定位
   │     │     ├── 定位到阶段（建图/编译/执行）→ 节点（dump_graph 对照）→ 算子
@@ -42,6 +42,33 @@ description: 运行时问题诊断与调试保障（工作流条目 13，贯穿�
         ├── 有进程，HBM 持续增长 → 权重加载/编译中 → 等待或评估是否越界
         └── 0 进程 → 查 error.log → 通用诊断流程
 ```
+
+### GE 自定义交付相关报错
+
+**1. 解析期算子不支持**（插件未安装 / 未生效）：
+
+```
+[ERROR] ... [pre_checker.cc] CheckTypeSupported: ErrorNo: 4294967295(failed) Check op[<node>]'s type[<domain>::<version>::<OpType>] failed, it is not supported.
+[ERROR] ... [onnx_parser.cc] ModelParseToGraphImpl: ... [Invoke][Prechecker] failed.
+[ERROR] parse model failed, status=4294967295
+```
+
+处置：取 `type[<domain>::<version>::<OpType>]`；能由现有算子组合表达 → ONNX 插件翻译
+（`model-recommend-plugin-dev` 的等价改写）；
+否则转自定义算子（`model-recommend-custom-op-dev`）。
+
+**2. 无匹配内核 / dtype 不支持**：
+
+```
+[ERROR] ... [dnnengine_manager.cc] GetDNNEngineName: ErrorNo: 1343242282(assign engine failed)
+  [Check][OpSupported] Op type <OpType> of ops kernel AIcoreEngine is unsupported, reason :
+  [tbe-custom]: op type <OpType> is not found in this op store.
+  [Dynamic shape check]: data type <dtype> of input [<input>] is not supported.
+```
+
+处置：先判断"算子完全缺失"还是"仅当前 dtype/format 不支持"；后者优先用等价改写/Pass 在前后加
+Cast/Transpose 规避（`model-recommend-fusion-pass-dev`），
+再转自定义算子（`model-recommend-custom-op-dev`）。
 
 ## npu-smi 状态判定表（单卡单进程）
 
@@ -66,7 +93,7 @@ description: 运行时问题诊断与调试保障（工作流条目 13，贯穿�
 
 - **日志双通道**：`--info`（plog 等级 2）/ `--debug`（等级 0）开启后，进程 stdout/stderr 自动落 `models/M<id>/report/run_debug_<时间戳>.log`；设备侧 plog 由 CANN 写默认日志目录。
 - **GE 产物目录**：`.cache/run`（fusion_result.json / kernel_meta）、`.cache/dump_graph`（最多 3 份）、`.cache/dump_data`（最多 3 份）——排查时先看产物是否存在判断卡在哪一阶段。
-- **自定义算子**（[kernel-generation](../model-recommend-kernel-generation/SKILL.md) / [custom-op-development](../model-recommend-custom-op-development/SKILL.md) 产物）的卡死/崩溃/内存越界：plog 解析 + memcheck 主动检测；aclnn 错误码（161xxx/361xxx/561xxx）按环境配置 / Tiling / Kernel 三类归因。
+- **自定义算子**（`model-recommend-custom-op-dev` 产物）的卡死/崩溃/内存越界：plog 解析 + memcheck 主动检测；aclnn 错误码（161xxx/361xxx/561xxx）按环境配置 / Tiling / Kernel 三类归因。
 - **onnx 带外部权重**：运行时权重文件必须与 `model.onnx` 同目录（prepare.sh 已校验；手动挪动后报错先查此项）。
 - **设备占用冲突**：npu-smi 进程表有他任务时换 `START_DEVICE` 或等待；sweep.py 内置占用检测逻辑可复用。
 - 直接执行二进制（绕过 test.sh/run.sh）导致的 GE 产物散落/路径错误：重走脚本入口。
@@ -75,22 +102,22 @@ description: 运行时问题诊断与调试保障（工作流条目 13，贯穿�
 
 问题概要 → 定位过程（阶段 → 节点 → 算子）→ 根因 → 修复 → 验证 → 同类错误二次出现时的直达路径记录。
 
-**修复的落地纪律（改动校验双门禁）**：修复方案凡改动模型执行（onnx/配置/GE 选项/算子实现），与优化项同等对待——落地前必须**串行 verify 全 pass**（精度门禁）且**同口径端到端主指标不劣化**（性能门禁）；只确认"报错消失"不算修复完成。详见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md) 全局约束。
+**修复的落地纪律**：修复若改动模型执行（onnx/配置/GE 选项/算子实现），与优化项同等过双门禁——只确认"报错消失"不算修复完成；规则见 `model-recommend-ascend-env-baseline` 全局约束。
 
 ## 产物目录约束
 
-- **文档格式约束（GFM 删除线）**：Markdown 文档禁止裸单波浪线 `~`——同段落/同表格单元内成对出现会被 GFM 渲染为删除线；数值区间用全宽 `～`（`-15%～-30%`）或 `-`/`至`，约数用 `≈`；交付前 grep 确认文档无裸 `~`（详见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md) 全局约束）
+- **文档格式**：禁止裸单波浪线（GFM 删除线），规则见 `model-recommend-ascend-env-baseline` 全局约束。
 - **文档类交付件** → `docs/{model_name}/runtime-debug/`：排查记录与沉淀文档（问题概要/定位过程/根因/修复/验证、同类错误直达路径）
 - **数据类交付件** → 无（现场数据均属中间产物）
 - **中间产物** → `tmp/{model_name}/runtime-debug/`：plog、memcheck 输出、现场日志快照、临时复现脚本
-- 全局约定与判定标准见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md)；违反目录约定的产物视为未交付
+- 全局约定与判定标准见 `model-recommend-ascend-env-baseline`；违反目录约定的产物视为未交付
 
 ## 验收标准
 
 - 故障案例沉淀为可检索的排查记录
 - 同类错误二次出现时按路径直达根因
 - 修复若改动模型执行（onnx/配置/选项/算子），**已过「改动校验双门禁」**（串行 verify 全 pass + 同口径性能不劣化）后才可关闭案例
-- 修复后全量回归通过（[regression-baseline-mgmt](../model-recommend-regression-baseline-mgmt/SKILL.md)）
+- 修复后全量回归通过（`model-recommend-regression-baseline-mgmt`）
 
 ## 依据
 

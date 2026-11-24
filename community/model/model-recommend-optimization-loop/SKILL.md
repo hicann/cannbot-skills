@@ -15,7 +15,7 @@ description: 持续优化循环（闭环工作流，贯穿条目 5→14 的迭�
      L1 动作选择：next_actions 顶部可执行项（前置依赖满足）
      L2 执行优化：进入对应条目 skill（6/7/8/9/11/12）实施，过「改动校验双门禁」
      L3 profiling 采集：优化后配置同口径 --prof msprof，归档 prof/{model_name}/iter{k}/
-     L4 profiling 深度分析：条目 5 四项专项（[profiling-deep-analysis](../model-recommend-profiling-deep-analysis/SKILL.md)）
+     L4 profiling 深度分析：条目 5 四项专项（`model-recommend-analysis`）
      L5 收益判定：主指标（目标口径）对照上轮，改善 > 噪声带？
           是 → no_gain_streak = 0，动作保留，写台账
           否 → no_gain_streak += 1（动作按双门禁结果回退或保留）
@@ -28,7 +28,7 @@ description: 持续优化循环（闭环工作流，贯穿条目 5→14 的迭�
 
 - 条目 0-4 已就绪（基线 + 精度门禁 + 同口径对照基准）
 - **性能目标已由用户指定**（缺失时向用户确认，禁止自行设定）：`目标指标`（latency_avg_ms / tp99_ms / qps）+ `方向与阈值`（如 `avg ≤ 1.0ms`、`QPS ≥ 1500`）
-- 噪声带已测定（[performance-analysis](../model-recommend-performance-analysis/SKILL.md) 改动性能校验口径；未测定则首轮先测）
+- 噪声带已测定（`model-recommend-analysis` 改动性能校验口径；未测定则首轮先测）
 - 初始动作表存在（首轮收口产物，或基线后直接由条目 5 生成）
 
 ## 目标
@@ -76,13 +76,13 @@ description: 持续优化循环（闭环工作流，贯穿条目 5→14 的迭�
 1. **L1 动作选择**：取 `next_actions.json` 中优先级最高且前置依赖满足的**单个**动作（一轮一动作，保证归因唯一；强关联的组合动作在动作表中须登记为一条）
 2. **L2 执行**：按动作的 `workflow_entry` 进入对应条目 skill；**双门禁全程有效**（精度不过 → 该轮回退并计入 no_gain_streak；性能不过 → 回退同上）；需用户确认的动作（方案确认步骤）在 L1 前完成确认，被拒则该动作标记 `rejected_by_user` 并重选
 3. **L3 采集**：同口径（同卡/batch/THREAD_NUM/CORE_NUM/统计策略）`--prof msprof`；归档 `prof/{model_name}/iter{k}/`（即工作流口径的 `{case}`）
-4. **L4 深度分析**：四模块全做（[profiling-deep-analysis](../model-recommend-profiling-deep-analysis/SKILL.md)），优化点并入动作表
+4. **L4 深度分析**：四模块全做（`model-recommend-analysis`），优化点并入动作表
 5. **L5 收益判定**：主指标 = 目标指标同口径复测（≥3 次重复或框架统计策略取稳定值）；改善 ≤ 噪声带 → 无收益
 6. **L6 终止检查**：按终止条件表
 7. **L7 交付件与动作表同步更新（强制，每轮必做，未完成即该轮未完成）**：
    - **台账类（实时更新）**：`perf_ledger.json` 追加本轮动作记录（`step` 标注「循环第 k 轮」）；`loop_state.json` 更新 iteration / no_gain_streak / history
    - **分析类（当轮产出）**：`data/{model_name}/profiling-deep-analysis/iter{k}/findings.json` + `docs/{model_name}/profiling-deep-analysis/iter{k}/deep_analysis_report.md`（L4 产物，当轮落盘）
-   - **条目报告类（当轮完成即写，禁止推迟到收口）**：本轮动作所属条目 skill 的 docs 交付件——如精度战役/验证报告（[precision-comparison](../model-recommend-precision-comparison/SKILL.md)）、策略与选项验证报告（[ge-graph-optimization](../model-recommend-ge-graph-optimization/SKILL.md)）、并发验收报告（[multi-thread-optimization](../model-recommend-multi-thread-optimization/SKILL.md)）、算子设计文档（[kernel-generation](../model-recommend-kernel-generation/SKILL.md)）等
+   - **条目报告类（当轮完成即写，禁止推迟到收口）**：本轮动作所属条目 skill 的 docs 交付件——如精度战役/验证报告（`model-recommend-precision-comparison`）、策略与选项验证报告（`model-recommend-ge-graph-optimization`）、并发验收报告（`model-recommend-core-limit-stress`）、算子设计文档（`model-recommend-custom-op-dev`）等
    - **最终报告轨迹（增量追加）**：`docs/{model_name}/final_optimization_report.md` 的「循环轨迹」表**每轮追加一行**（轮次/动作/条目/before/after/收益/落地/计数/交付件指针）——收口时只补累计收益与结论，**禁止事后批量补写**
    - **动作表**：`next_actions.json` 重排（完成项标记 done；新发现并入；回退项附重试条件；`loop_status` 字段同步）
    - 判定：以上任一未更新 = 该轮未完成，不得进入 L1（下一轮）
@@ -105,17 +105,17 @@ description: 持续优化循环（闭环工作流，贯穿条目 5→14 的迭�
 
 - 单卡约束全程有效：循环各轮同卡执行（共享环境换 die 须整轮重采基线口径并在台账注明）
 - 共享设备的干扰判定：某轮"无收益"若伴随 npu-smi 他进程占用，须复测一次再计数（防误判收敛）
-- profiling 轮次成本控制：L3 采集 circle 不必与压测一致（50-100 次足够 op_summary 稳定）；正式收益判定用压测口径（[performance-analysis](../model-recommend-performance-analysis/SKILL.md)）
+- profiling 轮次成本控制：L3 采集 circle 不必与压测一致（50-100 次足够 op_summary 稳定）；正式收益判定用压测口径（`model-recommend-analysis`）
 - 多线程场景的 profiling：THREAD_NUM>1 时深度分析的 host/多流模块价值最大（TP99 劣化归因），但注意框架已知缺陷（多线程退出挂起，M100 案例 RD-M100-01）用 timeout 保护
 
 ## 产物目录约束
 
-- **文档格式约束（GFM 删除线）**：Markdown 文档禁止裸单波浪线 `~`——数值区间用全宽 `～` 或 `-`/`至`，约数用 `≈`；交付前 grep 确认无裸 `~`（详见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md) 全局约束）
+- **文档格式**：禁止裸单波浪线（GFM 删除线），规则见 `model-recommend-ascend-env-baseline` 全局约束。
 - **数据类交付件** → `data/{model_name}/optimization_log/`：`loop_state.json`（循环状态）+ `perf_ledger.json`（动作台账）；`data/{model_name}/profiling-deep-analysis/iter{k}/findings.json`
 - **profiling 归档** → `prof/{model_name}/iter{k}/`（每轮优化后配置的同口径采集）
 - **文档类交付件** → `docs/{model_name}/profiling-deep-analysis/iter{k}/`；循环轨迹并入 `docs/{model_name}/final_optimization_report.md`
 - **中间产物** → `tmp/{model_name}/optimization-loop/`：轮次调度脚本、复测原始日志
-- 全局约定见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md)；违反目录约定的产物视为未交付
+- 全局约定见 `model-recommend-ascend-env-baseline`；违反目录约定的产物视为未交付
 
 ## 验收标准
 

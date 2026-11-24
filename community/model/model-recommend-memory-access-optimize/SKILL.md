@@ -7,7 +7,7 @@ description: 访存优化（工作流条目 9）。对 profiling 确认的 memor
 
 ## Prerequisites
 
-- [performance-analysis](../model-recommend-performance-analysis/SKILL.md) profiling 数据**确认存在 memory-bound 热点**（查表/Gather/大 GEMM/密集访存链，带宽利用率对照本机实测 copy 带宽锚定）
+- `model-recommend-analysis` profiling 数据**确认存在 memory-bound 热点**（查表/Gather/大 GEMM/密集访存链，带宽利用率对照本机实测 copy 带宽锚定）
 - 候选热点有**安全的依赖窗口**：前序算子不能同为 memory-bound（否则争抢带宽）
 - 带宽锚定数据可用（`data/env-baseline/` 实测 copy 带宽）
 
@@ -27,9 +27,9 @@ description: 访存优化（工作流条目 9）。对 profiling 确认的 memor
 
 > 与 torch 工作流的差异：无 `npu_prefetch` 类直插 API，图由 GE 编译，不可在 python 层逐算子插预取。手段按层分流：
 
-1. **图结构侧（首选，零开发）**：onnx 等价改写减少 GM 往返——中间张量物化消除（Cast 链/Reshape-Transpose 链压缩）、查表形态优化（等价索引变体）、布局友好形态；经 [fusion-operator-adaptation](../model-recommend-fusion-operator-adaptation/SKILL.md) 手段实施
-2. **kernel 侧**：热点为自定义算子（[kernel-generation](../model-recommend-kernel-generation/SKILL.md) / [custom-op-development](../model-recommend-custom-op-development/SKILL.md) 产物）时，在 AscendC kernel 内做双缓冲/预取（`DataCopy` 与计算重叠），随算子开发交付
-3. **精度模式联动**：`FORCE_16` / `ENABLE_HF32` 减少搬运字节数（须过 [precision-comparison](../model-recommend-precision-comparison/SKILL.md) 门禁，逐项归因）
+1. **图结构侧（首选，零开发）**：onnx 等价改写减少 GM 往返——中间张量物化消除（Cast 链/Reshape-Transpose 链压缩）、查表形态优化（等价索引变体）、布局友好形态；经 `model-recommend-fusion-pass-dev` 手段实施
+2. **kernel 侧**：热点为自定义算子（`model-recommend-custom-op-dev` 产物）时，在 AscendC kernel 内做双缓冲/预取（`DataCopy` 与计算重叠），随算子开发交付
+3. **精度模式联动**：`FORCE_16` / `ENABLE_HF32` 减少搬运字节数（须过 `model-recommend-precision-comparison` 门禁，逐项归因）
 4. **框架侧需求记录**：GE 不支持图级显式 stream prefetch；如需 host 侧预取属框架层改造——**记录需求不擅自改框架**，移交用户决策
 
 ## 工作流步骤
@@ -43,7 +43,7 @@ description: 访存优化（工作流条目 9）。对 profiling 确认的 memor
 ### Step 2: 实施开发
 
 - 新增优化一律带 enable 开关（默认关闭）；onnx 改写保留原始版本
-- kernel 侧改动遵循 [kernel-generation](../model-recommend-kernel-generation/SKILL.md) 流程
+- kernel 侧改动遵循 `model-recommend-custom-op-dev` 流程
 
 ### Step 3: 验证测试（双门禁执行点，实际执行，记录真实结果）
 
@@ -63,11 +63,11 @@ description: 访存优化（工作流条目 9）。对 profiling 确认的 memor
 
 ## 产物目录约束
 
-- **文档格式约束（GFM 删除线）**：Markdown 文档禁止裸单波浪线 `~`——同段落/同表格单元内成对出现会被 GFM 渲染为删除线；数值区间用全宽 `～`（`-15%～-30%`）或 `-`/`至`，约数用 `≈`；交付前 grep 确认文档无裸 `~`（详见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md) 全局约束）
+- **文档格式**：禁止裸单波浪线（GFM 删除线），规则见 `model-recommend-ascend-env-baseline` 全局约束。
 - **文档类交付件** → `docs/{model_name}/memory-access-optimize/`：访存优化方案与性能报告（实现代码按工程归属：onnx 改写在模型工作区，kernel 在 ops/）
 - **数据类交付件** → `data/{model_name}/memory-access-optimize/`：baseline vs 优化后对比数据（目标算子/关键路径/带宽利用率）
 - **中间产物** → `tmp/{model_name}/memory-access-optimize/`：profiling 中间数据、候选位置分析草稿、试验性改写
-- 全局约定与判定标准见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md)；违反目录约定的产物视为未交付
+- 全局约定与判定标准见 `model-recommend-ascend-env-baseline`；违反目录约定的产物视为未交付
 
 ## 验收标准
 

@@ -30,7 +30,7 @@ description: 昇腾 NPU（Ascend 910B 系列，单卡）推荐模型推理环境
 - **单卡执行**：`DEVICE_NUM` 恒为 1；卡选择经 `GE_DEVICE_ID` / `START_DEVICE`（`TOTAL_DIE` 取模）
 - **并发约束**：`THREAD_NUM>1` 仅用于性能压测（不做 dump/精度验证/输出落盘）；精度验证仅串行单并发
 - `compile.sh` 依赖系统头文件 `nlohmann/json.hpp`（缺失时 `dnf install -y nlohmann-json-devel`）
-- **执行框架来源（仅 onnx 路径）**：`GE_SESSION_DEMO` 随插件内置在 `framework/GE_SESSION_DEMO/`（project 级 `init.sh` 自动复制到工程根；global 级与统一安装器需手工复制），目录布局与维护约定见 `framework/README.md`，框架路径与编译产物校验和信息须随环境基线归档；本工作流不引用任何外部链接。框架当前**不含** `src/graph_fusion_pass.{h,cc}`，图融合 pass 需按 GE graph pass API 自行新增
+- **执行框架来源（仅 onnx 路径）**：`GE_SESSION_DEMO` 随插件内置在 `framework/GE_SESSION_DEMO/`（project 级 `init.sh` 自动复制到工程根；global 级与统一安装器需手工复制），目录布局与维护约定见 `framework/README.md`，框架路径与编译产物校验和信息须随环境基线归档；本工作流不引用任何外部链接。框架当前**不含**自定义图融合 Pass 实现；自定义 Pass 以独立 `.so` 交付件接入 `opp/vendors/<vendor>/custom_fusion_passes/`，**不得修改框架 `src/` 或其它源码/脚本**
 - **依赖全量核对**：外部依赖 25 项清单与缺失处置见 `workflows/references/external-dependencies.md`（在插件仓 recommend-infer-optimize 内），条目 0 逐项记录版本号与结果
 - 运行必须经 `test.sh` / `run.sh` 入口（工作目录与缓存治理依赖脚本设置）；直接执行二进制会导致 GE 产物散落根目录
 
@@ -45,7 +45,7 @@ description: 昇腾 NPU（Ascend 910B 系列，单卡）推荐模型推理环境
 ### 2.1 硬件规格获取原则
 
 - AIC/AIV 分离形态：GE 限核选项 `CORE_NUM="AIC|AIV"`（GE_SESSION_DEMO 默认 `24|48`）；**实际核心数与 Buffer 规格（UB/L1/L0 等）运行时经 `PlatformAscendC` 接口获取，禁止硬编码**
-- **算力与带宽基准以实测锚定**（不引用纸面值）：本机小规模 matmul TFLOPS + HBM copy 带宽测试，结果记入 `data/env-baseline/`，供 [performance-analysis](../model-recommend-performance-analysis/SKILL.md) bound 判定与 [fusion-planning-estimation](../model-recommend-fusion-planning-estimation/SKILL.md) Roofline 使用
+- **算力与带宽基准以实测锚定**（不引用纸面值）：本机小规模 matmul TFLOPS + HBM copy 带宽测试，结果记入 `data/env-baseline/`，供 `model-recommend-analysis` bound 判定与 `model-recommend-analysis` Roofline 使用
 
 ### 2.2 执行框架基线（GE_SESSION_DEMO，仅 onnx 路径）
 
@@ -63,19 +63,19 @@ pytorch / HuggingFace 输入跳过本步：其执行与采集基座是模型自�
 
 ```
 (0)环境自检 [ascend-env-baseline，本 skill]
-  → (1)模型结构分析 structure-analysis → (2)单卡基线 baseline-run → (3)并发策略 concurrency-strategy-analysis
+  → (1)模型接入与适配 model-recommend-adaptation → (2)单卡基线 baseline-run → (3)并发策略(限核压测) model-recommend-core-limit-stress
   → (4)精度门禁 precision-comparison（先于一切优化）
   ╔═══════════════════════════════════════════════════╗
-  ║ (5)性能分析 performance-analysis（三表 + bound）  ║
-  ║   └ 四项专项 profiling-deep-analysis              ║
+  ║ (5)性能分析 model-recommend-analysis              ║
+  ║   └ 四项专项 model-recommend-analysis             ║
   ║    （算子执行/多流掩盖/H2D-D2H/host 瓶颈四专项）  ║
   ║ (6)shape 策略 ge-graph-optimization               ║
-  ║ (7)算子与图优化 fusion-operator-adaptation        ║
-  ║ (8)多线程 multi-thread-optimization               ║
+  ║ (7)算子与图优化 model-recommend-fusion-pass-dev   ║
+  ║ (8)限核压测 model-recommend-core-limit-stress     ║
   ║ (9)访存 memory-access-optimize                    ║
-  ║ (10)融合规划 fusion-planning-estimation           ║
-  ║ (11)kernel 生成 kernel-generation                 ║
-  ║ (12)自定义算子 custom-op-development              ║
+  ║ (10)融合规划 model-recommend-analysis             ║
+  ║ (11)算子开发 model-recommend-custom-op-dev        ║
+  ║ (12)算子接入 model-recommend-custom-op-dev        ║
   ║ (13)运行时诊断 runtime-debug（贯穿）              ║
   ║ (14)回归验收 regression-baseline-mgmt             ║
   ║     → 下一步优化动作表 → 下一轮循环               ║
@@ -86,24 +86,24 @@ pytorch / HuggingFace 输入跳过本步：其执行与采集基座是模型自�
 
 | 条目 | Skill | 进入时机 |
 |------|-------|---------|
-| 1 | [structure-analysis](../model-recommend-structure-analysis/SKILL.md) | 新模型接入 / 可执行性评估 |
-| 2 | [baseline-run](../model-recommend-baseline-run/SKILL.md) | 模型分析后；CANN/框架版本变更后重采 |
-| 3 | [concurrency-strategy-analysis](../model-recommend-concurrency-strategy-analysis/SKILL.md) | 基线就绪后；场景/batch/TP99 上限变更后重做 |
-| 4 | [precision-comparison](../model-recommend-precision-comparison/SKILL.md) | **先于一切优化**：建立 golden 标杆与判定标准；此后每个优化项落地后复检 |
-| 5 | [performance-analysis](../model-recommend-performance-analysis/SKILL.md) | 基线采集、优化验证、瓶颈定位 |
-| 5（专项） | [profiling-deep-analysis](../model-recommend-profiling-deep-analysis/SKILL.md) | 条目 5 的四项专项；**循环每轮固定动作**（算子执行/多流掩盖/H2D-D2H/host 瓶颈） |
-| 6 | [ge-graph-optimization](../model-recommend-ge-graph-optimization/SKILL.md) | 基线跑通后（shape 策略与编译选项调优） |
-| 7 | [fusion-operator-adaptation](../model-recommend-fusion-operator-adaptation/SKILL.md) | 热点明确后，不新增算子实现的手段收益优先 |
-| 8 | [multi-thread-optimization](../model-recommend-multi-thread-optimization/SKILL.md) | 并发策略推荐产出后 / overlap 机会表产出后 |
-| 9 | [memory-access-optimize](../model-recommend-memory-access-optimize/SKILL.md) | memory-bound 热点确认后 |
-| 10 | [fusion-planning-estimation](../model-recommend-fusion-planning-estimation/SKILL.md) | profiling 热点 + 未适配项清单就绪后 |
-| 11 | [kernel-generation](../model-recommend-kernel-generation/SKILL.md) | 融合规划产出 Top-N 开发项后 |
-| 12 | [custom-op-development](../model-recommend-custom-op-development/SKILL.md) | 图含 GE 无法解析/无原生实现的算子（功能补齐） |
-| 13 | [runtime-debug](../model-recommend-runtime-debug/SKILL.md) | 任一环节报错/卡死 |
-| 14 | [regression-baseline-mgmt](../model-recommend-regression-baseline-mgmt/SKILL.md) | 每个优化项收口；全流程收口时产出最终优化报告 + **下一步优化动作表**（下一轮执行入口） |
-| 循环 | [optimization-loop](../model-recommend-optimization-loop/SKILL.md) | 条目 0-4 就绪后编排 5→14 迭代；终止条件满足后收口 |
+| 1 | `model-recommend-adaptation` | 新模型接入 / 可执行性评估 |
+| 2 | `model-recommend-baseline-run` | 模型分析后；CANN/框架版本变更后重采 |
+| 3 | `model-recommend-core-limit-stress` | 基线就绪后；场景/batch/TP99 上限变更后重做 |
+| 4 | `model-recommend-precision-comparison` | **先于一切优化**：建立 golden 标杆与判定标准；此后每个优化项落地后复检 |
+| 5 | `model-recommend-analysis` | 基线采集、优化验证、瓶颈定位 |
+| 5（专项） | `model-recommend-analysis` | 条目 5 的四项专项；**循环每轮固定动作**（算子执行/多流掩盖/H2D-D2H/host 瓶颈） |
+| 6 | `model-recommend-ge-graph-optimization` | 基线跑通后（shape 策略与编译选项调优） |
+| 7 | `model-recommend-fusion-pass-dev` | 热点明确后，不新增算子实现的手段收益优先 |
+| 8 | `model-recommend-core-limit-stress` | 并发策略推荐产出后 / overlap 机会表产出后 |
+| 9 | `model-recommend-memory-access-optimize` | memory-bound 热点确认后 |
+| 10 | `model-recommend-analysis` | profiling 热点 + 未适配项清单就绪后 |
+| 11 | `model-recommend-custom-op-dev` | 融合规划产出 Top-N 开发项后 |
+| 12 | `model-recommend-custom-op-dev` | 图含 GE 无法解析/无原生实现的算子（功能补齐） |
+| 13 | `model-recommend-runtime-debug` | 任一环节报错/卡死 |
+| 14 | `model-recommend-regression-baseline-mgmt` | 每个优化项收口；全流程收口时产出最终优化报告 + **下一步优化动作表**（下一轮执行入口） |
+| 循环 | `model-recommend-optimization-loop` | 条目 0-4 就绪后编排 5→14 迭代；终止条件满足后收口 |
 
-已移除条目（推荐模型不适用，不得引用）：KVCache 优化（推荐模型无 KVCache）、量化策略分析（不做量化；`FORCE_16`/`ENABLE_HF32` 等精度模式开关属 [ge-graph-optimization](../model-recommend-ge-graph-optimization/SKILL.md) 范畴且须过精度门禁）。
+已移除条目（推荐模型不适用，不得引用）：KVCache 优化（推荐模型无 KVCache）、量化策略分析（不做量化；`FORCE_16`/`ENABLE_HF32` 等精度模式开关属 `model-recommend-ge-graph-optimization` 范畴且须过精度门禁）。
 
 ## 全局约束：产物目录约定（所有 skill 强制）
 
@@ -146,7 +146,7 @@ pytorch / HuggingFace 输入跳过本步：其执行与采集基座是模型自�
 - **性能门禁**：同口径对比（同卡/同 batch/同 THREAD_NUM/CORE_NUM/同 CircleCount 与统计策略）；目标场景主指标（单并发 avg/TP99；吞吐场景 QPS/TP99）**不得劣化超过噪声带**（噪声带以重复测量方差确定，典型 ±2%～±5%）；改善小于噪声带不得宣称提升；允许局部指标劣化换主指标显著改善，但必须显式声明、量化、经用户确认。算子级改动必须补**整图端到端对比**（算子级提升不等于端到端提升）。
 - **落地流程**：改动前确认同口径对照基准 → 实施（可开关/可回退）→ 精度门禁 →（过）→ 性能门禁 →（过）→ 落地并写 `data/{model_name}/optimization_log/perf_ledger.json`（before/after/delta/precision/`reverted=false`）；任一不过 → 回退并记录原因。
 - **不可回退的改动禁止实施**（不可逆模型覆盖、框架侧修改——框架需求记录移交，不擅自改）。
-- 判定细则：精度见 [precision-comparison](../model-recommend-precision-comparison/SKILL.md)，性能测量与噪声带见 [performance-analysis](../model-recommend-performance-analysis/SKILL.md)，门禁台账与回归见 [regression-baseline-mgmt](../model-recommend-regression-baseline-mgmt/SKILL.md)。
+- 判定细则：精度见 `model-recommend-precision-comparison`，性能测量与噪声带见 `model-recommend-analysis`，门禁台账与回归见 `model-recommend-regression-baseline-mgmt`。
 
 ## 信息渠道
 

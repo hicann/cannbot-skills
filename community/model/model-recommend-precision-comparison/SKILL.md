@@ -10,7 +10,7 @@ description: 模型精度对比（工作流条目 4）。所有优化手段（sh
 **先于一切优化执行**，三重角色：
 1. **前置基线门禁**：在一切优化前建立 golden 标杆（用户 `reference/` 优先 → CPU onnxruntime 生成 → 报错）、判定标准与逐节点对比框架
 2. **优化验证门禁**：此后每个优化项（shape 策略 / 编译选项 / onnx 改写 / 融合 / 并发参数 / 自定义算子）落地后必须过本门禁
-3. **「改动校验双门禁」的精度侧执行者**：所有对模型执行的改动，精度门禁通过是性能测量的前置条件（精度不过直接回退，不进性能测量）；精度门禁单独通过**不足以落地**——还须过性能门禁（见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md) 全局约束与 [performance-analysis](../model-recommend-performance-analysis/SKILL.md)）
+3. **「改动校验双门禁」的精度侧执行者**：所有对模型执行的改动，精度门禁通过是性能测量的前置条件（精度不过直接回退，不进性能测量）；精度门禁单独通过**不足以落地**——还须过性能门禁（见 `model-recommend-ascend-env-baseline` 全局约束与 `model-recommend-analysis`）
 
 ## Prerequisites
 
@@ -43,7 +43,7 @@ description: 模型精度对比（工作流条目 4）。所有优化手段（sh
   ```
   `verify_report.json` 会同时记录 `precision_gate` 路径与每个输出的 `rtol/atol`，门禁结论按输出逐条引用；缺该文件时 `verify.py` 会打印 WARN，说明所有输出按全局阈值判定。
 - 报告：`output/verify_report.json`（简述）+ `output/verify_table.log`（误差区间统计 + 绝对/相对误差前 30 明细，忽略 `abs_err<=1e-6` 可忽略项）
-- 自定义算子按 dtype 的 atol/rtol 标准验收（见 [kernel-generation](../model-recommend-kernel-generation/SKILL.md)）
+- 自定义算子按 dtype 的 atol/rtol 标准验收（见 `model-recommend-custom-op-dev`）
 
 ## 工作流步骤（分层排查）
 
@@ -87,17 +87,17 @@ description: 模型精度对比（工作流条目 4）。所有优化手段（sh
 
 - **标杆来源优先级**：用户 `reference/output_i.npy`（次 `.bin`）→ onnxruntime 生成（**本环境未安装**，需 `pip install`，华为云镜像）→ 报错。**bf16 与自定义算子模型 onnxruntime 不可用，必须用户提供标杆**。
 - **精度验证仅串行单并发**（`THREAD_NUM=1`，`--verify` 在并发下会报错）；并发参数变更不影响数值（同图同输入），但 shape/batch 变更会改变输出 shape 与数值口径，须重新对齐标杆。
-- **精度模式开关一次只动一个**：`FORCE_16` / `ENABLE_HF32` / `precision_mode` / `op_precision_mode` 的收益与精度同时记录（联动 [ge-graph-optimization](../model-recommend-ge-graph-optimization/SKILL.md)）。
+- **精度模式开关一次只动一个**：`FORCE_16` / `ENABLE_HF32` / `precision_mode` / `op_precision_mode` 的收益与精度同时记录（联动 `model-recommend-ge-graph-optimization`）。
 - 输出动态维以运行时 `output_shapes.json` 为准；`verify.py` 据此解释 `output_i.bin`，静态声明不一致不中断但要看 `[GE OUTPUT][WARN]`。
 - 调试中间 tensor 与日志必须保留现场（tmp/），用于后续分析。
 
 ## 产物目录约束
 
-- **文档格式约束（GFM 删除线）**：Markdown 文档禁止裸单波浪线 `~`——同段落/同表格单元内成对出现会被 GFM 渲染为删除线；数值区间用全宽 `～`（`-15%～-30%`）或 `-`/`至`，约数用 `≈`；交付前 grep 确认文档无裸 `~`（详见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md) 全局约束）
+- **文档格式**：禁止裸单波浪线（GFM 删除线），规则见 `model-recommend-ascend-env-baseline` 全局约束。
 - **文档类交付件** → `docs/{model_name}/precision-comparison/`：精度验证结论、定位报告、调试报告
 - **数据类交付件** → `data/{model_name}/precision-comparison/`：精度对比结构化数据（逐输出 pass/fail、误差指标，供回归环节程序化引用）
 - **中间产物** → `tmp/{model_name}/precision-comparison/`：dump 的中间 tensor、逐节点对比原始数据、改写试验 onnx
-- 全局约定与判定标准见 [ascend-env-baseline](../model-recommend-ascend-env-baseline/SKILL.md)；违反目录约定的产物视为未交付
+- 全局约定与判定标准见 `model-recommend-ascend-env-baseline`；违反目录约定的产物视为未交付
 
 ## 验收标准
 
