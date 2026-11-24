@@ -131,7 +131,7 @@ CV 融合算子拆成独立 Cube / Vector kernel 的理由；最终交付结构�
 - 只做 L1 双缓冲、L0 仍单缓冲（单独收益只有 3%~5%，拿不到第 3 级的 20%~30%）。
 
 骨架的核内同步只允许用 `tla.mutex` 显式同步，结构照
-`examples/python/tla_dsl/experimental/kernel/matmul/matmul_row_exp_scatter_add/` 的 GEMM 段。
+`examples/python/tla_dsl/experimental/kernel/matmul/matmul_exp_scale_ub/` 的 GEMM 段。
 骨架脚本里不得出现 `auto_sync`、`tla.flag` / `set_flag` / `wait_flag`、`tla.pipe_barrier`
 与 `cross_flag`；出现即 skeleton 不通过（自检第 8 项）。
 
@@ -442,21 +442,23 @@ export ASCEND_RT_VISIBLE_DEVICES=<id>; timeout -k 5 60s <run>
 骨架成形前允许验证少数不确定机制，但验证必须有计数上限、有出口、可复用：
 
 - **默认不写独立探针**。优先使用 catlass 样例中已覆盖的写法：master 源码在
-  `examples/python/tla_dsl/`；examples 未覆盖但能通过编译或一次数值对比判断的，
-  直接写入主实现后再验证。
+  `examples/python/tla_dsl/` 与 `python/tla_dsl/tests/end_to_end/`；样例未覆盖但能通过
+  编译或一次数值对比判断的，直接写入主实现后再验证。
 - **按结构选参考样例**：Cube-only（纯 MMAD）参考
   `tla/kernel/matmul/basic_mmad/basic_matmul.py`；Cube-Vector（MMAD 后接 vector 后处理）参考
-  `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+  `experimental/kernel/matmul/matmul_exp_scale_ub/matmul_exp_scale_ub.py`；
   Cube-Vector-Cube（两段 MMAD 中间夹 vector）参考
   `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
   纯 vector 参考 `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
-  `dsl_tutorials/vector_simt_ops/`。先按整体结构（阶段序列、
+  `dsl_tutorials/vector_simt_ops/`。以上只是示例，不是固定的结构到样例映射；须在参考仓
+  `examples/python/tla_dsl/` 与 `python/tla_dsl/tests/end_to_end/` 下全量检索，按目标算子
+  的阶段序列、数据流与同步方式自行判断最契合的样例。先按整体结构（阶段序列、
   数据流、任务映射、同步方式）选主参考；主参考是基线不是约束，偏离时写清理由。没有
   足够契合的主参考时，可以组合多个分步样例，但要显式设计组合后的整体结构并照常跑
-  skeleton DoD。路径先在
-  `.catlass-dsl/references/catlass/examples/python/tla_dsl/` 下用 `find` 确认；
+  skeleton DoD。路径先在 `.catlass-dsl/references/catlass/` 的
+  `examples/python/tla_dsl/` 与 `python/tla_dsl/tests/end_to_end/` 下用 `find` 确认；
   目标版本没有同名样例时按结构检索等价样例，并把实际路径写入 `ITERATIONS.md`。
-- 只有同时满足三条才允许写独立探针：examples 未覆盖；失败会推翻已冻结设计；无法用编译
+- 只有同时满足三条才允许写独立探针：样例未覆盖；失败会推翻已冻结设计；无法用编译
   检查或分段运行判断。
 - 单个探针只回答一个是/否命题，自带断言与退出码，单次运行 ≤60 秒；同一探针修改 3 次
   仍不通即判定该机制不可用，按 DESIGN.md 的备选路径推进。
@@ -474,11 +476,12 @@ UB 剩余空间反推，不能先定 tile 再找空间：每多一份整 tile �
 ## 高风险接口选型
 
 `tla.gather` 接口使用限制多，默认不用它。需要实现 gather 操作时，必须参考并使用
-`**/indexer/gather/gather.py` 样例的 SIMT 标量读写法；样例写法不适用时，可参考知识库
+`**/vec/gather/gather.py` 样例的 SIMT 标量读写法；样例写法不适用时，可参考知识库
 `knowledge/dsl/pattern-precomputed-index-structure` 中的方案进行扩展，理由写入 `DESIGN.md`。
 
-scatter 没有官方样例，SIMT 标量读写写法同样参考 `**/indexer/gather/gather.py`；索引结构
-按知识库 `knowledge/dsl/pattern-precomputed-index-structure` 的 run 表（CSR）实现：host
+scatter 已有纯 Vector 官方样例 `**/vec/scatter_row_add/scatter_row_add.py`（SIMT 一行一线程、
+UB 内按索引累加、重复下标按槽位顺序），优先按它实现；索引结构再按知识库
+`knowledge/dsl/pattern-precomputed-index-structure` 的 run 表（CSR）实现：host
 侧按输出 tile 建表、按 `(row, col)` 合并重复 id，kernel 内每线程对整段 run 求和后只做一次
 目标格读改写。放置位置不做默认规定：独立 Vector kernel 与 Cube 融合 epilogue 都可行，
 按 `DESIGN.md` 的收益与风险权衡选择。融合时至少保持单写者，SIMD/SIMT 交界按样例放

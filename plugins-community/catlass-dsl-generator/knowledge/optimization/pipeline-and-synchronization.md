@@ -44,7 +44,7 @@ arch: [c310]
 也可以用 `@tla.kernel(auto_sync="v0")`：编译 pass 可代插核内 mutex 与 unit-flag 协议，
 kernel 本身不手写 local flag/mutex。它是明确的 v0 模式，不能假设覆盖 cross-core 或所有
 自定义内存别名；骨架与融合 kernel 的核内流水默认用显式 mutex（与
-`matmul_row_exp_scatter_add` 的 GEMM 段同构），跨核交棒仍用 `cross_flag`，`auto_sync`
+`matmul_exp_scale_ub` 的 GEMM 段同构），跨核交棒仍用 `cross_flag`，`auto_sync`
 仅作纯 MMAD/FIX 的对照写法。[^auto-sync]
 
 # 用法

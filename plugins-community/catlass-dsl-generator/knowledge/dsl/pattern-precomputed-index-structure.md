@@ -47,8 +47,9 @@ arch: [c310]
 
 # scatter：run 表（CSR）形态
 
-官方样例只有 gather，没有 scatter，但 SIMT 标量读写的写法仍以
-`examples/python/tla_dsl/experimental/kernel/indexer/gather/gather.py` 为准；
+官方样例已有纯 Vector 的 `experimental/kernel/vec/scatter_row_add/scatter_row_add.py`
+（SIMT 一行一线程、UB 内按索引累加、重复下标按槽位顺序）；SIMT 标量读写的基础写法以
+`examples/python/tla_dsl/experimental/kernel/vec/gather/gather.py` 为准；
 scatter 的特殊之处在索引结构：**按输出 tile 把目标地址压平成 CSR / run 表，不要用链表**。
 
 - 建表：只保留 owned id（越界 id 在建表时丢弃）；按 `(tile, row, col, k)` 排序后，

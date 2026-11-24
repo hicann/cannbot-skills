@@ -173,10 +173,12 @@ python3 <skills>/catlass-dsl-workflow/scripts/gate.py <design|develop|fulltest|m
   预算取小造成的分段不算「完整 matmul 不可行」。放不下时按「提预算 → 改布局/复用 →
   实测不可行才 split-K 或跨 launch 累加」降级，后者必须在 deviation 单列依据与对照。
 - **按结构选参考样例**：Cube-only → `tla/kernel/matmul/basic_mmad/basic_matmul.py`；
-  Cube-Vector → `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+  Cube-Vector → `experimental/kernel/matmul/matmul_exp_scale_ub/matmul_exp_scale_ub.py`；
   Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
   纯 vector → `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
-  `dsl_tutorials/vector_simt_ops/`。整体结构
+  `dsl_tutorials/vector_simt_ops/`。以上只是常见结构的示例，不是固定的结构到样例映射；
+  执行时须在参考仓 `examples/python/tla_dsl/` 与 `python/tla_dsl/tests/end_to_end/` 下全量
+  检索，按目标算子的阶段序列、数据流与同步方式自行判断最契合的样例。整体结构
   优先：先选阶段序列、数据流、任务映射、同步方式都接近的主参考；主参考是基线不是约束，
   偏离写清理由。没有足够契合的主参考时，可以组合多个分步样例，但要显式设计整体结构并
   照常跑 skeleton DoD。路径以工作区 `.catlass-dsl/references/catlass/` 下 `find` 的

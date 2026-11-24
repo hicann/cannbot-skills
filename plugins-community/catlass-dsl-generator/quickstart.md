@@ -139,10 +139,12 @@ git clone <git-repository-url> ~/.cursor/plugins/local/catlass-dsl-generator
 每次进入下一阶段前都要先跑门禁并通过：
 
 > 按结构找参考样例：Cube-only → `tla/kernel/matmul/basic_mmad/basic_matmul.py`；
-> Cube-Vector → `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+> Cube-Vector → `experimental/kernel/matmul/matmul_exp_scale_ub/matmul_exp_scale_ub.py`；
 > Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
 > 纯 vector → `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
-> `dsl_tutorials/vector_simt_ops/`。路径以
+> `dsl_tutorials/vector_simt_ops/`。以上只是示例，不是固定的结构到样例映射；须在参考仓
+> `examples/python/tla_dsl/` 与 `python/tla_dsl/tests/end_to_end/` 下全量检索，按目标算子
+> 的阶段序列、数据流与同步方式自行判断最契合的样例。路径以
 > 工作区 `.catlass-dsl/references/catlass/` 下 `find` 的结果为准。
 > 整体结构优先：先选阶段序列、数据流、任务映射、同步方式都接近的主参考；主参考是基线
 > 不是约束，偏离写清理由。没有足够契合的主参考时，可以组合多个分步样例，但要显式设计

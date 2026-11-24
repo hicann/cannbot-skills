@@ -137,7 +137,7 @@ kernel 或用户未要求单 kernel 时写 `merge_required: false`（此时 `mer
 
 - 整体结构：`<阶段数 / Cube-Vector 交替方式 / 数据流 / 任务映射 / 同步方式>`
 - 结构类型：`<Cube-only / Cube-Vector / Cube-Vector-Cube / Vector-only>`
-- 主参考样例（整体结构，可为空）：`<Cube-only → tla/kernel/matmul/basic_mmad/basic_matmul.py；Cube-Vector → experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py；Cube-Vector-Cube → experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py；Vector-only → tla/kernel/vec/basic_vadd/basic_vadd.py、dsl_tutorials/vector_simd_ops/、dsl_tutorials/vector_simt_ops/；没有足够契合的样例时写“无”>`
+- 主参考样例（整体结构，可为空）：`<Cube-only → tla/kernel/matmul/basic_mmad/basic_matmul.py；Cube-Vector → experimental/kernel/matmul/matmul_exp_scale_ub/matmul_exp_scale_ub.py；Cube-Vector-Cube → experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py；Vector-only → tla/kernel/vec/basic_vadd/basic_vadd.py、dsl_tutorials/vector_simd_ops/、dsl_tutorials/vector_simt_ops/；没有足够契合的样例时写“无”；以上仅为示例，按实际结构自行选择>`
 - 整体结构匹配点 / 偏离点：`<阶段序列 / 数据流 / 任务映射 / 同步；偏离时写理由>`
 - 参考样例可运行性（逐个样例登记）：`<path → passed / failed / not_run（含未复用原因或
   remote-detached）；命令、shape、退出码、日志路径（默认 evidence/reference/）；failed

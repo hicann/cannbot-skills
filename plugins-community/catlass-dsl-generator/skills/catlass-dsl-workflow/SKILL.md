@@ -288,17 +288,20 @@ targeted review（high risk）/ final review → full test #3（优化改动 ker
 
   下载、解压和移动的具体命令按当前平台选择，只要求每次任务启动都重新获取最新 master。
 
-  样例分布在 `examples/python/tla_dsl/` 下的 `tla/kernel`、`experimental/kernel`、
-  `dsl_tutorials`、`helpers` 四类目录，挑选参考前先全量浏览（例如
-  `find <refs>/examples/python/tla_dsl -name '*.py' | sort`），避免只看顶层或单个子树
-  而漏掉 `experimental/kernel/matmul/...` 这类深层样例。同一归档里还有官方 API 文档
-  `python/tla_dsl/docs/`（含 `zh/`、`en/`），查接口语义、数据搬运规则时先看这里，再回退
-  到样例。按结构优先看：Cube-only →
+  样例分布在 `examples/python/tla_dsl/` 与 `python/tla_dsl/tests/end_to_end/` 两个目录，
+  挑选参考前先全量浏览（例如
+  `find <refs>/examples/python/tla_dsl <refs>/python/tla_dsl/tests/end_to_end -name '*.py' | sort`），
+  避免只看顶层或单个子树而漏掉 `experimental/kernel/matmul/...` 这类深层样例。同一归档里
+  还有官方 API 文档 `python/tla_dsl/docs/`（含 `zh/`、`en/`），查接口语义、数据搬运规则时
+  先看这里，再回退到样例。按结构优先看：Cube-only →
   `tla/kernel/matmul/basic_mmad/basic_matmul.py`；Cube-Vector →
-  `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+  `experimental/kernel/matmul/matmul_exp_scale_ub/matmul_exp_scale_ub.py`；
   Cube-Vector-Cube → `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；
   纯 vector → `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
-  `dsl_tutorials/vector_simt_ops/`。整体结构优先：先选阶段序列、数据流、任务映射、同步方式都接近的
+  `dsl_tutorials/vector_simt_ops/`。以上只是示例，不是固定的结构到样例映射；须在参考仓
+  全量检索 DSL 样例与端到端用例（`examples/python/tla_dsl/`、
+  `python/tla_dsl/tests/end_to_end/`），按目标算子的阶段序列、数据流与同步方式自行判断
+  最契合的样例。整体结构优先：先选阶段序列、数据流、任务映射、同步方式都接近的
   主参考；主参考是基线不是约束，偏离写清理由。没有足够契合的主参考时，可以组合多个
   分步样例，但要显式设计整体结构并照常跑 skeleton DoD。同名样例不存在时按结构检索
   等价样例，不得凭记忆引用。
