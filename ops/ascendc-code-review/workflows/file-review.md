@@ -35,8 +35,8 @@
 1. 将任务1 标记为 in_progress
 2. **启动 yaml collector 服务**（子 Agent 通过 HTTP 提交 yaml，不接触 yaml 输出目录路径）：
    - 选可用端口：`PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()")`
-   - 后台启动（分离 stdio 避免阻塞 shell）：`setsid python3 {skill_base}/scripts/workflow.submit_server.py {yaml_dir} {PORT} > /tmp/collector_{PORT}.log 2>&1 < /dev/null &`（保存 PID）
-   - 就绪检查（最多重试 2 次）：`sleep 1 && curl -s http://127.0.0.1:{PORT}/health || (sleep 2 && curl -s http://127.0.0.1:{PORT}/health)`；若仍失败，检查 `/tmp/collector_{PORT}.log` 排查原因并尝试重启
+   - 后台启动（分离 stdio 避免阻塞 shell）：`setsid python3 {skill_base}/scripts/workflow.submit_server.py {yaml_dir} {PORT} > $(dirname {yaml_dir})/collector_{PORT}.log 2>&1 < /dev/null &`（保存 PID；日志与 yaml 输出同根，跟随 REVIEW_DIR_ROOT，headless 部署不脱离工作区）
+   - 就绪检查（最多重试 2 次）：`sleep 1 && curl -s http://127.0.0.1:{PORT}/health || (sleep 2 && curl -s http://127.0.0.1:{PORT}/health)`；若仍失败，检查 `$(dirname {yaml_dir})/collector_{PORT}.log` 排查原因并尝试重启
 3. Read `steps/file-review.clause-review.md` 获取 prompt 模板
 4. 按阶段0 检视计划的分组**单波派发**：在单个消息中并行调用全部组的 `Agent` 工具（每组 = 一个规则文件的全部条款），`subagent_type` 使用 `"general"`
    - 每组用 prompt 模板填入：**{skill_base}（本 skill 根目录绝对路径）** + 侧别 + 条例ID和标题 + file_input + **collector_port（=步骤2 选定的 PORT）**，**不传 yaml_output_dir**

@@ -17,6 +17,8 @@ file-review 与 pr-review 共用,主 Agent 在 code-fetch 返回（PR 模式）�
 
 调用 `{skill_base}/scripts/workflow.create_review_dir.py` 创建本次检视的结构化 yaml 输出目录：
 - 命令：`python3 {skill_base}/scripts/workflow.create_review_dir.py --type {review_type}`，仅当检视类型为 pr 时追加 ` --id {review_id}`（file 检视的 review_id 为空，**必须省略 --id 参数**——空值会导致 argparse 报错退出）
+
+   输出目录根由环境变量 `REVIEW_DIR_ROOT` 控制（缺省 `/tmp`）：headless/权限受限部署将其指向工作区内目录（子 Agent 文件工具访问工作区外路径会触发权限询问挂起），交互环境无需设置。
 - 捕获 stdout 输出作为 `yaml_dir`（绝对路径，如 `/tmp/pr1234_a3b7x9`）。yaml_dir 保留用于启动 collector 服务和阶段2/3 脚本调用,**不传给 clause-review 子 Agent**（子 Agent 通过 collector HTTP 端点提交 yaml，不接触目录路径）
 - 目录创建失败（exit code 非 0）则终止，报错返回
 
@@ -37,7 +39,7 @@ scope_hint 非空时:类别名（如\"数值安全\"）→ 只保留该类条例
 ## Step 5 输出检视计划
 
 ```
-yaml_dir: /tmp/{目录名}
+yaml_dir: {REVIEW_DIR_ROOT}/{目录名}（REVIEW_DIR_ROOT 缺省 /tmp，如 /tmp/pr1234_a3b7x9）
 检视计划 [标准]
 检视范围: {全量/scope_hint} | 代码语言: {C++/Python/Build/混合} | 侧别: {Kernel/Host/混合}
 匹配规则文件: {文件列表}（共 N 个文件）
@@ -50,5 +52,7 @@ yaml_dir: /tmp/{目录名}
 
 共 G 组（G = 匹配文件数,含 style 专项组）。
 ```
+
+**缺口口径约束**：导航/总览类文件（如 `references/mc2-specific.md`）仅用于路由参考，**其缺失或未读不构成当前条款的资料缺口**，不得写入「跳过文件」原因或待核实列表——无总览时按各规则文件 `<适用>` 声明独立完成选规即可；条款级缺口仅指 `<适用>` 声明、目标条款正文或条款声明的必要输入不可得。
 
 禁止生成报告文件。

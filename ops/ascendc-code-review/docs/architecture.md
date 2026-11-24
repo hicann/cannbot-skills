@@ -37,7 +37,13 @@ ascendc-code-review/
 │   ├── ascendc-topk.md              TOPK高频问题
 │   ├── ...                          另有 cpp-style、ascendc-simt、mc2-specific 等
 │
-├── scripts/                         工具脚本：{tool}.py
+├── docs/                            维护者文档
+│   └── architecture.md              本文件：目录结构、文件格式规范、扩展方式
+│                                    （注：行内评论品牌标识 logo 以 base64 常量内嵌于
+│                                    scripts/workflow.format_inline_comment.py 的 _LOGO_B64——
+│                                    check-pr/OAT 门禁不允许新增二进制图片提交，
+│                                    skill 目录亦不得携带图片文件；_LOGO_B64 即仓内唯一真源，
+│                                    需要图片文件时可由该常量解码生成）
 │   ├── get_gitcode_pr_diff.py        PR diff获取
 │   ├── clone_pr_source.py            PR源码克隆
 │   └── ...

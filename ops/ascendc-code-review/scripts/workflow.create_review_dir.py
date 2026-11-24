@@ -12,8 +12,14 @@
 检视工作目录创建工具
 
 由 plan-design 子 Agent（router）在阶段0调用，
-在 /tmp 下创建本次检视的结构化 yaml 输出目录，供后续 clause-review
+创建本次检视的结构化 yaml 输出目录，供后续 clause-review
 子 Agent 落盘 yaml 结果。
+
+输出目录根由环境变量 REVIEW_DIR_ROOT 控制（缺省 /tmp）：
+  - 交互环境保持 /tmp（权限放行，行为不变）
+  - headless/权限受限部署将 REVIEW_DIR_ROOT 指向工作区内目录——
+    子 Agent 文件工具访问工作区外路径会触发 external_directory
+    权限询问，无人应答时挂起，故此类部署必须收敛到工作区内
 
 目录命名规则：
   - PR 检视:    pr{pr号}_{随机串}      例如 pr1234_a3b7x9
@@ -81,14 +87,15 @@ def main() -> int:
         logger.error("%s", e)
         return 1
 
-    dir_path = os.path.join("/tmp", dir_name)
+    root = os.environ.get("REVIEW_DIR_ROOT", "/tmp")
+    dir_path = os.path.join(root, dir_name)
 
     try:
         os.makedirs(dir_path, mode=0o755, exist_ok=False)
     except FileExistsError:
         # 极小概率碰撞，重试一次
         dir_name = build_dir_name(args.type, args.id)
-        dir_path = os.path.join("/tmp", dir_name)
+        dir_path = os.path.join(root, dir_name)
         try:
             os.makedirs(dir_path, mode=0o755, exist_ok=False)
         except Exception as e:

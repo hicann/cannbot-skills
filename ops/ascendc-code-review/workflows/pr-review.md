@@ -21,7 +21,7 @@
 
 ### 阶段0：获取 diff + 检视计划设计
 
-1. 将任务0 标记为 in_progress
+1. 将任务0 标记为 in_progress；同时打检视耗时起始戳：`mkdir -p ./operators/pr-{pr_number} && date +%s > ./operators/pr-{pr_number}/timing.log`（阶段3 统计检视耗时用）。**打戳规则**：统计窗口内（本戳 → 阶段3 结束戳）凡因等待用户回应而阻塞（澄清提问、问卷、权限确认等），阻塞前 `date +%s >> ./operators/pr-{pr_number}/timing.log` 记一行 WAIT_BEGIN、恢复后记一行 WAIT_END——这些段不计入检视耗时；窗口外（阶段4 及以后）的等待无需记录
 2. Read + 执行 `steps/common.env-check.md`（依赖自检，已装即走）。失败则中止检视
 3. 从用户输入中提取 PR 链接，解析出 repo_url 与 pr_number，判断托管平台（仅支持 GitCode，非 GitCode PR 终止）
 4. Read + 执行 `steps/pr-review.code-fetch.md` 的派发指令，派发 code-fetch 子 Agent 获取 diff 和完整源码（获取/克隆脚本由子 Agent 执行，主 Agent 不直接执行）
@@ -41,8 +41,8 @@
 1. 将任务1 标记为 in_progress
 2. **启动 yaml collector 服务**（子 Agent 通过 HTTP 提交 yaml，不接触 yaml 输出目录路径）：
    - 选可用端口：`PORT=$(python3 -c "import socket; s=socket.socket(); s.bind(('',0)); print(s.getsockname()[1]); s.close()")`
-   - 后台启动（分离 stdio 避免阻塞 shell）：`setsid python3 {skill_base}/scripts/workflow.submit_server.py {yaml_dir} {PORT} > /tmp/collector_{PORT}.log 2>&1 < /dev/null &`（保存 PID）
-   - 就绪检查（最多重试 2 次）：`sleep 1 && curl -s http://127.0.0.1:{PORT}/health || (sleep 2 && curl -s http://127.0.0.1:{PORT}/health)`；若仍失败，检查 `/tmp/collector_{PORT}.log` 排查原因并尝试重启
+   - 后台启动（分离 stdio 避免阻塞 shell）：`setsid python3 {skill_base}/scripts/workflow.submit_server.py {yaml_dir} {PORT} > $(dirname {yaml_dir})/collector_{PORT}.log 2>&1 < /dev/null &`（保存 PID；日志与 yaml 输出同根，跟随 REVIEW_DIR_ROOT，headless 部署不脱离工作区）
+   - 就绪检查（最多重试 2 次）：`sleep 1 && curl -s http://127.0.0.1:{PORT}/health || (sleep 2 && curl -s http://127.0.0.1:{PORT}/health)`；若仍失败，检查 `$(dirname {yaml_dir})/collector_{PORT}.log` 排查原因并尝试重启
 3. Read `steps/pr-review.clause-review.md` 获取 prompt 模板
 4. 按阶段0 检视计划的分组**单波派发**：在单个消息中并行调用全部组的 `Agent` 工具（每组 = 一个规则文件的全部条款），`subagent_type` 使用 `"general"`
    - 每组用 prompt 模板填入：**{skill_base}（本 skill 根目录绝对路径）** + 侧别 + 条例ID + diff路径 + repo_path + **collector_port（=步骤2 选定的 PORT）**，**不传 yaml_output_dir**
@@ -68,13 +68,23 @@
 1. 将任务3 标记为 in_progress
 2. Read + 执行 `steps/common.report-write.md` 薄壳：传入 yaml_dir + 报告输出路径 + 头部元信息（检视文件数/代码行数 = code-fetch 返回的变更文件数/变更行数）。薄壳内部调用 `{skill_base}/scripts/workflow.assemble_report.py` 组装报告正文，主 Agent 替换头部占位符。**替换完成后检查报告行数（`wc -l`），若 >2000 行则派发 `steps/common.report-filter.md` 过滤子 Agent 原地精简报告**
 3. 报告输出路径 `./operators/pr-{pr_number}/{pr_number}_review_summary.md`
-4. 将任务3 标记为 done
+4. **统计检视耗时并插入报告**：`date +%s` 打结束戳；耗时计算——总耗时 = 结束戳 − timing.log 首行起始戳，纯流程耗时 = 总耗时 − Σ（WAIT_BEGIN 到最近一个 WAIT_END 的差值）。在报告「检视意见」章节之后、「附录」章节之前插入：
+
+   ```
+   ## 检视耗时
+
+   - 总耗时：X 分 Y 秒（工作流触发 → 报告生成）
+   - 纯流程耗时：X 分 Y 秒（已扣除人机等待 N 秒；无等待时本行省略）
+   ```
+
+5. 将任务3 标记为 done
 
 ### 阶段4：可选行内评论（最后执行）
 1. 将任务4 标记为 in_progress，先向用户展示最终报告或报告链接；阶段3 的头部补齐与超长过滤必须已完成。
 2. 检查能否找到 `gitcode-toolkit` skill 及其行内评论说明；找不到则跳过本阶段，不读取或执行下一步文件。
-3. 仅当可用时，Read + 执行 `steps/pr-review.inline-pr-comment.md`，传入 PR URL + repo_path + diff_path + yaml_dir + 最终报告路径 + 用户对本次 PR 评论的明确要求（保留原话及后续调整，未指定则留空）；检视 head SHA 取已获取源码的 `git rev-parse HEAD`，不得用当前远端 SHA 替代。
+3. 仅当可用时，Read + 执行 `steps/pr-review.inline-pr-comment.md`，传入 PR URL + repo_path + diff_path + yaml_dir + 最终报告路径 + 检视耗时（阶段3 报告的纯流程耗时值，无等待时即总耗时，行内评论尾部标识用）+ 用户对本次 PR 评论的明确要求（保留原话及后续调整，未指定则留空）；检视 head SHA 取已获取源码的 `git rev-parse HEAD`，不得用当前远端 SHA 替代。
 4. 发布完成、用户取消或跳过后将任务4 标记为 done；等待问卷回答时保持 in_progress。本阶段不改变已完成的报告。
+
 
 ---
 
@@ -95,4 +105,5 @@
 - 阶段2 走 `steps/pr-review.line-verify.md` 薄壳：脚本内部对 yaml 做 diff 红线校验与行号校对
 - PR 检视模式下 code-fetch 失败则终止流程
 - `oversized=true` 的拆分建议只提示、不阻断：不等待用户回复、不标记任务为 deleted、不改变后续阶段顺序
+- 阶段4 仅发布行内评论；检视报告（全文或任何汇总形式）一律不发布到 PR——行为固定，不因评论模式或触发方式变化，报告为本地交付
 - 禁止提前 Read 未执行阶段的 step 文件
