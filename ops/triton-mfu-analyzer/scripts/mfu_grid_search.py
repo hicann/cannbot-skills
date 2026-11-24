@@ -119,7 +119,8 @@ def trace_flops(d, tool, mem_cap=8 * 1024**3):
         两道强制：环境变量 MFU_FLOPS_NO_REAL=1 供 tracer 自行遵守；
         RLIMIT_AS 硬上限作为兜底（对不认该变量的 tracer 同样有效）。
     """
-    out = tempfile.mktemp(suffix=".json")
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+        out = tf.name
     try:
         subprocess.run(
             [sys.executable, tool, os.path.join(d, "model.py"), out],
@@ -129,7 +130,8 @@ def trace_flops(d, tool, mem_cap=8 * 1024**3):
             env=dict(os.environ, MFU_FLOPS_NO_REAL="1"),
             preexec_fn=_limit_mem(mem_cap),
         )
-        fl = json.load(open(out)).get("flops", {})
+        with open(out) as fp:
+            fl = json.load(fp).get("flops", {})
         return max(fl.values()) if fl else 0.0
     except Exception:
         return 0.0
@@ -155,7 +157,8 @@ def collect(prof_dir, iters):
     for fp in glob.glob(
         os.path.join(prof_dir, "**", "op_summary_*.csv"), recursive=True
     ):
-        rows += list(csv.DictReader(open(fp)))
+        with open(fp) as csv_fp:
+            rows += list(csv.DictReader(csv_fp))
     if not rows:
         return None
     rows.sort(key=lambda r: _f(r.get("Task Start Time(us)", 0)))
@@ -348,11 +351,8 @@ def main():
         if not cand:
             sys.exit("找不到用例文件")
         cases_path = cand[0]
-    cs = [
-        json.loads(line)
-        for line in open(cases_path, encoding="utf-8-sig")
-        if line.strip()
-    ]
+    with open(cases_path, encoding="utf-8-sig") as fp:
+        cs = [json.loads(line) for line in fp if line.strip()]
 
     # 先按原始 shape 的 FLOPs 排序挑候选 case
     order = []
@@ -545,7 +545,8 @@ def main():
         )
         print(f"  已写 {md}")
     out = a.out or os.path.join(a.dir, "mfu_grid.json")
-    json.dump(res, open(out, "w"), ensure_ascii=False, indent=1)
+    with open(out, "w") as fp:
+        json.dump(res, fp, ensure_ascii=False, indent=1)
     if best:
         if best.get("suspect"):
             print("⚠ 该点未通过一致性检查：" + "；".join(best["suspect"]))
