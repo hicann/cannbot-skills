@@ -1,0 +1,54 @@
+{
+  "skill_name": "docs-branch-update",
+  "eval_mode": "text",
+  "evals": [
+    {
+      "id": 1,
+      "title": "版本分支只更新链接",
+      "prompt": "请把本轮 Skills 源码根的 infra/docs-branch-update/evals/fixtures/docs-branch-update-sample.md 拷贝到工作区的 eval-sample/ 目录（目录不存在则新建，该目录不是 git 仓），然后按 9.3.0 版本分支的映射规则，用 docs-branch-update 只更新里面的链接，不要动 npu 标签。",
+      "expected_output": "只用链接更新脚本 update_links.py 处理拷贝目录（-d 指向 eval-sample/，-b 指定 9.3.0），不执行 remove_npu_tags.py。按映射规则直接修改拷贝文件：gitcode.com/cann/cann-ops 的 master 换为 9.3.0，gitcode.com/cann/pypto-gym 的 master 换为映射后的上一个正式版本，gitcode.com/Ascend/mindstudio 的 master 换为 26.3.0，hiascend CANNCommunityEdition 的 latest 换为 930，hiascend Pytorch 的 latest 换为 2630，hiascend TensorFlowCommunity 的 latest 换为 930；输出修改清单（含链接替换明细与在线有效性校验），npu 标签保持不变，源 fixture 文件不被改动。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 2,
+      "title": "只删除 NPU 标签",
+      "prompt": "继续验证标签清理：把本轮 Skills 源码根的 infra/docs-branch-update/evals/fixtures/docs-branch-update-sample.md 拷贝一份干净的到工作区 eval-sample/ 目录（目录不存在则新建，存在则覆盖旧文件），然后用 docs-branch-update 只删除其中不允许存在的 npu 标签内容，链接不要动。",
+      "expected_output": "只用 remove_npu_tags.py 处理拷贝目录（-d 指向 eval-sample/），不执行 update_links.py。未显式指定类型时先从 cann/docs 仓文档写作规范在线获取不允许存在的标签范围（仅查询一次，失败则提示通过 --npu 显式指定），拷贝文件中单一类型 x90 标签块（含 id3/id4 嵌套块与接缝前的 id5 块）整块删除、950,x90 混合标签仅移除 x90 并保留块内容、x90,9030 混合标签逐类型移除后列表为空整块删除、删除接缝处的冗余 <br> 与空行同步局部清理；直接修改拷贝文件并输出修改清单（删除块数、接缝清理统计），混合改写按最终数据对账：明细仅 950,x90 -> 950 共 1 处，已整删的 x90,9030 块不计入混合改写、不出现 x90,9030 -> 9030 中间态明细。样例中的链接保持不变，源 fixture 文件不被改动。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 3,
+      "title": "master 分支拒绝执行链接更新",
+      "prompt": "先把本轮 Skills 源码根的 infra/docs-branch-update/evals/fixtures/docs-branch-update-sample.md 拷贝到工作区的 eval-sample/ 目录（目录不存在则新建，该目录不是 git 仓）；然后我想在还没拉版本分支的 master 阶段先试跑：以该目录为目标、分支按 master，用 docs-branch-update 执行链接更新，看看会发生什么。",
+      "expected_output": "拒绝执行链接更新：分支为 master 时链接版本更新无意义，提示需要切换到版本分支或通过 -b 显式指定版本分支，不修改拷贝文件、不输出修改清单。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 4,
+      "title": "同时更新链接并删除 NPU 标签",
+      "prompt": "完整流程验证：把本轮 Skills 源码根的 infra/docs-branch-update/evals/fixtures/docs-branch-update-sample.md 拷贝一份干净的到工作区 eval-sample/ 目录（目录不存在则新建，存在则覆盖旧文件），按 9.3.0 版本分支用 docs-branch-update 一次完成链接更新与 npu 标签删除两类固定修改项。",
+      "expected_output": "依次执行两个脚本完成全部处理：先 update_links.py（-d 指向 eval-sample/、-b 9.3.0）更新链接（cann master 换为 9.3.0、pypto-gym 按上一正式版本映射、Ascend master 换为 26.3.0、hiascend CANN/Pytorch/TF 的 latest 分别换为 930/2630/930）并输出修改清单与在线有效性校验，再 remove_npu_tags.py 删除 NPU 标签（x90 块含嵌套整块删除、950,x90 混合改写留内容、x90,9030 混合至空整删、接缝冗余清理）并输出修改清单。两类修改由独立脚本分别承载、互不覆盖，源 fixture 文件不被改动，修改后可用 git diff 复查。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 5,
+      "title": "标签删除边界与幂等自检",
+      "prompt": "标签清理边界验证：把本轮 Skills 源码根的 infra/docs-branch-update/evals/fixtures/docs-branch-update-sample.md 拷贝到工作区 eval-sample/ 目录（目录不存在则新建），再执行本轮 Skills 源码根的 infra/docs-branch-update/evals/fixtures/prepare_crlf_sample.py，在 eval-sample/ 目录下生成 docs-branch-update-sample-crlf.md（CRLF 行尾样例，仓库中不存在该文件、由脚本生成）；然后用 docs-branch-update 显式指定 --npu x90 9030 执行删除（不要在线获取默认范围），完成后对同一目录重跑一次做幂等自检。",
+      "expected_output": "先用 prepare_crlf_sample.py 生成纯 CRLF 样例（全部行尾为 \\r\\n、无裸 LF），再用 remove_npu_tags.py（-d 指向 eval-sample/，--npu x90 9030）执行：单一类型 x90 标签块整块删除、id3/id4 嵌套块按 end id 配对整删、950,x90 混合标签仅移除 x90 保留块内容、x90,9030 混合标签逐类型移除后列表为空整块删除、删除接缝处 3 个及以上连续 <br> 与冗余空行局部清理；两个样例行尾均保持原样（LF 文件仍为 LF，CRLF 文件仍为 CRLF，字节级处理），输出修改清单（两文件命中统计），混合改写按最终数据对账：明细仅 950,x90 -> 950 共 2 处（两文件各 1 处），已整删的 x90,9030 块不计入混合改写、不出现中间态明细。重跑一次后修改清单为零命中（无删除块数、无混合改写、无接缝清理），链接保持不变，源 fixture 文件与生成脚本不被改动。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "版本分支映射矩阵",
+      "prompt": "映射矩阵验证：把本轮 Skills 源码根的 infra/docs-branch-update/evals/fixtures/docs-branch-update-sample.md 分别拷贝三份到工作区 eval-sample/ 下的 b910/、b920beta/、b930beta/ 子目录（eval-sample/ 及子目录不存在则新建，均不是 git 仓），依次用 docs-branch-update 按 -b 9.1.0、-b 9.2.0-beta.1、-b 9.3.0-beta.1 只更新链接，并说明每组的映射结果。",
+      "expected_output": "对三份拷贝分别执行 update_links.py（-b 对应分支），映射结果均为：gitcode.com/cann/cann-ops 的 master 换为分支本身（9.1.0 / 9.2.0-beta.1 / 9.3.0-beta.1）；gitcode.com/cann/pypto-gym 的 master 换为上一个正式版本（9.1.0 -> 9.1.0，9.2.0-beta.1 -> 9.1.0，9.3.0-beta.1 -> 9.2.0）；gitcode.com/Ascend/mindstudio 的 master 换为映射 Ascend 分支（9.1.0 与 9.2.0-beta.1 均 -> 26.1.0，9.3.0-beta.1 -> 26.2.0）；hiascend CANNCommunityEdition 的 latest 换为 910 / 920beta1 / 930beta1；hiascend TensorFlowCommunity 的 latest 换为 910 / 910 / 920；hiascend Pytorch 的 latest 换为 2610 / 2610 / 2620。三组各输出修改清单（各 6 处链接替换），npu 标签保持不变，源 fixture 文件不被改动。",
+      "files": [],
+      "expectations": []
+    }
+  ]
+}
