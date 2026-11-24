@@ -35,7 +35,7 @@ metadata:
 完整测试生成按以下产物顺序推进；已有有效产物先检查并复用：
 
 1. 黑盒：读取 inventory 后，在正式 `TEST_DIR/testcase.csv` 创建固定表头并写入已确认的 L0 核心用例，再分批补 L1/L2；已有 CSV 只更新 blackbox 行，使用分组安全更新入口保留其他分组。
-2. Golden 与入口：只读 spec 和设计中相关数学/接口章节，保存完整可解析的 Golden，运行 `prepare_golden.py` 校验并安装固定入口，再进行 CPU 数值复核。完成这一步后再展开白盒和全部 Unit。
+2. Golden 与入口：只读 spec 和设计中相关数学/接口章节，保存完整可解析的 Golden，运行 `prepare_golden.py` 校验并安装固定入口，核对接口、输出结构及已声明的 shape/dtype。完成这一步后再展开白盒和全部 Unit。
 3. 白盒：按设计索引逐个读取真实执行分支，完成一批即写入 whitebox 行；每个 active 行显式填写 `expected`，判定选择见[用例契约](references/cases.md#白盒)；无需预读 Unit。
 4. TDD：按 Unit 依赖顺序逐份读取 YAML，逐批保存相应义务的 tdd 行；最后执行全量义务、依赖与关联检查。
 
@@ -59,7 +59,7 @@ metadata:
 
 ## 独立 Golden 与固定入口
 
-依据 spec 和 DESIGN 直接编写 `TEST_DIR/<op>_golden.py`。其中包含 `DESIGN_REFS`、与 spec 参数一致的 `<op>_golden`、公开接口元数据；CPU 实现不得导入被测算子或设备库。可参考 [Golden 契约](references/golden.md)。人工审查数值路径后运行 `scripts/prepare_golden.py --spec SPEC --design DESIGN --test-dir TEST_DIR` 校验最终 Golden，并安装固定 `test_<op>.py` 与三个结果目录。静态校验不能证明数值等价，须用 CPU 样例和边界复核。
+依据 spec 和 DESIGN 直接编写 `TEST_DIR/<op>_golden.py`。其中包含 `DESIGN_REFS`、与 spec 参数一致的 `<op>_golden`、公开接口元数据；CPU 实现不得导入被测算子或设备库。主参考的精度与计算方法遵循 [Golden 契约](references/golden.md#独立主参考与计算精度)。运行 `scripts/prepare_golden.py --spec SPEC --design DESIGN --test-dir TEST_DIR` 校验最终 Golden，并安装固定 `test_<op>.py` 与三个结果目录。Golden 准备阶段仅检查接口、元数据、输出数量/结构及已声明的 shape/dtype，不额外构造 CPU 样例、手算答案或独立数值对照。既定参考缓存准备及目标算子的正式精度比较照常执行；结构检查不作为数值正确的证明。
 
 若 spec 声明了 `op.aicpu_kernel`，算子实现模块须提供 `_aicpu_preprocess(inputs)` 钩子：NPU 测试时固定入口自动调用该钩子对输入做 AICPU 前置处理，再执行主算子；CPU Golden 不感知此流程，保持纯 CPU 实现。
 

@@ -38,8 +38,8 @@
         "timeout": 600,
         "eval_mode": "file_based"
       },
-      "prompt": "使用 cannbot-dsl-test-generator 的 Golden/入口模块。读取本 skill evals/fixtures/add-spec.yaml 和 evals/fixtures/add-design.md，在 test/ 编写完整独立 CPU add_golden.py，并运行 prepare_golden.py 校验、安装固定 test_add.py 及所需辅助模块。用一个小 CPU 样例核对加法结果；本次不用 NPU，不生成白盒/TDD，不实现目标算子。",
-      "expected_output": "Golden 应消费规格与给定数学/接口设计，使用独立 CPU 参考加法，元数据和容差一致，DESIGN_REFS 可追溯设计条目；不得导入被测算子、cannbotdsl 或 torch_npu。应实际通过 Golden 静态校验并生成固定入口、辅助模块和结果目录，绑定 spec.op.name=add，不能从 TEST_DIR 的父目录推断算子名。小 CPU 复核与静态校验结论分开，不能宣称设备验证通过。",
+      "prompt": "使用 cannbot-dsl-test-generator 的 Golden/入口模块。读取本 skill evals/fixtures/add-spec.yaml 和 evals/fixtures/add-design.md，在 test/ 编写完整独立 CPU add_golden.py，并运行 prepare_golden.py 校验、安装固定 test_add.py 及所需辅助模块。本次不用 NPU，不生成白盒/TDD，不实现目标算子。",
+      "expected_output": "Golden 应消费规格与给定数学/接口设计，使用独立 CPU 参考加法，元数据和容差一致，DESIGN_REFS 可追溯设计条目；不得导入被测算子、cannbotdsl 或 torch_npu。应实际通过 Golden 静态校验并生成固定入口、辅助模块和结果目录，绑定 spec.op.name=add，不能从 TEST_DIR 的父目录推断算子名。仅检查接口、元数据、输出结构及 shape/dtype，不额外构造数值对照；不能将静态校验通过宣称为数值或设备验证通过。",
       "files": [],
       "expectations": [
         {
