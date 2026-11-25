@@ -327,7 +327,8 @@ def main():
     args = ap.parse_args()
 
     fields = CONV3DDX_FIELDS if args.schema == "conv3ddx" else FIELDS
-    rows = list(csv.DictReader(open(args.results, encoding="utf-8")))
+    with open(args.results, encoding="utf-8") as fp:
+        rows = list(csv.DictReader(fp))
     decoded = []
     for r in rows:
         name = r.get("testcase_name", "")
