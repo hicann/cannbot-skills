@@ -52,6 +52,7 @@ MoE 已有实现从[源码阅读](references/foundations/ascendc-api/moe-dispatc
 
 **使用信号**（任一即可）：
 - 场景：多卡协同的通算融合算子（AllToAll+Matmul、AllReduce+Matmul、MoE Dispatch/Combine、多卡 EP/TP/SP 融合 Kernel）
+- 接入已有专家并行（Expert Parallelism，EP）接口时，直接查阅[推理与训练的 Dispatch/Combine 用法](references/foundations/ascendc-api/moe-dispatch-combine/api-rules/dispatch-combine-contracts.md#公开接口)。自建 Kernel 时再按通信路线选择开发底座。
 - 关键词："MC2"、"SHMEM"、"APACE"、"apace"、"通算融合"、"多卡通信直调"、"UDMA"、"URMA"、"AllToAll+Matmul"、"CollectiveComm"、"MoE Dispatch"、"MoE Combine"、"专家并行"、"EP"、"mega_moe"、"MTE通信"、"MTE window"、"token 路由分发"、"910B"、"HCCL"、"aclnn 通算融合"
 - 代码：现有工程同时出现通信 API（`shmem.h`/`aclshmem*` 或 `collective_comm_api.h`/`CollectiveComm`）与 `blaze/gemm/` 模板（blaze-shmem/apace 路线），或出现 `winContext`/`mc2Context`/`HcclOpParam` 与 MTE 通信窗口结构（MTE通信 → ascendc-api 路线），或出现 `Hccl<HCCL_SERVER_TYPE_AICPU>` 与 `AscendC::Matmul`（HCCL 高阶 → hccl-matmul 路线）
 
