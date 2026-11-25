@@ -65,10 +65,11 @@ def read_knowledge_env(project_root):
         else None
     )
     if p and os.path.exists(p):
-        for line in open(p):
-            m = re.match(r"\s*(?:export\s+)?(\w+)='?([^'\n]*)'?\s*$", line)
-            if m:
-                env[m.group(1)] = m.group(2)
+        with open(p) as fp:
+            for line in fp:
+                m = re.match(r"\s*(?:export\s+)?(\w+)='?([^'\n]*)'?\s*$", line)
+                if m:
+                    env[m.group(1)] = m.group(2)
     return env
 
 
@@ -84,11 +85,12 @@ def list_local_kb(project_root):
                 out[kind].append((os.path.basename(f), os.path.getmtime(f)))
     mf = os.path.join(base, "manifest.jsonl")
     if os.path.exists(mf):
-        for line in open(mf):
-            try:
-                out["manifest"].append(json.loads(line))
-            except Exception:
-                pass
+        with open(mf) as fp:
+            for line in fp:
+                try:
+                    out["manifest"].append(json.loads(line))
+                except Exception:
+                    pass
     return out
 
 
@@ -115,7 +117,8 @@ def scan_transcripts(projects_dir, since_ts, projects_filter=None):
         try:
             if os.path.getmtime(f) < since_ts:
                 continue
-            t = open(f, encoding="utf-8", errors="ignore").read()
+            with open(f, encoding="utf-8", errors="ignore") as fp:
+                t = fp.read()
         except Exception:
             continue
         stats["files"] += 1
@@ -146,24 +149,16 @@ def scan_evo_dir(evo_dir):
         p = os.path.join(evo_dir, name)
         if os.path.exists(p):
             try:
-                ids.update(
-                    re.findall(
-                        r"\b[PX]\d{2,3}\b",
-                        open(p, encoding="utf-8", errors="ignore").read(),
-                    )
-                )
+                with open(p, encoding="utf-8", errors="ignore") as fp:
+                    ids.update(re.findall(r"\b[PX]\d{2,3}\b", fp.read()))
             except Exception:
                 pass
     for p in glob.glob(
         os.path.join(evo_dir, "round_*", "parallel_*", "implementation_note.txt")
     ):
         try:
-            ids.update(
-                re.findall(
-                    r"\b[PX]\d{2,3}\b",
-                    open(p, encoding="utf-8", errors="ignore").read(),
-                )
-            )
+            with open(p, encoding="utf-8", errors="ignore") as fp:
+                ids.update(re.findall(r"\b[PX]\d{2,3}\b", fp.read()))
         except Exception:
             pass
     for p in sorted(
@@ -172,7 +167,8 @@ def scan_evo_dir(evo_dir):
         )
     ):
         try:
-            r = json.load(open(p))
+            with open(p) as fp:
+                r = json.load(fp)
             evals.append(
                 (
                     p.replace(evo_dir.rstrip("/") + "/", ""),
