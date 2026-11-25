@@ -293,11 +293,10 @@ class TestWorkflowInstallation:
             workflow="fixture-workflow",
             harness=harness,
         )
-        assert open(os.path.join(work, "selected-tool.txt")).read() == tool
-        assert (
-            open(os.path.join(work, "operators", "fixture", "desc.md")).read()
-            == "fixture operator"
-        )
+        with open(os.path.join(work, "selected-tool.txt")) as fp:
+            assert fp.read() == tool
+        with open(os.path.join(work, "operators", "fixture", "desc.md")) as fp:
+            assert fp.read() == "fixture operator"
         assert os.path.isfile(os.path.join(work, "example", "CMakeLists.txt"))
         if harness == "opencode":
             agent = os.path.join(work, ".opencode", "agents", "cannbot.md")
@@ -817,8 +816,10 @@ class TestReport:
         paths = report.generate_report(
             TestReport._results(), "test001", "a/1", "ops-direct-invoke", str(tmp_path)
         )
-        md = open(paths["md"], encoding="utf-8").read()
-        html_doc = open(paths["html"], encoding="utf-8").read()
+        with open(paths["md"], encoding="utf-8") as fp:
+            md = fp.read()
+        with open(paths["html"], encoding="utf-8") as fp:
+            html_doc = fp.read()
         assert "通过率" in md and "50.0%" in md
         assert "softmax" in md and "mla" in md
         assert "⏱️" in md  # timeout 图标
@@ -840,7 +841,8 @@ class TestReport:
             }
         ]
         paths = report.generate_report(results, "del001", "a/1", "wf", str(tmp_path))
-        md = open(paths["md"], encoding="utf-8").read()
+        with open(paths["md"], encoding="utf-8") as fp:
+            md = fp.read()
         assert "缺whl" in md
         assert "交付完整 | 0/1" in md
         assert "| x |" in md and "| 2 |" in md  # 尝试列 = op_attempt
@@ -859,7 +861,8 @@ class TestReport:
             }
         ]
         paths = report.generate_report(results, "dirty01", "a/1", "wf", str(tmp_path))
-        md = open(paths["md"], encoding="utf-8").read()
+        with open(paths["md"], encoding="utf-8") as fp:
+            md = fp.read()
         assert "x" in md and "0.0000" in md
 
     @staticmethod
