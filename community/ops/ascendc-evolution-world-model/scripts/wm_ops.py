@@ -1639,7 +1639,8 @@ def _expected_case_count(results_dir: str) -> int | None:
 
     # main10 模式：期望 case 数 = main10 文件行数
     try:
-        state = json.load(open(os.path.join(evo_dir, "state.json")))
+        with open(os.path.join(evo_dir, "state.json")) as fp:
+            state = json.load(fp)
         if state.get("eval_mechanism") == "main10":
             m10 = sorted(glob.glob(os.path.join(shared, "*_main10.json")))
             if m10:
