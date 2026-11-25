@@ -12,8 +12,6 @@ metadata:
 
 本 skill 是 docs-common-review 家族的编排入口：自身不实现任何检查，职责限定为 模式路由 → 调度原子检查能力 → 聚合统一报告。各检查能力的规则真源在原子 skill / 脚本处（知识依赖单向：本 skill 只消费，不复制、不修改它们的规则定义）。
 
-> 家族内另含领域专项检查 `docs-api-review/`（API 参考模板规则质检）：独立 skill，用户点名 API 参考/模板类检查时直接使用，不参与本入口 9 项通用检查的门禁/全量/自定义模式编排。
-
 ## 质检能力项（canonical 命名）
 
 | 检查项 | 功能说明 | 执行方式 | 执行入口（相对本 skill 根目录） |
@@ -23,7 +21,7 @@ metadata:
 | link-validity-check | 链接可访问性检查 | 同上 | 同上 |
 | resource-existence-check | 资源存在性检查 | 同上 | 同上 |
 | codespell-check | 单词拼写检查 | 同上 | 同上 |
-| filename-check | Markdown 文件命名规范检查 | 脚本（python，黑盒直调） | docs-filename-check/docs-filename-check.py |
+| filename-check | Markdown 文件命名规范检查 | 脚本（node，黑盒直调） | docs-filename-check/docs-filename-check.js |
 | punctuation-check | 标点符号检查（空格缺失/冗余、中英混排等） | 原子 skill（模型+脚本） | docs-punctuation-check/SKILL.md |
 | compliance-check | 合规性检查（术语、敏感词、标签、编码、table、目录层级） | 原子 skill（模型+脚本） | docs-compliance-check/SKILL.md |
 | aicheck | 基于上下文语义的 AI 检查（一致性、冗余、可读性、结构完整性） | 原子 skill（模型+脚本） | docs-basic-aicheck/SKILL.md |
@@ -61,9 +59,9 @@ metadata:
 
 | 模式 | 覆盖检查项 | 特点 | 最小环境（见"环境依赖"） |
 | --- | --- | --- | --- |
-| 门禁模式（ci-gated） | markdownlint、codespell-check、tag-closed-check、link-validity-check、resource-existence-check + compliance-check 的两个脚本步骤（芯片/位置标签、MD 编码格式） | 纯脚本管线，脚本项并发执行，秒级完成；报告给出门禁 pass/fail | node + npm（仅 cspell 词典未装时用一次）；无需 python 3 |
-| 全量模式（full） | 9 项全部 | 覆盖最全；脚本项与模型项同消息全并发（含 aicheck；唯一例外是 markdownlint 首跑缓存预热先行），耗时与成本最高 | node + python 3 + npm（仅词典未装时用一次） |
-| 自定义模式（custom） | 用户勾选的任意组合 | 确定性执行勾选项；用户未给清单时必须先弹 9 项多选框（见"模式选择"硬约束） | node 恒需（聚合链路）；python 3 仅勾 filename-check、npm 仅勾 codespell-check 时需要 |
+| 门禁模式（ci-gated） | markdownlint、codespell-check、tag-closed-check、link-validity-check、resource-existence-check + compliance-check 的两个脚本步骤（芯片/位置标签、MD 编码格式） | 纯脚本管线，脚本项并发执行，秒级完成；报告给出门禁 pass/fail | node + npm（仅 cspell 词典未装时用一次） |
+| 全量模式（full） | 9 项全部 | 覆盖最全；脚本项与模型项同消息全并发（含 aicheck；唯一例外是 markdownlint 首跑缓存预热先行），耗时与成本最高 | node + npm（仅词典未装时用一次） |
+| 自定义模式（custom） | 用户勾选的任意组合 | 确定性执行勾选项；用户未给清单时必须先弹 9 项多选框（见"模式选择"硬约束） | node 恒需（聚合链路 + filename-check）；npm 仅勾 codespell-check 时需要 |
 
 门禁集合依据：CANN 社区 docs-ci 实际启用且拦截 PR 的项为 link / resource / tag-closed / compliance（标签+编码）；markdownlint 与 codespell 在 CI 中仅告警不拦截——因此门禁判定只看前四类，后两项按告警单独计数。标点、术语、文件命名不在社区 CI 内，归全量/自定义模式。
 
@@ -115,7 +113,7 @@ metadata:
 
 1. **脚本项直调**：所有模式中的脚本项直接调用脚本命令，不经过原子 skill 的交互流程（范围询问等是它们独立使用时的行为）。工具 5 项逐项独立调用 run_check.js、每项独立结果文件；filename-check 逐目标运行后由 `scripts/merge_json.js` 合并为单一结果文件。
 2. **模型项派 subagent**：punctuation-check / compliance-check / aicheck 以 subagent 执行——subagent 读取并严格遵循对应原子 SKILL.md 的完整流程；subagent 提示词中必须预先指定检查对象、项目根目录、检查范围（免交互）。
-3. **全并发启动**：互不依赖的检查在单条消息中同时发出——工具项各自一条 Bash、filename 各目标一条 Bash、三个模型项（punctuation / compliance / aicheck）各一个 subagent（Agent 派发与 Bash 调用可混在同一条消息）；禁止把互不依赖的检查排成先后步骤串行执行。模型三项之间**无顺序约束**（aicheck 不等 compliance：经源码核实，本家族 spoke 的脚本不产出共享中间文件 `output/tag_check_result.json`——该文件仅社区 CI 版本产生，spoke 的 `tag_checker.js` 直接把结果写入调用方传入的输出路径，无从互删；第 1 步预清理历史中间产物进一步保证并发起点干净）。唯一例外：工具 5 项中 markdownlint 先行单独执行（社区脚本首次运行需下载缓存到固定路径，并发下载同一文件会互踩），其返回后其余 4 项再并发（缓存确认存在时 5 项同时发出）。环境前置按序完成后再进入上述并发编排：① `node -v` 可用性检查——node 为 hub 硬依赖（见"环境依赖"），不可用即**停止本次质检**并提示安装，禁止带病执行后再逐项失败；② 本次范围含 codespell-check 时，完成"环境依赖 → cspell 词典"的检查/安装前置（已装则跳过）；③ python 不做预检，filename-check 执行期由命令内联探测 `python` → `python3` 兜底。宿主不支持同消息多工具调用时降级为顺序执行并告知用户。
+3. **全并发启动**：互不依赖的检查在单条消息中同时发出——工具项各自一条 Bash、filename 各目标一条 Bash、三个模型项（punctuation / compliance / aicheck）各一个 subagent（Agent 派发与 Bash 调用可混在同一条消息）；禁止把互不依赖的检查排成先后步骤串行执行。模型三项之间**无顺序约束**（aicheck 不等 compliance：经源码核实，本家族 spoke 的脚本不产出共享中间文件 `output/tag_check_result.json`——该文件仅社区 CI 版本产生，spoke 的 `tag_checker.js` 直接把结果写入调用方传入的输出路径，无从互删；第 1 步预清理历史中间产物进一步保证并发起点干净）。唯一例外：工具 5 项中 markdownlint 先行单独执行（首次运行需将内置脚本复制到固定缓存路径，并发复制同一文件可能互踩），其返回后其余 4 项再并发（缓存确认存在时 5 项同时发出）。环境前置按序完成后再进入上述并发编排：① `node -v` 可用性检查——node 为 hub 硬依赖（见"环境依赖"），不可用即**停止本次质检**并提示安装，禁止带病执行后再逐项失败；② 本次范围含 codespell-check 时，完成"环境依赖 → cspell 词典"的检查/安装前置（已装则跳过）。宿主不支持同消息多工具调用时降级为顺序执行并告知用户。
 4. **完整性校验与失败隔离**：按模式维护期望结果文件清单，全部执行单元返回后核对落盘情况；缺失则重派一次；仍缺失则按第 5 条计入失败清单并在最终汇报中显著标注，禁止用空结果冒充。**任一检查项异常中断（命令失败、超时、subagent 崩溃、重派后仍失败、环境缺失跳过）只影响该项本身，其余检查项必须正常执行并完成聚合，禁止因单项失败中止整个质检或放弃产出报告**。
 5. **失败记录与显著提示（failed_check）**：存在未能成功执行的检查项时：(1) 在聚合前将失败清单写入 `<项目根>/output/failed_checks.json`（JSON 数组，每项 `{"check": "<canonical 检查项名>", "reason": "<具体原因，含错误输出摘要>"}`）；(2) 聚合命令追加 `--failed-file=<项目根>/output/failed_checks.json`，由 aggregate.js 写入 `summary.failed_check`（可选字段，有失败才存在）；(3) 汇总输出时**必须**在汇报最前面输出显著的检查项错误提示块（模板与可能原因映射见"检查项失败提示"节）；(4) `failed_checks.json` 属中间产物，收尾清理。
 6. **宿主降级**：运行环境不支持 subagent 时，改为按顺序自行执行各原子 skill，并告知用户耗时将增加。
@@ -140,25 +138,24 @@ metadata:
 
 | 失败检查项 | 可能原因与建议 |
 | --- | --- |
-| markdownlint / tag-closed-check / link-validity-check / resource-existence-check / codespell-check（run_check.js 类） | 社区脚本拉取失败（网络/代理受限，建议检查网络或配置 `--proxy`）；外链检查网络超时（内网建议 `--disable-external`）；node 运行期异常（启动前缺失已被前置检查拦截） |
+| markdownlint / tag-closed-check / link-validity-check / resource-existence-check / codespell-check（run_check.js 类） | 技能安装不完整（内置检查脚本 `scripts/vendor/docs-ci-v2.js.txt` 缺失，脚本为本地直调、不访问远端）；外链检查网络超时（内网建议 `--disable-external`）；node 运行期异常（启动前缺失已被前置检查拦截） |
 | codespell-check | cspell 词典未安装或安装失败（npm 源不可达，处理见"环境依赖 → cspell 词典"） |
-| filename-check | python / python3 不存在（安装后重跑该检查项） |
+| filename-check | node 运行期异常（启动前缺失已被前置检查拦截）；目标路径不存在或不可读 |
 | 合规脚本块（标签 / MD 编码格式） | node 运行期异常（启动前缺失已被前置检查拦截）；目标文件读取失败（路径含特殊字符或权限不足） |
 | punctuation-check / compliance-check / aicheck（模型项 subagent） | subagent 执行超时或异常中断；上下文超限；原子 skill 内部错误 |
-| 全部检查项均失败 | 项目根目录判定错误，或运行期环境整体异常（node 启动前缺失已被前置检查拦截、python 缺失仅影响 filename-check；重跑前先确认环境与路径） |
+| 全部检查项均失败 | 项目根目录判定错误，或运行期环境整体异常（node 启动前缺失已被前置检查拦截；重跑前先确认环境与路径） |
 
 修复建议统一附加：修复后可用自定义模式单独重跑失败项，再与本次结果合并判断。
 
 ## 环境依赖（分级按需）
 
-依赖分级：**node 为 hub 硬依赖**（任何模式、任何勾选组合恒需——即使只勾 filename-check，合并/聚合/失败清单写盘也全部跑在 node 上）；**python 3 / npm / 网络为条件依赖**，仅对应检查项在本次范围内才检查与安装，禁止无差别预检预装。唯一由本技能自行安装的只有 cspell 词典（临时目录内的 npm 包，见下节）；node / python 只探测与提示安装，不代替用户安装，hub 直调脚本也不触发原子 skill 独立使用时的"协助安装"交互（执行原则 1）。
+依赖分级：**node 为 hub 硬依赖**（任何模式、任何勾选组合恒需——即使只勾 filename-check，合并/聚合/失败清单写盘也全部跑在 node 上）；**npm / 网络为条件依赖**，仅对应检查项在本次范围内才检查与安装，禁止无差别预检预装。唯一由本技能自行安装的只有 cspell 词典（临时目录内的 npm 包，见下节）；node 只探测与提示安装，不代替用户安装，hub 直调脚本也不触发原子 skill 独立使用时的"协助安装"交互（执行原则 1）。
 
 | 依赖 | 级别与触发条件 | 用途 | 缺失时 |
 | --- | --- | --- | --- |
-| node | 硬依赖，恒需 | 全部脚本项与公共链路：工具 5 项（run_check.js）、punctuation 的 7 个脚本、compliance 的 5 个脚本、aicheck 的 repeate_char_checker.js（三个"模型项"均为模型 + node 脚本混合体，不存在零脚本依赖的检查项）；另有 merge_json.js（filename 合并）、aggregate.js（聚合与导出）、failed_checks.json 写盘（node -e） | 各 workflow 进入检查编排前前置 `node -v`，不可用 → **停止本次质检**（无 node 则任何模式都无法聚合产出报告，禁止带病执行后再逐项失败）并提示安装：Windows `winget install OpenJS.NodeJS.LTS`；Ubuntu/Debian `sudo apt install -y nodejs npm`；EulerOS `sudo yum install -y nodejs npm`。前置通过后的运行期脚本失败按执行原则 4/5 失败隔离，不按环境缺失处理 |
-| python 3 | 条件依赖，仅 filename-check（门禁模式恒不涉及：不检查、不提示） | docs-filename-check.py | 执行期内联探测 `python`，不存在改试 `python3`；均不存在 → 跳过 filename-check 并提示安装，禁止编造结果 |
+| node | 硬依赖，恒需 | 全部脚本项与公共链路：工具 5 项（run_check.js）、filename-check 的 docs-filename-check.js、punctuation 的 7 个脚本、compliance 的 5 个脚本、aicheck 的 repeate_char_checker.js（三个"模型项"均为模型 + node 脚本混合体，不存在零脚本依赖的检查项）；另有 merge_json.js（filename 合并）、aggregate.js（聚合与导出）、failed_checks.json 写盘（node -e） | 各 workflow 进入检查编排前前置 `node -v`，不可用 → **停止本次质检**（无 node 则任何模式都无法聚合产出报告，禁止带病执行后再逐项失败）并提示安装：Windows `winget install OpenJS.NodeJS.LTS`；Ubuntu/Debian `sudo apt install -y nodejs npm`；EulerOS `sudo yum install -y nodejs npm`。前置通过后的运行期脚本失败按执行原则 4/5 失败隔离，不按环境缺失处理 |
 | npm（随 Node.js 安装） | 条件依赖，仅 codespell-check 且 cspell 词典未装时（词典已装则全程不触碰 npm） | 安装 cspell 词典（见下方"cspell 词典"） | 词典无法安装时跳过 codespell-check 并明示，禁止编造结果（处理规则见下方"cspell 词典"） |
-| 网络 | 分级隐性依赖：① 首跑拉社区脚本缓存（一次性，之后走缓存）② cspell 词典安装（npm 源，一次性）③ 外链检查 ④ compliance 术语源（运行期） | — | ① 拉取失败该检查项失败（建议检查网络或配置 `--proxy`）；② 见下方"cspell 词典"；③ 内网/无外网环境为 run_check.js 加 `--disable-external`，避免外链误报；④ 由 compliance 原子 skill 按其自身规则降级执行并如实披露，不阻断其他检查项 |
+| 网络 | 分级隐性依赖：① cspell 词典安装（npm 源，一次性）② 外链检查 ③ compliance 术语源（运行期）——检查脚本本体已随技能内置（本地直调），不依赖网络 | — | ① 见下方"cspell 词典"；② 内网/无外网环境为 run_check.js 加 `--disable-external`，避免外链误报；③ 由 compliance 原子 skill 按其自身规则降级执行并如实披露，不阻断其他检查项 |
 
 ### cspell 词典（codespell-check 执行前置）
 
@@ -211,11 +208,15 @@ docs-common-review/
 ├── scripts/merge_json.js       # JSON 数组合并（filename-check 多目标 → 单一结果文件）
 ├── evals/                      # 评测用例与共享数据集
 ├── docs-tool-based-check/      # 原子：5 项工具检查（脚本）
-├── docs-filename-check/        # 原子：文件命名检查（python 脚本）
+├── docs-filename-check/        # 原子：文件命名检查（node 脚本）
 ├── docs-punctuation-check/     # 原子：标点检查（skill）
 ├── docs-compliance-check/      # 原子：合规检查（skill）
 ├── docs-basic-aicheck/         # 原子：AI 语义检查（skill）
-├── docs-diagram-check/         # 原子：图形规范性检查（skill）
-├── docs-api-review/            # 原子：API 参考模板规则质检（skill）
 └── docs-skills-benchmark/      # 家族级基准回归（固定样例 + common_bench.md 基线 + scripts/bench.js 对齐工具，见其 README.md）
 ```
+
+> **说明**：
+>
+> 家族内另含其他skill，目前处于试点阶段，支持独立调用，暂不纳入9项通用检查的门禁/全量/自定义模式编排：
+> - docs-api-review：CANN通用的API参考模板质检skill。
+> - docs-diagram-check：CANN通用的图形规范检查，包括drawio图形（.drawio.svg）与mermaid语法图。

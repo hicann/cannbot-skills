@@ -19,7 +19,7 @@
 ## 并发模型
 
 - 工具 5 项（各自一条 Bash）与合规脚本块（一条 Bash）**并发执行**，禁止串行排队。
-- markdownlint 先行单独执行：社区脚本首次运行需下载缓存到固定路径，并发下载同一文件会互踩；其返回后其余 4 项与合规脚本块在同一条消息中并发发出（缓存确认已存在时，5 项工具 + 合规块全部同时发出）。
+- markdownlint 先行单独执行：首次运行需将内置脚本复制到固定缓存路径，并发复制同一文件可能互踩；其返回后其余 4 项与合规脚本块在同一条消息中并发发出（缓存确认已存在时，5 项工具 + 合规块全部同时发出）。
 - tag/encoding 两脚本为"读-合并-写"语义，多文件在其循环内**串行**追加同一结果文件（不能拆开并发），但该块整体与工具项并发。
 
 ## 产物
@@ -100,7 +100,7 @@ T1=$(date +%s%3N); echo "compliance-encoding-check $((T1-T0))" > "<项目根>/ou
 - 消息 2（markdownlint 返回、缓存就绪后）：Bash（tag-closed-check）+ Bash（link-validity-check）+ Bash（resource-existence-check）+ Bash（codespell-check），四条同消息并发
 - 社区脚本缓存确认已存在（此前运行过）时：5 个工具项 + 合规脚本块全部并入消息 1 并发
 
-- 内网/无外网环境为 run_check.js 追加 `--disable-external`；需代理时 `--proxy=<地址>`；文件多可调 `--concurrency`。首次运行含脚本拉取缓存时间，该项耗时偏高属正常。
+- 内网/无外网环境为 run_check.js 追加 `--disable-external`；需代理时 `--proxy=<地址>`；文件多可调 `--concurrency`。检查脚本为技能内置本地直调，运行不依赖网络。
 - 全部返回后核对：命令成功但结果文件缺失的工具项创建内容为 `[]` 的同名文件（0 问题也必须落盘）；命令失败的项禁止伪造空结果——**记录为失败检查项**（canonical 检查项名 + 错误输出摘要），保留缺失状态进聚合（计为 skipped，门禁判定按未通过/不可信处理，并经第 3 步写入 summary.failed_check）；**失败只影响该项，禁止因此中止其余检查项**。合规两脚本（tag_checker.js、encoding_format_checker.js）零问题时亦自行写入 `[]`，compliance-gate-result.json 在合规块整体成功后必然存在，无需补写。
 - 输出 `[CHECKPOINT: 脚本检查完成]`
 

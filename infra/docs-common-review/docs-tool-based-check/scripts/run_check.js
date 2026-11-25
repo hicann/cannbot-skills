@@ -3,8 +3,9 @@
 /**
  * docs-tool-based-check 运行器（零第三方依赖，需 Node.js >= 18）
  *
- * 职责：校验配置 → 解析配置优先级（项目 .doctools/ 优先）→ 拉取 master 最新版
- *       docs-ci-v2.js（失败自动重试至多 3 次，仍失败则回退本地缓存并提示非最新）→
+ * 职责：校验配置 → 解析配置优先级（项目 .doctools/ 优先）→ 准备检查脚本
+ *       （技能目录内置 scripts/vendor/docs-ci-v2.js.txt，复制到缓存目录执行，
+ *       本地直调、不访问远端仓库）→
  *       组装 ciConfig → 执行检查 → result.json 转换为统一 12 字段结果 JSON → 写入 output → 清理临时目录。
  *
  * 用法：
@@ -22,10 +23,6 @@ const os = require("os");
 const { spawn } = require("child_process");
 
 // ---------- 常量 ----------
-// 检查脚本取 CANN 社区 master 分支最新版，不 pin 版本，每次运行重新拉取。
-const SCRIPT_URL =
-  "https://raw.gitcode.com/cann/.gitcode/raw/master" +
-  "/actions/staticcheck/dist/staticcheck/docs-ci/docs-ci-v2.js";
 const LEGAL_CHECKS = [
   "markdownlint",
   "tag-closed-check",
@@ -217,80 +214,36 @@ if (fileExistsSafe(projUrl)) {
   urlSource.push("项目 .doctools/url.whitelist.txt");
 }
 
-// ---------- 准备 master 最新版脚本（拉取失败时回退本地缓存并提示非最新） ----------
+// ---------- 准备检查脚本（技能目录内置，本地直调，不访问远端仓库） ----------
 const cacheDir = path.join(os.tmpdir(), "docs-tool-based-check");
-const cacheFile = path.join(cacheDir, "docs-ci-v2.master.js");
-let scriptFile = cacheFile;
-function findCachedScript() {
-  let best = null;
-  let bestMtime = -1;
-  if (!fs.existsSync(cacheDir)) {
-    return null;
-  }
-  for (const name of fs.readdirSync(cacheDir)) {
-    if (!/^docs-ci-v2(\..*)?\.js$/.test(name)) {
-      continue;
-    }
-    const full = path.join(cacheDir, name);
-    let st;
-    try {
-      st = fs.statSync(full);
-    } catch {
-      continue;
-    }
-    if (!st.isFile()) {
-      continue;
-    }
-    if (st.mtimeMs > bestMtime) {
-      best = full;
-      bestMtime = st.mtimeMs;
-    }
-  }
-  return best;
-}
-async function fetchScript() {
-  const res = await fetch(SCRIPT_URL);
-  if (!res.ok) {
-    return { reason: "HTTP " + res.status };
-  }
-  const b = Buffer.from(await res.arrayBuffer());
-  if (b.length < 1000 || b.slice(0, 3).toString("utf8").startsWith("<!")) {
-    return { reason: "下载内容异常（非 JS 文件）" };
-  }
-  return { buf: b };
-}
-async function ensureScript() {
-  console.log("[helper] 下载检查脚本（master 最新版）...");
+// 检查脚本随技能仓内置（scripts/vendor/docs-ci-v2.js.txt，与社区 master 逐字节同步），
+// 运行时不做远端拉取。vendor 产物以 .js.txt 扩展名存放：内容与社区 dist 原版完全一致，
+// 但不作为本仓 JS 源码参与静态代码检查（三方打包产物，约 19 万行）。
+// 因脚本内 cspell 词典按脚本所在目录（__dirname）解析，
+// 先将其复制到缓存目录（恢复 .js 文件名）再执行，以继续复用缓存目录 node_modules 中的词典。
+const bundledScriptFile = path.join(SKILL_DIR, "scripts", "vendor", "docs-ci-v2.js.txt");
+const scriptFile = path.join(cacheDir, "docs-ci-v2.js");
+function prepareScript() {
   fs.mkdirSync(cacheDir, { recursive: true });
-  let buf = null;
-  let reason = "";
-  for (let attempt = 1; attempt <= 3 && !buf; attempt++) {
+  if (!fs.existsSync(bundledScriptFile)) {
+    fail("技能目录缺少内置检查脚本 " + toPosix(bundledScriptFile) + "（技能安装不完整，请修复或重新安装技能）");
+  }
+  // 每次运行都重新复制（内置脚本更新后下次运行即生效）；
+  // 先写临时文件再原子改名，避免并发运行多份检查时读到半写状态的脚本；
+  // 改名失败（目标被并发占用）且目标已存在完整副本时直接复用。
+  const tmp = scriptFile + ".tmp." + process.pid + "." + Date.now();
+  try {
+    fs.copyFileSync(bundledScriptFile, tmp);
+    fs.renameSync(tmp, scriptFile);
+  } catch (e) {
     try {
-      const r = await fetchScript();
-      if (r.buf) {
-        buf = r.buf;
-      } else {
-        reason = r.reason;
-      }
-    } catch (e) {
-      reason = e.message;
-    }
-    if (!buf && attempt < 3) {
-      console.log("[helper] 第 " + attempt + "/3 次拉取失败（" + reason + "），1 秒后重试...");
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      fs.rmSync(tmp, { force: true });
+    } catch {}
+    if (!fs.existsSync(scriptFile)) {
+      fail("内置检查脚本就位失败：" + e.message);
     }
   }
-  if (buf) {
-    fs.writeFileSync(cacheFile, buf);
-    console.log("[helper] 脚本已缓存至 " + toPosix(cacheFile));
-    return;
-  }
-  const cached = findCachedScript();
-  if (!cached) {
-    fail("检查脚本连续 3 次拉取失败（" + reason + "），且本地无可用缓存脚本。请检查网络/代理后重试，下载地址：" + SCRIPT_URL);
-  }
-  scriptFile = cached;
-  console.log("[helper] 警告：检查脚本连续 3 次拉取失败（" + reason + "），已回退使用本地缓存脚本（非 master 最新版）：" + toPosix(cached));
+  console.log("[helper] 检查脚本: 技能内置本地脚本（不访问远端）" + toPosix(bundledScriptFile));
 }
 
 // ---------- 组装运行时配置 ----------
@@ -411,7 +364,7 @@ function convertItems(rawItems, refs) {
 
 // ---------- 主流程 ----------
 (async () => {
-  await ensureScript();
+  prepareScript();
   const t0 = Date.now();
   const code = await runScript();
   if (code !== 0) {

@@ -91,7 +91,7 @@
         "eval_mode": "text"
       },
       "prompt": "自定义模式检查 infra/docs-common-review/evals/dataset/data_test.md，检查项只用 link_check；外链检查按 --disable-external 执行（内网/无外网环境约定，文档内锚点检查不受影响）。",
-      "expected_output": "1. 别名 link_check 按 SKILL.md 别名映射表转换为 canonical 名 link-validity-check（用户已给出清单，无需多选询问，输出检查项确定完成）。\n2. 环境前置按 SKILL.md\"环境依赖（分级按需）\"执行最小集合：仅 ① node -v（node 为 hub 硬依赖，聚合链路恒需）；禁止无差别预检预装——不检查/安装 cspell 词典（本次范围不含 codespell-check）、不预检 python（不含 filename-check，本次全程无 python 参与）、不触碰 npm。勾选集不含 markdownlint，无脚本缓存预热等待，单工具项直接执行。\n3. 执行仅 1 个工具项：run_check.js --checks=link-validity-check --disable-external（外链探测跳过，评测结果不随外网可用性漂移），独立结果文件 tool-based-link-validity-check-result.json 与计时文件 timing/link-validity-check.txt。\n4. 聚合 --inputs 仅含该结果文件，--mode=custom --timing=<timing目录>，产物落待检文档同级 output/：summary.mode=custom、by_check 与 check_timing_ms 仅含 link-validity-check 条目、无 gate 字段（custom 模式正常）；埋设的失效锚点 #不存在的锚点 被检出。\n5. 汇报 summary、逐条问题与该检查项耗时、误报引导（失效链接可加入 .doctools/url.whitelist.txt）；随后询问 csv/md 导出并清理中间产物，全程无检查项失败。",
+      "expected_output": "1. 别名 link_check 按 SKILL.md 别名映射表转换为 canonical 名 link-validity-check（用户已给出清单，无需多选询问，输出检查项确定完成）。\n2. 环境前置按 SKILL.md\"环境依赖（分级按需）\"执行最小集合：仅 ① node -v（node 为 hub 硬依赖，聚合链路恒需）；禁止无差别预检预装——不检查/安装 cspell 词典（本次范围不含 codespell-check）、不触碰 npm。勾选集不含 markdownlint，无脚本缓存预热等待，单工具项直接执行。\n3. 执行仅 1 个工具项：run_check.js --checks=link-validity-check --disable-external（外链探测跳过，评测结果不随外网可用性漂移），独立结果文件 tool-based-link-validity-check-result.json 与计时文件 timing/link-validity-check.txt。\n4. 聚合 --inputs 仅含该结果文件，--mode=custom --timing=<timing目录>，产物落待检文档同级 output/：summary.mode=custom、by_check 与 check_timing_ms 仅含 link-validity-check 条目、无 gate 字段（custom 模式正常）；埋设的失效锚点 #不存在的锚点 被检出。\n5. 汇报 summary、逐条问题与该检查项耗时、误报引导（失效链接可加入 .doctools/url.whitelist.txt）；随后询问 csv/md 导出并清理中间产物，全程无检查项失败。",
       "expectations": [
         {
           "type": "file_exists",
@@ -183,7 +183,7 @@
         "eval_mode": "text"
       },
       "prompt": "我准备用自定义模式只勾选 link-validity-check 检查一篇文档，执行前需要准备哪些环境依赖？需要提前安装 cspell 词典吗？",
-      "expected_output": "环境依赖咨询：不执行任何检查、不产出质检报告，按 SKILL.md\"环境依赖（分级按需）\"回答：① node 为 hub 硬依赖、恒需——即使只勾选单个工具项，结果聚合、计时读取与报告产出链路也全部运行在 node 上；② cspell 词典与 npm 不需要——词典仅在本次检查范围含 codespell-check 时才检查/安装，本次未勾选，禁止无差别预检预装；③ python 3 不需要——仅 filename-check 使用且不做预检（执行期内联探测 python/python3 兜底）；④ link-validity-check 的外链检查隐含网络依赖，内网/无外网环境可加 --disable-external。答复区分\"恒需\"与\"条件依赖\"，不引导用户安装本次用不到的依赖，也不虚构检查结果。",
+      "expected_output": "环境依赖咨询：不执行任何检查、不产出质检报告，按 SKILL.md\"环境依赖（分级按需）\"回答：① node 为 hub 硬依赖、恒需——即使只勾选单个工具项，结果聚合、计时读取与报告产出链路也全部运行在 node 上；② cspell 词典与 npm 不需要——词典仅在本次检查范围含 codespell-check 时才检查/安装，本次未勾选，禁止无差别预检预装；③ link-validity-check 的外链检查隐含网络依赖，内网/无外网环境可加 --disable-external。答复区分\"恒需\"与\"条件依赖\"，不引导用户安装本次用不到的依赖，也不虚构检查结果。",
       "expectations": [
         {
           "type": "contains",
@@ -194,11 +194,6 @@
           "type": "contains",
           "pattern": "词典",
           "description": "答复回应 cspell 词典问题（未勾选 codespell-check 时不需要）"
-        },
-        {
-          "type": "contains",
-          "pattern": "python",
-          "description": "答复覆盖 python 分级（仅 filename-check 需要，本次不需要）"
         },
         {
           "type": "contains",

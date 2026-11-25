@@ -8,14 +8,14 @@
 
 9 项全部：
 
-- 脚本直调：markdownlint、tag-closed-check、link-validity-check、resource-existence-check、codespell-check（run_check.js 每项一条 Bash）、filename-check（python 脚本逐目标运行后合并为单一结果文件）
+- 脚本直调：markdownlint、tag-closed-check、link-validity-check、resource-existence-check、codespell-check（run_check.js 每项一条 Bash）、filename-check（node 脚本逐目标运行后合并为单一结果文件）
 - 原子 skill（subagent 执行）：punctuation-check、compliance-check、aicheck
 
 ## 并发模型
 
 - **互不依赖的检查全部并发**：工具 5 项（各自一条 Bash）、filename 各目标（各自一条 Bash）、punctuation / compliance / aicheck（各自一个 subagent）在同一条消息中发出；Agent 派发与 Bash 调用可混合同发。禁止把互不依赖的检查排成先后步骤串行执行。
 - **无顺序约束**：三个模型项之间不需要任何先后等待（aicheck 不等 compliance）。曾存在"aicheck 等 compliance"约束，其前提经源码核实不成立——本家族 spoke 的 `tag_checker.js` 直接把结果写入调用方传入的输出路径，spoke 侧无人产出 `output/tag_check_result.json`（该文件仅社区 CI 版本产生），无从互删；第 1 步预清理历史中间产物进一步保证并发起点干净。
-- **缓存预热**：工具 5 项中 markdownlint 先行单独执行（社区脚本首次运行需下载缓存到固定路径，并发下载同一文件会互踩），其返回后其余 4 项再并发（缓存确认存在时 5 项全部同消息发出）。
+- **缓存预热**：工具 5 项中 markdownlint 先行单独执行（首次运行需将内置脚本复制到固定缓存路径，并发复制同一文件可能互踩），其返回后其余 4 项再并发（缓存确认存在时 5 项全部同消息发出）。
 
 ## 产物
 
@@ -63,14 +63,13 @@ mkdir -p "<项目根>/output/timing" && echo "<检查项> $((T1-T0))" > "<项目
 ```bash
 T0=$(date +%s%3N)
 mkdir -p "<项目根>/output/filename-<序号>" "<项目根>/output/timing"
-python <skill_base>/docs-filename-check/docs-filename-check.py "<目标>" "<项目根>/output/filename-<序号>"
+node <skill_base>/docs-filename-check/docs-filename-check.js "<目标>" "<项目根>/output/filename-<序号>"
 T1=$(date +%s%3N)
 echo "filename-check-<序号> $((T1-T0))" > "<项目根>/output/timing/filename-check-<序号>.txt"
 ```
 
-- `python` 不存在时改试 `python3`；仍失败则跳过 filename-check 并按 SKILL.md 提示用户（不产生结果文件与计时条目），禁止编造结果。
 - 重名文件检查按脚本语义覆盖文件所在目录的第一层 `.md`。
-- 内网/无外网环境为 run_check.js 加 `--disable-external`；首次运行含脚本拉取缓存耗时属正常。
+- 内网/无外网环境为 run_check.js 加 `--disable-external`；检查脚本为技能内置本地直调，运行不依赖网络。
 
 **subagent 提示词模板**（以 punctuation 为例；派发时记录当前时间戳，供耗时兜底计算）：
 
@@ -133,7 +132,7 @@ rm -rf <项目根>/output/filename-*
 | compliance-check | compliance-markdown-check-result.json |
 | aicheck | general-markdown-check-result.json |
 
-逐项核对落盘；缺失项重派对应执行单元一次（重派后覆盖同名计时文件）；仍缺失则在第 7 步汇报中明确标注"该检查项结果缺失"，禁止以空结果冒充。环境缺失而跳过的项（如 python 缺失跳过 filename-check、cspell 词典无法安装跳过 codespell-check）不计缺失。**重派后仍缺失的项与环境缺失跳过的项，连同第 3 步记录的命令/subagent 失败项，一并计入失败清单**（第 6 步写入 failed_checks.json）。
+逐项核对落盘；缺失项重派对应执行单元一次（重派后覆盖同名计时文件）；仍缺失则在第 7 步汇报中明确标注"该检查项结果缺失"，禁止以空结果冒充。环境缺失而跳过的项（如 cspell 词典无法安装跳过 codespell-check）不计缺失。**重派后仍缺失的项与环境缺失跳过的项，连同第 3 步记录的命令/subagent 失败项，一并计入失败清单**（第 6 步写入 failed_checks.json）。
 
 - 输出 `[CHECKPOINT: 完整性校验完成]`
 
