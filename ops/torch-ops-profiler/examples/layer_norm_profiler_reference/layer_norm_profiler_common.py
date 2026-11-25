@@ -425,7 +425,7 @@ def run_layer_norm_profiler_cases(
         for mode in modes:
             handler_dir = os.path.join(base_out, mode, f"case_{idx:03d}")
 
-            def make_forward(m: str) -> Callable[[], torch.Tensor]:
+            def make_forward(m: str, x=x, ns=ns, w=w, b=b, eps=eps) -> Callable[[], torch.Tensor]:
                 return lambda: forward_layer_norm(m, x, ns, w, b, eps)
 
             total_us, per_us, csv_p, trace_d = run_one_profiler_block(
