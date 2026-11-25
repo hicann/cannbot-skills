@@ -10,8 +10,8 @@
 | R2 | 无 HCCL 高阶 API | 代码中不含 `Hccl::`（完整禁止清单见 [`comm_shmem.md`](comm_shmem.md) §5） |
 | R3 | 无 asc-devkit matmul | 代码中不含 `AscendC::Matmul` |
 | R4 | 通信走 SHMEM | 头文件含 `shmem.h`，device 侧用 `aclshmemx_udma_*`/`aclshmem_barrier_all`（`aclshmemx_barrier_all_vec` 已废弃，见 [`comm_shmem.md`](comm_shmem.md) §4.4） |
-| R5 | Matmul 走 Blaze | 头文件含 `blaze/gemm/block/block_mmad*.h` |
-| R6 | L2 flush 证据 | 代码中含 L2 flush kernel 调用或等效实现（见 [`profiling_mc2.md`](../../shared/profiling_mc2.md)） |
+| R5 | Matmul 走 Blaze | 沿实际计算入口确认 Blaze `Kernel::*` 调用 `BlockMmad` 处理收到的矩阵块，见[计算层](matmul_blaze.md)。 |
+| R6 | 冷缓存采样 | 使用 flush kernel 时，逐卡核对同一 msprof 窗口内 flush 记录数与测量轮数相等，且每轮都先于主 Kernel 完成。等效方法须能证明相同的缓存前提，见[性能采集](../../shared/profiling_mc2.md)。 |
 
 ## 流程门禁
 

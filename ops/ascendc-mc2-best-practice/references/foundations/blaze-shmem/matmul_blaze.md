@@ -6,7 +6,7 @@
 > - **blaze-shmem 路线**：tensor_api 来自 `gitcode.com/cann/asc-devkit` 仓 `feature/tensor_api_from_9.0.0` 分支，Blaze 来自 CANN toolkit 内置 `opp/built-in/op_impl/ai_core/tbe/impl/ops_nn/ascendc/common`（参考工程 CMakeLists 用 `_BLAZE_COMMON_DIR` 指向该目录）
 > - **apace 路线**：Blaze **和** tensor_api 均来自 `gitcode.com/cann/ops-tensor` 仓（tensor_api 是 ops-tensor 的 submodule，指向 asc-devkit）
 >
-> 与 `ascendc-blaze-best-practice` 共享 Blaze 基底，但聚焦 MC2 场景下的差异点。**禁止使用 asc-devkit 的 matmul 高阶 API（`AscendC::Matmul` 等）**——它是官方通算融合（单算子 API 调用）路径的计算接口，不支持 Kernel 直调场景。
+> 本路线与 `ascendc-blaze-best-practice` 共享 Blaze 基底。在 SHMEM AllToAll 量化示例中，外层 Impl 等待通信块就绪，调用 `Blaze::Gemm::Kernel::QuantMatmulMxKernelSwat<ProblemShape, BlockMmad, BlockScheduler>`，算完后通知缓冲可复用。矩阵 Kernel 按 `BlockScheduler` 分配的输出块调用 `BlockMmad`。注册融合算子的 `AscendC::Matmul` 调度层使用 `GetHcclContext` 所建通信域的 Rank ID 计算本卡输出地址。迁移到 SHMEM 直调时，除矩阵 Tiling 和 workspace 外，还要从 SHMEM 路线取得本卡分片；依赖上下文的是这段多卡调用链，见[注册融合 Kernel 的启动条件](comm_shmem.md#注册式融合-kernel-的启动条件)。
 
 ---
 
@@ -19,7 +19,7 @@
 | **Kernel** | `Blaze::Gemm::Kernel::QuantMatmulMxKernelSwat`（项目级） | `include/kernel/qbmm_mx_kernel.h` | SWAT 量化 Matmul kernel 包装，遍历所有 rank 累加 L0C |
 | **Block** | `Blaze::Gemm::Block::BlockMmad` | `blaze/gemm/block/block_mmad_qbmm_mx.h`（toolkit 内） | 单 Block 的 MMAD 计算（L0A×L0B→L0C→GM） |
 | **Block Scheduler** | `Blaze::Gemm::Block::BlockSchedulerQuantBatchMatmulV3` | `include/block/quant_matmul_mx_block_scheduler_swat.h` | 多 Block 间任务切分 |
-| **Dispatch Policy** | `Blaze::Gemm::MatmulWithScaleMx` | `blaze/gemm/policy/dispatch_policy.h`（toolkit 内） | 流水策略（含 scale 处理） |
+| **Dispatch Policy** | `Blaze::Gemm::MatmulWithScaleMx` | `blaze/gemm/policy/dispatch_policy.h`（toolkit 内） | `BlockMmad` 的编译期流水策略（含 scale 处理） |
 | **Tile** | `Blaze::Gemm::Tile::*` | `include/tile/*.h` | L1→L0 搬运、Scale pad |
 | **Layout/Tensor** | `AscendC::Te::*` | `tensor_api/`（SHMEM: asc-devkit clone; apace: ops-tensor submodule） | Tensor / Layout 抽象 |
 

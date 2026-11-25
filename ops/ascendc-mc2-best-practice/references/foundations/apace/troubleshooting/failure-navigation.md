@@ -7,7 +7,7 @@
 
 | 分类 | 含义 | 典型信号 |
 |:---|:---|:---|
-| 编译 | 编译/链接阶段失败，未进入设备执行 | 编译报错、API 符号缺失、模板实例化失败 |
+| 编译 | 设计审查发现的缺项记为构建风险；实际编译报错记录构建命令和返回码。按[失败案例记录](../../../../SKILL.md#失败案例记录)分别填写构建与设备执行两项，尚未上机时将设备项标为待验证。可复用的生产故障归入 [review-checklist.md 的常见 FAIL 原因表](../review-checklist.md#常见-fail-原因)。 | 未指定目标架构、API 符号缺失、模板实例化失败 |
 | ABI | host/kernel 接口与二进制契约不一致 | 入口变体错配、dtype 分发错误、参数布局漂移、host 前置校验缺失导致非法配置下发 |
 | 通信时序 | 通信与计算的先后/配对时序错误 | 读到未就绪数据、GET/PUT 可见性错乱、框架原语语义错配 |
 | 同步 | CrossCore flag / 事件 / barrier 配对或计数错误 | 死锁（507015/507014）、flagId 溢出、删同步后偶发错误 |
@@ -21,8 +21,8 @@
 |:---|:---|:---|
 | 死锁（aclError:507015） | 同步 | [`../review-checklist.md`](../review-checklist.md) R1/R5/R12；[`../fundamentals/architecture.md`](../fundamentals/architecture.md) §10 ①（禁 schedmode）；[`../fundamentals/communication.md`](../fundamentals/communication.md) 陷阱 #9（UB 静态区被 TPipe 覆盖）；[`../fundamentals/fusion.md`](../fundamentals/fusion.md) §5（MTE 未排空路径鉴别） |
 | localMatmul=1 MTE 异常 | 同步 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §5.4（RunLocalMatmul 与 RunMatmul 之间补 `PipeBarrier<PIPE_ALL>()`） |
-| 精度不达标 | 设备精度 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §5（AllToAll 语义）+ §6.2.6（归约 float32 累加）；[`../workflow_integration.md`](../workflow_integration.md) Step 6（精度验收流程）；[`../review-checklist.md`](../review-checklist.md) 常见 FAIL 原因 |
-| golden 全错、误差不收敛 | 设备精度 | [`../workflow_integration.md`](../workflow_integration.md) Step 2 §golden 语义（先核对每卡输入/输出与切分轴，再怀疑 kernel）；[`../operator-design/host-and-testing.md`](../operator-design/host-and-testing.md)（gen_data 工程侧）；先修 golden 再怀疑 kernel |
+| golden 全错、误差不收敛 | 设备精度 | 先按 [Golden 语义](../workflow_integration.md) 对照每卡输入与预期输出；分布不符时修正 [`gen_data.py`](../operator-design/host-and-testing.md) 并重生成。分布已核实而精度仍不达标时，按下一行定位。 |
+| Golden 分布已核实，精度仍不达标 | 设备精度 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §5（AllToAll 语义）+ §6.2.6（归约 float32 累加）；[`../workflow_integration.md`](../workflow_integration.md) Step 6（精度验收流程）；[`../review-checklist.md`](../review-checklist.md) 常见 FAIL 原因 |
 | T=1 全 PASS、T>1 精度错 | 设备精度 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §3.3/§6.2.3（多 tile 布局与 flag 逐轮计数配对）；按 tile/轮次定位超差分布 |
 | 编译失败 / API 符号缺失 | 编译 | [`../operator-design/development-guide.md`](../operator-design/development-guide.md)（工程搭建与依赖）；核对 CANN 内置 apace 事实源版本 |
 | Blaze matmul 排错 | 编译 | [`../fundamentals/compute.md`](../fundamentals/compute.md) §8 排错速查；[`../review-checklist.md`](../review-checklist.md) R7（禁 `AscendC::Matmul` 高阶 API） |
@@ -33,7 +33,7 @@
 | 死锁（aclError:507014，归约路径） | 同步 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.6 纪律 1 + [`../scenarios/compute-first-reduce-scatter/development.md`](../scenarios/compute-first-reduce-scatter/development.md) §5.3 事件模板（四类 HardEvent 同迭代配对 + 残留事件消费）；[`../review-checklist.md`](../review-checklist.md) R19 |
 | E5M2 变体精度全错 | ABI | [`../review-checklist.md`](../review-checklist.md) R3；[`../operator-design/development-guide.md`](../operator-design/development-guide.md) §3.5（4 变体入口 + host 运行期 dtype dispatch）；[`../operator-design/operator-anatomy.md`](../operator-design/operator-anatomy.md) |
 | N>redUbN 时部分输出为零 | 设备精度 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.6 纪律 3（2D DataCopyPad strided 隐式上限，redUbM ≤ 32 或 1D 退化） |
-| 归约结果系统性错误 | 设备精度 | [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.6 纪律 2（禁 in-place BF16→FP32 Cast，独立 srcFP32 双缓冲）；[`../review-checklist.md`](../review-checklist.md) R18 |
+| 归约结果系统性错误、误差随来源序累积 | 设备精度 | 优先核对是否存在源/目标重叠的 BF16→FP32 Cast；若存在，按 [`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.6 纪律 2 改为独立 srcFP32 双缓冲（[`../review-checklist.md`](../review-checklist.md) R18）。逐来源比较 Cast 前、Cast 后及累加后的值，定位首次偏差；未发现覆盖时再核对来源地址与复用时序，不能仅凭误差形态断言根因或改动累加顺序 |
 | perf 数据不可复现 / MTE2 带宽虚高 | 性能 | [`../operator-design/host-and-testing.md`](../operator-design/host-and-testing.md) §4（L2 flush 实接线模板）；[`../review-checklist.md`](../review-checklist.md) R20 |
 | 大 shape 无法运行 / 间歇 FAIL | ABI | [`../operator-design/development-guide.md`](../operator-design/development-guide.md) §3.5（host 前置校验：正确性类整除/对齐/核数/Win 容量；单轮 PUT 大小按 R14 风险提示复核，非强制拒绝；R ≤ 32 为 fragment 数上限，R×T 无硬约束）；[`../fundamentals/communication.md`](../fundamentals/communication.md) 陷阱 #12/#13 |
 | cube_utilization 低 | 性能 | [`optimization-playbook.md`](optimization-playbook.md) §2（CUBE bound 判据与手法）；[`../fundamentals/fusion.md`](../fundamentals/fusion.md) §6.2.2（R×T 子调用 SCALAR 主 bound 特征） |

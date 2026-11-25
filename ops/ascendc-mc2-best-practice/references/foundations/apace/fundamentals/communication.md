@@ -232,7 +232,7 @@ GET/PUT 的算子级编排模式见 `fusion.md`，本节只描述钩子契约。
 
 > **官网暂无 GET 算子样例**：GET 钩子基础设施（`apace/block/aiv_comm/all_to_all/all_to_all_udma_get.h` 的 `AllToAllCommGetImpl`）已就绪并注册进 `CollectiveCommHelper<AllToAll, GET, ...>` 分发（`apace/block/aiv_comm/collective_comm_api.h`），但官网 kernel/ 下两个算子均为 PUT 模式，无 GET 使用方。本节为钩子契约级描述，地址公式与 self 跳过规则均可在该头文件中直接验证。
 
-GET 模式 = 计算→通信：AIC 先算 C 写到 Win 区，AIV 从远端 Win 区拉回本 rank 的 C 段。
+在 `AllToAllCommGetImpl` 中，接收方通过 `ReadNbi` 读取对端源缓冲。源缓冲可存输入或中间结果，读取前必须确保对应数据已经就绪。
 
 #### GET 钩子不变量表
 
@@ -251,7 +251,7 @@ GET 模式 = 计算→通信：AIC 先算 C 写到 Win 区，AIV 从远端 Win �
 
 GET 的 `DoCommit()` 和 `DoFinalize()` 中 barrier 调用顺序为**先 Core 后 Device**。
 
-> ⚠️ **GET 模式 Commit 前 barrier 不可省**：`DoCommit` 内的 `CrossCore()+CrossDevice()` 是生产者（对端 AIC）槽位就绪的回压保证，删除会读到未写入数据；对应 `DoFinalize()` 的 barrier 同样不可省（防止尾部越界覆盖）。
+> 此钩子的 `DoCommit` 先调用 `CrossCore()`、`CrossDevice()`，再读取远端槽。发布就绪时生产者必须已写完；环形复用还须确认所有远端读者已完成旧槽读取。保留 `DoFinalize()` 规定的同步。
 
 #### GET 地址语义
 
@@ -282,7 +282,7 @@ GET 的 DoCommit/DoWait 和 PUT 的 DoCommit 都会跳过 `targetRankId == rankI
 
 ### 3.2 PUT 钩子（AllToAllCommPutImpl）与 GET 差异
 
-PUT 模式 = 通信→计算：AIV 先推数据到远端 Win 区，AIC 从 Win 区读取计算。实现见 `apace/block/aiv_comm/all_to_all/all_to_all_udma_put.h` 的 `AllToAllCommPutImpl`（AllGather PUT 变体见 `apace/block/aiv_comm/all_gather/all_gather_udma_put.h` 的 `AllGatherCommPutImpl`，钩子结构相同，仅地址公式不同）。
+PUT 由发送方向对端写入本地数据。`all_to_all_udma_put.h` 的 `AllToAllCommPutImpl` 与 `all_gather_udma_put.h` 的 `AllGatherCommPutImpl` 按各原语计算地址；先计算还是先搬运由所传数据的依赖决定。
 
 #### 与 GET 的钩子差异
 
@@ -412,7 +412,7 @@ flagId 选择规则（16 通道截断机制、计数器 0-15 衡量未消费积�
 
 ### 4.3 SyncAll（块间）
 
-`SyncAll<true>()` 是 AIV 块间硬同步原语，其内部占用保留 flagId **14**（`SYNC_AIV_ONLY_ALL`；`<false>` 变体占 11/12/13——保守避让整个 [11,14]，见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §3）。PUT 模式的逐轮编排用法（每轮 `SyncAll<true>()` 保证 WriteNbi 对端可见性）见 `fusion.md`；完整签名与平台生效性见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md`。
+`SyncAll<true>()` 是 AIV 块间硬同步原语，其内部占用保留 flagId **14**（`SYNC_AIV_ONLY_ALL`；`<false>` 变体占 11/12/13——保守避让整个 [11,14]，见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §3）。PUT 样例先按通信钩子完成跨 rank 等待，再用本地 `SyncAll<true>()` 汇合 AIV 各块并通知 AIC，见 `fusion.md` §3.2。
 
 > ⚠️ `SyncAll<false>()`（非 isAIVOnly 变体）需要 **AIC + AIV 双方参与**——只在单侧调用会永久等待（调试实测踩坑）。MC2 场景块间同步一律用 `SyncAll<true>()`（仅 AIV），除非确认 AIC 侧也有对齐的调用点。
 
@@ -473,6 +473,8 @@ flagId 选择规则（16 通道截断机制、计数器 0-15 衡量未消费积�
 ---
 
 ## 6. Host 侧建链机制
+
+例如 AllToAll 后做 MatMul：Host 建好信道，把本 Rank 的原始输入和通信上下文交给 MIX Kernel。AIV 按目的 Rank 分发数据，AIC 消费到达本卡的矩阵块。CPU Golden 可独立按 Rank 重排得到期望矩阵；若直接将这份矩阵喂给候选 Kernel，只验证了 MatMul，跨卡搬运没有被执行。
 
 CommContext 的 `CommUdmaContext` 和 `CommUbmemContext` 不能手动赋值，必须通过 `CommChannelBuilder`（`apace/utils/comm_channel_builder.h`）创建 HCCL channel 后自动填充。
 
@@ -539,7 +541,7 @@ CommContext (device GM)
 | AllToAll | GET | `apace/block/aiv_comm/all_to_all/all_to_all_udma_get.h` | ✅ 钩子已实现（已注册分发；官网暂无 GET 算子使用方） |
 | AllToAll | PUT | `apace/block/aiv_comm/all_to_all/all_to_all_udma_put.h` | ✅ 已实现（all_to_all_quant_matmul 使用） |
 | AllGather | PUT | `apace/block/aiv_comm/all_gather/all_gather_udma_put.h` | ✅ 已实现（all_gather_quant_matmul 使用） |
-| AllGather | GET | — | ❌ 未实现 |
+| AllGather | GET | — | `not_found`：当前核对范围未找到该钩子 |
 | AllReduce | — | — | ❌ 未实现（**连 `CommCollectiveOp` 枚举值都没有**——`collective_comm_api.h` 枚举仅 AllToAll/AllGather/ReduceScatter；扩展须先补枚举，见下方"新增集合操作三步法"） |
 | ReduceScatter | — | — | ❌ 未实现（`CommCollectiveOp::ReduceScatter` 枚举值已在 `apace/block/aiv_comm/collective_comm_api.h` 预留但无分发实现；已有自研编排用 AllToAll PUT + 3 级流水 workspace 架构实现，见 `fusion.md` §6.2） |
 
@@ -654,7 +656,7 @@ struct CollectiveCommHelper<CommCollectiveOp::<Op>, CommMode::PUT, T, Barrier> {
 | 8 | TeamBarrier flag 区复用或未清零 | epoch 计数错乱 → 同步提前放行或挂死 | TeamBarrier flag 为单调递增 epoch：HCCL **数据** buffer 的清零由 builder `AllocRegAndBuildChannels` 内 `aclrtMemset` 完成（§6）；barrier flag 区（BARRIER_BUF）零初值依赖 `HcclEngineCtxCreate` 分配语义（§4.1，未显式 memset）——新算子若新增自管理 flag/计数区必须显式清零并验证，kernel 生命周期内禁止复用/重置 |
 | 9 | AIV UB 静态偏移与 TPipe 混用 | buffer 重叠踩踏 | 通信对象的 UB 用静态偏移（`MakeMemPtr<UB>` 顺序排布 commBuf 512B×2 + barrierBuf），不与 TPipe 管理的 buffer 区域混用 |
 | 10 | 多对象共享 TeamBarrier 时重复 barrier | 多余同步开销甚至死锁 | 仅一个对象使能 barrier，其余 `Init<BARRIER_NONE>`；同 channel 多对象只 Wait 一次（见 §2 BarrierMode 选择规则） |
-| 11 | GET 模式 `Drain` 返回非 0（未实现/兼容性）（GET 场景） | assert 失败中断 | URMA Win 区是共享内存，可绕过 Drain：`TeamBarrier.CrossDevice()`（跨 rank 就绪）+ `SyncAll<true>`（核间可见）后直接 `DataCopyPad` 读远端 Win 区（GET 算子开发实测绕行方案）。⚠️ 该绕行绕开 §3.1 的 Drain assert 纪律：仅在确认 Drain 兼容性问题时作为兜底使用，正常 GET 实现仍以钩子契约为准 |
+| 11 | GET 的 `Drain` 返回非 0 | 此次远端读完成状态未知 | 核对错误码、通道及该轮目的数据；跨 rank barrier 与本地 `SyncAll` 不能代替失败传输的完成确认。若另用 MTE 读窗口，须单独验证其地址可达性与同步契约。 |
 | 12 | PUT/GET 数据覆盖 Win 区内元数据/barrier 区 | "假通过"（精度碰巧对、同步已破坏），大 shape/多轮时紊乱 | 原则与两种布局见 §3.2 ⚠️注（唯一事实源）；共享布局须按约定偏移跳过头部（具体实现形态见 [`scenarios/compute-first-reduce-scatter/design.md`](../scenarios/compute-first-reduce-scatter/design.md) §3.6；失败链见 [`failure-navigation.md`](../troubleshooting/failure-navigation.md)） |
 | 13 | 单轮 PUT 数据量偏大（PUT 大数据量场景） | ⚠️ **风险提示（非硬红线，边界未定）**：bring-up 期过大单轮曾见间歇失败，官方代码无显式约束；亦有同平台更大单轮稳定运行的工程实例 | 大单轮 PUT **按 case 复核**（连续多轮精度 + 重复 launch 一致性验证），不作 host 强制拒绝/shape 拒绝依据；bring-up 期可先用小单轮 PUT 跑通再放大复核 |
 | 14 | compute-first 归约读 staging 得旧值/0 | 归约结果错误或全 0 | **先查三处，勿先加 dcci**：① AIC `SetFlag<PIPE_FIX>` 与 AIV `WaitFlag<PIPE_MTE2>` 是否逐轮配对（配对即内存序保证，staging 可见性由此而来，参考实现不依赖 dcci）；② 多核归约是否写竞争（须按行块多核分治，见 `fusion.md` §6.2.6 纪律 5）；③ staging 写/读地址是否同源。对 staging 加 dcci 属误诊，掩盖真根因 |

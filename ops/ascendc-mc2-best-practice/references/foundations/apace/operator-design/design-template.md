@@ -30,7 +30,8 @@
 |-----|------|
 | 算子名称 | `{operator_name}` |
 | 算子类别 | `<如 all_gather_quant_matmul / quant_matmul_reduce_scatter / all_to_all_quant_matmul / 新增>` |
-| 通信方向 | GET / PUT / compute-first |
+| 远端读写方向 | PUT / GET |
+| 融合顺序 | 通信后计算 / 计算后通信 |
 | 集合通信原语 | AllGather / AllToAll / ReduceScatter / `<其他>` |
 | 需求类型 | 特定用例（shape=`<...>`，dtype=`<...>`，rankSize=`<n>`） / 通用 |
 | 支持数据类型 | `<输入、scale、累加、中间值和输出 dtype，如 fp8_e4m3fn + e8m0 scale → bf16>` |
@@ -171,7 +172,7 @@ AIV 侧（通信）与 AIC 侧（计算）的完整数据流向：GM → Win 区
 
 | 项目 | 设计结论 | 证据引用 |
 |-----|---------|---------|
-| 通信方向 | GET / PUT / compute-first | `<refs>` |
+| 远端读写方向 | PUT / GET | `<refs>` |
 | 集合通信原语与实现类 | `<如 CollectiveComm<AllToAll, PUT, AType, TeamBarrier>>` | `<refs>` |
 | 通信轮次 T 推导 | kernel 侧 `commTurn = splitAxisTileCnt + splitAxisTailCnt`；host 侧派生规则（compute-first 默认 `T \| mSeg` 无尾块；单尾块 ≤ 头块 16 对齐可直传） | `<refs>` |
 | rankSize 与组网 | `<rank 数、卡间拓扑、targetRank 映射（每通信核负责 1 个 targetRank 并行 PUT/GET）>` | `<refs>` |
@@ -196,7 +197,7 @@ Flag 编排（CrossCore flag 配对，门禁必查）：
 | 项目 | 设计结论 | 证据引用 |
 |-----|---------|---------|
 | 切分轴（按 rank） | M / N / K / 不切；`<每 rank 本地分片公式>` | `<refs>` |
-| `splitAxisTileCnt` 策略 | 两阶段：精度调试 `tileCnt=1` 串行基线；性能调优扫描 `{1,2,4,8,16,32}`（通信在前默认值；compute-first 计数式固定 flagId 下 T 上限按 case 实测确定，R≤32 为 FragmentTensor 容量约束） | `<refs>` |
+| `splitAxisTileCnt` 策略 | 两阶段：精度调试优先采用合法的 `tileCnt=1` 串行基线；性能调优扫描 `{1,2,4,8,16,32}` 中的合法值，可优先验证 [公式化 Tiling](../../../shared/pipeline_tuning.md) 推荐值（通信在前默认值；compute-first 计数式固定 flagId 下 T 上限按 case 实测确定，R≤32 为 FragmentTensor 容量约束） | `<refs>` |
 | 三层 tiling 结构 | `<算子级 tiling_data + CommTilingData + Blaze matmul tiling 的字段与 host 填充>` | `<refs>` |
 | tail 与空任务 | `<splitAxisTailCnt、尾部 tile、空分片行为>` | `<refs>` |
 
@@ -299,7 +300,7 @@ Step 3 不实现、不运行设备，也不得写设备 PASS。
 - [ ] §0.3 调查事实逐条带 `文件:行号`，无虚构接口/文件名，未闭合项已标 `blocking`。
 - [ ] §0.4 四项约束全部 confirmed，无 blocking 进入可执行路线。
 - [ ] §1.2 golden 语义逐 rank 给出输入/输出分布与切分轴，与 gen_data.py 依据一致。
-- [ ] 通信方向（GET/PUT/compute-first）、编排形式（严格分离/时分复用）、切分轴（M/N/K）均已冻结且有源码证据。
+- [ ] 远端读写方向（PUT/GET）、融合顺序、编排形式（严格分离/时分复用）、切分轴（M/N/K）均已冻结且有源码证据。
 - [ ] 通信轮次 T 由 `splitAxisTileCnt + splitAxisTailCnt`（kernel）与 host 派生规则共同冻结，取值依据可解释。
 - [ ] Win 区预算与布局（通信在前两段式 / compute-first 单对象）字节数与 host 注册容量一致，数据区偏移 host/kernel 同源。
 - [ ] CrossCore flag 配对表完整：flagId、PIPE、生产者、消费者、去重/兜底语义。

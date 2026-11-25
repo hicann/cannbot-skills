@@ -25,7 +25,7 @@
 
 | 项目 | 合同 | 事实源 |
 |:---|:---|:---|
-| 通信方向 | compute-first（compute → communication）：先完成本地 mm，再以 AllToAll PUT + 本地增量归约实现 ReduceScatter 聚合语义 | fusion.md §6.2 |
+| 通信方向与先后 | 本场景先完成本地 mm，再把结果分片用 AllToAll PUT 写往对端，由接收方增量归约，得到 ReduceScatter 输出 | fusion.md §6.2 |
 | 编排形式 | 严格分离（专职化）：**后 R 核通信 / 前 (核数-R) 核归约**，`AllToAll(t) ∥ Reduce(t-1)` 错位流水 | fusion.md §6.2.2 |
 | 分核映射 | 通信核：`jobIndex = GetBlockNum() - 1 - GetBlockIdx()`，最大 blockIdx → jobIndex 0；归约核：`blockIdx < rsCoreNum`。**禁止**套用通信在前算子的"前 R 核"惯例 | communication.md §2 |
 

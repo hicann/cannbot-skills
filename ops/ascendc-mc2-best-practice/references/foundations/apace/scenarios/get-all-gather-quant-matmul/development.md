@@ -11,7 +11,7 @@
 | 事项 | 状态 |
 |:---|:---|
 | GET 钩子基础设施 | ✅ 已存在：`apace/block/aiv_comm/all_to_all/all_to_all_udma_get.h`（`AllToAllCommGetImpl`），已注册进 `CollectiveCommHelper<AllToAll, GET, ...>` 分发 |
-| AllGather GET 钩子 | ❌ 未实现（communication.md 钩子支持表：AllGather/GET = —） |
+| AllGather GET 钩子 | `not_found`：上述源码范围内未见 AllGather GET 分发 |
 | GET 使用方 kernel | ❌ 官网 kernel/ 下两个算子均为 PUT 模式，无 GET 使用方 |
 
 **开发纪律**：本文档为原理推导级指导。任何钩子行为假设（`PostInit`/`DoCommit`/`DoWait`/`DoFinalize` 职责、barrier 顺序、self 跳过、`Wait(true)` waitLast 早退语义）必须在实现前对照 `block/aiv_comm/` 源码逐条验证，并在 PLAN 第 11 章记录验证结论；与源码不符时以源码为准并回退设计阶段。
@@ -20,19 +20,19 @@
 
 | # | 动作 | 关键要点 |
 |:--|:---|:---|
-| 1 | 适配通信对象 | 优先**复用** `AllToAllCommGetImpl`（逐 targetRank 从远端 Win 拉回）。⚠️ **待验证假设**：其"按请求方 rankId 取槽位"语义是否天然覆盖 AllGather"收齐所有 rank 数据"语义，取决于 Win 布局合同，实现前必须对照源码逐条验证（本场景 not_found）；仅当分发层要求 `CollectiveCommHelper<AllGather, GET, ...>` 时才新写 `AllGatherCommGetImpl`，且须保持与 AllToAll GET 相同的钩子契约（barrier 先 Core 后 Device、self rank 跳过） |
+| 1 | 适配通信对象 | 以 PUT AllGather 核对各来源 rank 与列偏移，以 AllToAll GET 钩子核对远端读取。验证源槽寻址、到达语义及本地列的处理，再以已核实的 block 接口实现 GET AllGather 并接入通信分发。 |
 | 2 | 适配计算 | 复用 `QuantMatmulMxKernel`（`quant_matmul_mx_kernel.h`，CommPolicy 策略注入），AIC 按 N 轴切分算 C 并写入 Win 区（每 rank 持有 C 的 N/rankSize 列，B 可 N-split，见 architecture.md §4） |
-| 3 | 实现 Win 槽位环形复用 + 回压 | Win 区按 bufferCount 槽位环形复用；**AIC 侧 `CrossCoreWaitFlag` 等待槽位可用 flag**（AIV 拉走数据后置位），禁止无回压覆写（fusion.md §3.4） |
-| 4 | 完成 flag 编排闭环 | AIC 算完写 Win → `SetFlag`（C-ready）；AIV `WaitFlag` → `Commit(GET)` → 拉取完成 → `SetFlag`（V-done / 槽位释放）；尾部按 `Wait(true)` waitLast 语义处理——**最后一轮通信不被 Drain**，须由 `Finalize`/`DoFinalize` 的 CrossDevice barrier 完成 final drain，防止尾部越界覆盖 |
+| 3 | 实现 Win 槽位环形复用 + 回压 | 同一源槽将被改写时，先确认所有需要这个旧列块的远端 rank 都已完成读取，再通知本地 AIC 可复用（fusion.md §3.4）。 |
+| 4 | 完成 flag 编排闭环 | AIC 写 Win 后发布就绪；各 AIV 确认对应远端槽就绪，提交 GET，确认读取完成后通知源 rank。依据实际钩子核对最后一轮的完成路径，不能将提前返回的 `Wait(true)` 当成读取完成。 |
 
-> ⚠️ GET `DoCommit` 内 `CrossCore()+CrossDevice()` barrier 是对端 AIC 槽位就绪的回压保证，**不可省**；barrier 顺序为先 Core 后 Device（与 PUT 相反）。
+> 参考 AllToAll GET 钩子在 `DoCommit` 中先 `CrossCore()` 再 `CrossDevice()`。将该协议用于 AllGather 前，要验证它覆盖了每个源 rank 的就绪与旧槽释放。
 
 ## 3. 文件级合同
 
 | 文件 | 状态 | 说明 |
 |:---|:---|:---|
 | `kernel/{op_name}_tiling_data.h` | MODIFY | tiling 结构体：N 轴切分字段、Win 偏移、bufferCount、flag id、tile 字节数 |
-| `kernel/{op_name}_impl.h` | MODIFY | Impl：Init/Run 编排，GET 模式 `AllToAllProcess` 中**不需要 SyncAll**（同步全由 CrossCore flag 负责，fusion.md §3.1） |
+| `kernel/{op_name}_impl.h` | MODIFY | Impl 负责 Init/Run、AIC/AIV 通知和跨 rank 通信完成协议（fusion.md §3.1） |
 | `kernel/quant_matmul_mx_kernel.h` | REUSE | 复用官方 `QuantMatmulMxKernel`，仅注入 GET CommPolicy |
 | `src/kernel_launcher.h` | MODIFY | `__global__` 入口含 `KERNEL_TYPE_MIX_AIC_1_1`；UDMA 模式带 `__gm__ CommContext*` |
 | `src/main.cpp` | MODIFY | Tiling + fork 多 rank + HCCL 建链 + launch；host 前置校验 + perf 模式 L2 flush |
@@ -43,7 +43,7 @@
 
 | 维度 | 要求 |
 |:---|:---|
-| 精度 | golden 比对覆盖 N 轴各 rank 列段；dtype 全变体；**重点回归 R=2 与 R=4+**（GET 多 rank 数据可见性风险，见 §6） |
+| 精度 | 分别核对每 rank 的局部 N 列、AllGather 后各 rank 的完整输出；覆盖支持的 dtype，在 R=2 与 R≥4 下复验。 |
 | 时序 | 大 shape / 多轮（bufferCount 环形翻转 ≥ 2 圈）下无脏读、无"假通过" |
 | 同步 | flag idx 配对（AIV WaitFlag idx == AIC SetFlag idx）；末轮 final drain 经 DoFinalize 验证 |
 | 性能 | 真实大 shape × R=2/4 双档，与 mc2 融合算子 / hccl 分步路径对标归档（R15）；perf 每轮实调 L2 flush kernel（R20） |
@@ -63,8 +63,8 @@
 | R15/R20 | 投产级性能对标 + L2 flush 实接线 |
 | R7/R8 | 禁 `AscendC::Matmul` 高阶 API、禁 `Hccl::*` |
 
-## 6. 额外警示：GET 模式 4+ rank 不稳定性
+## 6. 多 rank GET 的验证
 
-- **PUT 优先原则**（fusion.md §6.2.5）：GET 模式在 4+ rank 存在数据可见性问题，且官网无 GET 算子样例；设计期应已论证"必须 GET"的理由，否则回退 PUT。
-- 已知绕行方案（communication.md 陷阱 #11）：GET `Drain` 返回非 0 时，可用 `TeamBarrier.CrossDevice()`（跨 rank 就绪）+ `SyncAll<true>`（核间可见）后直接 `DataCopyPad` 读远端 Win 区。
+- 4 个及以上 rank 的稳定性尚待验证。比较逐 rank、逐轮的列块，定位源槽就绪、GET 完成与复用时序；固定 GET 的需求应保留远端读的语义。
+- `Drain` 返回非零时，记录 rank、通道、轮次和错误码，并沿该通道确认读取是否完成。跨 rank barrier 或本地核间同步本身不能证明一次失败的 GET 已完成。
 - R≥4 精度回归不通过时**禁止带病交付**：先在 PLAN 第 11 章记录 `design_issue`，回退设计阶段评估改 PUT 或绕行方案。

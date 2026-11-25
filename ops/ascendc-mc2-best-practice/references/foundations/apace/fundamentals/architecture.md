@@ -146,9 +146,9 @@ kernel/all_to_all_quant_matmul/
 
 ## 4. 通信方向：GET vs PUT
 
-apace 通信方向由数据流决定：**GET = 计算→通信**（AIC 先算 C 写 Win 区，AIV 从远端拉回本 rank 段，沿 N 轴切分）；**PUT = 通信→计算**（AIV 先推数据到远端 Win 区，AIC 读取计算，沿 K 轴切分）。方向语义、钩子差异与 flag 编排对比以 [`fusion.md`](fusion.md) §2 为唯一事实源，本节只保留切分轴决策与 B 分布模式。
+GET 表示接收方远端读，PUT 表示发送方远端写。阶段顺序取决于传输的是矩阵输入还是计算结果；钩子与流水示例见 [`fusion.md`](fusion.md) §2。
 
-> M 轴是通用首选切分轴（不同 M 段独立通信/计算），但 GET 模式按 N 轴切分（每 rank 持有 N/rankSize 列），PUT 模式按 K 轴切分（每 rank 持有 K/rankSize 行）。官网 `all_gather_quant_matmul` 即按 M 轴切分。GET 模式官网暂无算子样例（见 §5）。
+> 先确定哪些张量复制、哪些维度跨 rank 分片，再选择通信轴和分块轴。`all_gather_quant_matmul` 在计算前用 PUT 汇集 M 行；结果 AllGather 的定制场景则拉取按 N 分片的局部结果。
 
 > ⚠️ **术语消歧**：本节「切分轴 = K」指 **rank 级数据分布轴**（每 rank 持有 A 的 K/rankSize 段）；而 `CommTilingData.splitAxis*` 字段沿 **M** 轴推进（通信 tile 经 `headMSize` 沿 M 切分，`nonSplitAxisSize = ka`）。字段映射详见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §3，填 tiling 字段时不要混用两个"切分轴"概念。
 
@@ -174,30 +174,30 @@ apace 通信方向由数据流决定：**GET = 计算→通信**（AIC 先算 C 
 
 | 切分轴 | 通算并行性 | 实现难度 | 适用场景 | 官网样例 |
 |:---|:---|:---|:---|:---|
-| **M 轴** | 高（不同 M 段完全独立） | 低（A/C 都按 M 切，偏移简单） | 通用首选，适合 AllGather/ReduceScatter | all_gather_quant_matmul |
-| **N 轴** | 中（需协调 B 的列切分） | 中（B 偏移 = rankOffset × N/rankSize × K） | GET 模式（计算→通信），每 rank 持有 C 的 N/rankSize 列 | ⚠️ 官网暂无 |
-| **K 轴** | 低（需跨 rank 规约部分和） | 高（需要额外的 Reduce 步骤或 PUT 模式） | PUT 模式（通信→计算），每 rank 持有 B 的 K/rankSize 行 | all_to_all_quant_matmul |
+| **M 轴** | 行块独立 | 按行定位 A 或 C | 按输入行聚合，或按输出行分发 | all_gather_quant_matmul |
+| **N 轴** | 各输出列块可独立计算 | 按权重布局取出对应列 | 各 rank 先算局部列，再汇集完整 C | GET 结果收集场景（推导） |
+| **K 轴** | 各 K 段产生同一输出的部分和 | 需汇齐输入或累加部分和 | 按 A 的来源选择对应 B 的 K 段 | all_to_all_quant_matmul |
 
-**决策原则**：
-1. **GET 模式（计算→通信）优先 N 轴**：AIC 算完 C 后，AIV 按 N 轴从远端拉取本 rank 应得的列段
-2. **PUT 模式（通信→计算）优先 K 轴**：AIV 先把 A 的 K 段推到远端，AIC 从 Win 区读取计算
-3. **M 轴是通用首选**：如果通信模式允许（如 AllGather），M 轴切分最简单且并行性最高
+**选择依据**：
+1. 输出行或列分属不同 rank 时，按目标输出布局推导片段起点和拼接顺序。
+2. 按 K 分片时，确认由哪个 rank、在哪个阶段取得完整内积。
+3. 通信块与矩阵计算块的大小可分别选择，在依赖的输入全部到齐后启动计算。
 
 ### B 数据分布模式
 
-通信方向不仅决定切分轴，还决定 B 矩阵的数据分布方式：
+B 的布局由局部矩阵计算需要的 K 段和 N 列决定。下面对比两种具体方案。
 
 | 通信模式 | B 分布 | 每 rank 持有 | 典型场景 |
 |:---|:---|:---|:---|
-| **GET**（计算→通信） | N-split | B_i[K×N_local] | N 轴 AllToAll，每 rank 输出不同 N 段 |
-| **PUT**（通信→计算） | 全量复制 | B_full（rankSize × K_local × N 逻辑拼接） | K 轴 AllToAll + AtomicAdd 累加 |
+| 结果 AllGather GET（计算后通信） | N-split | B_i[K×N_local] | 每 rank 计算 C 的局部列，按来源收集完整 C |
+| AllToAll PUT 样例（通信后计算） | 全量复制 | B_full（rankSize × K_local × N 逻辑拼接） | 按来源 K 段做局部乘加 |
 
 **PUT 模式 B 布局**（官网样例）：每 rank 持有全部 rank 的 B K 段拼接，AIC 按远端 A 的来源 rank 选择对应的 B K 段（`quant_matmul_mx_kernel.h` `ProcessSingleBatch` 中 `gmB.Slice(rank * K, nPos)`）。
 
 **选择规则**：
 - B 全量复制 → 内存开销大（rankSize 倍），但 AIC 可按 rank 索引直接访问对应 K 段
 - B N-split → 内存节省，每 rank 持有 B 的 N/rankSize 列
-- **泛化规则**：PUT 模式（含 AtomicAdd 串行与 3 级流水 workspace 两种实现）要求 B 全量复制；GET 模式 B 可 N-split
+- 根据每个 rank 的局部矩阵合同选择 B 的存储方式；相同 PUT 或 GET 方向可以使用不同的 B 布局。
 
 > ScaleB 的内存分配公式与 B 分布一致，详见 [`operator-anatomy.md`](../operator-design/operator-anatomy.md) §3。
 
@@ -271,17 +271,17 @@ PUT 逐 tile 流水编排（AIV Commit→Wait→SyncAll→SetFlag，AIC WaitTile
 AIC (生产者)                    AIV (消费者)
 ─────────────                   ─────────────
 tile 0: Matmul → C[0] 写 Win    │
-          SetFlag<0x2,PIPE_FIX>(0) ──→  WaitFlag<0x2,PIPE_FIX>(0)（消费侧按生产管线取 FIX；管线选择属原理推导，官方样例仅 MTE3→MTE2 一对）
+          发布本地槽就绪            ──→  等待所需对端源槽已就绪
                                        Commit(GET C[0] from remote Win)
-                                       Wait(waitLast)
-                                       SetFlag<0x2,PIPE_MTE3>(0) ──→ 回压
-tile 1: Matmul → C[1] 写 Win    │
-          (WaitFlag 等回压)      │
+                                       等待本轮远端读完成
+                                       按 rank 确认读完并释放源槽
+后续 tile：若复用同一槽，先等旧槽释放│
+           再写入新结果            │
           SetFlag<0x2,PIPE_FIX>(1) ──→  ...
 ...                             │
 ```
 
-> GET 语义：AIC 先算 C 写 Win，AIV 从远端 Win 拉回本 rank 应得的 N 段；Win 区按 bufferCount 槽位环形复用，带回压。钩子契约见 [`communication.md`](communication.md) §3。
+> 此例各 rank 先写入自己的局部 N 列，再读取其他 rank 的列块并拼成完整结果。有限 Win 槽在所有读者完成后才能复用。已核实的 AllToAll GET 钩子见 [`communication.md`](communication.md) §3。
 
 ### 关键同步点（PUT）
 
@@ -381,7 +381,7 @@ __schedmode__(1)
 
 ### ② Matmul 走 Blaze 模板
 
-计算侧统一用 Blaze（`BlockMmad` + `BlockScheduler` + `MatmulWithScaleMx`）。禁止使用 `AscendC::Matmul` 等 asc-devkit 黑盒 API——无法接入通算流水。
+计算侧使用 Blaze 矩阵 Kernel。AllToAll 量化示例中，矩阵 Kernel 按 `BlockScheduler` 分配的输出块检查通信依赖，经 `CommPolicy::WaitTile` 等到所需数据后调用 `BlockMmad`。`MatmulWithScaleMx` 配置块乘流水，`CommPolicy` 由对应通信实现注入。该路线禁止以 `AscendC::Matmul` 高阶调用替代上述逐块调度。
 
 ### ③ 禁止修改 `block/` 和 `tiling/`
 
@@ -403,7 +403,7 @@ __schedmode__(1)
 
 | 约束 | blaze-shmem 路线 | apace 路线 |
 |:---|:---|:---|
-| 通信 API | 必须走 SHMEM，禁 HCCL | 禁 HCCL 高阶 API，**允许 HCCL windows/CCU**（⚠️ 直调仅 UDMA） |
+| 通信 API | SHMEM Host 建链并分配对称内存，Device 用 `aclshmemx_udma_*` 搬运；禁 HCCL | 直调通过 APACE `CommContext` 和 `CollectiveComm` 下发 UDMA；禁 HCCL 高阶 API，HCCL windows/CCU 仅限注册形态 |
 | Matmul | 必须走 Blaze | 必须走 Blaze |
 | 流程 | 按 CANNBot 7 步 | 按 CANNBot 7 步 |
 | 调度属性 | — | **禁 `__schedmode__(1)`** |

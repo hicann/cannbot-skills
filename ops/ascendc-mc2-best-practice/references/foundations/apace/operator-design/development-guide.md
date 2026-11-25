@@ -428,8 +428,8 @@ set(COMMON_LIBS dl platform tiling_api ascendcl runtime hccl stdc++)
 
 | 阶段 | tileCnt | 目的 |
 |:---|:---|:---|
-| 精度调试阶段 | 1（串行基线） | 消除流水干扰，flag 出错直接 deadlock 便于排查 |
-| 性能调优阶段 | 扫描 {1,2,4,8,16,32} | 找 Task Duration 最小值 |
+| 精度调试阶段 | 1（容量及接口允许时的串行基线） | 减少跨块流水干扰，便于定位 flag 配对和数据依赖问题 |
+| 性能调优阶段 | 扫描 {1,2,4,8,16,32} 中的合法值，可优先验证公式推荐值 | 精度通过后找 Task Duration 最小值 |
 
 **验收条件**：切换 tileCnt 必须重新调 `QuantMatmulTilingSwat::GetTilingData`，不能复用旧 tiling。
 

@@ -1,10 +1,8 @@
 # CANNBot Step 1→7 在 apace MC2 场景下的工作流映射
 
-本文档保留旧版 `ops-direct-invoke` 七步流程在 apace 通算融合算子场景中的映射。CANNBot 主控和 Architect/Developer/Reviewer 三类 Subagent 在每个 Step 进入前都应先读对应小节，明确"本阶段在 apace 场景下要做什么、门禁是什么"。
+通过 [`ops-direct-invoke` 插件](https://gitcode.com/cann/cannbot/blob/master/plugins-official/ops-direct-invoke/README.md) 开发 APACE 算子时，`workflow_integration.md` 是各阶段的技术指南。插件定义实际执行顺序；在本文按七步映射查找当前阶段的 APACE 接口、设计产物和验收条件。
 
-> 工作流已迁移至 [cannbot 仓的 `ops-direct-invoke`](https://gitcode.com/cann/cannbot/blob/master/plugins-official/ops-direct-invoke/README.md)；以下 Step 编号为历史场景映射，实际执行以新仓工作流定义为准。本文件只补充 apace 场景的差异化要点，不重写父级规则。
->
-> **与 skill 四步模型的对应**：plugin Step 1 ≈ skill Step 1；plugin Step 2/2.5 ≈ skill Step 2+3；plugin Step 3-7 ≈ skill Step 4。**plugin 场景下以本文档为主要消费文档**；通用开发方法论（五阶段流程 + D1-D6 决策点 + 跨阶段纪律）见 [`operator-design/dev-methodology.md`](operator-design/dev-methodology.md)，路线模型、R1-R21 红线（[`review-checklist.md`](review-checklist.md)）与场景注册表（[`scenarios/`](scenarios/)）为两边共用的合同。
+独立开发使用四步流程。插件 Step 1 对应独立开发的工程搭建，Step 2/2.5 对应接口核对与设计，Step 3–7 对应实现与验收。两种入口共用[开发方法](operator-design/dev-methodology.md)、[审查规则](review-checklist.md)和[场景注册表](scenarios/)。
 
 ## Step 1：环境检查（门禁）
 
@@ -37,7 +35,7 @@
 按 [`dev-methodology.md`](operator-design/dev-methodology.md) §2 对六个决策点逐项定值（数据流方向/切分轴与 T/数据通路/同步合同/累加合同/入口合同），每项附依据。技术细节锚点：
 
 - 切分轴按数据分布语义确定——通信原语只决定搬运方向，不决定切分轴（[`compute.md`](fundamentals/compute.md) §4.7）
-- 两阶段 tileCnt 策略：精度期 T=1 串行基线 → 性能期扫描（[`../shared/pipeline_tuning.md`](../../shared/pipeline_tuning.md)）
+- 两阶段 tileCnt 策略：精度期采用合法的 T=1 串行基线 → 性能期扫描；设计时可用公式优先选择候选（[`../shared/pipeline_tuning.md`](../../shared/pipeline_tuning.md)）
 - Win 区预算：data 段 `rankSize × rankDataBytes` + scale 段 `rankSize × scaleKaSize × axisM`（[`operator-anatomy.md`](operator-design/operator-anatomy.md) §3.5）
 
 #### §golden 语义（每卡输入/输出契约）
@@ -100,7 +98,7 @@
 | 1 | 采集模式 | msprof task-based 采集 |
 | 2 | L2 cache flush | 每轮实际调用 flush kernel（记录数 == 轮数；模板见 [`host-and-testing.md`](operator-design/host-and-testing.md) §4） |
 | 3 | 多卡后处理 | 官方口径（parse_prof.py：跳 3 轮 warmup + 1.2×min 去离群 → 卡均值 → 总体 = 卡均值平均）；skill 投产另报跨 rank max，两层分开归档 |
-| 4 | tileCnt 扫描 | 扫 `tileCnt ∈ {1,2,4,8,16}` 选最优（上限约束见 R9 口径） |
+| 4 | tileCnt 扫描 | 扫 `tileCnt ∈ {1,2,4,8,16}` 中的合法值，可优先验证公式推荐值；精度通过后按实测选优（上限约束见 R9 口径） |
 | 5 | 数据归档 | `docs/perf/round_NNN/` 含多个 `PROF_*` 子目录 |
 | 6 | 性能达标 | R15 门槛：真实大 shape × R=2/4 双档 × 参考路径对标归档（[`host-and-testing.md`](operator-design/host-and-testing.md) §6） |
 

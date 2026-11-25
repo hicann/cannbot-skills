@@ -59,9 +59,9 @@
 #### §切分策略
 
 - **两阶段 `tileCnt` 策略**（详见 [`pipeline_tuning.md`](../../shared/pipeline_tuning.md)）：
-  - Step 2-4 设计/审查阶段：`tileCnt=1`（`headMSize=m`）做串行基线，简化精度/审查调试；
-  - Step 6 性能验收阶段：扫描 `tileCnt ∈ {1, 2, 4, 8, 16, 32}` 找最优，`headMSize=512` 只是起点不是最优值。
-- M 轴切分：`headMSize = m / tileCnt`，`bufferSize=4`
+  - Step 2-4 设计/审查阶段：容量及接口允许时以 `tileCnt=1`（`headMSize=m`）做串行基线，简化精度/审查调试；
+  - Step 6 性能验收阶段：扫描 `tileCnt ∈ {1, 2, 4, 8, 16, 32}` 中的合法值，可优先验证公式推荐值后实测选优，`headMSize=512` 只是起点不是最优值。
+- 按上述分块关系核对总行数能否整分；样例的 `bufferSize=4` 是轮转缓冲数。
 - SHMEM 空间预算（默认 1 GB，需够装下 `rankSize * bufferSize * bufferBlockSize + scale`）
 
 #### §AIV/AIC 分工图
@@ -169,7 +169,7 @@ bash run.sh  # 默认 m=2048 k=8192 n=3584 rank=4 precision
 
 ## Step 6：性能验收（Developer）
 
-### MC2 专用流程（必须刷 L2 cache）
+### Blaze-SHMEM 冷缓存采样流程
 
 > 详细步骤见 `profiling_mc2.md`。这里只给摘要。
 
@@ -190,8 +190,8 @@ python3 scripts/extract_perf.py "${PROJ}/docs/perf/round_001" AllToAllQuantMatmu
 
 ### 关键点
 
-- **两阶段 `tileCnt` 扫描**：进入 Step 6 时算子默认处于 `tileCnt=1` 串行基线（Step 2-4 期间配置）。Step 6 的工作是扫描 `tileCnt ∈ {1, 2, 4, 8, 16, 32}`，每个值跑一次 msprof 采集 + 后处理，对比整体 Task Duration 找最优。完整流程见 [`pipeline_tuning.md`](../../shared/pipeline_tuning.md) §3 阶段 B + §6 决策树；
-- **L2 cache flush 必须在主循环每轮触发**：参考工程在 perf 主循环（`src/all_to_all_matmul.cpp` 的 `mode == "perf"` 分支）中每轮先调用 `heavy_add_kernel`（256 MB bf16 全核扫一遍）刷 L2，再跑主 kernel，避免上一轮的热度污染本轮采集——所以 msprof 不需要 `--warm-up`；
+- **两阶段 `tileCnt` 扫描**：进入 Step 6 时保留 Step 2-4 精度通过的合法基线。扫描 `tileCnt ∈ {1, 2, 4, 8, 16, 32}` 中的合法值，有匹配模型时优先验证公式推荐值；每个值重新编译、验证精度，再做 msprof 采集 + 后处理，对比整体 Task Duration 找最优。完整流程见 [`pipeline_tuning.md`](../../shared/pipeline_tuning.md) §3 阶段 B + §6 决策树；
+- **L2 cache flush 必须在主循环每轮触发**：参考工程在 perf 主循环（`src/all_to_all_matmul.cpp` 的 `mode == "perf"` 分支）中每轮先调用 `heavy_add_kernel`（256 MB bf16 全核扫一遍）刷 L2，再跑主 kernel，避免上一轮的热度污染本轮采集。本示例不传 `--warm-up`，由程序多轮运行并统计后 5 轮；刷 L2 不能替代预热；
 - **perf 模式默认跑 10 轮**：msprof task-based 为每轮 main kernel 生成一条 `op_summary_*.csv` 记录；
 - **多卡数据提取规则**：每卡取最后 5 次 main kernel 的 Task Duration 求平均 → 4 卡平均值取最大值作为整体性能（多卡并行由最慢卡决定）。
 
@@ -200,7 +200,7 @@ python3 scripts/extract_perf.py "${PROJ}/docs/perf/round_001" AllToAllQuantMatmu
 - `docs/perf/round_NNN/` 存在且包含 4 个 `PROF_*` 子目录（每卡一份）；
 - `extract_perf.py` 输出每卡 `rank_avg` 与整体 `max` Task Duration；
 - 最优 `tileCnt` 与对应整体 Task Duration 已写入 DESIGN.md "性能调优记录"；
-- 若整体 Task Duration 与理论耗时差距 >50% → 视为性能不达标，检查通算流水是否真的并行（AIV time vs AIC time）。
+- 若整体 Task Duration 与理论耗时差距 >50% → 作为诊断线索核对模型和流水，用时间线确认真实重叠；性能是否达标仍按任务目标判断，不以 AIV/AIC 汇总时间接近代替。
 
 ---
 

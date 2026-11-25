@@ -10,11 +10,14 @@
 
 ## 通信路径选项
 
-| 通信路径 | 引擎 + 协议 | 接口来源 | 说明 | 已验证架构 | 典型场景 |
+- **识别已有实现**：沿 Kernel 的一次跨卡搬运，查地址从哪里取得、由哪个接口传输。Host 申请通信资源只能说明资源已就绪。
+- **选择新算子**：先看数据怎样分布。矩阵分片按块交换、可与矩阵计算重叠时，评估 AIV+URMA；专家并行按 token 决定目的 Rank 和槽位、需要逐目标寻址和状态通知时，评估 MTE。再按下表核对典型场景、芯片与调用形态。
+
+| 通信路径 | 引擎 + 协议 | 已有代码中的路线识别依据 | 说明 | 已验证架构 | 典型场景 |
 |---------|------------|---------|------|-----------|---------|
-| HCCL 高阶集合通信 | 服务端调度（引擎对 Kernel 不可见） | `asc-devkit/adv_api/hccl/`（如 `Hccl::AllReduce`） | HCCL 集合通信库（Ascend C 高阶 API 一部分，基于 HCOMM 构建），服务端调度，Kernel 不能干预通信时序；仅支持 acnn 单算子调用，**不支持 Kernel 直调** | 全系列 | 注册算子 / acnn 调用场景 |
-| AIV+URMA | AIV + URMA | `aclshmem_*`（host）、`aclshmemx_udma_*`（device，经 SHMEM 独立通信库） | Kernel 直调，GM 内存域跨卡大块搬运，通算流水掩盖通信开销 | Ascend 950（dav-3510） | 计算密集型（AllToAll+Matmul 等集合通信类） |
-| MTE通信 | AIV + UBMEM | host：`HcclAllocComResourceByTiling` 分配 window 资源；device：AIV 触发 MTE + `DataCopyPad` 按 window 地址搬运 | Kernel 直调（裸 Ascend C，不经任何通信库），HCCL window 资源寻址 + 状态位协议，适合 token 级路由通信 | A3（dav-2201）+ A5（Ascend 950/dav-3510）双平台 | 路由通信密集型（MoE Dispatch/Combine、专家并行 EP） |
+| HCCL 高阶集合通信 | 服务端调度（引擎对 Kernel 不可见） | `asc-devkit/adv_api/hccl/`（如 `Hccl::AllReduce`） | HCCL 集合通信库（Ascend C 高阶 API 一部分，基于 HCOMM 构建），服务端调度，Kernel 不能干预通信时序；本路线经 aclnn 调用注册算子，**不支持 Kernel 直调** | 910B（A2，dav-2201） | 注册算子 / aclnn 调用场景 |
+| AIV+URMA（UDMA） | AIV + URMA | blaze-shmem（SHMEM/UDMA）：Kernel 调用 SHMEM API（如 `aclshmemx_udma_*`）搬运跨卡数据，Host 用 `aclshmem_*` 初始化。apace：Kernel 通过 `CollectiveComm` 进行集合通信，底层用 HCOMM 的 UDMA 原语 | Kernel 直调，GM 内存域跨卡大块搬运，通算流水掩盖通信开销 | Ascend 950（dav-3510） | 计算密集型的集合通信与矩阵融合，如 AllToAll+Matmul、AllReduce+Matmul 及 TP/SP 分片计算；具体底座按已登记路线选取 |
+| MTE通信 | AIV + UBMEM | Kernel 经 compat 层从 `winContext` / `mc2Context` 取得远端窗口地址，再用 MTE（`DataCopyPad`）搬运。该窗口由 Host 调用 `HcclAllocComResourceByTiling` 分配 | Kernel 直调（裸 Ascend C，不经任何通信库），HCCL window 资源寻址 + 状态位协议，适合 token 级路由通信 | A3（dav-2201）+ A5（Ascend 950/dav-3510）双平台 | 路由通信密集型的专家并行（EP）：按 token 路由分发与回收，如 MoE Dispatch/Combine、mega_moe |
 | CCU | CCU + URMA | hcomm `writenbi` / `readnbi`（device） | Kernel 直调（编程接口为 HCOMM 通信基础库），通信与 AIC 计算流水深度重叠；注册场景已有实现（APACE 通信基础 API 基于 HCOMM 驱动 CCU） | Ascend 950（dav-3510） | 计算密集型（直调尚无参考工程） |
 
 ## 参考信息
@@ -26,10 +29,10 @@
 - **已验证芯片**：Ascend 910B（A2 / dav-2201）；A3（910_93）不在本期范围
 
 ### AIV+URMA
-- **文档**：https://shmem-doc.pages.dev/
-- **定位**：SHMEM 是独立通信库（cann/shmem），与 HCOMM 无关
-- **开发约束**：通信走 SHMEM（禁止 HCCL 高阶 API），Matmul 走 Blaze 模板，详见 `ops/ascendc-mc2-best-practice/SKILL.md`
-- **对齐要求**：512B
+- **SHMEM 文档**：https://shmem-doc.pages.dev/
+- **blaze-shmem**：通信使用独立的 SHMEM 库（cann/shmem），矩阵计算使用 Blaze 模板。
+- **apace**：沿用 [`CollectiveComm` 的通信接口](../foundations/apace/fundamentals/communication.md)，GET 和 PUT 分别对应 HCOMM 的 `ReadNbi`、`WriteNbi`。两种直调底座均禁止调用 HCCL 高阶 API。
+- **SHMEM 窗口对齐**：示例通过 `aclshmem_align` 申请 512B 对齐的对称内存。
 
 ### MTE通信（AIV+UBMEM）
 - **开发约束**：禁止用 HCCL 高阶通信原语替代 window 搬运；window 地址必须走 compat 层（禁止硬编码平台结构体偏移）；共享 GM/状态区走 `DataCopyPad`；状态协议先数据后状态、每核只写自己槽位、消费后清理。详见 SKILL.md ascendc-api 路线章节与 `references/foundations/ascendc-api/moe-dispatch-combine/api-rules/`

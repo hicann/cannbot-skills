@@ -1,8 +1,8 @@
 # MC2 通算融合架构总览
 
-本文档面向第一次接触 MC2 的 Architect/Developer，建立 AIV/AIC 分工、UDMA 通信、4-buffer 流水、M 轴通算并行的整体心智模型。读完本文档应能回答：
+本文以 Ascend 950 上的 AllToAll + MX FP8 Matmul 为例，说明 blaze-shmem 直调路线的 AIV/AIC 分工、UDMA 通信和分块流水。
 
-- 为什么 MC2 必须用 SHMEM/UDMA，不能用 HCCL？
+- 为什么这条直调路线使用 SHMEM/UDMA？
 - AIV 和 AIC 各自做什么？怎么同步？
 - 4-buffer 流水怎么掩盖通信开销？
 - M 轴切分 vs N/K 轴切分的取舍？
@@ -17,28 +17,26 @@ MC2 = Matrix Computation & Communication，多卡通算融合。典型场景：
 - **AllReduce + Matmul**：DDP 前向反向；Matmul 后的部分和通过 AllReduce 聚合。
 - **ReduceScatter + Matmul**：TP 反向梯度聚合。
 
-参考工程 `all_to_all_matmul/` 实现的是 **AllToAll + 量化 Matmul（MX FP8）** 的融合，可作为所有 MC2 算子的起手模板。
+下文的缓冲区布局、通信顺序和切分示例取自 `all_to_all_matmul/`。
 
 ## 2. 为什么不用 HCCL
 
 HCCL（Huawei Collective Communication Library）的高阶 API（`Hccl::AllReduce` 等）是 asc-devkit 官方通算融合路径的通信入口，但该路径**不支持 Kernel 直调，仅支持单算子 API 调用**（见 asc-devkit 官方文档《通算融合》算子实现章节）：
 
 ```
-官方通算融合: aclnn 单算子 API → Kernel 内 Hccl 高阶 API（依赖框架注入的 GetHcclContext 上下文）
-                                     ↑
-                     直调（<<<>>>）拿不到框架注入的通信上下文，无法接入
+注册式通算融合（以 AllGatherMatmul 为例）
+aclnn → 框架注入通信上下文 → GetHcclContext → HCCL InitV2
+                                              ├─ 集合通信
+                                              └─ GetRankId → AscendC::Matmul 的融合调度层 → 本卡矩阵分片
+SHMEM 直调（<<<>>>）没有这一框架上下文，通信域和本卡分片由本路线提供
 ```
 
-而 MC2 直调的核心诉求是：**Kernel 内部下发通信 + 下发计算，让两者在硬件流水上重叠**。官方通算融合路径不向内核直调场景开放 Hccl 高阶 API；SHMEM/UDMA 直调路径把通信下发权交回 Kernel：
+[注册示例的初始化与输出寻址](comm_shmem.md#注册式融合-kernel-的启动条件)说明了这条依赖怎样跨越通信和计算两层。SHMEM/UDMA 直调在 Kernel 内下发通信和分块计算，让它们在硬件流水上重叠：
 
 ```
-应用层: Kernel 内直接调 aclshmemx_udma_put_nbi(...)
-                ↓
-        UDMA 硬件引擎异步搬数
-                ↓ （同时）
-        AIC 管线继续下发 MMAD 指令
-                ↓
-        aclshmem_barrier_all() 等通信完成
+AIV：向空闲槽提交 UDMA put → 确认传输完成并与对端同步 → 发布本块就绪信号
+AIC：等就绪信号 → 调用 Blaze 矩阵 Kernel 计算这一块 → 发出槽位释放信号
+AIV：环回该槽时，等待本卡计算结束和各 Rank 释放完毕，才可覆写。不同槽可流水。
 ```
 
 UDMA（Unified DMA，对应 URMA 协议——Unreliable Remote Memory Access）是 Ascend 950 提供的 Kernel 级跨卡通信原语，所有通信下发在 Kernel 内完成，可与计算流水深度耦合。
@@ -108,19 +106,15 @@ AIC:           |wait(0) | MMAD(0)| wait(1) | MMAD(1)|wait(2)| MMAD(2)| ... | MMA
                ↑ 4 个 buffer 轮转使用，bufferId = mLoopIdx & (bufferSize - 1)
 ```
 
-- AIV 的 Put(i) 与 AIC 的 MMAD(i-1) 并行；
+- 若两个块没有数据依赖，AIV 的 Put(i) 可以与 AIC 的 MMAD(i-1) 并行；
 - AIV 的 Put(i) 把数据写到 SHMEM 的 `bufferId = i & 3` 位置；
-- AIC 的 MMAD(i) 从同一 bufferId 位置读；
-- 通信延迟被 4 个 buffer 的流水深度掩盖。
+- AIC 的 MMAD(i) 从同一 bufferId 读。收到本轮数据、满足就绪条件后即可计算，无需等待后续槽填满。
 
-**bufferSize 取舍**：
-- 过浅（=1）：通信和计算串行，没有掩盖效果；
-- 过深：SHMEM 空间不够（默认 1 GB），或 AIC 等 AIV 凑够 4 轮才开始算，反而增加延迟；
-- 4 是经验最优值，参考工程固定为 4，新算子一般不动。
+**bufferSize 取舍**：单槽时，下一轮 Put 必须等上一轮 MMAD 释放同一槽；增加槽数允许更多块同时在途。按生产和消费进度选择槽数，并核对所有数据槽及 Scale 区能否装入每个 Rank 的 SHMEM。样例取 4；保留 `i & (bufferSize - 1)` 寻址时，槽数须为正的 2 的幂。
 
 ## 5. SHMEM 空间布局
 
-每张卡的 SHMEM 空间（`aclshmem_align` 分配的 1 GB）被分成两段：
+样例在每张卡上用 `aclshmem_align` 分配 1 GB。数据区的字节范围为 `[0, bufferSize × bufferBlockSize)`，Scale 区紧随其后：
 
 ```
 SHMEM base (rankId 视角)
@@ -137,27 +131,21 @@ SHMEM base (rankId 视角)
 
 ## 6. 切分策略：M 轴通算并行
 
-参考工程沿 M 轴切分，每块 `headMSize=512` 行。为什么选 M 轴？
+先确定各 Rank 持有的输入、负责的输出和集合通信的分布，再选外层流水切分轴。样例按目的 Rank 取 A 的行段，在接收端将各来源的数据作为不同的 K 段，配合本地 B 累加出该段 M 行的结果，因此可以先搬下一块行、同时计算上一块行。
 
-| 候选轴 | 通算并行性 | 实现难度 | 适用场景 |
-|--------|-----------|---------|---------|
-| **M 轴** | ✅ 高（不同 M 段可独立 Put，AIC 边收边算） | 中 | **通用首选**（参考工程采用） |
-| N 轴 | 低（N 轴切会让 B 矩阵跨卡，通信量翻倍） | 高 | 不推荐 |
-| K 轴 | 中（K 切分对应 ReduceScatter，每段需要 reduce） | 高 | AllReduce + Matmul 场景 |
-
-**M 轴切分的好处**：
-- A 矩阵按 M 段分布在不同卡，每卡独立 Put 自己的 M 段，无冲突；
-- B 矩阵全卡持有相同副本（或按 K 段分布），无需通信；
-- AIC 收到某段 M 后立即可算，无需等待所有段到齐。
+| 候选轴 | 分块后的依赖与搬运 |
+|--------|--------------------|
+| M（输出行） | 行块彼此独立时，可按块发送 A、复用 B；每个输出块须等其所需的来源数据就绪。 |
+| N（输出列） | 列块彼此独立时，可按 B 的列块计算、复用 A；是否要跨卡传 B 或重排输出，取决于权重和输出的归属。 |
+| K（归约维） | 同一输出块的各 K 段产生部分和。部分和在本卡时本地累加，分布在不同卡时按输出归属决定是否需要跨卡归约。 |
 
 ### headMSize 取值
 
-参考工程默认 `headMSize=512`（即 `tileCnt = M/512`），只是经验起点，**不是最优值**。约束：
-- 必须是 Blaze `BlockMmad` 的 `baseM`（典型 128 或 256）的整数倍；
-- 必须让单次 Put 的数据量 `headMSize * kPerRank * sizeof(dtype)` 落在 UDMA 高效区间（数百 KB ~ 数 MB）；
-- `headMSize = M / tileCnt`，调整 `tileCnt` 即调整 `headMSize`。
+样例 `headMSize=512`、`tailMSize=0`，`M = tileCnt × headMSize`。Host 的 `tileCnt` 是完整主块数，Kernel 也只处理这些主块，所以 M 必须整分。若扩展为单独处理尾块，则 `M = tileCnt × headMSize + tailMSize`；有尾块要多跑一轮，通信字节数与矩阵 Tiling 均使用该尾块的实际行数。
 
-**`tileCnt` 是通算流水的深度旋钮**——`tileCnt=1` 时无掩盖（串行基线），`tileCnt>1` 时 N-1 级流水掩盖通信延迟。分两阶段调优（详见 [`pipeline_tuning.md`](../../shared/pipeline_tuning.md)）：精度调试阶段用 `tileCnt=1` 做串行基线简化精度/审查，性能调优阶段扫描 `tileCnt` 找最优。
+主块行数按所选 Blaze 基本块的对齐要求取值（样例的 `baseM` 可取 128 或 256）。每次数据 Put 的字节数为 `本轮行数 × kPerRank × sizeof(dtype)`。块太小会增加提交次数，块太大则减少可重叠的轮次，应结合实际矩阵效率和传输耗时比较。
+
+`tileCnt` 控制分块数，`bufferSize` 控制可轮转的槽数。容量允许时用单块验证串行结果，再比较多块候选的实测耗时，见 [`pipeline_tuning.md`](../../shared/pipeline_tuning.md)。
 
 ## 7. UDMA 通信原语速览
 
@@ -186,7 +174,7 @@ aclshmem_barrier_all();
 
 ## 8. 性能采集要点
 
-MC2 算子的性能采集有一条核心特殊点：每轮主 kernel 前必须调用 `heavy_add_kernel` 刷 L2 cache，否则前一轮的 B 矩阵驻留 L2 会让本轮带宽指标虚高。详细流程（msprof task-based 采集、4 卡数据后处理、优化速查）见 [`profiling_mc2.md`](../../shared/profiling_mc2.md)。
+该样例测冷缓存性能时，每轮主 kernel 前调用 `heavy_add_kernel` 刷 L2，避免前一轮 B 矩阵驻留 L2 抬高本轮带宽指标。详细流程（msprof task-based 采集、4 卡数据后处理、优化速查）见 [`profiling_mc2.md`](../../shared/profiling_mc2.md)。
 
 ## 9. 后续阅读
 

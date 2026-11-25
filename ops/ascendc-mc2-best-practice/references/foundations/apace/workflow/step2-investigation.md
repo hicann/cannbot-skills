@@ -10,8 +10,8 @@
 
 | 要素 | field id | 说明 | 示例 |
 |------|------|------|------|
-| golden 语义 | `golden_semantics` | 每卡输入/输出分布与切分轴（**输入分布轴与输出分布轴分别冻结**） | 输入：每卡完整 A（K 不切分）；输出：按 M 轴聚合 → [M/R, N] |
-| 通信方向 | `communication_direction` | GET / PUT / compute-first | PUT（通信→计算） |
+| golden 语义 | `golden_semantics` | 计算与通信的先后、每卡输入/输出分布与切分轴（**输入分布轴与输出分布轴分别冻结**） | 输入：每卡完整 A（K 不切分）；输出：按 M 轴聚合 → [M/R, N] |
+| 远端读写方向 | `communication_direction` | PUT（发起方写对端）/ GET（发起方读对端） | PUT |
 | 编排形态 | `orchestration` | 严格分离 / 时分复用 | 严格分离（后 R 核通信 / 前核归约） |
 | dtype/shape/rankSize | `dtype` / `shape` / `rank_size` | 输入/累加/输出 dtype、逻辑 shape、rank 数 | FP8_E4M3 × FP8_E4M3 → BF16，M=2048，R=4 |
 
@@ -51,7 +51,9 @@ apace/
 | 官方覆盖性 | 官方 kernel 可直接调用/复用的部分、未覆盖的需求项 | DESIGN.md §2.2 |
 | 注册形态原型事实（需求存在既有实现时） | 原型语义/算法骨架/验证基准三要素 + 可借鉴/必须重写边界判定（按 [`paradigm-mapping.md`](../operator-design/paradigm-mapping.md) §3 清单） | DESIGN.md §0.3 |
 
-每条事实必须带 `文件:行号` 证据引用；声明读取边界内未找到 ≠ 不支持，不得据此虚构接口或文件名（教训：AllGather GET 钩子在源码中不存在，仅 `all_to_all_udma_get.h` 有记录）。
+每条事实记录查询对象、读取边界及实际命中的 `文件:行号`。已完成边界内检索却未找到目标 kernel/钩子时记为 `not_found`；尚未读取或无法核实时记为 `unknown`。`not_found` 是检索结果，不是 `unsupported` 的路线结论，不得据此虚构接口或文件名。
+
+按通信原语分别记录钩子。某个原语的 GET 钩子只能证明该原语有对应接口。把已有接口和官方参考、仍缺的 kernel 或钩子分开记录，交 Step 3 对照[场景注册表](../scenarios/index.md)决定实现路线。
 
 ## 4. 调用链核对要点
 
@@ -86,4 +88,4 @@ read_boundary: []               # 实际读取的文件清单
 
 - 不做方案推荐、不匹配场景、不选择路线
 - 不编译或运行设备
-- 事实不足时在 DESIGN.md 标记 `blocking` 并停止等待澄清，最多一次补充核对
+- 尚未核实的关键接口事实影响路线判断时，在 DESIGN.md 标记具体 `blocking` 项，最多一次补充核对；已完成检索的 `not_found` 作为未覆盖项交给 Step 3，不单独触发停止等待

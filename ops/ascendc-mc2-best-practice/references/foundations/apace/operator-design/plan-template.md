@@ -13,7 +13,7 @@
 | 项目 | 内容 |
 |-----|------|
 | 算子名称 | {operator_name} |
-| 通信方向 | PUT / GET / compute-first（来源 DESIGN） |
+| 读写方向与融合顺序 | PUT / GET；通信后计算 / 计算后通信（来源 DESIGN） |
 | 编排形式 | 严格分离 / 时分复用（来源 DESIGN） |
 | 数学公式 | y = f(x) + 通信语义描述 |
 | 输入 | x1: shape=[...], dtype=...（含每 rank 输入 + **输入分布轴**：按哪轴切/不切） |
@@ -49,7 +49,7 @@
 
 | 合同项 | 冻结值 | DESIGN 引用 |
 |--------|--------|------------|
-| 通信方向与编排形式 | PUT/GET/compute-first；AIC↔AIV 触发关系 | DESIGN §x |
+| 通信方向与编排形式 | PUT/GET；按融合顺序说明 AIC↔AIV 的触发关系 | DESIGN §x |
 | Rank 规模与启动 | rank_size、rank_id 获取方式、启动命令 | DESIGN §x |
 | Win 区分配 | 每 buffer 容量、偏移表（send/recv/workspace/flag 区） | DESIGN §x |
 | Flag 编排 | flag 数量、含义、置位/等待时序（AIC→AIV / AIV→AIC） | DESIGN §x |
@@ -102,7 +102,7 @@
 | C4 精度 | A5 | 设备 | 多 rank 精度矩阵全部通过 | Max Diff ≤ 阈值 |
 | C5 性能 | A6 | 设备 | msprof 数据归档、达标判定 | 满足 DESIGN 性能标准 |
 
-每个上设备的 checkpoint 必须记录执行上下文（rank_size、设备节点、实际命令、返回码），并区分实现失败、启动前风险与环境不可用；只有真实多卡执行证据才能判定该 checkpoint 通过。
+每个上设备的 checkpoint 必须记录实际运行环境（容器或主机、CANN 版本）、rank_size、设备节点、实际命令和返回码，并区分实现失败、启动前风险与环境不可用；只有真实多卡执行证据才能判定该 checkpoint 通过。
 
 ---
 
@@ -159,7 +159,7 @@ operator_root: <project-root>/operators/<operator_name>/
 design_path: operators/<operator_name>/docs/DESIGN.md
 implementation_route: apace_native | apace_custom
 selected_scenario: <仅 apace_custom 填写，场景注册表 scenarios/index.md 的语义命中场景 ID>
-communication_direction: PUT | GET | compute-first
+communication_direction: PUT | GET
 orchestration_form:
 rank_size:
 multi_rank_launch:
@@ -216,7 +216,7 @@ frozen_plan_status: ready | blocking
 
 ## 11. 执行记录（只追加）
 
-设计步骤只建立空表；开发阶段只追加：
+设计步骤只建立空表。开发阶段只登记实际执行的动作；尚未上机的检查点保持待验证。
 
 ```text
 执行记录:
@@ -224,7 +224,8 @@ frozen_plan_status: ready | blocking
     动作或检查点编号
     起止时间
     实际变更文件
-    实际输出
+    构建或测试的运行环境、实际命令与返回码
+    实际输出（失败时记录首错）
     结果: 完成 | 失败 | 环境阻塞
     证据引用
     与计划的偏差

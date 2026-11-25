@@ -74,7 +74,7 @@ rankDataBytes = axisM × axisKa × sizeof(AType)
 | 逐轮动作 | `Commit(scale) → Commit(data) → Wait<BARRIER_DEVICE>() → SyncAll<true>() → SetFlag<0x2, PIPE_MTE3>(tid)` | `WaitFlag<0x2, PIPE_MTE2>(tid)`（经 `UdmaCommWaitPolicy::WaitTile`）后从 Win 读 A[tid] → Matmul |
 | 依赖计算 | — | `CalcDependTileIdx(mPos + blockM - 1, ...)` 推导依赖 tile，`waitedMask` 按位去重，循环末尾尾部兜底 |
 | self 跳过 | DoCommit 跳过 `targetRankId == rankId`；DoWait 仅非 self 执行 `Drain`，barrier 含 self | self 段经本地 GM/Win 直读 |
-| 回压 | 无（PUT 不需要环形回压） | — |
+| 回压 | 样例各轮写入独立区域；若接收槽环形复用，重写前须确认 AIC 已消费上轮数据 | — |
 
 ## 4. 联合合同（通信 × 计算组装）
 

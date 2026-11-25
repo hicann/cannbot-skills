@@ -19,8 +19,8 @@ AIC（计算）与 AIV（通信）在同一 kernel 内并行执行，两侧通�
 
 掩盖条件：每个 tile 的计算耗时 ≥ 通信耗时，且流水深度足够。
 
-- **PUT 模式**：AIV 先推数据、AIC 后算（通信→计算）；localMatmul=1 时本地 A×B 前置计算与 AIV PUT 并行（见 §5）。
-- **GET 模式**：AIC 先算、AIV 后拉（计算→通信），Win 槽位环形复用 + 回压（见 §3.4）。
+- **AllToAll PUT 样例**：AIV 先发送矩阵分片，AIC 在对应数据到达后计算；localMatmul=1 时本地 A×B 与 AIV PUT 并行（见 §5）。
+- **结果 AllGather GET 场景**：各 rank 先计算局部结果，接收方再读取对端已就绪的结果片段。复用窗口槽时按 §3.4 确认释放。
 - 重叠粒度受 comm tile 限制（CalcDependTileIdx + waitedMask 去重，见 §4.2）。
 
 ---
@@ -29,10 +29,10 @@ AIC（计算）与 AIV（通信）在同一 kernel 内并行执行，两侧通�
 
 **方向语义**：
 
-- **GET 模式 = 计算→通信**：AIC 先算 C 写到 Win 区，AIV 从远端 Win 区拉回本 rank 的 C 段。
-- **PUT 模式 = 通信→计算**：AIV 先推数据到远端 Win 区，AIC 从 Win 区读取计算。实现见 `apace/block/aiv_comm/all_to_all/all_to_all_udma_put.h` 的 `AllToAllCommPutImpl`（AllGather PUT 变体见 `apace/block/aiv_comm/all_gather/all_gather_udma_put.h` 的 `AllGatherCommPutImpl`，钩子结构相同，仅地址公式不同）。
+- **GET（远端读）**：接收方从对端已就绪的源地址读取数据。
+- **PUT（远端写）**：发送方将本地已就绪的数据写到对端目标地址。通信传输入参时，依赖该入参的计算随后执行；通信传输矩阵结果时，该块先计算，再用 GET 或 PUT 交换。§6.2 的 ReduceScatter 就是先算后 PUT。
 
-> **官网暂无 GET 算子样例**：GET 钩子基础设施已就绪并注册分发，但官网 kernel/ 下两个算子均为 PUT 模式，无 GET 使用方（详见 [`communication.md`](communication.md) §3 GET 钩子契约）。本文 GET 内容为钩子契约级描述。
+> 已核对的 `kernel/` 中有 AllToAll PUT 和 AllGather PUT 样例；`all_to_all_udma_get.h` 提供 AllToAll GET 钩子。AllGather GET 的源码覆盖和定制路线见[场景注册表](../scenarios/index.md)。
 
 ### 2.1 钩子差异
 
@@ -40,17 +40,17 @@ GET/PUT 钩子差异表（`PostInit`/`DoCommit`/`DoWait`/`DoFinalize` 四钩子�
 
 ### 2.2 flag 编排对比
 
-| 维度 | GET 模式（契约，官网无样例） | PUT 模式（官网实现） |
+| 维度 | 先算后 GET 的结果收集场景（推导） | 先 PUT 输入的 AllToAll 样例 |
 |:---|:---|:---|
 | 发起方 | AIC 先 SetFlag → AIV WaitFlag | AIV 先通信 → SetFlag → AIC WaitFlag |
 | Wait 参数 | Wait(true) 按 waitLast 早退语义：DoWait 仅在 currentTileIdx_ == totalTiles - 1 时执行一次（典型 Commit→Wait 循环中为倒数第二轮），末轮不 Drain（详见 communication.md） | `Wait<BARRIER_DEVICE>()`（BarrierMode 模板参数） |
-| SyncAll | 不需要（CrossCore flag 已保证时序） | **每轮必须** `SyncAll<true>()`（WriteNbi 对端可见性） |
+| SyncAll | 本地核间通知与跨 rank 源数据就绪分别同步 | 样例在通信等待后执行 `SyncAll<true>()`，再通知 AIC |
 | flagId | `tid`（tile 索引） | `tid`（round 索引） |
-| 回压 | AIC WaitFlag<0x2, PIPE_M>(tid-bufCnt) | 无（PUT 不需要环形回压） |
+| 回压 | 环形窗口复用前须确认旧块的全部读取已完成 | 各轮写入独立区域，轮间无需等待同一槽释放 |
 
 ### 2.3 Wait 参数维度差异
 
-GET 约定的 `Wait(true)` 中 `true` 是 `waitLast` 位置参数——Wait(true) 按 waitLast 早退语义：DoWait 仅在 currentTileIdx_ == totalTiles - 1 时执行一次（典型 Commit→Wait 循环中为倒数第二轮），末轮不 Drain（详见 communication.md）；PUT 的 `Wait<BARRIER_DEVICE>()` 是 `BarrierMode` 模板参数（控制 DoWait 中是否插入 CrossDevice barrier）。两者是完全不同的维度。
+`Wait(true)` 的 `true` 是 `waitLast` 位置参数：只有 `currentTileIdx_ == totalTiles - 1` 才进入 `DoWait`；不能用它逐块确认完成。`Wait<BARRIER_DEVICE>()` 的模板参数 `BarrierMode` 控制 `DoWait` 中的同步范围。两者的选择取决于钩子和消费者的完成要求。
 
 ---
 
@@ -60,7 +60,7 @@ CrossCore Flag 是 AIC↔AIV 跨核同步的核心机制。每个 flag 由 `<MOD
 
 ### 3.1 GET 编排不变量
 
-> **官网暂无 GET 算子样例**：以下为 GET 模式的契约级编排模式（与 communication.md 的 GET 钩子契约配套），官网 kernel/ 下无可验证的 GET 使用方。
+> 以下为向对端读取已计算结果的流水示意。各 rank 必须在数据就绪后才能开放该槽给对端，复用前还要确认所有实际读者都已读完。
 
 ```
 AIC (MatmulProcess)                            AIV (AllToAllProcess)
@@ -70,11 +70,11 @@ tile tid:
   RunMatmul(C → Win[tid % bufCnt])
   SetFlag<0x2, PIPE_FIX>(tid)          ──→    WaitFlag(tid)   // 无模板：阻塞标量流
                                                 Commit(GET C[tid])
-                                                Wait(true)
+                                                等待读取完成，与对端确认旧槽可释放
   [if ring: ...]                        ←──   SetFlag<0x2, PIPE_MTE3>(tid)
 ```
 
-> GET 模式 `AllToAllProcess` 中不需要 `SyncAll`。同步完全由 CrossCore flag 负责。
+> CrossCore flag 传递本地 AIC/AIV 进度。对端窗口可读以及何时能覆写，须由有相应完成语义的跨 rank 协议保证。
 >
 > 以上为**契约级推导**（官网无 GET 样例）：AIV 侧 Wait 后紧随标量流 `Commit`（ReadNbi 下发），故用无模板形态（形态语义见 `ascendc-api-best-practices` skill `references/api-crosscore-sync.md` §4.1）；AIC 侧回压 Wait gate 计算主流水，用 `PIPE_M` 模板形态。实现前须对照钩子源码逐条验证（见 [`scenarios/get-all-gather-quant-matmul/development.md`](../scenarios/get-all-gather-quant-matmul/development.md)）。
 
@@ -115,7 +115,7 @@ flagId 的硬件规则（16 通道截断、计数器 0-15 衡量未消费积压�
 
 ### 3.4 环形回压与 bufferCount
 
-> **GET 模式契约级描述**：环形回压是 GET 模式（计算→通信）Win 槽位复用的配套机制，官网 kernel/ 下暂无 GET 算子样例可验证；PUT 模式（官网两个算子）不需要环形回压。
+> 回压取决于槽位的生存期。GET 的远端源槽要等所有读者完成，PUT 的接收槽要等上轮数据消费完成才能覆写。下表以 AIC 生产、AIV 协调释放的结果窗口为例。
 
 #### 机制
 
@@ -161,7 +161,7 @@ CrossCore flag 是**计数式**同步：每个 flagId 维护一个计数器，Se
 | 4 | AIC 通知 | 每轮 `CrossCoreSetFlag<0x2, PIPE_MTE3>(tid)` 通知 AIC 第 tid 个通信 tile 就绪 |
 | 5 | 分核保护 | Commit/Wait 仅在 `GetBlockIdx() < rankSize` 的 block 执行；`SyncAll` 与 `CrossCoreSetFlag` 在守卫**之外**，全 AIV 执行 |
 | 6 | Finalize | 循环结束后 `allToAllScaleA_.Finalize()` + `allToAllA_.Finalize()`（无分核 guard，全 AIV 执行） |
-| 7 | 无环形回压 | 每轮独立，无 bufferCount 槽位复用（与 GET 的环形回压不同，见 §3.4） |
+| 7 | Win 槽复用 | 此样例各轮区域独立。改成环形复用时须确认旧块消费完成。 |
 
 #### 流水线要素
 
@@ -328,9 +328,9 @@ L0C 需求 = baseM × baseN × 4B（FP32）
 
 #### 6.2.1 架构总览（计算在前 + per-tile 流水）
 
-适用场景：**计算在前**（AIC 先算 C），**通信在后**（AIV PUT C）。与 §4 PUT 编排（通信在前）方向相反。
+本节采用先算后 PUT：AIC 先计算局部 C，AIV 再向对端写入相应分片；§4 的 PUT 样例传输的是矩阵输入。
 
-计算在前算子的同步面天然最小：AIC 不消费任何通信数据，只存在单向"mm 完成"通道（AIC→AIV），无 AIV→AIC 回压通道，无跨卡部分和 ⇒ 无 `SetAtomicAdd/SetAtomicNone`。死锁论证随之简化：AIC 必然完成 → AIV Wait 必然解除。
+在本节完整 staging、各轮数据分址的布局中，AIC 不读取通信结果，只需通知 AIV 哪些结果已就绪；跨 rank 求和由后续本地归约完成。若改用有限槽，生产者还须等待通信与消费释放旧槽。
 
 三级流水：mm → aivComm → reduce。AIC 计算 C 写入 staging（workspaceGM）并按轮 SetFlag 通知 AIV；AIV 逐轮 WaitFlag 门控后执行通信与归约（默认严格分离编排：通信核「Commit → Wait」与归约核「Reduce(上一轮)」并行，见本节末尾 AIV 组织方式）。
 

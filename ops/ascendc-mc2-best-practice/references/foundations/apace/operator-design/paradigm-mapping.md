@@ -17,7 +17,7 @@
 | AllGather + MX 量化 matmul（每卡独立 A/B，全量 C 输出） | `kernel/all_gather_quant_matmul/`（AllGather+PUT、M 轴输入切分、FragmentTensor 三区） | `all_gather_matmul`（fp16/bf16）、`all_gather_matmul_v2`（量化语义） | 标准 = native；变体见场景 [`put-all-gather-quant-matmul`](../scenarios/put-all-gather-quant-matmul/design.md) | AllGather+PUT 已注册 |
 | AllToAll + MX 量化 matmul（K 分段累加 `y = Σ_r A_r @ B_r`） | `kernel/all_to_all_quant_matmul/`（UDMA 版 + hcomm/CCU 版） | `allto_all_matmul`（先通后算+permute）、`matmul_allto_all`（先算后通） | 标准 = native；变体见场景 [`put-all-to-all-quant-matmul`](../scenarios/put-all-to-all-quant-matmul/design.md) | AllToAll+PUT/GET 已注册 |
 | ReduceScatter 语义 + 量化 matmul（先算后通，M 轴输出分片） | 无 | `matmul_reduce_scatter`（M 轴 RS 流水）、`quant_reduce_scatter`（纯量化 RS，one-shot 互读） | `apace_custom`，场景 [`compute-first-reduce-scatter`](../scenarios/compute-first-reduce-scatter/design.md) | ReduceScatter 仅枚举预留；用 AllToAll+PUT + 本地归约组合实现 |
-| AllReduce + 量化 matmul | 无 | `matmul_all_reduce`（量化通信三段式）、`quant_all_reduce`（纯量化 AR one-shot） | 无场景先例——设计前先读 §4 两条技术路线 | AllReduce**无枚举值**；须先扩展（见 [`communication.md`](../fundamentals/communication.md) §7） |
+| AllReduce + 量化 matmul | 无 | `matmul_all_reduce`（量化通信三段式）、`quant_all_reduce`（纯量化 AR one-shot） | 当前无匹配场景，判 `unsupported`；框架扩展备选见 §4 | AllReduce**无枚举值**；须先扩展（见 [`communication.md`](../fundamentals/communication.md) §7） |
 | 纯量化规约（无 matmul） | 无 | `quant_all_reduce`、`quant_reduce_scatter`（AIV-only 窗口互读 + 边读边反量化累加） | 视同上，评估后登记场景 | 同上 |
 | 分组/变长 token 族（grouped alltoallv 类） | 无 | `grouped_mat_mul_allto_allv` 等 | 零场景命中 → 按注册表规则暂判 `unsupported`，需求澄清后评估登记新场景 | — |
 
@@ -71,15 +71,15 @@
 
 典型错误：把 `hccl_.Wait()`、`CrossCoreSetFlag(EVENT_ID_6)`、ND2NZ 逻辑、tiling key 分发直接搬进 apace kernel——这些在 apace 中要么不存在、要么语义完全不同。
 
-## 4. AllReduce 类算子的两条技术路线（无 apace 先例，设计前必读）
+## 4. AllReduce 的框架扩展备选方案
 
-语义收敛建议（apace 适用范围 = MX 量化通算融合；非量化/伪量化变体不迁移）：
+此处仅讨论 MX 量化通算融合，非量化与伪量化变体不适用。框架维护时可评估两种方案；用于开发算子时，须先验证所需 block 接口可组合，且需求唯一命中[场景注册表](../scenarios/index.md)，再选择 `apace_custom`。
 
 **路线 A：直接规约（WriteReduceNbi）**——扩展 CollectiveComm 新增 AllReduce op，AIV 用 `Hcomm::WriteReduceNbi`（hcomm 原语，支持 int8/16/32、uint32、half、float、bfloat16 + `HcommUrmaReduceOp`）把部分和远程原位规约进对端输出窗口。组件改动最小（先补 `CommCollectiveOp::AllReduce` 枚举值——当前只有 AllToAll/AllGather/ReduceScatter，见 [`communication.md`](../fundamentals/communication.md) §7 扩展指南）；难点是远程规约完成语义（Drain 只保证本端发出，须 CrossDevice barrier 确保对端累加落窗）与首轮覆盖/清零语义（每 tile 独立 slot 天然免清零）。
 
 **路线 B：三段式分解（注册形态验证过的算法骨架）**——AllReduce = AllToAll → 低比特域 ReduceSum → AllGather。复用 apace 已有 AllToAll+PUT、AllGather+PUT 组件；中段 reduceSum 需要 AIV 向量计算（`block/aiv_compute/` 当前为空占位，须先建设）。流水掩蔽时序（第 1 块 ReduceSum 与 A2A 重叠、后续块与前一块 AG 重叠、段间 SyncAll 防精度）借鉴上游仓 `matmul_all_reduce` 的 `based_a2a_rs_ag` 实现。
 
-**建议**：先路线 A 打通功能闭环（顺带沉淀 AllReduce 通信原语），profiling 后若通信量成瓶颈再按路线 B 演进——两条路线 kernel 侧骨架一致（AIC 产 tile → AIV 逐 tile 通信），演进成本低。
+两种扩展方案共用「AIC 产 tile → AIV 逐 tile 通信」的 kernel 骨架。扩展框架时可先用路线 A 验证规约原语；若 profiling 显示通信量是瓶颈，再评估路线 B。
 
 ## 5. 原型研读操作指引
 

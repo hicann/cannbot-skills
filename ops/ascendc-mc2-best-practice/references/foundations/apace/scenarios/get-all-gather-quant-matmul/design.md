@@ -8,7 +8,7 @@
 
 | 条件 | 说明 |
 |------|------|
-| 通信方向 | GET（计算→通信） |
+| 通信方向 | GET：接收方读取远端结果片段 |
 | 编排形态 | AIC 先算，AIV 后拉 |
 | 切分轴 | N 轴按 rank 切分（⚠️ 无官方样例，为原理推导） |
 | 通信引擎 | UDMA |
@@ -25,7 +25,7 @@
 
 | 维度 | 合同 |
 |------|------|
-| 方向 | GET = 计算→通信：AIC 先算 C 写到 Win 区，AIV 从远端 Win 区拉回本 rank 的 C 段 |
+| 方向 | 每个 rank 对其他 rank 的已就绪 C 列块发起远端读，写入本地结果的相应列区间 |
 | 编排 | AIC 先 SetFlag → AIV WaitFlag |
 | 回压 | AIC `CrossCoreWaitFlag<0x2, PIPE_M>(tid-bufCnt)` 环形回压（原理推导：回压 gate AIC 计算主流水，pipe 选取见 `api-crosscore-sync.md` §4；与 [`fusion.md`](../../fundamentals/fusion.md) §3.4 契约一致；bufCnt 为深度参数） |
 
@@ -33,12 +33,12 @@
 
 | 维度 | 合同 |
 |------|------|
-| 切分轴 | N 轴按 rank 切分，每 rank 持有 N/rankSize 段（输出 C 按 N 分布） |
+| 切分轴 | 局部 MatMul 的 N 列跨 rank 分片；AllGather 完成后，每 rank 得到完整 `[M, N]` 结果 |
 | A 数据 | 各 rank 持有完整 A `[M, K]`（**A 不切分**：C 按 N 切分需全 M 的 A） |
-| B 数据 | 各 rank 持有 B 的 N/rankSize 段 `[K, N/rankSize]`（**B 按 N 切分**，与输出 C 的 N 切分一致；见 [`../../../fundamentals/architecture.md`](../../fundamentals/architecture.md) §4 GET 行"B N-split"） |
+| B 数据 | 各 rank 持有 B 的列块 `[K, N/rankSize]`，用于计算相同列范围的局部 C（见 [`architecture.md`](../../fundamentals/architecture.md) §4） |
 | C 输出 | 每 rank 写出 N/rankSize 段到 Win 区，AIV 拉回完整 C |
 
-> ⚠️ 本场景标注 not_found（原理推导，未经官方源码验证）：上述分布为按 AllGather+Matmul（GET、N-split 输出）的语义推导，实现前必须对照源码逐条验证钩子行为。
+> 这一数据分布是该定制场景的设计。可按列拼接各 rank 的局部乘积，与完整矩阵乘结果比对；还须在设备上验证 GET 的就绪与完成语义。
 
 ### 3.3 Win 区布局
 
@@ -60,15 +60,15 @@
 | 维度 | 合同 |
 |------|------|
 | 发起方 | AIC 先 SetFlag → AIV WaitFlag |
-| Wait 参数 | Wait(true) 按 waitLast 早退语义：DoWait 仅在 currentTileIdx_ == totalTiles - 1 时执行一次 |
-| SyncAll | 不需要（CrossCore flag 已保证时序） |
+| Wait 参数 | 局部输出使用前以及重用远端源槽前须确认相应读取已完成；`Wait(true)` 可能提前返回，不能作为逐块完成凭据 |
+| 同步范围 | CrossCore flag 通知本卡 AIC/AIV；跨 rank 的就绪与旧槽释放按通信协议确认 |
 | flagId | tid（tile 索引） |
 
 ## 4. 联合合同
 
 ```
-AIC: mm 计算 → 写 Win 区 → SetFlag(tid) → WaitFlag(tid-bufCnt) 回压
-AIV: WaitFlag(tid) → GET 从远端拉回 → 写输出 GM
+AIC: 复用时等待旧槽释放 → mm 计算并写本 rank 的 C 列块 → 发布就绪
+AIV: 等待远端对应列块就绪 → GET 到本地输出对应列 → 确认读取完成，通知源 rank 可复用
 ```
 
 ## 5. Step 3 前提
@@ -84,10 +84,10 @@ AIV: WaitFlag(tid) → GET 从远端拉回 → 写输出 GM
 | golden 语义 | 每 rank 输入（本地数据 + 远端数据来源）与输出语义明确，N 轴切分 |
 | 精度标准 | 以 ST verify_result.py 为准 |
 | 多卡矩阵 | R=2/4 双档 |
-| GET 稳定性 | 4+rank 不稳定已知风险（见 [`fusion.md`](../../fundamentals/fusion.md) §6.2.5 PUT 优先） |
+| GET 稳定性 | 验证目标 rank 数下的逐轮就绪、完成与缓冲复用；§6.2.5 尚无 4+ rank 的稳定性结论 |
 
 ## 7. 已知限制
 
 - 官网无 GET 算子样例，GET 内容为钩子契约级描述
 - 地址公式与 self 跳过规则需从 `block/aiv_comm/` 头文件直接验证
-- GET 模式 4+rank 不稳定，PUT 优先
+- 4 个及以上 rank 的 GET 稳定性仍需按目标配置实测。

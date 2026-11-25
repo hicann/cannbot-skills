@@ -32,12 +32,14 @@
 
 | 组合 | status | 原因 |
 |------|--------|------|
-| 直调 × HCCL 高阶集合通信（`Hccl::*`）× AscendC::Matmul 高阶 API | unsupported | HCCL 集合通信库（Ascend C 高阶 API 一部分，基于 HCOMM 构建）依赖框架注入的通信上下文，Kernel 直调拿不到；官方通算融合仅支持 acnn 单算子调用（详见 [`foundations/blaze-shmem/comm_shmem.md`](foundations/blaze-shmem/comm_shmem.md) §5）。910B 集合通信+Matmul 应改走本表 `dav-2201 × collective-comm × 注册 × HCCL 高阶 × hccl-matmul` 行（详见 [`foundations/hccl-matmul/`](foundations/hccl-matmul/)） |
+| 直调 × HCCL 高阶集合通信（`Hccl::*`）× AscendC::Matmul 高阶 API | unsupported | HCCL 集合通信库（Ascend C 高阶 API 一部分，基于 HCOMM 构建）依赖框架注入的通信上下文，Kernel 直调拿不到；官方通算融合仅支持 aclnn 单算子调用（详见 [`foundations/blaze-shmem/comm_shmem.md`](foundations/blaze-shmem/comm_shmem.md) §5）。910B 集合通信+Matmul 应改走本表 `dav-2201 × collective-comm × 注册 × HCCL 高阶 × hccl-matmul` 行（详见 [`foundations/hccl-matmul/`](foundations/hccl-matmul/)） |
 | 直调 × HCCL windows（`GetHcclContext`） | unsupported | 无 `__global__` 入口，不支持 Kernel 直调；仅限注册场景（apace 非直调变体，见 [`foundations/apace/fundamentals/architecture.md`](foundations/apace/fundamentals/architecture.md) §10 ④） |
 | 直调 × CCU | unsupported | 同上，无 `__global__` 入口 |
 | dav-2201 × UDMA（blaze-shmem 或 apace） | unsupported | UDMA 路径仅 dav-3510 已验证，其他架构行为未验证，禁止使用 |
 
-未出现在任何行中的组合一律视为 unsupported（如 moe × blaze-shmem：无参考实现）。
+未登记的 **chip × op_type × 调用形态 × 通信路径 × 编程抽象**组合按 `unsupported` 处理（如 moe × blaze-shmem）。该判断只覆盖路线组合，不枚举路线内每个 kernel 或通信钩子。
+
+已命中 `supported` 路线、但在声明读取边界内未找到某个实现时，查询结果记为 `not_found`，不能据此把整条路线改判 `unsupported`。apace 的官方未覆盖项继续按[场景注册表](foundations/apace/scenarios/index.md)判断是否进入 `apace_custom`；缺失项及证据按[源码核对规则](foundations/apace/workflow/step2-investigation.md)记录。
 
 ## 字段说明
 
@@ -48,16 +50,20 @@
 | `调用形态` | 工程调用方式 | `直调`（`<<<>>>`）、`注册`（op_host + op_kernel 完整工程） |
 | `通信路径` | 跨卡数据搬运方式（通信引擎 + 协议的组合） | `AIV+URMA`、`MTE通信`（AIV+UBMEM）、`CCU`（CCU+URMA，尚无直调参考工程）、`HCCL 高阶`，选项详见 [`requirement-analysis/comm-path-decision.md`](requirement-analysis/comm-path-decision.md) |
 | `编程抽象` | 代码编写所基于的技术底座，值即 `references/foundations/` 下的底座目录名 | `blaze-shmem`（SHMEM 通信库 + Blaze 计算模板，手工组装）、`apace`（APACE 模板库，通信+计算+工程组织全包）、`ascendc-api`（裸 Ascend C API 全自建，MTE通信场景含 compat 层）、`hccl-matmul`（HCCL 高阶 + `AscendC::Matmul` 高阶，仅注册） |
-| `status` | 可用性状态 | `supported`（有参考实现可开发）、`planned`（已规划无实现）、`unsupported`（不可用） |
+| `status` | 路线组合的可用性状态 | `supported`（路线有参考实现，不代表所有 kernel/钩子已实现）、`planned`（已规划无实现）、`unsupported`（本表不支持的路线组合）；具体实现的查询结果另行记录 |
 | `reference_impl` | 参考实现路径 | skill 内相对路径或 ops-transformer 仓路径 |
 | `知识目录` | 该路线的领域知识所在目录 | `references/foundations/` 下的目录（底座目录或其下路线目录），Architect 据此路由 |
 
 ## 查询规则
 
-1. 按 L0 三列（`chip` / `op_type` / `调用形态`）过滤候选行
+**开发规范与路线支持是两种查询。** 说明开发规范时，用[开发路线对照表](../SKILL.md#单卡直调与多卡融合的开发差异)中的普通单卡直调作起点：单卡 Host 准备张量和 stream，以 `<<<>>>` 启动，按本卡张量分块并比较本卡输出。多卡还要逐 Rank 绑定设备、建链并准备通信资源，按各 Rank 的输入输出分布将计算块映射到跨卡搬运，所有 Rank 联跑、逐卡比数并核对完成顺序。根据算子类型说明哪条路线实现这些工作；特定底座的详细红线留在对应知识目录。
+
+查询具体组合是否支持时，按以下步骤查表一次：
+
+1. 按 L0 三列（`chip` / `op_type` / `调用形态`）过滤候选行。新算子按矩阵分片或 token 路由选择通信路径；核对已有算子时，从 Kernel 的 [SHMEM 搬运调用或 `winContext` / `mc2Context` 窗口取址](requirement-analysis/comm-path-decision.md#通信路径选项)反查实际走的路径。
 2. `supported` 优先于 `planned`；`planned` → 告知用户该组合尚无参考实现、风险自担；仅命中否定行或无行命中 → 给出确定答复（不可用 + 原因 + 替代建议）
 3. 多行命中时按用户信号选编程抽象（见下表）
-4. 按 `知识目录` 列路由到对应 references 目录；按 `reference_impl` 定位起手工程
+4. 路线咨询直接列出命中行的 `知识目录` 和 `reference_impl`，依据 SKILL.md 对应路线说明调用形态、通信上下文、红线和接入方式。登记表和正文足以回答时即结束查询。需要设计、实现或审查具体代码时，再进入知识目录或打开参考实现。
 
 ### 编程抽象选择信号（多行命中时）
 

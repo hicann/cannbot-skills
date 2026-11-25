@@ -12,7 +12,7 @@
 |:---|:---|:---|:---|:---|:---|
 | `put-all-to-all-quant-matmul` | PUT 模式 AllToAll+QuantMatmul 的**变体扩展**（官方 kernel 未覆盖的需求：新 dtype 组合、bias/scale 融合、不同切分/编排），K 轴切分，UDMA 直调 | 通信原语为 AllToAll；localMatmul 为 QuantMatmul（含 scale）；PUT 方向；核间数据沿 K 轴切分；UDMA；**且存在官方 kernel 未覆盖的 native gap**（标准 PUT AllToAll+QuantMatmul 需求走 `apace_native`，不读本表） | [design.md](put-all-to-all-quant-matmul/design.md) | [development.md](put-all-to-all-quant-matmul/development.md) | 已实现 |
 | `put-all-gather-quant-matmul` | PUT 模式 AllGather+QuantMatmul 的**变体扩展**（新 dtype、bias 融合、rankSize>8、编排改造），M 轴输入切分，UDMA 直调 | 通信原语为 AllGather；localMatmul 为 QuantMatmul；PUT 方向；核间数据沿 **M 轴聚合**（每卡持本卡 M 行 × 全部 K 列，每卡输出全量 C）；UDMA；**且存在官方 kernel 未覆盖的 native gap**（标准需求走 `apace_native`） | [design.md](put-all-gather-quant-matmul/design.md) | [development.md](put-all-gather-quant-matmul/development.md) | 已实现 |
-| `get-all-gather-quant-matmul` | GET 模式，AllGather + QuantMatmul 融合，N 轴切分，UDMA 直调 | 通信原语为 AllGather；localMatmul 为 QuantMatmul；GET 方向；核间数据沿 N 轴切分；UDMA | [design.md](get-all-gather-quant-matmul/design.md) | [development.md](get-all-gather-quant-matmul/development.md) | not_found |
+| `get-all-gather-quant-matmul` | GET 模式，AllGather + QuantMatmul 融合，N 轴切分，UDMA 直调 | localMatmul 为 QuantMatmul；局部结果按 rank 分持 N 列，AllGather 以 UDMA GET 收集各 rank 的列块 | [design.md](get-all-gather-quant-matmul/design.md) | [development.md](get-all-gather-quant-matmul/development.md) | not_found |
 | `compute-first-reduce-scatter` | compute-first 模式，ReduceScatter 语义 + QuantMatmul 融合，输出沿 M 轴切分，UDMA 直调 | **逻辑语义为 ReduceScatter**（每 rank 输出 M 轴分片、跨 rank 求和）；localMatmul 为 QuantMatmul；compute-first（先算后通信）；UDMA。（通信实现方式——AllToAll PUT + 本地增量归约——由场景文档指导决策，非准入前提） | [design.md](compute-first-reduce-scatter/design.md) | [development.md](compute-first-reduce-scatter/development.md) | 已实现 |
 
 ### 状态说明
@@ -21,12 +21,12 @@
 |:---|:---|
 | 已实现 | 有官方参考或生产实现，design.md / development.md 已就绪，可直接指导开发 |
 | planned | 场景已规划，指导文档编写中，暂不可用于路线决策 |
-| not_found | 代码仓中尚无使用该场景的 kernel；`get-all-gather-quant-matmul` 当前仅 AllToAll GET hook（`block/aiv_comm/all_to_all/all_to_all_udma_get.h`）有源码记录，**AllGather GET hook 未见源码记录**，设计指导为原理推导，须经源码验证后方可采用 |
+| not_found | 声明读取边界内未找到场景所需的 kernel 或钩子；`get-all-gather-quant-matmul` 仅 AllToAll GET hook（`block/aiv_comm/all_to_all/all_to_all_udma_get.h`）有记录，**AllGather GET hook 未见源码记录**。定制设计复用已验证的 `apace/block` 接口，以官方 PUT AllGather 为组合参照；GET kernel 及其通信分发需要实现并验证 |
 
 ### 参考依据
 
 - `put-all-to-all-quant-matmul`：官方参考算子 `all_to_all_quant_matmul`（K 轴切分、UDMA 直调范式来源）；本场景定位为该范式的**变体扩展**指导，非标准 PUT 需求的重复
-- `put-all-gather-quant-matmul`：官方参考算子 `all_gather_quant_matmul`（AllGather+**PUT**、M 轴输入切分、FragmentTensor 三区范式来源）；本场景定位为该范式的**变体扩展**指导。注意与 `get-all-gather-quant-matmul` 的区别：官方 AG 是 PUT 模式（AIV 逐轮 PUT 到对端窗口），GET+AllGather 无任何官方实现
+- `put-all-gather-quant-matmul`：官方参考算子 `all_gather_quant_matmul` 使用 PUT 汇集 M 轴输入，提供 FragmentTensor 三区范式。GET AllGather 的钩子及参考算子在上述核对范围内未找到。
 - `get-all-gather-quant-matmul`：官方暂无 GET 算子样例；GET 切分策略为原理推导（见 [`../workflow_integration.md`](../workflow_integration.md) Step 2 §切分策略）
 - `compute-first-reduce-scatter`：已有生产实现（先本地计算、再 AllToAll PUT + 本地增量归约实现 ReduceScatter 语义），关键编排特征为 **compute-first + localLast 双 flag + 归约多核分治**（设计/开发合同见对应场景文档）。⚠️ 官方快照基准（`mc2/common/op_kernel/apace/`）中 ReduceScatter 仅为枚举占位（`collective_comm_api.h` 的 `CommCollectiveOp::ReduceScatter`，无 block 实现与 kernel 使用方）——本场景合同为自研编排，不与官方实现混淆
 
@@ -35,7 +35,7 @@
 1. 场景准入条件（语义判据）必须**互斥**：任意需求不得同时命中两个及以上场景的语义判据。
 2. **语义零命中**（官方未覆盖项无场景可覆盖）→ 路线判 `unsupported`，阻塞 DESIGN.md。
 3. **多命中** → 视为注册表缺陷或需求描述不清，判 `unsupported`，停止并等待澄清，禁止自行择优。
-4. 命中后默认查阅命中场景的指导文档作为设计基线；跨场景拼接设计元素时必须在 DESIGN.md 中显式论证。
+4. 唯一命中可用于设计的场景（含 `not_found` 场景）→ 选择 `apace_custom`，读取对应指导并登记 `selected_scenario`。在 PLAN 中分别列明可复用的接口与待开发部分，给出缺失 kernel 的通信分发注册位置和多 Rank 验证方法，并随验证更新已有场景记录。跨场景拼接设计元素时必须在 DESIGN.md 中显式论证。
 
 ## 场景扩展
 

@@ -99,6 +99,8 @@ Reviewer R1–R7（见下）+ `bash examples/run_test.sh` 多轮 `CHECK PASSED`�
 判据必须与融合方向匹配（§1.4.1）：先算后通的归约算子若照抄蓝本的逐元素 `rtol`/`atol`，会得出"bf16 精度不达标"的假结论并浪费一轮返工。判据选择与阈值须在 DESIGN.md 里写明理由。
 
 ### Reviewer 速查（R1–R7）
+
+按[审查清单](review-checklist.md)核对各项红线，违反任一项即不通过。
 ```bash
 R1: grep -i "ascend910b\|dav-2201" CMakeLists.txt x_{op}/CMakeLists.txt  # → ascend910b（默认）/dav-2201，无 A3/910_93/950
 R2: grep -rn "Hccl<HCCL_SERVER_TYPE_AICPU>\|InitV2\|SetCcTilingV2\|hccl_\.\(AllGather\|AllReduce\|AlltoAll\|Commit\|Wait\|Finalize\)" operators/{op}/
@@ -119,9 +121,9 @@ msprof --application="python examples/single_server_run.py" --output=PROF_xxx --
 python scripts/extract_perf.py PROF_*/op_summary_*.csv   # 每卡 last N、跨 rank max
 ```
 > 910B 走 HCCL（AICPU），无 SHMEM B-matrix residency 问题，**无需 950 的 L2 flush**；warm-up 仍建议。指南未述 L2 flush，此为本 skill 推理。
-- 两阶段 tileCnt 扫描：先 `tileCnt=1` 基线，再扫 {1,2,4,8,16}（A2 一通信域 Prepare≤63）。
+- 两阶段 tileCnt 扫描：先采用合法的 `tileCnt=1` 基线，再扫 {1,2,4,8,16}；可按 [`pipeline_tuning.md`](pipeline_tuning.md) 优先验证公式推荐的合法值（A2 一通信域 Prepare≤63）。
 - perf 跑 ≥10 轮，多卡取每卡 last 5、跨 rank max；核数 `MARK_CORE_NUM_SOC910B=20`（910B3/B4 20-core 变体）。
-- 门禁：cube_ratio 40–70%、通信隐藏率符合 DESIGN.md。
+- 门禁：通信隐藏率符合 DESIGN.md，以时间线核对真实重叠；性能达到任务目标。cube_ratio 用于辅助定位，不以 40–70% 作为通用门槛。
 
 ### 常见 FAIL
 | 现象 | 根因 | 修复方向 |

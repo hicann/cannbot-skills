@@ -1,6 +1,6 @@
 # hccl-matmul 通算并行调优（tileCnt，910B / A2）
 
-两阶段策略（`tileCnt=1` 串行基线 → 扫描找最优）与 `headMSize = M / tileCnt` 概念复用 [`../../shared/pipeline_tuning.md`](../../shared/pipeline_tuning.md)，**本文不重复**。下文只写本路线差异。
+两阶段策略（合法的 `tileCnt=1` 串行基线 → 扫描找最优）、公式化估时与 `headMSize = M / tileCnt` 概念复用 [`../../shared/pipeline_tuning.md`](../../shared/pipeline_tuning.md)，**本文不重复**。下文只写本路线差异。
 
 > 蓝本：[`all_gather_matmul/`](all_gather_matmul)。A2 上 `algConfig` 为预留字段，仅 FullMesh。
 
@@ -13,7 +13,7 @@
 | 约束 | 说明 | 违反后果 |
 |------|------|----------|
 | 一通信域 Prepare ≤ 63 | A2 上限（不含 A3 的 `InterHcclGroupSync`） | Prepare 失败 |
-| 扫描候选 | `{1,2,4,8,16}`（`MAX_TILE_CNT=16`） | 超过公式化 tiling 默认上限 |
+| 扫描候选 | `{1,2,4,8,16}`；可优先测试模型推荐的合法整数（`MAX_TILE_CNT=16`） | 超过公式化 tiling 默认上限 |
 | NZ 外轴 16 对齐 | 单 tile M 按 dtype block 对齐 | MMAD 报错 |
 | UB 192KB / L0C 128KB | 单 tile 须 fit | OOM / tiling 失败 |
 | 无 doublering | A2 仅 FullMesh | 误传也不生效 |
@@ -22,7 +22,7 @@
 
 ## 3. 公式化 tiling 系数（MC2-repo 辅助，非官方 API）
 
-蓝本权威副本：`all_gather_matmul/x_all_gather_matmul/mc2_common/op_host/op_tiling/`。系数以头文件为准，暂不需真机校准。
+蓝本权威副本：`all_gather_matmul/x_all_gather_matmul/mc2_common/op_host/op_tiling/`。系数以头文件为准，按当前产品、Rank 数及消息区间选用；复用已有模型不要求先重做拟合，实测偏差明显时再核对参数。
 
 | 来源 | 常量 |
 |------|------|
@@ -36,12 +36,12 @@ A2 子类 `XAllGatherPlusMMA2A3` 硬编码 `SocVersion::SOC910_B`。A3 的额外
 ## 4. 调优决策（本路线）
 
 ```
-tileCnt=1 串行基线跑通（精度 + R1–R8）?
+tileCnt=1（合法时）串行基线跑通（精度 + R1–R8）?
   ├─ 否 → 修精度/审查
-  └─ 是 → 扫描 tileCnt ∈ {1,2,4,8,16}
-            ├─ cube_ratio<40% → 增 tileCnt
-            ├─ cube_ratio>70% → 减 tileCnt 或关 L2CACHE
-            └─ 选最优 → 写入 DESIGN.md
+  └─ 是 → 扫描 tileCnt ∈ {1,2,4,8,16}，优先验证匹配模型推荐的合法值
+            ├─ 切分变化 → 重求主/尾块 Matmul Tiling，完成精度和同口径性能测试
+            ├─ 精度失败或性能退化 → 恢复此前通过的最佳版本
+            └─ 在精度通过的候选中选实测最快配置 → 写入 DESIGN.md
 ```
 
 910B 核数：910B2 为 24 Cube / 48 Vector；910B3/B4 为 20/40。`SetBlockDim` 据实核数。

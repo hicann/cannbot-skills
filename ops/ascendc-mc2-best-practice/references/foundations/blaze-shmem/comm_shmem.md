@@ -229,9 +229,11 @@ AllGather = 每卡 Put 自己段给所有其他卡，但不 reduce。本质就�
 | 跨组同步 | `Hccl::InterHcclGroupSync()` |
 | Context | `GetHcclContext<>()` |
 
-### 历史背景与正确理解
+### 注册式融合 Kernel 的启动条件
 
-这些 API 是 asc-devkit 官方通算融合路径（`docs/zh/api/SIMD-API/adv_api/HCCL_communication/`）的通信入口，也是官方 AllGatherMatmul 类算子样例使用的接口。**注意**：官方文档明确 Hccl 高阶 API 本身支持在 Kernel 内编排"先通信后计算 / 先计算后通信"（见 `HCCL_usage.md`），并非只能串行。本 skill 不用它们的真正原因只有一个：**官方通算融合仅支持单算子 API 调用（aclnn），不支持 Kernel 直调**；而本 skill 的 MC2 工程是 Kernel 直调形态，拿不到框架注入的通信上下文。直调场景下通信必须由 Kernel 自建（SHMEM/UDMA），才能与计算在同一 Kernel 内深度耦合。
+以注册式 AllGatherMatmul 为例，aclnn 启动时框架注入通信上下文，`GetHcclContext` 返回 `contextGM`。通信侧调用 `hccl_.InitV2(contextGM, tilingData)` 建立通信域。计算侧用 `hccl_.GetRankId()` 的结果初始化矩阵调度，按 `rankId × rankM × N` 偏移到本卡输出。若将这套 HCCL + `AscendC::Matmul` 高阶融合 Kernel 原样改成 `<<<>>>` 直调，通信域及由它确定的矩阵分片均无来源。具体见[通信初始化](../hccl-matmul/all_gather_matmul/x_all_gather_matmul/op_kernel/x_all_gather_matmul_full_mesh.h)和[矩阵输出寻址](../hccl-matmul/all_gather_matmul/x_all_gather_matmul/op_kernel/x_all_gather_matmul_base.h)。
+
+blaze-shmem 的替代路径从 Host 开始：各 Rank 初始化 SHMEM 并分配对称内存，Device 才能通过 UDMA 搬运并在就绪后启动对应的 Blaze 计算块。Host 的初始化、Device 的搬运和完成条件见本页 §1–4。
 
 ---
 

@@ -18,7 +18,7 @@
 
 ## 1. 计算原理：Cube 核 MMAD 流水
 
-> 架构硬约束：Matmul 走 Blaze 模板（`BlockMmad` + `BlockScheduler` + `MatmulWithScaleMx`），禁止 `AscendC::Matmul` 等 asc-devkit 黑盒 API——黑盒 API 无法接入通算流水，无法在逐 tile 粒度插入通信等待（详见 SKILL.md 与 [`architecture.md`](architecture.md)）。
+> `QuantMatmulMxKernel` 的组合模式用 `BlockScheduler` 分派输出块，`BlockMmad` 执行块乘，`CommPolicy` 在相应块就绪时解除等待。该计算入口按块接受通信进度，使用 Blaze 的 `MatmulWithScaleMx`，不能直接替换为注册融合算子中的 `AscendC::Matmul` 调用。接口分工见 [`architecture.md`](architecture.md)。
 
 Blaze 集成方式：
 
