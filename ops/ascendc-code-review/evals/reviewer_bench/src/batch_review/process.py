@@ -288,10 +288,15 @@ def run_task(
         timeout_event = threading.Event()
         timeout_type_holder = [""]
 
-        def on_timeout(t_type: str):
-            timeout_type_holder[0] = t_type
-            timeout_event.set()
-            terminate_process_group(proc.pid)
+        def on_timeout(
+            t_type: str,
+            _holder=timeout_type_holder,
+            _event=timeout_event,
+            _pid=proc.pid,
+        ):
+            _holder[0] = t_type
+            _event.set()
+            terminate_process_group(_pid)
 
         # 启动固定超时
         fixed_timer = FixedTimeout(proc.pid, timeout_sec, on_timeout)
