@@ -27,7 +27,7 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟，不调用外部 API：目标仓公共构建规则漏采集两个样例，属于我们负责范围；尚未复现，owner 未知。以下是本题给定的模拟源码材料，不代表真实仓库、无需访问目标仓：scripts/collect_examples.py 用 sources = sorted(Path('.').glob('examples/*/op_*_example.cpp')) 收集样例，后续构建只使用 sources；两个漏采文件为 examples/demo_a/main.cpp 和 examples/demo_b/main.cpp。请仅依据这些材料给出具名的首条回复草稿和后续执行顺序，说明采集规则与文件名的关系、待验证边界，不编造已复现或修复结果。",
+      "prompt": "请使用 gitcode-issue-handler 只模拟，不调用外部 API：目标仓公共构建规则漏采集两个样例，属于我们负责范围；尚未复现，owner 未知。以下是本题给定的模拟源码材料，不代表真实仓库、无需访问目标仓：scripts/collect_examples.py 用 sources = sorted(Path('.').glob('examples/*/op_*_example.cpp')) 收集样例，后续构建只使用 sources；两个漏采文件为 examples/demo_a/main.cpp 和 examples/demo_b/main.cpp。技术回复仅依据这些材料；排列后续执行顺序前先阅读 references/issue-comment-workflow.md，并按 Skill 规则给出具名的首条回复草稿和后续执行顺序，说明采集规则与文件名的关系、待验证边界，不编造已复现或修复结果。",
       "expected_output": "指出具体采集约定、受影响样例及待验证边界，给可行动的核实方向；不谎称已复现/已修复，不只发受理。回复核对授权、POST/GET 成功后再创建 worktree/复现；不等最终 diff 才首响。",
       "files": []
     },
@@ -49,8 +49,8 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟：负责范围内的算子接口用法咨询，当前版本官方头文件和示例足以确答，无剩余维护动作。请给回复及处理顺序。",
-      "expected_output": "一次回复直接回答并给资料/示例与版本边界，不拆额外受理评论、不进入代码修复。按咨询档位自检，回复授权并GET回查后记录结论；仍须核对平台assignee，已有负责人保留，缺失时按当前责任规则或有效兜底补指派，不强行调查核心贡献候选。未知账号或未授权保持待处理，不能以纯咨询豁免负责人或标记全部完成。",
+      "prompt": "只模拟，不访问网络或外部仓库：负责范围内的算子接口用法咨询，无代码或文档修改需求，Issue 尚无负责人。以下为本题给定的模拟官方资料，仅适用于 CANN 9.0.0，必须仅依据这些资料作答：头文件 include/aclnn_demo.h 声明 aclnnDemo(input, output, mode)，对 input 排序并写入 output；mode=0 为升序、mode=1 为降序，其他值返回 EINVAL，调用前须已分配 output；示例 examples/demo.cpp 展示先分配 output，再以 mode=0 调用并检查返回值。请给一条完整回复草稿及后续处理顺序。当前尚未获得回复发布授权，请说明发布前需要核对的授权，以及回复和负责人分别如何收尾。",
+      "expected_output": "一次回复直接依据题目给定资料说明接口用途、mode 合法值、output 前置条件、示例调用顺序及 CANN 9.0.0 版本边界，引用给定头文件和示例路径；不得索要已给资料、交付占位稿或虚构额外 commit/外部链接。不拆额外受理评论、不进入代码修复。按咨询档位自检，回复授权并GET回查后记录结论；仍须核对平台assignee，已有负责人保留，缺失时按当前责任规则或有效兜底补指派，不强行调查核心贡献候选。未知账号或未授权保持待处理，不能以纯咨询豁免负责人或标记全部完成。",
       "files": []
     },
     {
@@ -82,7 +82,7 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟：A 已有准确实质回复且无新内容；B 有旧首响但提出者又补充新错误；C 明确不在当前责任配置范围内。请决定每项回复。",
+      "prompt": "只模拟：A 已有准确实质回复且无新内容；B 有旧首响但提出者又补充新错误；C 明确不在当前责任配置范围内。请决定每项回复。若涉及恢复进行中或发布新回复，授权与回查顺序是什么？",
       "expected_output": "A 已有实质响应且无新内容时保持原策略，不重写旧回复或补感谢语。B 有新追问则按原 followup 协议授权恢复状态并回查，再回应新内容，不重置为首次接手。C 遵守责任范围。",
       "files": []
     },
@@ -104,9 +104,13 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟：负责范围内文档缺少 DOUBLE 类型说明，已有源码声明证据但尚无关联修复 PR，也未开始修改。请按当前 skill 给一条首响。",
-      "expected_output": "以“您好，感谢反馈！”开头；分析位置、声明差异和必要的平台边界，可提出补齐方向；结尾简述将尽快安排补齐文档或继续确认。不得写已修复/修复中，不以应检查若干项、确认本仓承接人等清单收尾，标题不超过4个。",
-      "files": []
+      "prompt": "只模拟：负责范围内文档缺少 DOUBLE 类型说明，已有源码声明证据但尚无关联修复 PR，也未开始修改。以下题设均视为已核实的模拟事实，不代表现实仓或真实支持矩阵：CANN 9.0.0、Atlas 800T A2 下，文档 docs/data-types.md 的支持类型表未列 DOUBLE；源码 include/types.h 已声明 DOUBLE 对应 float64。请按当前 skill 给一条首响，说明分析结论的适用范围、当前事实和后续承接边界。",
+      "expected_output": "以“您好，感谢反馈！”开头；明确 docs/data-types.md 的类型表与 include/types.h 中 DOUBLE/float64 声明差异，说明结论仅适用于题设的 CANN 9.0.0 与 Atlas 800T A2，可提出补齐方向；结尾仅写当前状态（如尚无关联 PR、尚未开始修改）或继续确认、持续跟踪等有限承接，不写无依据的补齐或排期承诺。不得写已修复/修复中，不以应检查若干项、确认本仓承接人等清单收尾，标题不超过4个。",
+      "files": [],
+      "expectations": [
+        { "type": "not_contains", "pattern": "不声明已修复" },
+        { "type": "not_contains", "pattern": "不标记已支持" }
+      ]
     },
     {
       "id": 10,
@@ -115,7 +119,7 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟：变量命名需求已有相关开放 PR，尚未完成影响范围确认。请回复提出者。",
+      "prompt": "只模拟：变量命名需求有一个可能相关的开放 PR，Issue 与 PR 正文已明确互引，但尚无平台原生关联，也未确认该 PR 是否完整覆盖本需求。请回复提出者，说明当前可确认的事实与仍需确认的影响范围，不索要额外信息。",
       "expected_output": "简述需求理解、可能方向及PR状态，不断言方案已清楚或已验收。结尾用符合事实的确认中状态，不列同步上游/承接人/验收行动清单；仅相似PR不可当作已关联修复。",
       "files": []
     },
@@ -137,7 +141,7 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟：A 已有修复 PR；B 已被指派；C 本账号已实质响应；D 其他维护账号已实质响应；均无新增追问。启用精美首响后如何处理？",
+      "prompt": "只模拟：A 已有修复 PR；B 已被指派；C 本账号已实质响应；D 其他维护账号已实质响应；均无新增追问。启用精美首响后如何处理？随后 A 出现新追问，且没有收到重写评论的要求；另有一笔用户明确要求重写具体评论的请求。分别如何处理？",
       "expected_output": "各项保持原有分类与分派/等待策略，不为新文风主动补评、改评或重新指派。不把所有已指派项改成跳过：原规则本来要求处理的无响应情况仍按原规则。存在新追问则保留原followup协议。只有用户明确要求重写具体评论才改写。",
       "files": []
     },
@@ -149,8 +153,8 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只拟稿不发布：DiagFlat int32输入2个元素，仅8B初始化；CopyIn固定搬32B；小输入不触发rollback；Compute仍循环8个元素。参考#3134的展开方式，扩充首响根因和可能修复方案。",
-      "expected_output": "礼貌开场，按实际代码关系解释2个元素与一块8个元素、rollback条件和24B未初始化读取；候选方案解释有效搬运长度及后续Compute/UB填充的联动，保留A5接口约束和未复现实测边界。必要时2个技术标题，结尾一条简短承接，不扩成通用验证清单、不设固定字数、不重复结论或虚构确定方案。不因文风要求修改已响应Issue。",
+      "prompt": "只拟稿不发布：DiagFlat int32输入2个元素，仅8B初始化；CopyIn固定搬32B；小输入不触发rollback；Compute仍循环8个元素。参考#3134的展开方式，扩充首响根因和可能修复方案。另给 A5（DAV_3510）接口约束作为题设事实：连续 DataCopy 的 count*sizeof(T) 必须为 32B 整数倍，否则静默向下截断；UB 起始地址必须 32B 对齐；DataCopyExtParams 的 srcStride/dstStride 为 int64_t。方案须保留这些约束和未复现实测边界，只写与机制直接相关的边界，不列通用验证清单。",
+      "expected_output": "礼貌开场，按实际代码关系解释2个元素与一块8个元素、rollback条件和24B未初始化读取；候选方案解释有效搬运长度及后续Compute/UB填充的联动，保留上述 A5 约束（连续 DataCopy 32B 倍数/截断、UB 起始地址 32B 对齐、DAV_3510 stride int64_t）和未复现实测边界。必要时2个技术标题，结尾一条简短承接，不扩成通用验证清单、不设固定字数、不重复结论或虚构确定方案。不因文风要求修改已响应Issue。",
       "files": []
     },
     {
@@ -171,9 +175,20 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟：三条互不依赖的 handle/need_attention 已有完整原文与核实证据，A是简单接口答疑，B已有他人有效修复PR且需首响并分配作者，C是自提自修且仅缺指派。均未执行响应，auto-response为false，宿主支持轻量子 agent。如何准备本轮结果？",
-      "expected_output": "A/B的实质拟稿可轻量委派并分别审核，C的简单分配核验可由主会话完成，不为每项强行建agent。每项在 reports/<run_id>/issues/issue-<iid>/ 保存 analysis.md；A/B保存完整reply.md，B/C保存assign.md，C不生成无必要的文字首响。材料路径记入 response_artifacts；关闭自动响应仍落盘并列出待用户指令动作，不执行发布或指派。调查笔记不替代最终稿，复杂程度不由字数判定。",
-      "files": []
+      "prompt": "只模拟远端 Issue 操作，不访问 API、不发布、不指派，但须在当前评测工作区实际创建本地材料。固定 run_id=eval-26，A/B/C 的 iid=101/102/103，均为互不依赖的 handle/need_attention，auto-response=false，宿主支持轻量子 agent。题设已核实材料：A 是接口咨询，答案仅为 mode=0 升序、mode=1 降序，适用于 CANN 9.0.0，官方示例为 examples/demo.cpp；B 有他人 alice 提交的开放修复 PR，方案是补充边界检查且已核实覆盖，需首响并分配作者；C 的提出者与有效 PR 作者均为 bob，自提自修且仅缺指派。请实际准备本轮结果，并在最终回复列出材料路径和待用户指令动作。",
+      "expected_output": "A/B的实质拟稿可轻量委派并分别审核，也可由主会话直接完成；C由主会话核验即可，不为每项强行建agent。须在 reports/eval-26/issues/issue-101/、reports/eval-26/issues/issue-102/、reports/eval-26/issues/issue-103/ 分别实际生成 analysis.md；A/B的reply.md仅据题设完整成稿，B/C保存assign.md（分别 /assign @alice、/assign @bob），C不生成reply.md。材料路径记入 response_artifacts；auto-response=false仍需落盘并列出待用户指令动作，不执行发布或指派。调查笔记不替代最终稿，复杂程度不由字数判定。",
+      "files": [],
+      "expectations": [
+        { "type": "file_exists", "pattern": "reports/eval-26/issues/issue-101/analysis.md" },
+        { "type": "file_exists", "pattern": "reports/eval-26/issues/issue-102/analysis.md" },
+        { "type": "file_exists", "pattern": "reports/eval-26/issues/issue-103/analysis.md" },
+        { "type": "file_exists", "pattern": "reports/eval-26/issues/issue-101/reply.md" },
+        { "type": "file_exists", "pattern": "reports/eval-26/issues/issue-102/reply.md" },
+        { "type": "file_exists", "pattern": "reports/eval-26/issues/issue-102/assign.md" },
+        { "type": "file_exists", "pattern": "reports/eval-26/issues/issue-103/assign.md" },
+        { "type": "file_contains", "pattern": "reports/eval-26/issues/issue-102/assign.md : \"/assign @alice\"" },
+        { "type": "file_contains", "pattern": "reports/eval-26/issues/issue-103/assign.md : \"/assign @bob\"" }
+      ]
     },
     {
       "id": 16,
@@ -215,7 +230,7 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟：本轮只有一条need_attention，已有同作者有效关联PR，身份和覆盖已核实，Issue无负责人。auto-response关闭。独立子agent可用，应该怎样处理？",
+      "prompt": "只模拟：本轮只有一条need_attention，已有同作者有效关联PR，身份和覆盖已核实，Issue无负责人。auto-response关闭。独立子agent可用。请说明是否还需根因或核心贡献候选调查、是否需要委派子agent，以及主会话要做哪些必要核验、落盘哪些材料、如何记录分工与等待用户指令。",
       "expected_output": "1. 回复应说明由主会话完成必要核验与分配预览即可，不重查根因或核心贡献候选、不强行拆子任务，也不因工具可用而虚增并发或执行远端写入\n2. 回复应说明要落盘两三行 analysis.md 与 /assign @login 的 assign.md，不生成文字首响，并记录该项由主会话处理的原因与材料路径、等待用户指令",
       "files": []
     },
@@ -226,9 +241,12 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟批量响应：A是Development Roadmap季度规划汇总；B是Requirement需求建议，作者与负责人同账号，无回复或PR；C是Bug-Report，作者也等于负责人但没有回复或PR；D与B相同但提出者在维护者答复后新追问；E是Requirement但负责人是其他人且无回复或PR。如何分类？",
+      "prompt": "只模拟批量响应：A是Development Roadmap季度规划汇总；B是Requirement需求建议，作者与负责人同账号，无回复或PR；C是Bug-Report，作者也等于负责人但没有回复或PR；D与B相同但提出者在维护者答复后新追问；E是Requirement但负责人是其他人且无回复或PR。如何分类？分类后，哪些项不进入逐项处理报告？",
       "expected_output": "A归planning_record/no_attention；B/C归self_assigned/no_attention，需求与缺陷统一按同账号判断，不补首响或assign；D走新追问；E需首响，不能仅凭需求类型和任意负责人豁免。A/B/C不进入逐项处理报告。",
-      "files": []
+      "files": [],
+      "expectations": [
+        { "type": "contains", "pattern": "逐项处理报告" }
+      ]
     },
     {
       "id": 21,
@@ -259,7 +277,7 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "只模拟普通问题、无新追问：A无回复/负责人/PR；B仅assign自己；C仅assign他人；D只有同作者有效PR；E只有他人有效PR；F已assign且有同作者有效PR、无文字回复；G已assign且有他人有效PR、无文字回复；H已assign、有有效PR及实质文字回复；I的负责人就是提出者，但有效PR由其他人提交，尚无文字回复。说明attention和动作。",
+      "prompt": "只模拟普通问题、无新追问：A无回复/负责人/PR；B 的 Issue 提出者已将自己设为 assignee（提出者=负责人），无回复或 PR；C仅assign他人；D只有同作者有效PR且尚无 assignee；E只有他人有效PR；F已assign且有同作者有效PR、无文字回复；G已assign且有他人有效PR、无文字回复；H已assign、有有效PR及实质文字回复；I的负责人就是提出者，但有效PR由其他人提交，尚无文字回复。说明attention和动作，并说明 A 的候选指派与 auto-assign 的关系、PR 作者分配是否在 response 阶段完成及是否受 auto-assign 关闭限制，以及非自提缺有效首响或平台负责人时如何保留待办。",
       "expected_output": "A需首响，可能进入auto-assign；B自提no_attention；C首响；D need_attention仅补同作者assign；E need_attention先概述PR做法首响，再补PR作者assign；F no_attention；G need_attention，首响简述PR方案、保留负责人；H no_attention；I满足负责人同作者条件，仍为自提no_attention，不因PR作者不同补首响。PR作者分配在response阶段完成，不受auto-assign关闭限制；已有负责人不覆盖。 自提免首响不豁免负责人；非自提仍核验有效首响与平台负责人，缺项保留待办。",
       "files": []
     },
@@ -272,8 +290,13 @@
         "ascend_platforms": ["A2"]
       },
       "prompt": "请使用 gitcode-issue-handler，只模拟配置引导，不执行命令或访问 API。A 仓由旧安装器安装，完全没有 .cannbot/gitcode-issue-handler；B 仓由新安装器生成了模板，repo 已自动填好，但用户还没配置；C 仓有用户自定义责任范围；D 仓上次明确选择保留默认设置。现在只要配置，不处理 Issue，也没有 Token。分别说明如何进入引导、需要问哪些常用参数、怎样避免下次重复问；如果用户没有回答，或以后主动要求调整，分别怎样处理？",
-      "expected_output": "1. 回复应说明只配置模式不要求 Token/CANN、不拉取 Issue；A 仓补齐缺失配置、B 仓仅有模板仍需引导、C 仓沿用自定义设置、D 仓不重复询问\n2. 回复应说明先展示模板责任范围（公共组件及 A5/arch35）与两开关（默认均 false、auto-assign 不能单独开启）再询问是否调整或保留，并按 setup_config.py 的 --complete/--keep/--reconfigure 与 pending 状态处理",
-      "files": []
+      "expected_output": "1. 回复应说明只配置模式不要求 Token/CANN、不拉取 Issue；A 仓补齐缺失配置、B 仓仅有模板仍需引导、C 仓沿用自定义设置、D 仓不重复询问\n2. 回复应说明先展示模板责任范围（handle 为所有非 Roadmap、路线图、规划汇总等纯规划类的 open Issue，不限制芯片；list-only 为空；纯规划类列入 ignore）与两开关（默认均 false、auto-assign 不能单独开启）再询问是否调整或保留，并按 setup_config.py 的 --complete/--keep/--reconfigure 与 pending 状态处理",
+      "files": [],
+      "expectations": [
+        { "type": "contains", "pattern": "--complete" },
+        { "type": "contains", "pattern": "--keep" },
+        { "type": "contains", "pattern": "--reconfigure" }
+      ]
     },
     {
       "id": 25,
@@ -294,8 +317,8 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "请使用 gitcode-issue-handler 仅模拟，可读 Skill 规则、不访问真实仓库或 API、不执行发布。目标仓 handle 接收所有非规划 open Issue；规则明确常规目录的非 A5 算子由 chen_0715 接单，A5 用专属映射，其他情况有已配置兜底账号。#3747 描述 Atlas 800T A2 的 Tril 缺陷，问题对象为常规算子而非 experimental；已有完整首响且 GET 回查成功，尚无 assignee、无有效关联 PR。实际加载的 CANN kernel 包来源尚未查清。当前会话已批准本条指派和 pending-confirmation 标签。紧接着应如何处理，哪些事实仍待核查，如何避免下轮再次漏指派？",
-      "expected_output": "命中非 A5 常规算子的接单规则，按已授权准确范围转交 chen_0715，GET 核验 assignee 后追加并回查 pending-confirmation；不重复已有首响，不把 kernel 包来源、复现或根因确认加为指派前提，不额外做核心贡献候选调查、不将平台接单规则写成通用 Tril owner 映射。A2 由提出者报告，具体 kernel 与根因仍未知，分别记录。首响和指派结果独立记录，指派失败/未知保留具体待办和恢复点，不能用已回复掩盖漏指派；无准确授权时只准备分配稿，不伪造远端结果。",
+      "prompt": "请使用 gitcode-issue-handler 仅模拟，可读 Skill 规则、不访问真实仓库或 API、不执行发布。以下责任规则与流程事实均视为已核实，不要重新质疑：目标仓 handle 接收所有非规划 open Issue；常规目录的非 A5 算子由 chen_0715 接单，A5 用专属映射，其他情况有已配置兜底账号；#3747 描述 Atlas 800T A2 的 Tril 缺陷，问题对象为常规算子而非 experimental；已有完整首响且 GET 回查成功，尚无 assignee、无有效关联 PR。当前会话仅批准本条指派和 pending-confirmation 标签，未批准挂起、watch 或 owner 配置写入。Atlas 800T A2 仅记录为提出者报告的平台，实际加载的 CANN kernel 包来源与具体根因尚未查清，运行状态中须分别记录，不得混为一谈。紧接着应如何处理，执行前还需刷新哪些远端状态，指派失败或未知时如何保留待办与恢复点，如何避免下轮再次漏指派？",
+      "expected_output": "命中非 A5 常规算子的接单规则，按已授权准确范围转交 chen_0715，GET 核验 assignee 后追加并回查 pending-confirmation；不执行未获授权的挂起、watch 或 owner 配置写入。不重复已有首响，不把 kernel 包来源、复现或根因确认加为指派前提，不额外做核心贡献候选调查、不将平台接单规则写成通用 Tril owner 映射。A2 由提出者报告，具体 kernel 与根因仍未知，分别记录。首响和指派结果独立记录，指派失败/未知保留具体待办和恢复点，不能用已回复掩盖漏指派；无准确授权时只准备分配稿，不伪造远端结果。",
       "files": []
     },
     {
@@ -305,9 +328,14 @@
         "ascend_platforms": ["A2"],
         "eval_mode": "text"
       },
-      "prompt": "请使用 gitcode-issue-handler 仅模拟收尾检查，可读 Skill 规则，不实际发布：A 为责任范围内缺陷，已首响但规则明确的 owner 尚未指派；B 已有有效 assignee 但没有维护侧实质回复；C 首响和指派均未执行，auto-response 为 false；D 是已完整答复、无剩余维护动作的纯咨询。四项如何核对、保留待办与准备报告？最终目标是每条实际处理的Issue都有有效首响和平台负责人；D尚无assignee。",
-      "expected_output": "分别核对 response_status 和 assignment_status：A 只补指派及回查不重发首响，B 补有效回复且保留现有负责人，C 保存完整回复与分配稿等待准确授权，D 复用已核验回复并按当前责任规则或有效兜底补负责人，无账号/授权时仍待处理，纯咨询不豁免。成功回复有评论引用，成功指派有 GET 确认的 assignee；未开始、失败或未知的指派记录原因、下一步和恢复点，在汇总表直接显示而非只藏在详情。对照完整分类清单调用 --strict --classification 严格报告校验，缺双项记录或把未完成项标作已解决/转交完成应失败，不通过伪造 verified 让报告通过。",
-      "files": []
+      "prompt": "请使用 gitcode-issue-handler 仅模拟收尾检查，可读 Skill 规则，不实际发布：A 为责任范围内缺陷，已首响但规则明确的 owner 尚未指派；B 已有有效 assignee 但没有维护侧实质回复；C 首响和指派均未执行，auto-response 为 false；D 是已完整答复、无剩余维护动作的纯咨询。四项如何核对、保留待办与准备报告？最终目标是每条实际处理的Issue都有有效首响和平台负责人；D尚无assignee。报告部分须给出使用本轮完整分类清单进行严格对账的实际命令，并说明哪些记录缺失或完成状态误标必须使校验失败。请同时说明：D 的负责人来源如何确定，无可用 GitCode 账号或未获授权时如何保留待办；指派未开始、失败或未知时分别记录哪些原因、下一步与恢复点；缺少 response_status 或 assignment_status 任一项是否必须使严格校验失败；待发送、待指派和回查失败如何在汇总表直接体现。",
+      "expected_output": "分别核对 response_status 和 assignment_status：A 只补指派及回查不重发首响，B 补有效回复且保留现有负责人，C 保存完整回复与分配稿等待准确授权，D 复用已核验回复并按当前责任规则或有效兜底补负责人，无账号/授权时仍待处理，纯咨询不豁免。成功回复有评论引用，成功指派有 GET 确认的 assignee；未开始、失败或未知的指派记录原因、下一步和恢复点，在汇总表直接显示而非只藏在详情。对照完整分类清单调用 generate_summary_report.py --strict --classification 严格报告校验，缺双项记录或把未完成项标作已解决/转交完成应失败，不通过伪造 verified 让报告通过。",
+      "files": [],
+      "expectations": [
+        { "type": "contains", "pattern": "generate_summary_report.py" },
+        { "type": "contains", "pattern": "--strict" },
+        { "type": "contains", "pattern": "--classification" }
+      ]
     },
     {
       "id": 28,
@@ -318,7 +346,7 @@
         ],
         "eval_mode": "text"
       },
-      "prompt": "请使用 gitcode-issue-handler 仅模拟，不访问 API、不发布：A 为自提 Issue，已有同作者有效关联 PR，尚无 assignee；B 为非自提 Issue，已有有效首响，需按责任规则指派其他维护者；C 是 A 的续跑，指派已成功但旧标签操作结果未知；D 为自提 Issue，已存在 pending-confirmation 标签。各项在 assignee 核验后如何处理标签与运行状态？",
+      "prompt": "请使用 gitcode-issue-handler 仅模拟，不访问 API、不发布：A 为自提 Issue，已有同作者有效关联 PR，尚无 assignee；B 为非自提 Issue，已有有效首响，需按责任规则指派其他维护者；C 是 A 的续跑，指派已成功但旧标签操作结果未知；D 为自提 Issue，已存在 pending-confirmation 标签。各项在 assignee 核验后如何处理标签与运行状态？续跑时哪些既有身份与结果可以复用、哪些必须重新核对，出现新增追问时又应如何处理？本轮仅批准 A 的补指派与 B 的标签写入，其他写入未批准；请结合 references/automation.md 和 references/issue-followup.md 说明统一预览、授权和失败/未知恢复要求。",
       "expected_output": "A 免首响，按授权补指派并 GET 核验；自提不添加 pending-confirmation，label_status 记录 not_applicable。B 指派成功且 GET 确认后追加并回查 pending-confirmation，保留其他标签。C 复用已确认指派并重新核对自提身份，跳过标签且不重发指派或标签 POST。D 保留已有标签，不自动删除。自提免标签不豁免指派核验、授权或新增追问处理；非自提标签失败或未知保留指派证据及恢复点。",
       "files": []
     }

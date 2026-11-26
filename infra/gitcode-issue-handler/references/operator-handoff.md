@@ -36,7 +36,11 @@ owner 不明且启用 `auto-assign` 或用户单次明确要求自动选择候�
    POST 结果未知时只回查 assignee 和评论，不重发；回查不足则保留未确认状态。
    若仓库未执行 `/assign` 指令，且当前授权覆盖该 Issue 的负责人变更，可使用 toolkit 原生更新接口 PATCH `{"assignee":"<owner>"}` 并 GET 核验；不添加评论、不改变目标账号。
    仅授权发送评论时不能扩大为原生指派。
+   指派对象须是目标仓库成员，资格按仓库独立判定：在其它仓库的成员身份不随作者或 Issue 迁移，不能以提交历史、外部名单或预载信息推断。成员资格以目标 Issue GET 回查的 assignee 为准，经授权的原生 PATCH 或 `/assign` 后 GET 确认均可；机器人代发或仅出现 `/assign` 评论文本不作为资格证据。判定与指派统一走 `assign_issue.py` 的原生单数 `assignee` PATCH 与 GET 回查，不额外回写 title/body；HTTP 400/403 仅按实际返回记录，回查不匹配记 `failed`、结果无法确认记 `unknown`，不盲目重试。同一账号的成员结论可在后续 Issue 复用，账号状态变化时重新探测。
+   单条自提且身份、覆盖已核实的分配预览由主会话完成，不拆子任务、不重查根因或核心贡献候选；按 `delivery-reporting.md` 的材料约定落盘两三行 `analysis.md` 与仅含 `/assign @login` 的 `assign.md`，记录材料路径并等待用户指令，预览阶段不执行远端写入。
+   有效关联 PR 作者的分配在 response 阶段完成，不受 auto-assign 限制；auto-response 关闭时仅保存预览并等待指令，不与 auto-assign 混写。
    本次为非自提 Issue 指派 assignee 并核验成功后，按 [automation.md 的确认标签规则](automation.md#指派后的确认标签) 追加并回查 `pending-confirmation`，保留其他标签；自提 Issue 不添加。将适用的标签操作纳入同一预览和授权范围；标签失败/未知时保留已成功的指派记录，不把整体转交记为完成，不重发指派。
+   续跑须重新核对提出者与负责人身份，自提豁免不直接继承；自提免确认标签不豁免新增追问，补指派仍须授权；标签失败或未知时保留恢复点。
 7. **处理失败和 direct**：指派评论或 assignee 回查失败时设置 `assignment_status: failed`、`handling_status: assignment_failed`，记录可重试动作并继续其他 Issue，禁止自动改为代码修复。用户选择 `direct` 时设置 `operator_owner_source: none`、`operator_handling_decision: direct`、 `assignment_status: not_started`（已有 GET 核实的 assignee 则为 `verified`），自行处理仍须落实平台负责人；只让明确写出 IID 的 Issue 进入下方常规分派；不要把 `direct` 写入配置，也不要扩展为同算子其他 Issue 的授权。
 
 收到完整回复后，从每个待决 Issue 的步骤 2d 检查点恢复：owner 分支只确定配置写入、转交和回查计划；`direct` 分支才进入常规分派并形成必要的代码计划。不得重新执行已通过的能力检查、Issue 获取、已完成的算子识别或其他 Issue 的处理。全部 owner 聚合项都有确定方案后仅移除对应 owner 输入项，不清空其他待输入项；更新 `run.pending_user_inputs`，设置 `operator_owner_request_status: resolved`，把所有适用动作纳入 `delivery-confirmation.md` 的统一预览；尚未批准前不得执行评论、指派、暂存、commit 或发布。明确选择 `direct` 的代码 Issue 可先在受管 worktree 中完成未提交实现和验证，再进入统一预览。

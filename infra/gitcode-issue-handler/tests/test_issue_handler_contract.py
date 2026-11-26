@@ -91,6 +91,127 @@ def test_issue_workflow_documents_keep_business_contracts_in_handler():
     _assert_handler_interaction_contract(documents)
 
 
+def test_eval_prompts_do_not_leak_rubric_answers():
+    data = json.loads((HANDLER_ROOT / "evals/evals.json").read_text(encoding="utf-8"))
+    cases = {case["id"]: case for case in data["evals"]}
+
+    attention_prompt = cases[23]["prompt"]
+    assert "no_attention" not in attention_prompt
+    assert "need_attention" not in attention_prompt
+
+    style_prompt = cases[12]["prompt"]
+    assert "按原 followup 协议" not in style_prompt
+    assert "只有用户明确要求" not in style_prompt
+
+    report_prompt = cases[27]["prompt"]
+    for token in ("generate_summary_report.py", "--strict", "--classification"):
+        assert token not in report_prompt
+        assert token in cases[27]["expected_output"]
+
+
+def test_strict_report_eval_prompt_covers_compound_dimensions():
+    data = json.loads((HANDLER_ROOT / "evals/evals.json").read_text(encoding="utf-8"))
+    cases = {case["id"]: case for case in data["evals"]}
+    prompt = cases[27]["prompt"]
+
+    for question_dimension in (
+        "负责人来源",
+        "无可用 GitCode 账号",
+        "未开始、失败或未知",
+        "response_status",
+        "assignment_status",
+        "汇总表",
+    ):
+        assert question_dimension in prompt
+    for rubric_answer in ("按当前责任规则或有效兜底", "伪造 verified"):
+        assert rubric_answer not in prompt
+
+
+def test_response_and_classification_evals_have_deterministic_guards():
+    data = json.loads((HANDLER_ROOT / "evals/evals.json").read_text(encoding="utf-8"))
+    cases = {case["id"]: case for case in data["evals"]}
+
+    response = (HANDLER_ROOT / "references/response-writing.md").read_text(encoding="utf-8")
+    assert "自我约束式免责声明" in response
+    response_expectations = {
+        (expectation["type"], expectation["pattern"])
+        for expectation in cases[9].get("expectations", [])
+    }
+    assert ("not_contains", "不声明已修复") in response_expectations
+    assert ("not_contains", "不标记已支持") in response_expectations
+
+    classification_prompt = cases[20]["prompt"]
+    assert "逐项处理报告" in classification_prompt
+    assert "A/B/C不进入逐项处理报告" not in classification_prompt
+    assert {
+        "type": "contains",
+        "pattern": "逐项处理报告",
+    } in cases[20].get("expectations", [])
+
+    combined_prompt = cases[23]["prompt"]
+    assert "B 的 Issue 提出者已将自己设为 assignee" in combined_prompt
+    assert "提出者=负责人" in combined_prompt
+    assert "B自提no_attention" not in combined_prompt
+
+
+def test_followup_eval_prompt_covers_state_authorization():
+    data = json.loads((HANDLER_ROOT / "evals/evals.json").read_text(encoding="utf-8"))
+    cases = {case["id"]: case for case in data["evals"]}
+    prompt = cases[7]["prompt"]
+
+    assert "授权与回查顺序" in prompt
+    assert "统一预览" not in prompt
+    assert "获批后执行" not in prompt
+
+
+def test_eval_configuration_expectation_matches_authoritative_template():
+    data = json.loads((HANDLER_ROOT / "evals/evals.json").read_text(encoding="utf-8"))
+    case = next(case for case in data["evals"] if case["id"] == 24)
+    template = yaml.safe_load((HANDLER_ROOT / "assets/classify_config.yaml.template").read_text(encoding="utf-8"))
+    setup = (HANDLER_ROOT / "references/configuration-setup.md").read_text(encoding="utf-8")
+
+    default_handle = template["responsibility"]["handle"][0]
+    assert default_handle in case["expected_output"]
+    assert default_handle in setup
+    assert "不限制芯片" in case["expected_output"]
+    assert "公共组件及 A5/arch35" not in case["expected_output"]
+
+
+def test_file_and_strict_report_evals_have_deterministic_assertions():
+    data = json.loads((HANDLER_ROOT / "evals/evals.json").read_text(encoding="utf-8"))
+    cases = {case["id"]: case for case in data["evals"]}
+
+    artifact_expectations = cases[15]["expectations"]
+    artifact_paths = {
+        expectation["pattern"]
+        for expectation in artifact_expectations
+        if expectation["type"] == "file_exists"
+    }
+    expected_paths = {
+        f"reports/eval-26/issues/issue-{iid}/{name}"
+        for iid, name in (
+            (101, "analysis.md"), (102, "analysis.md"), (103, "analysis.md"),
+            (101, "reply.md"), (102, "reply.md"),
+            (102, "assign.md"), (103, "assign.md"),
+        )
+    }
+    assert expected_paths <= artifact_paths
+    assign_contents = {
+        expectation["pattern"]
+        for expectation in artifact_expectations
+        if expectation["type"] == "file_contains"
+    }
+    assert "reports/eval-26/issues/issue-102/assign.md : \"/assign @alice\"" in assign_contents
+    assert "reports/eval-26/issues/issue-103/assign.md : \"/assign @bob\"" in assign_contents
+
+    report_patterns = {
+        expectation["pattern"]
+        for expectation in cases[27]["expectations"]
+        if expectation["type"] == "contains"
+    }
+    assert {"generate_summary_report.py", "--strict", "--classification"} <= report_patterns
+
+
 def test_toolkit_references_do_not_depend_on_handler_business_contracts():
     toolkit_references = TOOLKIT_ROOT / "references"
     generic_document_parts = []
