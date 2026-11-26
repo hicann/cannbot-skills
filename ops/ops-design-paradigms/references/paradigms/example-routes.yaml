@@ -58,3 +58,8 @@ routes:
         - references/paradigms/conv/backward/adapters/ascendc/example/conv3dtranspose_aclnn
         - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddw_direct
         - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddw_aclnn
+    Interpolation:
+      ascendc:
+        - references/paradigms/interpolation/adapters/ascendc/example/three_interpolate_package
+      dsl:
+        - references/paradigms/interpolation/adapters/dsl/example/three_interpolate_simt_draft

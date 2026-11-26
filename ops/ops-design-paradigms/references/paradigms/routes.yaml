@@ -23,7 +23,7 @@
 # Ascend C 使用 references/paradigms/general-methodology.md；DSL 使用 references/paradigms/general-methodology-dsl.md。
 #
 # 未配置路由的 paradigm（按 fallback 走通用方法论）：
-#   Padding, AtomicUpdate, Interpolation,
+#   Padding, AtomicUpdate,
 #   Spectral,
 #   CollectiveCommunication, FusedComposite,
 #   以及 Elementwise, ReductionComposite,
@@ -58,3 +58,5 @@ routes:
       - references/paradigms/control_flow/patterns.md
     ConvBackward:
       - references/paradigms/conv/backward/patterns.md
+    Interpolation:
+      - references/paradigms/interpolation/patterns.md
