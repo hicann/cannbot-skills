@@ -104,7 +104,7 @@ def _metric_label(metric_key: str) -> str:
     labels = {
         "loss": "loss",
         "grad_norm": "grad_norm",
-        "memory_gib": "memory (GB)",
+        "memory_gib": "memory (GiB)",
         "memory_pct": "memory (%)",
         "tps": "tps",
         "tflops": "tflops",
@@ -124,7 +124,12 @@ def _compute_error_stats(errors: list[float]) -> dict[str, float]:
     masking missing-metric steps as a perfect match."""
     valid = [e for e in errors if not math.isnan(e)]
     if not valid:
-        return {"mean": float("nan"), "mse": float("nan"), "min": float("nan"), "max": float("nan")}
+        return {
+            "mean": float("nan"),
+            "mse": float("nan"),
+            "min": float("nan"),
+            "max": float("nan"),
+        }
 
     mean_err = sum(valid) / len(valid)
     mse = sum(e * e for e in valid) / len(valid)
@@ -162,7 +167,9 @@ def _draw_metric_unavailable(axis, metric: str) -> None:
     axis.set_xticks([])
 
 
-def _draw_single_metric(axis, module, records, metric: str, warnings: list[str]) -> None:
+def _draw_single_metric(
+    axis, module, records, metric: str, warnings: list[str]
+) -> None:
     """Draw one metric on the given axis, recording a warning if absent."""
     steps, values = module.extract_metric_series(records, metric)
     if not steps:
@@ -196,14 +203,18 @@ def _plot_single_log(
     no_show: bool,
 ):
     """Plot single log with 2-column layout."""
-    selected = ["loss", "grad_norm"] + [metric for metric in metrics if metric not in {"loss", "grad_norm"}]
+    selected = ["loss", "grad_norm"] + [
+        metric for metric in metrics if metric not in {"loss", "grad_norm"}
+    ]
     n_metrics = len(selected)
 
     # Calculate grid: 2 columns, enough rows
     n_cols = 2
     n_rows = (n_metrics + 1) // 2
 
-    figure, axes = plt.subplots(n_rows, n_cols, figsize=(14, 3.5 * n_rows), sharex=False)
+    figure, axes = plt.subplots(
+        n_rows, n_cols, figsize=(14, 3.5 * n_rows), sharex=False
+    )
     axes_flat = _flatten_axes(axes, n_metrics=n_metrics, n_rows=n_rows, n_cols=n_cols)
 
     warnings: list[str] = []
@@ -266,11 +277,15 @@ def _draw_main_metrics_row(axes, aligned, *, log_a_name: str, log_b_name: str) -
     _apply_integer_xaxis(ax_grad)
 
 
-def _draw_abs_error_row(axes, aligned, *, loss_abs_err, loss_abs_stats, grad_abs_err, grad_abs_stats) -> None:
+def _draw_abs_error_row(
+    axes, aligned, *, loss_abs_err, loss_abs_stats, grad_abs_err, grad_abs_stats
+) -> None:
     """Draw row 1: absolute error curves (no threshold lines)."""
     # Loss abs error
     ax_loss_abs = axes[1][0]
-    ax_loss_abs.plot(aligned.steps, loss_abs_err, label="loss abs error", color="blue", linewidth=1.0)
+    ax_loss_abs.plot(
+        aligned.steps, loss_abs_err, label="loss abs error", color="blue", linewidth=1.0
+    )
     ax_loss_abs.axhline(y=0, color="gray", linestyle="-", linewidth=0.8, alpha=0.5)
     ax_loss_abs.set_ylabel("loss abs error")
     ax_loss_abs.grid(True, linestyle="--", alpha=0.4)
@@ -315,7 +330,9 @@ def _draw_rel_error_row(
         color="green",
         linewidth=1.0,
     )
-    ax_loss_rel.axhline(y=0.02, color="red", linestyle="--", linewidth=1.5, label="threshold ±0.02")
+    ax_loss_rel.axhline(
+        y=0.02, color="red", linestyle="--", linewidth=1.5, label="threshold ±0.02"
+    )
     ax_loss_rel.axhline(y=-0.02, color="red", linestyle="--", linewidth=1.5)
     ax_loss_rel.axhline(y=0, color="gray", linestyle="-", linewidth=0.8, alpha=0.5)
     ax_loss_rel.set_ylabel("loss relative error")
@@ -333,7 +350,9 @@ def _draw_rel_error_row(
         color="green",
         linewidth=1.0,
     )
-    ax_grad_rel.axhline(y=0.02, color="red", linestyle="--", linewidth=1.5, label="threshold ±0.02")
+    ax_grad_rel.axhline(
+        y=0.02, color="red", linestyle="--", linewidth=1.5, label="threshold ±0.02"
+    )
     ax_grad_rel.axhline(y=-0.02, color="red", linestyle="--", linewidth=1.5)
     ax_grad_rel.axhline(y=0, color="gray", linestyle="-", linewidth=0.8, alpha=0.5)
     ax_grad_rel.set_ylabel("grad_norm relative error")
@@ -423,11 +442,15 @@ def _compute_compare_error_stats(module, aligned, baseline: str):
     # Compute signed errors for loss and grad_norm
     losses_a = [float(r["loss"]) for r in aligned.records_a]
     losses_b = [float(r["loss"]) for r in aligned.records_b]
-    loss_abs_err, loss_rel_err = module.compute_signed_errors(losses_a, losses_b, baseline=baseline)
+    loss_abs_err, loss_rel_err = module.compute_signed_errors(
+        losses_a, losses_b, baseline=baseline
+    )
 
     grad_norms_a = [float(r.get("grad_norm", float("nan"))) for r in aligned.records_a]
     grad_norms_b = [float(r.get("grad_norm", float("nan"))) for r in aligned.records_b]
-    grad_abs_err, grad_rel_err = module.compute_signed_errors(grad_norms_a, grad_norms_b, baseline=baseline)
+    grad_abs_err, grad_rel_err = module.compute_signed_errors(
+        grad_norms_a, grad_norms_b, baseline=baseline
+    )
 
     # Compute error statistics
     loss_abs_stats = _compute_error_stats(loss_abs_err)
@@ -544,7 +567,9 @@ def _plot_compare(
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Plot training metrics from torchtitan-style training logs")
+    parser = argparse.ArgumentParser(
+        description="Plot training metrics from torchtitan-style training logs"
+    )
     parser.add_argument("--log-a", required=True, help="path to primary log")
     parser.add_argument("--log-b", default=None, help="path to comparison log")
     parser.add_argument(
@@ -563,8 +588,12 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         default="a",
         help="baseline for relative error (default: a, i.e., log-a)",
     )
-    parser.add_argument("--format", choices=["png", "pdf"], default="png", help="output format")
-    parser.add_argument("--no-show", action="store_true", help="disable interactive display")
+    parser.add_argument(
+        "--format", choices=["png", "pdf"], default="png", help="output format"
+    )
+    parser.add_argument(
+        "--no-show", action="store_true", help="disable interactive display"
+    )
     return parser
 
 
@@ -582,7 +611,11 @@ def _read_log(module, log_path: str, label: str):
 
 
 def _resolve_output_path(args) -> Path:
-    output = Path(args.output) if args.output else _default_output_path(args.log_a, args.log_b, args.format)
+    output = (
+        Path(args.output)
+        if args.output
+        else _default_output_path(args.log_a, args.log_b, args.format)
+    )
     if output.suffix.lower() != f".{args.format}":
         output = output.with_suffix(f".{args.format}")
     return output
@@ -687,7 +720,9 @@ def _resolve_plot_context(args) -> "_PlotContext":
     log_b_name = Path(args.log_b).stem if args.log_b else None
 
     title = args.title or (
-        f"Training Metrics: {log_a_name} vs {log_b_name}" if args.log_b else f"Training Metrics: {log_a_name}"
+        f"Training Metrics: {log_a_name} vs {log_b_name}"
+        if args.log_b
+        else f"Training Metrics: {log_a_name}"
     )
     return _PlotContext(output, metrics, log_a_name, log_b_name, title)
 
