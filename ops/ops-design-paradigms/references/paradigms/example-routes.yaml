@@ -45,6 +45,8 @@ routes:
     SlidingWindow:
       ascendc:
         - references/paradigms/conv/forward/adapters/ascendc/example/conv2d
+        - references/paradigms/sliding_window/adapters/ascendc/example/max_pool_with_argmax_simt_package
+        - references/paradigms/sliding_window/adapters/ascendc/example/max_pool_grad_with_argmax_simt_package
     ScatterUpdate:
       ascendc:
         - references/paradigms/scatterupdate/adapters/ascendc/example/examples-tensor-scatter-nd-update-code

@@ -48,6 +48,7 @@ routes:
       - references/paradigms/scatterupdate/patterns.md
     SlidingWindow:
       - references/paradigms/conv/forward/patterns.md
+      - references/paradigms/sliding_window/patterns.md
     Histogram:
       - references/paradigms/histogram/patterns.md
     RandomSampling:
