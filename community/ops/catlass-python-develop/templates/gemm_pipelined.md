@@ -4,7 +4,7 @@
 > `auto_sync`、`tla.flag` / `set_flag` / `wait_flag`、`tla.pipe_barrier` 与 `cross_flag`
 > （骨架不含跨核交棒，融合阶段的跨核同步另见 develop 规则）。唯一豁免：主参考样例本身
 > 不使用 mutex 且结构高度匹配时，按样例原语实现并在 `DESIGN.md` / `ITERATIONS.md` 记录。
-> 结构与 `examples/python/tla_dsl/experimental/kernel/matmul/matmul_row_exp_scatter_add/` 的
+> 结构与 `examples/python/tla_dsl/experimental/kernel/matmul/matmul_exp_scale_ub/` 的
 > GEMM 段一致（每份片上缓冲一块独立 mutex、`L0C` 单列，缓冲份数变化时按实际份数增减）；
 > `unit_flag`、`allocate` 对齐、`make_tensor_like` 的 layout 推导等 API 细节，以该样例为准。
 >

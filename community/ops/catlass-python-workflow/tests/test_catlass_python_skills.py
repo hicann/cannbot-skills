@@ -189,7 +189,7 @@ def test_skeleton_template_uses_explicit_mutex():
     ).read_text(encoding="utf-8")
     assert "tla.mutex" in template
     assert 'auto_sync="v0"' not in template
-    assert "matmul_row_exp_scatter_add" in template
+    assert "matmul_exp_scale_ub" in template
 
     text = skill_text("catlass-python-develop")
     assert "只允许用 `tla.mutex`" in text

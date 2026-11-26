@@ -306,7 +306,7 @@ case 规则：
    先判定算子整体结构（阶段数、Cube/Vector 交替方式、数据流、任务映射、同步方式），
    再按整体结构选一个**主参考样例**：Cube-only（纯 MMAD）参考
    `tla/kernel/matmul/basic_mmad/basic_matmul.py`；Cube-Vector（MMAD 后接 vector 后处理）参考
-   `experimental/kernel/matmul/matmul_softmax_row_stats/matmul_softmax_row_stats.py`；
+   `experimental/kernel/matmul/matmul_exp_scale_ub/matmul_exp_scale_ub.py`；
    Cube-Vector-Cube（两段 MMAD 中间夹 vector）参考
    `experimental/kernel/matmul/matmul_add_chain/matmul_add_chain.py`；纯 vector 参考
    `tla/kernel/vec/basic_vadd/basic_vadd.py`、`dsl_tutorials/vector_simd_ops/`、
@@ -316,7 +316,8 @@ case 规则：
    局部机制（如 gather SIMT、atomic add、特定 epilogue）时，用局部样例补齐。没有足够
    契合的主参考时，允许组合多个分步样例，但必须在 DESIGN 里显式设计组合后的整体结构
    （阶段顺序、接口、同步），并照常跑 skeleton DoD；不得无说明地把样例片段拼在一起。
-   参考样例必须在 `.catlass-python/references/catlass/examples/python/tla_dsl/` 下实际存在；
+   参考样例必须在 `.catlass-python/references/catlass/` 的 `examples/python/tla_dsl/` 或
+   `python/tla_dsl/tests/end_to_end/` 下实际存在；
    在 DESIGN 的「结构类型与参考样例」一节分别记录主参考（整体结构匹配点、偏离点）和
    局部参考（补齐的机制或组合方案）。目标版本没有同名样例时，选最接近的整体结构样例
    并记录差异与改造点，不得凭记忆引用。

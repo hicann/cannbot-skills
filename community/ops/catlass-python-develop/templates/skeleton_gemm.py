@@ -10,7 +10,7 @@
 """单 GEMM 流水骨架模板：复制到 `tools/skeleton_gemm.py` 后只改 kernel 体。
 
 结构即 `templates/gemm_pipelined.md` 的契约（与
-``experimental/kernel/matmul/matmul_row_exp_scatter_add/`` 的 GEMM 段一致）：
+``experimental/kernel/matmul/matmul_exp_scale_ub/`` 的 GEMM 段一致）：
 
 * L1A/L1B 各 2 份缓冲，按 `l1_phase` 交替；
 * L0A/L0B 各 2 份缓冲，按 `l0_phase` 交替；
