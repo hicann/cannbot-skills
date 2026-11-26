@@ -269,20 +269,20 @@ class TestOpencodeRunnerResume:
 
     @patch("subprocess.run")
     def test_resume_existing_session(self, mock_run):
-        temp_file = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        temp_file.write(b'{"session_id": "ses_test"}')
-        temp_file.close()
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as temp_file:
+            temp_file.write(b'{"session_id": "ses_test"}')
+            temp_path = temp_file.name
+        try:
+            mock_run.return_value = Mock(
+                returncode=0, stdout='{"result": "resumed"}', stderr=""
+            )
 
-        mock_run.return_value = Mock(
-            returncode=0, stdout='{"result": "resumed"}', stderr=""
-        )
+            runner = OpencodeRunner()
+            result = runner.resume_session(temp_path, "test prompt")
 
-        runner = OpencodeRunner()
-        result = runner.resume_session(temp_file.name, "test prompt")
-
-        assert result.success is True
-
-        Path(temp_file.name).unlink()
+            assert result.success is True
+        finally:
+            Path(temp_path).unlink(missing_ok=True)
 
 
 class TestOpencodeRunnerCLI:
