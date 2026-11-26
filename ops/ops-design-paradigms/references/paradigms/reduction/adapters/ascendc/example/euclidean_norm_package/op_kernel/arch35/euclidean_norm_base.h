@@ -66,7 +66,7 @@ constexpr int32_t OUTER_LOOP_AXIS_BASE = 4;
 
 constexpr AscendC::Reg::CastTrait CAST_TRAIT_TO_FP32{AscendC::Reg::RegLayout::ZERO, AscendC::Reg::SatMode::UNKNOWN,
                                                      AscendC::Reg::MaskMergeMode::ZEROING,
-                                                     AscendC::Reg::RoundMode::CAST_NONE};
+                                                     AscendC::RoundMode::CAST_NONE};
 
 constexpr AscendC::Reg::CastTrait CAST_TRAIT_FROM_FP32_FP16{
     AscendC::Reg::RegLayout::ZERO, AscendC::Reg::SatMode::NO_SAT, AscendC::Reg::MaskMergeMode::ZEROING,
@@ -295,10 +295,10 @@ protected:
     TBuf<QuePosition::VECCALC> preReduceResultTail_;
     TBuf<QuePosition::VECCALC> cacheBuf_;
     TBuf<QuePosition::VECCALC> outBuf_;
-    event_t evMTE2toV_ = 0;
-    event_t evVtoMTE2_ = 0;
-    event_t evVtoMTE3_ = 0;
-    event_t evMte3toV_ = 0;
+    event_t evMTE2toV_{};
+    event_t evVtoMTE2_{};
+    event_t evVtoMTE3_{};
+    event_t evMte3toV_{};
 };
 
 template <typename DType>

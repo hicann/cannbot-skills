@@ -87,7 +87,6 @@ add_library(${OP_HOST_SO} SHARED
     ${PKG_DIR}/op_host/euclidean_norm_def.cpp
     ${PKG_DIR}/op_host/euclidean_norm_infershape.cpp
     ${PKG_DIR}/op_host/arch35/euclidean_norm_tiling_arch35.cpp
-    ${PKG_DIR}/op_graph/euclidean_norm_proto.cc
 )
 target_include_directories(${OP_HOST_SO} PRIVATE
     ${CANN_COMMON_INCLUDE_DIRS}

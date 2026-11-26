@@ -1,5 +1,16 @@
 # euclidean_norm_package
 
+
+`axes` is a required tensor. An explicit empty tensor (`axes=[]`) selects no
+reduction axes, matching TensorFlow's `tf.math.reduce_euclidean_norm(x, axis=[])`.
+The output shape equals the input shape for either `keep_dims` value,
+and values are computed elementwise as `sqrt(x²)` (for example, `[-3, 4]` gives
+`[3, 4]`). Reducing all dimensions requires explicitly listing those axes; the
+same example then gives `5`. A zero-element input with empty axes keeps a
+zero-element output and must not schedule any output writes. Omitting the
+required axes input is not the empty-axes case.
+
+
 EuclideanNorm vendor operator: computes the Euclidean norm (L2 norm) along given
 axes — `y = sqrt( sum( x^2 ) along axes )`, equivalent to TensorFlow's
 `tf.math.reduce_euclidean_norm`. This package demonstrates a **multi-axis reduce**
@@ -145,3 +156,18 @@ EuclideanNorm is a reduce-class operator with dependencies that the minimal
 
 The ops-nn common include path is a cross-project dependency (CACHE variable
 `OPS_NN_COMMON_INC`, overridable via `-DOPS_NN_COMMON_INC=<path>`).
+
+The ACLNN regression assets include explicit-empty axes, all-axis reduction,
+zero-element output, empty reduction with nonempty output, and grouped reduction.
+After building and selecting this example's vendor package, run them with TTK
+(`EXAMPLE_DIR` must be the absolute path to this example):
+
+```bash
+python3 -m ttk aclnn -i "${EXAMPLE_DIR}/tests/aclnn/empty_axes_cases.csv" \
+  --plugin "${EXAMPLE_DIR}/tests/aclnn/empty_axes_spec.py" --pc=1
+```
+
+These cases use exactly representable values and call `tf.math.reduce_euclidean_norm`
+for the reference output. TensorFlow must be available in the TTK Python environment.
+They do not replace general precision or sanitizer coverage. Confirm that TTK
+loads the newly built vendor library and kernel before interpreting the result.

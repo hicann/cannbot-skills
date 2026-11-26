@@ -584,11 +584,13 @@ partial chunk 的 stale 区域，无论 tail 类型都必须显式清。
 | reducer | pad_value |
 |---------|-----------|
 | sum / mean | `0` |
-| max | `dtype::lowest()` |
-| min | `dtype::highest()` |
+| max | `-Inf`（负无穷） |
+| min | `+Inf`（正无穷） |
 | prod | `1` |
 | any | `false` (0) |
 | all | `true` (1) |
+
+浮点 min/max 也可用有效位置掩码排除 pad；不能用有限极值替代无穷，否则全 `+Inf` 的 min 或全 `-Inf` 的 max 会选中 pad。整数计算域使用该整数类型的最大/最小值，不经浮点转换；NaN 传播、并列值索引和空归约按算子规格分别处理。
 
 以下 4 个场景以 exp+sum（`pad_value=0`）为例，展示脏数据清零流程。
 

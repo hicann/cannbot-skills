@@ -1,0 +1,13 @@
+testcase_name,api_name,tensor_view_shapes,tensor_dtypes,attributes,input_data_ranges
+empty_axes_fp32,aclnnEuclideanNorm,"((2,), (2,))","('float32', 'float32')","{'axes': [], 'keepDims': False, 'x': [-3, 4]}","((1,1),)"
+empty_axes_keep_fp32,aclnnEuclideanNorm,"((2, 3), (2, 3))","('float32', 'float32')","{'axes': [], 'keepDims': True, 'x': [-3, 4, -6, 8, -5, 12]}","((1,1),)"
+empty_axes_fp16,aclnnEuclideanNorm,"((2,), (2,))","('float16', 'float16')","{'axes': [], 'keepDims': False, 'x': [-3, 4]}","((1,1),)"
+empty_axes_zero_fp16,aclnnEuclideanNorm,"((1, 0, 1, 1, 1, 1), (1, 0, 1, 1, 1, 1))","('float16', 'float16')","{'axes': [], 'keepDims': False}","((1,1),)"
+empty_axes_zero_keep,aclnnEuclideanNorm,"((0, 3), (0, 3))","('float32', 'float32')","{'axes': [], 'keepDims': True}","((1,1),)"
+zero_reduce_fp32,aclnnEuclideanNorm,"((2, 0), (2,))","('float32', 'float32')","{'axes': [1], 'keepDims': False}","((1,1),)"
+zero_all_fp32,aclnnEuclideanNorm,"((0,), ())","('float32', 'float32')","{'axes': [0], 'keepDims': False}","((1,1),)"
+explicit_all_fp32,aclnnEuclideanNorm,"((2,), ())","('float32', 'float32')","{'axes': [0], 'keepDims': False, 'x': [-3, 4]}","((1,1),)"
+last_axis_fp32,aclnnEuclideanNorm,"((2, 3), (2,))","('float32', 'float32')","{'axes': [1], 'keepDims': False, 'x': [3, 4, 0, 0, 5, 12]}","((1,1),)"
+group_large_fp32,aclnnEuclideanNorm,"((2, 262144), (2,))","('float32', 'float32')","{'axes': [1], 'keepDims': False}","((1,1),)"
+scalar_empty_axes,aclnnEuclideanNorm,"((), ())","('float32', 'float32')","{'axes': [], 'keepDims': False, 'x': [-3]}","((1,1),)"
+scalar_empty_axes_keep,aclnnEuclideanNorm,"((), ())","('float32', 'float32')","{'axes': [], 'keepDims': True, 'x': [-3]}","((1,1),)"

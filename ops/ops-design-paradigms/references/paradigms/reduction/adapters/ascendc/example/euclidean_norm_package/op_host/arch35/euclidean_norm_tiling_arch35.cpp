@@ -232,7 +232,7 @@ static bool LoadAxesLoop(const char* nodeName, const T* data, int64_t axesNum, i
 }
 
 // 解析值依赖输入 axes 的具体数值到 ctx.reduceAxes（升序去重）：
-// 空 axes → full reduce 展开 [0..rank-1]（与 infershape 端空 axes 语义一致）；
+// 空 axes → 无归约轴，输出 shape 保持不变（与 infershape 一致）；
 // 负索引归一化 v+rank；越界 / 重复 → GRAPH_FAILED；
 // 末尾 sort 升序保证合轴确定性（bitwise_reproducible）。
 static ge::graphStatus ParseAxesTensor(gert::TilingContext* context, EuclideanNormCtx& ctx)
@@ -244,10 +244,7 @@ static ge::graphStatus ParseAxesTensor(gert::TilingContext* context, EuclideanNo
     ctx.reduceAxes.clear();
 
     if (axesNum == 0) {
-        ctx.reduceAxes.resize(static_cast<size_t>(xRank));
-        for (int64_t i = 0; i < xRank; ++i) {
-            ctx.reduceAxes[static_cast<size_t>(i)] = i;
-        }
+        // No reduced axes: preserve the output shape and compute sqrt(x*x) elementwise.
         return ge::GRAPH_SUCCESS;
     }
 

@@ -226,8 +226,8 @@ DataCopyPad(postInBuf, postReduceInputGm[aOff], ext, padParams);
 |---------|---------------------|
 | sum | `0` |
 | mean | **NaN** |
-| max | `dtype::lowest()` |
-| min | `dtype::highest()` |
+| max | 按算子空归约约定；定义为单位元时，浮点用 `-Inf`、整数用该类型最小值 |
+| min | 按算子空归约约定；定义为单位元时，浮点用 `+Inf`、整数用该类型最大值 |
 | prod | `1` |
 | any | `false` (0) |
 | all | `true` (1) |

@@ -133,7 +133,7 @@ private:
     GlobalTensor<DT> yGm_;
     TPipe* pipe_ = nullptr;
     TBuf<QuePosition::VECCALC> outBuf_;
-    event_t evVtoMTE3_ = 0;
+    event_t evVtoMTE3_{};
 };
 
 } // namespace NsEuclideanNorm

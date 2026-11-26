@@ -56,11 +56,11 @@ reduce 系列通常 `x` 在 0、`axes` 在 1 → 填 `{1}`：
 
 **axes 归一化**：将用户传入的 reduce 轴参数（`axes`/`axis`/`dim`/`dims` 等，名称因算子而异）解析为合法、规范化的 reduce 轴下标集合。包含以下步骤（顺序不可换）：
 
-1. **空 axes 语义判定**：`axes=[]`（axesNum==0）的语义按算子公式判定——多数算子（对标 TF/PyTorch）按 "all reduce" 展开为 `[0..xRank-1]`；少数算子（`noopWithEmptyAxes=true`）按 "不 reduce" 处理。
+1. **空 axes 语义判定**：按[归约轴预处理](../../generic/axis-preprocessing.md) §1 核对本算子对标的框架接口。显式 `axes=[]` 表示全轴归约时，展开为 `[0..xRank-1]`。表示无归约轴时，保留空轴集合，与形状推导采用同一约定。
 2. **dtype 解析**：axes 输入可能是 int32 或 int64（`IndexNumberType`），按实际 dtype 读取数值。
 3. **越界校验**：对原始值校验 `v < -xRank || v >= xRank` → 报错（须在转正之前——如 `-xRank-1` 转正后变成 `-1`，会漏检）。
 4. **负数转正**：`v < 0` → `v + xRank`（对标 torch.sum，负数表示从末尾倒数）。归一化后所有轴下标落在 `[0, xRank)`。
-5. **去重校验**：重复轴下标 → 报错。
+5. **重复轴处理**：在负轴转正后按算子规格处理重复轴；允许重复轴的去重后继续，明确禁止重复轴的才报错。与 shape 推导端采用同一约定。
 6. **排序**：去重后升序排序，便于后续合轴按轴顺序处理。
 
 归一化完成后，遍历 xShape，按下标是否在 reduce 集合中标记 A/R 类型，构建初始 A/R 类型表（`axisShape` + `isReduceAxis`），作为合轴四步的输入。

@@ -32,6 +32,7 @@
  * =============================================================================
  */
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -51,6 +52,7 @@
 #include "exe_graph/runtime/tiling_data.h"
 #include "exe_graph/runtime/tensor.h"
 #include "base/context_builder/op_tiling_context_builder.h"
+#include "base/context_builder/op_infer_shape_context_builder.h"
 #include "base/registry/op_impl_space_registry_v2.h"
 #include "platform/platform_infos_def.h"
 
@@ -119,7 +121,15 @@ static const std::vector<TestCase>& Cases()
         {"int32_2d_reduce_first", {16, 32}, {32}, {0}, ge::DT_INT32, false},
         {"bf16_3d_reduce_mid", {2, 4, 8}, {2, 8}, {1}, ge::DT_BF16, false},
         {"fp32_arar_reduce", {4, 4, 8, 8}, {4, 8}, {1, 3}, ge::DT_FLOAT, false},
-        {"fp32_full_reduce", {4, 64}, {1, 1}, {}, ge::DT_FLOAT, true},
+        {"fp32_full_reduce", {4, 64}, {1, 1}, {0, 1}, ge::DT_FLOAT, true},
+        {"fp32_no_axes", {2}, {2}, {}, ge::DT_FLOAT, false},
+        {"fp32_scalar_no_axes", {}, {}, {}, ge::DT_FLOAT, false},
+        {"fp32_scalar_no_axes_keep", {}, {}, {}, ge::DT_FLOAT, true},
+        {"fp32_no_axes_keep", {2, 3}, {2, 3}, {}, ge::DT_FLOAT, true},
+        {"fp16_no_axes_zero", {1, 0, 1, 1, 1, 1}, {1, 0, 1, 1, 1, 1}, {}, ge::DT_FLOAT16, false},
+        {"fp32_no_axes_zero_keep", {0, 3}, {0, 3}, {}, ge::DT_FLOAT, true},
+        {"fp32_zero_reduce", {2, 0}, {2}, {1}, ge::DT_FLOAT, false},
+        {"fp32_zero_all", {0}, {}, {0}, ge::DT_FLOAT, false},
         {"fp32_tiny_1elem", {1, 1}, {1}, {1}, ge::DT_FLOAT, false},
         {"fp32_boundary_1024", {4, 1024}, {4}, {1}, ge::DT_FLOAT, false},
         {"fp32_boundary_1025", {4, 1025}, {4}, {1}, ge::DT_FLOAT, false},
@@ -159,6 +169,64 @@ gert::OpImplKernelRegistry::TilingKernelFunc LoadTilingKernel(const char* exePat
     }
     fprintf(stdout, "[setup] tiling kernel for '%s' resolved\n", kOpType);
     return impl->tiling;
+}
+
+int RunInferShapeCase(const TestCase& tc, bool omitAxes = false)
+{
+    auto registry = gert::DefaultOpImplSpaceRegistryV2::GetInstance().GetSpaceRegistry();
+    const auto* impl = registry->GetOpImpl(kOpType);
+    if (impl == nullptr || impl->infer_shape == nullptr) {
+        fprintf(stderr, "[%s] FAILED: reference InferShape callback unavailable\n", tc.name);
+        return -1;
+    }
+    gert::StorageShape storage;
+    for (int64_t dim : tc.xShape) {
+        storage.MutableOriginShape().AppendDim(dim);
+        storage.MutableStorageShape().AppendDim(dim);
+    }
+    gert::StorageFormat format(ge::FORMAT_ND, ge::FORMAT_ND, gert::ExpandDimsType());
+    gert::Tensor x(storage, format, gert::kOnHost, tc.dtype, nullptr);
+    auto axesHolder = MakeAxesTensor(tc.axes);
+    std::vector<gert::Tensor*> inputs{&x};
+    if (!omitAxes) {
+        inputs.push_back(reinterpret_cast<gert::Tensor*>(axesHolder.get()));
+    }
+    gert::OpInferShapeContextBuilder builder;
+    builder.OpType(ge::AscendString(kOpType))
+        .OpName(ge::AscendString(kOpType))
+        .IOInstanceNum({1, omitAxes ? 0U : 1U}, {1})
+        .InputTensors(inputs)
+        .OutputTensorDesc(0, tc.dtype, ge::FORMAT_ND, ge::FORMAT_ND)
+        .AppendAttr(tc.keepDims);
+    auto holder = builder.Build();
+    auto* context = holder.GetContext();
+    if (context == nullptr) {
+        fprintf(stderr, "[%s] FAILED: could not build InferShape context\n", tc.name);
+        return -1;
+    }
+    if (omitAxes && context->GetInputTensor(1) != nullptr) {
+        fprintf(stderr, "[%s] FAILED: test context unexpectedly provides axes\n", tc.name);
+        return -1;
+    }
+    const auto status = impl->infer_shape(context);
+    const auto expected = omitAxes ? ge::GRAPH_FAILED : ge::GRAPH_SUCCESS;
+    if (status != expected) {
+        fprintf(stderr, "[%s] FAILED: InferShape returned %u, expected %u\n", tc.name, status, expected);
+        return -1;
+    }
+    if (omitAxes) {
+        fprintf(stdout, "InferShape %-26s PASSED (missing axes rejected)\n", tc.name);
+        return 0;
+    }
+    const auto* actual = context->GetOutputShape(0);
+    bool ok = actual != nullptr && actual->GetDimNum() == tc.yShape.size();
+    if (ok) {
+        for (size_t i = 0; i < tc.yShape.size(); ++i) {
+            ok = ok && actual->GetDim(i) == tc.yShape[i];
+        }
+    }
+    fprintf(ok ? stdout : stderr, "InferShape %-26s %s\n", tc.name, ok ? "PASSED" : "FAILED");
+    return ok ? 0 : -1;
 }
 
 /**
@@ -237,6 +305,20 @@ int RunOneCase(const TestCase& tc, gert::OpImplKernelRegistry::TilingKernelFunc 
         fprintf(stderr, "[%s] FAILED: raw tiling data is null\n", tc.name);
         return -1;
     }
+    int64_t outputElements = 1;
+    for (int64_t dim : tc.yShape) outputElements *= dim;
+    const bool emptyInput = std::find(tc.xShape.begin(), tc.xShape.end(), 0) != tc.xShape.end();
+    if (emptyInput) {
+        if (rawTd->GetDataSize() != sizeof(EuclideanNormEmptyTilingData)) {
+            fprintf(stderr, "[%s] FAILED: unexpected empty tiling data size\n", tc.name);
+            return -1;
+        }
+        const auto* empty = static_cast<const EuclideanNormEmptyTilingData*>(rawTd->GetData());
+        ok = outputElements == 0 ? empty->usedCoreNum == 0 && empty->aTotal == 0 :
+                                  empty->usedCoreNum > 0 && empty->aTotal == outputElements;
+        fprintf(ok ? stdout : stderr, "Empty write extent %-26s %s\n", tc.name, ok ? "PASSED" : "FAILED");
+        return ok ? 0 : -1;
+    }
     if (rawTd->GetDataSize() != sizeof(EuclideanNormTilingData)) {
         fprintf(stderr, "[%s] FAILED: tiling data size %zu != %zu\n", tc.name, rawTd->GetDataSize(),
                 sizeof(EuclideanNormTilingData));
@@ -248,6 +330,15 @@ int RunOneCase(const TestCase& tc, gert::OpImplKernelRegistry::TilingKernelFunc 
     // ── 3. axisNum invariant ──
     if (td->axisNum < 2) {
         fprintf(stderr, "[%s] FAILED: axisNum=%d, expected >= 2\n", tc.name, td->axisNum);
+        ok = false;
+    }
+
+    // Even pattern positions are the non-reduced output axes consumed by the kernel.
+    int64_t tiledOutputElements = 1;
+    for (int32_t i = 0; i < td->axisNum; i += 2) tiledOutputElements *= td->axisShape[i];
+    if (tiledOutputElements != outputElements) {
+        fprintf(stderr, "[%s] FAILED: tiling writes %ld elements, output has %ld\n",
+                tc.name, tiledOutputElements, outputElements);
         ok = false;
     }
 
@@ -308,7 +399,9 @@ int main(int argc, char** argv)
     int passed = 0;
     const auto& cases = Cases();
     for (const auto& tc : cases) {
-        if (RunOneCase(tc, tilingFunc) == 0) {
+        const int shapeResult = RunInferShapeCase(tc);
+        const int tilingResult = RunOneCase(tc, tilingFunc);
+        if (shapeResult == 0 && tilingResult == 0) {
             ++passed;
         } else {
             ret = -1;
@@ -316,5 +409,14 @@ int main(int argc, char** argv)
     }
 
     fprintf(stdout, "\n==== Tiling UT summary: %d/%zu cases PASSED ====\n", passed, cases.size());
+    const TestCase missingAxesCases[] = {
+        {"fp32_scalar_missing_axes", {}, {}, {}, ge::DT_FLOAT, false},
+        {"fp32_vector_missing_axes", {2}, {}, {}, ge::DT_FLOAT, false},
+    };
+    for (const auto& tc : missingAxesCases) {
+        if (RunInferShapeCase(tc, true) != 0) {
+            ret = -1;
+        }
+    }
     return ret == 0 ? 0 : 1;
 }

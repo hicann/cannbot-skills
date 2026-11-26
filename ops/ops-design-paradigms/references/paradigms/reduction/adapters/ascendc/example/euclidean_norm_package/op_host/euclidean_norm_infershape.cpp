@@ -15,7 +15,7 @@
  *
  *   - axes 是 const tensor（IndexNumberType：int32 / int64）；非 const（nullptr）→ GRAPH_FAILED
  *     （与内置 ReduceSum/ReduceMax 严格策略同型：值依赖输入须编译期可 const-fold）
- *   - axes==[]（empty）→ 视为 full reduce，等价 axes=[0..rank-1]（对标 TF / PyTorch；与 NumPy axis=() identity 不同）
+ *   - axes==[]（empty）→ 无归约轴，y shape = x shape，逐元素 sqrt(x²)=|x|（对标 TF axis=[]）
  *   - 越界 / 重复 axes → GRAPH_FAILED（与 tiling 端 ParseAxesTensor 同步报错；
  *     重复 axes 在 keep_dims=true 下会让 shape 幂等地正确，但 tiling 仍会拒绝，
  *     infershape 端早拒绝免得后端做无用功）
@@ -84,7 +84,7 @@ static bool LoadAxesLoop(const char* nodeName, const T* data, int64_t axesNum, i
 }
 
 // 解析 axes tensor 内容到 int64 数组：
-//   axesNum == 0 时按 "all reduce" 展开 axes = [0..xRank-1]（与 tiling::ParseAxesTensor 一致）；
+//   axesNum == 0 时保留空轴列表，输出 shape 不变（与 tiling::ParseAxesTensor 一致）；
 //   否则按 int32 / int64 dtype 读，归一化负数到 [0, xRank)；失败分支直接打 ERROR 日志
 //   （带节点名/索引/值/合法域）并返回 false，不再经由出参回传错误信息。
 static bool LoadAxesFromTensor(const char* nodeName, const gert::Tensor* axesTensor, int64_t xRank,
@@ -92,10 +92,7 @@ static bool LoadAxesFromTensor(const char* nodeName, const gert::Tensor* axesTen
 {
     const int64_t axesNum = axesTensor->GetShapeSize();
     if (axesNum == 0) {
-        axesOut.resize(static_cast<size_t>(xRank));
-        for (int64_t i = 0; i < xRank; ++i) {
-            axesOut[static_cast<size_t>(i)] = i;
-        }
+        // An explicit empty axes tensor leaves all input dimensions in the output.
         return true;
     }
 
@@ -123,28 +120,21 @@ static bool LoadAxesFromTensor(const char* nodeName, const gert::Tensor* axesTen
 }
 
 // 处理 0-D（标量）输入 x 的 shape 推导分支（在 xRank == 0 时由主流程转入）。
-//   语义对标 TF/PyTorch 标量 reduce：|scalar| 归约结果为 0 维数值——
-//     - keep_dims=false → 输出 0-D 标量（gert::Shape() 即空 shape，rank=0）；
-//     - keep_dims=true  → 输出 [1]（keep_dims 保留被归约轴，标量轴视作长度 1）。
-//   axes 契约：标量无可归约轴，axes 必须为空（nullptr 或 ShapeSize==0 均合法，
-//   对应"不传"与"传空 tensor"两种表达）；非空 → GRAPH_FAILED（早拒绝，免得后端对无意义轴做无用功）。
-static ge::graphStatus HandleScalarInput(gert::InferShapeContext* context, bool keepDims, gert::Shape* yShape)
+//   空 axes 没有被归约的维度，两种 keep_dims 均保持 0-D 标量 shape。
+//   非空 axes 返回 GRAPH_FAILED（标量没有可归约轴）。
+static ge::graphStatus HandleScalarInput(gert::InferShapeContext* context, const gert::Tensor& axesTensor,
+                                         bool keepDims, gert::Shape* yShape)
 {
-    const gert::Tensor* axesTensor = context->GetInputTensor(INPUT_AXES_IDX);
-    if (axesTensor != nullptr && axesTensor->GetShapeSize() > 0) {
+    if (axesTensor.GetShapeSize() > 0) {
         OP_LOGE_FOR_INVALID_VALUE_WITH_REASON(context->GetNodeName(), "axes",
-                                              std::to_string(axesTensor->GetShapeSize()),
+                                              std::to_string(axesTensor.GetShapeSize()),
                                               "axes must be empty for scalar (0-D) input x");
         return GRAPH_FAILED;
     }
 
-    if (keepDims) {
-        *yShape = gert::Shape({1});
-    } else {
-        *yShape = gert::Shape();
-    }
+    *yShape = gert::Shape();
     OP_LOGD(context->GetNodeName(), "Scalar input: keepDims=%d, yShape=%s", static_cast<int>(keepDims),
-            ToString(*yShape).c_str());
+            Ops::Base::ToString(*yShape).c_str());
     return GRAPH_SUCCESS;
 }
 
@@ -171,12 +161,7 @@ static ge::graphStatus InferShape4EuclideanNorm(gert::InferShapeContext* context
     const bool* attrKeepDims = attrs->GetAttrPointer<bool>(ATTR_KEEP_DIMS_IDX);
     const bool keepDims = (attrKeepDims == nullptr) ? KEEP_DIMS_DEFAULT : (*attrKeepDims);
 
-    // 3) scalar (0-D) input：gert::Shape::IsScalar() 即 GetDimNum()==0 的官方封装
-    if (xShape->IsScalar()) {
-        return HandleScalarInput(context, keepDims, yShape);
-    }
-
-    // 4) axes 是 const tensor at compile time：非 const（nullptr）→ 拒绝
+    // 3) axes 是 const tensor at compile time：非 const（nullptr）→ 拒绝
     //    与内置 ReduceSum/ReduceMax 同型严格策略：值依赖输入 const-fold 失败即编译期报错，
     //    不把 unknown rank 传播给下游（下游无需支持 unknown shape 语义）。
     const gert::Tensor* axesTensor = context->GetInputTensor(INPUT_AXES_IDX);
@@ -187,7 +172,12 @@ static ge::graphStatus InferShape4EuclideanNorm(gert::InferShapeContext* context
         return GRAPH_FAILED;
     }
 
-    // 5) axes 解析：empty → all reduce (axes=[0..xRank-1])；否则按 int32/int64 读 + 越界/重复检查
+    // 4) scalar (0-D) input：gert::Shape::IsScalar() 即 GetDimNum()==0 的官方封装
+    if (xShape->IsScalar()) {
+        return HandleScalarInput(context, *axesTensor, keepDims, yShape);
+    }
+
+    // 5) axes 解析：empty → 无归约轴（输出 shape 不变）；否则按 int32/int64 读 + 越界/重复检查
     std::vector<int64_t> axes;
     if (!LoadAxesFromTensor(context->GetNodeName(), axesTensor, xRank, axes)) {
         return GRAPH_FAILED;

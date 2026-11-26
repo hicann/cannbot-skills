@@ -212,7 +212,7 @@ __aicore__ inline void EuclideanNormGroupKernel<DType>::DoOneAChunkGroup(int64_t
         }
         Base::DoCachingVf(cacheID);
 
-        if (i != bisectionPos - 1) {
+        if (rIdx != bisectionPos - 1) {
             SetFlag<HardEvent::V_MTE2>(Base::evVtoMTE2_);
         }
     }
