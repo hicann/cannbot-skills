@@ -1,7 +1,7 @@
 ---
 name: docs-common-review
 description: |
-  通用文档质检统一入口（hub）：按 门禁 / 全量 / 自定义 三种模式编排 9 项检查能力（markdownlint、HTML 标签闭合、链接有效性、资源存在性、单词拼写、文件命名、标点符号、合规、AI 语义检查），统计各检查项执行耗时，聚合为统一 JSON 质检报告（级别统计 + 门禁判定 + 耗时统计），产物落在待检文档同级 output/ 目录，互不依赖的检查（脚本项与模型项）在同一条消息中并发执行，汇报后按用户选择导出 csv/md。当用户提到以下任一场景时必须使用本技能：通用质检 / 综合质检 / 全面检查 Markdown 文档质量、文档质检报告、门禁预检 / CI 门禁项本地检查 / 提交前自检、全量模式 / 门禁模式 / 自定义模式检查文档、多个检查项组合检查同一文档、家族基准回归 / benchmark 对齐检查 / 基线对齐（docs-skills-benchmark，见"基准回归"节）。用户仅点名单项检查（如"只查链接"、"只查标点"）时不走本入口，直达对应原子检查技能。
+  通用文档质检统一入口（hub）：按 门禁 / 全量 / 自定义 三种本地模式编排 9 项检查能力（markdownlint、HTML 标签闭合、链接有效性、资源存在性、单词拼写、文件命名、标点符号、合规、AI 语义检查），统计各检查项执行耗时，聚合为统一 JSON 质检报告（级别统计 + 门禁判定 + 耗时统计），产物落在待检文档同级 output/ 目录，互不依赖的检查（脚本项与模型项）在同一条消息中并发执行，汇报后按用户选择导出 csv/md；另支持 PR 文档检视（检视PR / PR 文档检查：自动定位 GitCode PR 变更 .md → 复用本地检查引擎 → diff 红线过滤仅报 PR 引入问题，可选行内评论须经用户确认，见"PR 检视"节）。当用户提到以下任一场景时必须使用本技能：通用质检 / 综合质检 / 全面检查 Markdown 文档质量、文档质检报告、门禁预检 / CI 门禁项本地检查 / 提交前自检、全量模式 / 门禁模式 / 自定义模式检查文档、多个检查项组合检查同一文档、检视PR / PR 文档检视 / 检查 PR 中的文档变更、家族基准回归 / benchmark 对齐检查 / 基线对齐（docs-skills-benchmark，见"基准回归"节）。用户仅点名单项检查（如"只查链接"、"只查标点"）时不走本入口，直达对应原子检查技能。
 version: 1.0.0
 metadata:
   author: Huawei Technologies Co., Ltd.
@@ -55,18 +55,20 @@ metadata:
 
 内容正确性与完备性/可读性目前主要由 aicheck 的语义规则承载；所有检查当前与文档类型（API/指南/工具类）无关，类型化差异为后续路线。
 
-## 三种质检模式
+## 质检模式
 
 | 模式 | 覆盖检查项 | 特点 | 最小环境（见"环境依赖"） |
 | --- | --- | --- | --- |
 | 门禁模式（ci-gated） | markdownlint、codespell-check、tag-closed-check、link-validity-check、resource-existence-check + compliance-check 的两个脚本步骤（芯片/位置标签、MD 编码格式） | 纯脚本管线，脚本项并发执行，秒级完成；报告给出门禁 pass/fail | node + npm（仅 cspell 词典未装时用一次） |
 | 全量模式（full） | 9 项全部 | 覆盖最全；脚本项与模型项同消息全并发（含 aicheck；唯一例外是 markdownlint 首跑缓存预热先行），耗时与成本最高 | node + npm（仅词典未装时用一次） |
 | 自定义模式（custom） | 用户勾选的任意组合 | 确定性执行勾选项；用户未给清单时必须先弹 9 项多选框（见"模式选择"硬约束） | node 恒需（聚合链路 + filename-check）；npm 仅勾 codespell-check 时需要 |
+| PR 检视（pr-review） | 默认全量（9 项），可显式指定其他本地模式 | 自动定位 GitCode PR 变更 `.md` 文件后复用本地检查引擎，diff 红线过滤仅报 PR 引入的问题；可选行内评论（经用户确认，默认仅报告） | 同所选本地模式；另需 git、python 3（变更红线过滤与评论提交脚本）与网络（PR 信息查询）；提交评论另需 Token 配置 |
 
 门禁集合依据：CANN 社区 docs-ci 实际启用且拦截 PR 的项为 link / resource / tag-closed / compliance（标签+编码）；markdownlint 与 codespell 在 CI 中仅告警不拦截——因此门禁判定只看前四类，后两项按告警单独计数。标点、术语、文件命名不在社区 CI 内，归全量/自定义模式。
 
 ## 模式选择
 
+- **模式判定（先于一切执行）**：用户输入含 PR 编号 / PR 链接且要求检视或检查 PR 文档 → 走 **PR 检视模式**（workflows/pr-review.md；其内部默认复用全量模式，用户显式指定其他本地模式时从其指定）；否则在下述三种本地模式中选择。
 - 用户显式指定模式（"门禁模式 / 全量 / 自定义"）→ 直接路由对应 workflow。
 - 未指定模式 → 必须先以可勾选（单选）选项形式询问用户（全量 / 门禁 / 自定义，各附一句话特点说明），禁止默认选某个模式直接执行。
 - 仅当用户明确跳过选择时，才按门禁模式执行（耗时最短）并告知用户。
@@ -81,7 +83,7 @@ metadata:
 3. 一个文档目录（hub 先展开为 `.md` 文件清单再派发；展开时排除任何 `output/` 目录下的文件，避免本技能历史报告被再次检查）
 4. 直接粘贴一段 Markdown 内容（先写入 `<项目根>/output/temp/auto_temp.md` 后按文件路径处理）
 
-不自动从 git diff 提取变更文件；用户需要 PR 预检时自行提供变更文件列表。
+本地三种模式不自动从 git diff 提取变更文件（用户需要 PR 预检时自行提供变更文件列表）；PR 检视模式自动定位 PR 变更的 `.md` 文件（见 workflows/pr-review.md）。
 
 ## 输出（聚合产物）
 
@@ -181,8 +183,17 @@ fi
 | workflows/ci-gated-review.md | 门禁模式 |
 | workflows/full-review.md | 全量模式 |
 | workflows/custom-review.md | 自定义模式（含检查项清单解析与多选交互） |
+| workflows/pr-review.md | PR 检视模式（内部复用上述三种本地模式之一） |
 
 模式确定后先读对应 workflow 文件再执行，禁止凭本文件的记忆直接编排。
+
+## PR 检视（pr-review）
+
+Committer 检视 GitCode PR 中 `.md` 变更的入口，检视引擎复用本地三模式，本模式只增加 PR 专属阶段链（详见 workflows/pr-review.md，阶段 1~5）：
+
+基准分支确定（MR API base 字段 → merge-base 启发式 → 候选两可时询问用户，禁止默认 master）→ 基线核验与范围 sanity check → 变更 `.md` 清单与 diff 红线 → 按所选本地模式检查 → 红线过滤（`scripts/pr_review_filter.py`，只报 PR 引入的问题，存量仅计数）→ PR 检视报告 → 可选行内评论（经用户确认后提交）。
+
+**评论提交（可选增强，默认不执行）**：能力自包含——本地已安装 gitcode-toolkit 时优先委托；未安装时用 `scripts/pr_review_filter.py submit`（Token 经配置文件 `~/.config/opencode/skills/docs-common-review/config/gitcode-config.json` 或环境变量 `GITCODE_TOKEN` 传递，全程不进入对话上下文；脚本内置：与 PR 已有评论去重（拉取失败即中止，不假定没有重复；含 ≤5 行邻近同规则判重）→ head SHA 核对 → smoke test → 回读验证 → 错位撤回 → 逐条发送前刷新判重 → 400 降级普通评论 → 发布记录防重发）。**严禁未经用户确认自动提交。**
 
 ## 基准回归（docs-skills-benchmark）
 
@@ -200,12 +211,15 @@ fi
 ```
 docs-common-review/
 ├── SKILL.md                    # 本文件（入口：模式路由与原则）
-├── workflows/                  # 三种模式的执行流程
+├── workflows/                  # 各模式的执行流程
 │   ├── ci-gated-review.md
 │   ├── full-review.md
-│   └── custom-review.md
+│   ├── custom-review.md
+│   └── pr-review.md
 ├── scripts/aggregate.js        # 聚合：规范化 + summary + 耗时/门禁判定 + csv/md 转换
 ├── scripts/merge_json.js       # JSON 数组合并（filename-check 多目标 → 单一结果文件）
+├── scripts/pr_review_filter.py # PR 检视：diff 变更行解析 + 结果红线过滤 + 评论渲染/提交
+├── scripts/test_pr_review_filter.py  # 上者的单元测试（python3 -m unittest）
 ├── evals/                      # 评测用例与共享数据集
 ├── docs-tool-based-check/      # 原子：5 项工具检查（脚本）
 ├── docs-filename-check/        # 原子：文件命名检查（node 脚本）
