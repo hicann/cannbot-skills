@@ -58,9 +58,8 @@ ck("刚跨容噪带 → BELOW_FLOOR", compare.classify(96.0, 100.0, TE) == "BELO
 
 # ---- 2) 退出码：有 BELOW_FLOOR → 1；全 OK → 0 ----
 def run_compare(csv_text):
-    f = tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8")
-    f.write(csv_text)
-    f.close()
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False, encoding="utf-8") as f:
+        f.write(csv_text)
     try:
         r = subprocess.run(
             [sys.executable, str(COMPARE_PY), "--file", f.name],
