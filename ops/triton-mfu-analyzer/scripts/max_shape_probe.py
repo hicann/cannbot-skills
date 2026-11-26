@@ -177,7 +177,8 @@ def ref_accepts(d, flops_tool):
     """参考实现能否接受当前写入的 shape：FakeTensor 追踪成功且 FLOPs > 0。纯 CPU。"""
     if not flops_tool or not os.path.exists(flops_tool):
         return True, 0.0  # 没有 tracer 时跳过这一闸（但会在结果里标注）
-    out = tempfile.mktemp(suffix=".json")
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as tf:
+        out = tf.name
     try:
         subprocess.run(
             [sys.executable, flops_tool, os.path.join(d, "model.py"), out],
@@ -185,7 +186,8 @@ def ref_accepts(d, flops_tool):
             text=True,
             timeout=900,
         )
-        fl = json.load(open(out)).get("flops", {})
+        with open(out) as fp:
+            fl = json.load(fp).get("flops", {})
         v = max(fl.values()) if fl else 0.0
         return v > 0, v
     except Exception:
@@ -220,11 +222,8 @@ def run_impl(d, iters=3):
 
 
 def probe(d, cases_path, max_bytes, max_ms, flops_tool):
-    orig = [
-        json.loads(line)
-        for line in open(cases_path, encoding="utf-8-sig")
-        if line.strip()
-    ]
+    with open(cases_path, encoding="utf-8-sig") as fp:
+        orig = [json.loads(line) for line in fp if line.strip()]
     base = max(orig, key=case_bytes)
     best, s_fail, reason = None, None, "扫完整个梯度仍未受限"
 
@@ -318,7 +317,8 @@ def main():
     r["dir"] = a.dir
     r["ref_gate"] = bool(a.flops_tool)
     out = a.out or os.path.join(a.dir, "probe.json")
-    json.dump(r, open(out, "w"), ensure_ascii=False, indent=1)
+    with open(out, "w") as fp:
+        json.dump(r, fp, ensure_ascii=False, indent=1)
     b = r["best"]
     if b:
         print(
