@@ -561,11 +561,11 @@ def patch_kernel_macros(
         block = vdecl["block_text"]
         anchor = vdecl["anchor"]
         if anchor["mode"] == "replace":
-            content = re.sub(anchor["regex"], lambda _m: block, content, count=1)
+            content = re.sub(anchor["regex"], lambda _m, _block=block: _block, content, count=1)
         elif anchor["mode"] == "insert_before":
             content = re.sub(
                 anchor["regex"],
-                lambda m: block + "\n    " + m.group(0),
+                lambda m, _block=block: _block + "\n    " + m.group(0),
                 content,
                 count=1,
             )
