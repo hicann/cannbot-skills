@@ -273,19 +273,27 @@ def create_csv(params: CreateCsvParams):
             continue
 
         # L0 / L1 用例筛选
+        aclnn_name = extract_aclnn_name(params.args)
+        candidate_shapes = []
+        if level == 'L1':
+            candidates = convert_to_ttk_format(params.df.reset_index(drop=True), params.param_def, aclnn_name, level)
+            candidate_shapes = input_shape_keys(candidates)
         selected_indices, report = _generate_l0_l1_cases(
-            level, params.df, params.all_factor_values, params.args
+            level, params.df, params.all_factor_values, params.args, candidate_shapes
         )
 
         # 生成输出文件
-        aclnn_name = extract_aclnn_name(params.args)
         report_file, case_file = get_output_filenames(
             params.args.report_output, params.args.case_output, level, len(params.levels) > 1, aclnn_name
         )
 
         # 转换格式
-        selected_df = params.df.iloc[selected_indices].reset_index(drop=True)
-        case_df_ttk = convert_to_ttk_format(selected_df, params.param_def, aclnn_name, level)
+        if level == 'L1':
+            case_df_ttk = candidates.iloc[selected_indices].reset_index(drop=True).copy()
+            case_df_ttk['testcase_name'] = [f"{aclnn_name}_{level}_{i+1:03d}" for i in case_df_ttk.index]
+        else:
+            selected_df = params.df.iloc[selected_indices].reset_index(drop=True)
+            case_df_ttk = convert_to_ttk_format(selected_df, params.param_def, aclnn_name, level)
 
         # 空 tensor 用例
         if not params.args.skip_empty and params.args.empty_count > 0 and level in ('L0', 'L1'):
@@ -329,7 +337,7 @@ def _handle_l2_cases(args, param_def, factors, constraints_def):
         print(f"[INFO] 生成异常用例: {case_path} ({len(case_df_ttk)}条)")
 
 
-def _generate_l0_l1_cases(level, df, all_factor_values, args):
+def _generate_l0_l1_cases(level, df, all_factor_values, args, candidate_shapes):
     """生成 L0/L1 用例并返回选中索引 + 报告"""
     if level == 'L0':
         selected_indices, coverage_info = select_cases_L0(df, all_factor_values, args.verbose)
@@ -342,7 +350,7 @@ def _generate_l0_l1_cases(level, df, all_factor_values, args):
         selected_indices, coverage_info = select_cases_L1(
             df, pairwise_combinations, all_factor_values, args.verbose, args.sample_size
         )
-        selected_indices = complete_case(selected_indices, args)
+        selected_indices = complete_case(selected_indices, args, candidate_shapes)
         report = generate_L1_report(
             all_factor_values, pairwise_combinations, coverage_info, args.target_count
         )
@@ -376,12 +384,12 @@ def _save_case_results(params: SaveCaseParams):
             logging.info(f"生成用例: {case_path} ({len(params.case_df_ttk)}条)")
 
 
-def complete_case(selected_indices, args):
+def complete_case(selected_indices, args, candidate_shapes):
     if len(selected_indices) < args.target_count:
         if args.verbose:
             print(f"[INFO] 补齐用例: {len(selected_indices)} -> {args.target_count}")
         selected_indices = pad_cases(
-            selected_indices, args.target_count, args.seed
+            selected_indices, candidate_shapes, args.target_count, args.seed
         )
     return selected_indices
 
@@ -1022,32 +1030,45 @@ def select_cases_L1(df, pairwise_combinations, all_factor_values, verbose=False,
     return selected_indices, coverage_info
 
 
-def pad_cases(selected_indices, target_count, seed=None):
-    """
-    补齐用例到目标数量（L1专用）
-    
-    Args:
-        selected_indices: 已选中的用例索引列表
-        target_count: 目标用例数量
-        seed: 随机数种子
-    
-    Returns:
-        List[int]: 补齐后的用例索引列表
-    """
-    if len(selected_indices) >= target_count:
-        return selected_indices[:target_count]
-    
-    if seed is not None:
-        random.seed(seed)
-    
-    need_pad = target_count - len(selected_indices)
-    padded_indices = selected_indices.copy()
-    
-    for _ in range(need_pad):
-        random_idx = random.choice(selected_indices)
-        padded_indices.append(random_idx)
-    
-    return padded_indices
+def input_shape_keys(candidates):
+    """只按输入张量的形状及张量列表分组，不计入输出形状、类型或取值。"""
+    keys = []
+    for row in candidates.itertuples(index=False):
+        shapes = literal_eval(row.tensor_view_shapes)
+        if row.output_tensor_indexes:
+            shapes = shapes[:literal_eval(row.output_tensor_indexes)[0]]
+        keys.append((shapes, row.tensor_list_distribution))
+    return keys
+
+
+def pad_cases(selected_indices, candidate_shapes, target_count, seed=None):
+    """保留两两覆盖行，先补未覆盖形状，再补其余候选行。"""
+    result = list(selected_indices)
+    if len(result) >= target_count:
+        return result
+    if not candidate_shapes:
+        raise ValueError("没有可用于补齐的候选行")
+
+    rng = random.Random(seed)
+    used = set(result)
+    seen_shapes = {candidate_shapes[i] for i in used}
+    remaining = [i for i in range(len(candidate_shapes)) if i not in used]
+    rng.shuffle(remaining)
+    same_shape = []
+    for i in remaining:
+        shape = candidate_shapes[i]
+        if shape in seen_shapes:
+            same_shape.append(i)
+            continue
+        result.append(i)
+        seen_shapes.add(shape)
+        if len(result) == target_count:
+            return result
+
+    result.extend(same_shape[:target_count - len(result)])
+    # 所有候选行都已选过后才复用。
+    result.extend(rng.choices(range(len(candidate_shapes)), k=target_count - len(result)))
+    return result
 
 
 def generate_L1_report(all_factor_values, pairwise_combinations, coverage_info, target_count):

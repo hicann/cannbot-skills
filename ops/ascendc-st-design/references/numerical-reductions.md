@@ -10,6 +10,20 @@
 
 对于方差或方差加常数的输出，可从本技能的 `scripts/variance_probe.py` 导入 `find_variance_pair`。传入合法长度集合、按幅值排序的有限候选、输入/累加/输出 dtype、末尾加数（无则为零）和标量比较函数 `matches(actual, expected)`。按接口实际容差比较。在给定候选中优先选择有相邻对照、输出偏差最大的有限样例，返回触发长度、对照长度和转型后的常量；得到空结果时记录已搜索的范围。候选模拟仅用于选点。
 
+**在已安装的技能目录中执行搜索**。从本文件所在目录向上找到 `scripts/variance_probe.py`，或先将它复制到构造器旁再导入。对允许连续正整数轴长的接口，下面的调用可直接嵌入生成器，变量取自合法域和本次回放预算：
+
+```python
+from variance_probe import find_variance_pair
+
+pair = find_variance_pair(
+    range(min_length, max_length + 1), representable_constants,
+    input_dtype=storage_dtype, accumulator_dtype=compute_dtype,
+    output_dtype=result_dtype, offset=trailing_offset, matches=matches,
+)
+```
+
+候选长度应包含连续邻点，幅值应涵盖能放大舍入误差的合法常量。优先使用能把加权归约化为等权归约的退化轴。导入失败时修正路径后重试；搜索为空时扩大合法的连续长度区间或调整幅值，再用实际比较规则搜索。若仍为空，记录未命中。只有模拟路径在触发点超差、相邻对照合格，且题面参考在两处均符合解析解时，才记为已覆盖精度探针。
+
 ## 落到可执行 L1 用例
 
 按接口补齐其他输入及属性，在已有 L1 用例清单保留这两行，并固定张量构造方式（如常量区间的上下界相同）。常量与有效计数应在 dtype 转换、索引和掩码生效后仍成立。若 L1 有数量上限，优先替换随机补齐的冗余行，并复核原有覆盖目标。

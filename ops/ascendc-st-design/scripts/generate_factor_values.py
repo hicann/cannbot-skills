@@ -251,6 +251,7 @@ class FactorValueGenerator:
         self.anchors = []
         self.derivation_order = {}
         self._soft_fail_warned = set()
+        self.shape_round = 0
 
     @staticmethod
     def _make_hashable(value):
@@ -542,7 +543,7 @@ class FactorValueGenerator:
         if expression.startswith("derive_shape_from_dimensions"):
             dimensions = source_values[0]
             if isinstance(dimensions, int):
-                return generate_random_shape(dimensions, seed=seed)
+                return generate_random_shape(dimensions, seed=seed + self.shape_round)
             return None
 
         # === 通用推导：value_range from dtype ===
@@ -1440,9 +1441,15 @@ class FactorValueGenerator:
     def generate_all_cases(self, max_cases: int = 10000) -> List[Dict[str, Any]]:
         anchor_combinations = self.generate_bc_combinations(max_cases)
 
-        all_cases = self.generate_complete_cases(anchor_combinations)
+        all_cases = []
+        self.shape_round = 0
         while len(all_cases) < max_cases:
-            all_cases = all_cases + self.generate_complete_cases(anchor_combinations)
+            batch = self.generate_complete_cases(anchor_combinations)
+            if not batch:
+                break
+            all_cases.extend(batch)
+            # 复用离散锚点时重新抽取自由轴，关联形状仍由约束推导。
+            self.shape_round += 1
         return all_cases[:max_cases]
 
     def save_to_csv(self, cases: List[Dict[str, Any]], output_path: str):
