@@ -347,7 +347,7 @@ python3 scripts/check_launch_path.py --op-dir {工作目录} \
 | `pass_iteration` | 契约有效、声明的 `dev/` 基线至少含两个真实 JIT 定义 | 继续 Step 1 |
 | `delivery_path_violation` | 契约、基线或静态产物检查失败 | 中止本轮并返回编排器；不得调用 `verify.py` / `benchmark.py` |
 
-Phase 4 首次融合前执行 `--phase fusion --baseline-verify <基线正式验证报告>`，核对全部用例通过且报告覆盖所声明阶段源码。Phase 5 保留该报告参数并使用 `--phase final --fused-epilogue <阶段文件> --final-code <实际交付文件>`，同时保留 `--baseline`。脚本将 `pass_final_shape` 和最终文件的 SHA256 写入 `output/launch_path.json`；编排器以绑定该哈希的逐 case launch 和全部必测用例精度确认交付，并用同一文件的性能证据填写 `target_reached`。候选精度全过且 launch 合规时可交付，性能未达标记 `target_reached=false`。Phase 4 取证后仍无该类候选时，多 kernel 回退可传 `--fallback`，返回 `contract_conflict`（exit 2）。
+Phase 4 首次融合前执行 `--phase fusion --baseline-verify <基线正式验证报告>`（融合文件已产出时再追加 `--fused-epilogue <融合文件>`，供脚本校验其与基线不同；未产出可省略），核对全部用例通过且报告覆盖所声明阶段源码。Phase 5 保留该报告参数并使用 `--phase final --fused-epilogue <阶段文件> --final-code <实际交付文件>`，同时保留 `--baseline`。脚本将 `pass_final_shape` 和最终文件的 SHA256 写入 `output/launch_path.json`；编排器以绑定该哈希的逐 case launch 和全部必测用例精度确认交付，并用同一文件的性能证据填写 `target_reached`。候选精度全过且 launch 合规时可交付，性能未达标记 `target_reached=false`。Phase 4 取证后仍无该类候选时，多 kernel 回退可传 `--fallback`，返回 `contract_conflict`（exit 3）。
 
 ---
 
