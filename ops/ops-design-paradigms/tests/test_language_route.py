@@ -140,6 +140,33 @@ class YamlSpecTests(unittest.TestCase):
             for path in paths:
                 self.assertTrue((root / path).is_file(), path)
 
+    def test_sliding_window_examples_are_language_isolated(self):
+        import yaml
+
+        routes = yaml.safe_load((SCRIPT.parent / "example-routes.yaml").read_text())[
+            "routes"
+        ]["paradigms"]
+        self.assertEqual(set(routes["SlidingWindow"]), {"ascendc", "dsl"})
+        # SlidingWindow 允许跨范式并集（conv 与 sliding_window/pooling 共存），
+        # 因此断言“该语言下本范式示例命中且入口存在”，而不是语言下只有唯一示例。
+        entries = {
+            "ascendc": ("conv2d", "op_kernel/conv2d_kernel.cpp"),
+            "dsl": ("conv", "conv_dsl.py"),
+        }
+        for language, (directory, entry) in entries.items():
+            with self.subTest(language=language):
+                result = self.run_spec(
+                    f"op: {{language: {language}, paradigms: [SlidingWindow]}}"
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                paths = json.loads(result.stdout)["examples"]["SlidingWindow"]
+                self.assertGreaterEqual(len(paths), 1)
+                for path in paths:
+                    self.assertIn(f"/adapters/{language}/", path)
+                matches = [p for p in paths if Path(p).name == directory]
+                self.assertEqual(len(matches), 1, paths)
+                self.assertTrue((Path(matches[0]) / entry).is_file(), entry)
+
     def test_sortselect_registered_and_has_no_cross_language_example(self):
         import yaml
 

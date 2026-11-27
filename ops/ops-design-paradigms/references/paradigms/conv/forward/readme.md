@@ -32,12 +32,12 @@ Convolution（卷积前向/推理）范式覆盖输出元素由输入在多维�
 
 ## 支持范围
 
-- **开发语言**：AscendC（纯 Cube 与 Cube+Vector 协同；参考工程见 `adapters/ascendc/example/conv2d/`；拉起接入（直调/aclnn）由上层工作流负责）；CANNBotDSL 适配层暂缺，语言缺失时按 DSL 通用方法论兜底。
+- **开发语言**：AscendC（纯 Cube 与 Cube+Vector 协同；参考工程见 `adapters/ascendc/example/conv2d/`；拉起接入（直调/aclnn）由上层工作流负责）；CANNBotDSL（适配层见 `adapters/dsl/`，参考实现 `adapters/dsl/example/conv/`，已覆盖 FP16 的 1D/2D/3D、B 驻留、L1/L0 双缓冲、M 超块与多行输出展平；bf16/fp32/groups/channels-last 等待验证项见 `adapters/dsl/capability-mapping.md` §5）。
 - **芯片与版本**：参考工程面向 Ascend 950（arch35 / DAV_3510）；L1/L0 容量、指令上限与版本差异以 [adapters/ascendc/buffer-and-types.md](adapters/ascendc/buffer-and-types.md) 为准。
 - **规格边界**：fp16、NCHW/NCDHW/NCW、groups=1、pad<kernel、stride 1~63、dilation 1~255；空输出为合法规格（tiling 返回 1，跳过执行）。
 - **能力边界**：纯 Vector 滑窗（无 Mmad）与 Winograd 变体不在范式范围；分组卷积、pad≥kernel、NHWC、C04 小通道等变体按 [generic/scene.md](generic/scene.md) 的差异方式扩展，主干文档不重复。
 
 ## 未来支持计划
 
-- 补充 CANNBotDSL 适配层与参考实现。
+- 补齐 CANNBotDSL 适配层的待验证项（`ops.conv` 的 N 方向尾块缺口、bf16/fp32/HF32、groups、channels-last、fullLoad/整平面 A 驻留、AOT，以及更大形状集的性能标定）。
 - 经算子生成工作流产出首个卷积算子后，回填生成耗时与性能实测数据。

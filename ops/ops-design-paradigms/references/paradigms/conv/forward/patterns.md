@@ -35,7 +35,7 @@
 | 开发语言 | 加载内容 | 入口 |
 |------|------|------|
 | `ascendc` | 通用知识层 + AscendC 适配层| [adapters/ascendc/index.md](adapters/ascendc/index.md) |
-| `dsl`（CANNBotDSL） | 通用知识层 + DSL 通用方法论 | `ops/ops-design-paradigms/references/general-methodology-dsl.md`（DSL 专用适配层暂缺，按通用方法论兜底，见 [readme.md](readme.md) 支持范围；语言适配层建成后再挂 `adapters/dsl/index.md`） |
+| `dsl`（CANNBotDSL） | 通用知识层 + DSL 适配层 | [adapters/dsl/index.md](adapters/dsl/index.md) |
 
 **互斥规则**：一次任务只加载一个命中语言的适配层，例如命中了ascendc，就不要去加载dsl。
 
