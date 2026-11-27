@@ -1,57 +1,47 @@
 # 权重梯度分支 Ascend C Kernel 实现模板
 
-本页落实设备入口、任务骨架、地址、搬运、计算、输出和同步。计算模型与布局见 [compute-flow](../../../generic/filter/compute-flow.md)，API 字段见 [instruction-mapping](instruction-mapping.md)。模板对应 `Conv3dDwBasicBlockMNStreamK`，当前 streamkType=0、groupEnlarge=false。
+本页落实设备入口、任务骨架、地址、搬运、计算、输出和同步。计算模型与布局见 [compute-flow](../../../generic/filter/compute-flow.md)，API 字段见 [instruction-mapping](instruction-mapping.md)。本页主体对应 `Conv3dDwBasicBlockMNStreamK`、groupEnlarge=false，覆盖 streamkType=0/1/2。Winograd 在入口单独分发，其数据流、布局和同步见 [Winograd 实现](winograd-implementation.md)。
 
 片段中的类、阶段函数和共享结构均由生成工程定义；本文给出其实现契约，不产生对参考算子仓源码的工程依赖。入口使用外层 tilingData，类内 td 引用其 dwTiling，即 TConv3DDwTiling 字段。
 
-片段中 T 为与 DTYPE_X 一致的 half 或 bfloat16_t；省略 self->ctx 的字段仍指同一计算上下文，阶段函数名与本文各节及指令映射对应。
+T 与 DTYPE_X 一致，为 half、bfloat16_t 或 float。第 4–5 节现有搬运片段采用两字节输入，FP32 须使用 [指令映射 §9](instruction-mapping.md#9-fp32-输入与-hf32-计算模式) 的专用朝向、分形及 repeat 参数；省略 self->ctx 的字段仍指同一计算上下文，阶段函数名与本文各节及指令映射对应。
 
 ## 1 Kernel 概述
 
 ### 1.1 数据流图
 
 ```text
-InitOutput: AIV Fill dedw -> AIC waits -> paired data paths
+前置 InitOutput：AIV Fill 清零 dedw -> AIC 等待 -> 以下两路并行
 
-  +-----------------------------------+           +-----------------------------------+
-  | dedy / GM                         |           | x / GM                            |
-  +-----------------+-----------------+           +-----------------+-----------------+
-                    |                                               |
-                    | DataCopy                                      | DataCopy
-                    |                                               |
-                    |                                               |
-                    v                                               v
-  +-----------------+-----------------+           +-----------------+-----------------+
-  | L1A / parent segment              |           | L1B / x rows                      |
-  +-----------------+-----------------+           +-----------------+-----------------+
-                    |                                               |
-                    | Load2D + transpose                            | Load3D windows
-                    |                                               |
-                    |                                               |
-                    v                                               v
-  +-----------------+-----------------+           +-----------------+-----------------+
-  | L0A / NZ(M,K)                     |           | L0B / ZN(K,N)                     |
-  +-----------------+-----------------+           +-----------------+-----------------+
-                    |                                               |
-                    |                                               |
-                    +-----------------------+-----------------------+
-                                            |
-                                            | MMAD / FP32
-                                            v
-                          +-----------------+-----------------+
-                          | L0C / segment partial sum         |
-                          +-----------------+-----------------+
-                                            |
-                                            |
-                                            | Fixpipe / atomic add
-                                            |
-                                            v
-                          +-----------------+-----------------+
-                          | dedw / GM / FP32                  |
-                          +-----------------------------------+
+A 路（dedy）              B 路（x）
++---------------+         +---------------+
+| dedy / GM     |         | x / GM        |
++-------+-------+         +-------+-------+
+        | DataCopy                | DataCopy
+        v                         v
++-------+-------+         +-------+-------+
+| L1A / 父段    |         | L1B / x 行带  |
++-------+-------+         +-------+-------+
+        | Load2D + 转置           | Load3D 窗口
+        v                         v
++-------+-------+         +-------+-------+
+| L0A / NZ(M,K) |         | L0B / ZN(K,N) |
++-------+-------+         +-------+-------+
+        |                         |
+        +------------+------------+
+                     | MMAD / FP32
+                     v
+            +--------+--------+
+            | L0C / 段部分和  |
+            +--------+--------+
+                     | Fixpipe / 原子累加
+                     v
+           +---------+---------+
+           | dedw / GM / FP32  |
+           +-------------------+
 ```
 
-AIV 先清零 FP32 dedw，通知 AIC 后才开始主计算。普通路径中 A=dedy 直装加分形转置，B=x 正向窗口；拆核路径把原核坐标的采样前移到 MTE2。全部结果经 Fixpipe 原子累加到 dedw。
+AIV 先清零 FP32 dedw，通知 AIC 后才开始主计算。普通路径中 A=dedy 直装加分形转置，B=x 正向窗口；拆核路径把原核坐标的采样前移到 MTE2。主轮结果经 Fixpipe 原子累加到 dedw；尾轮先写清零的 Cube workspace，再由 AIV 固定顺序归约写回（§7.3）。
 
 ### 1.2 状态与术语
 
@@ -81,7 +71,7 @@ singleCoreN 是任务覆盖的完整通道窗口长度，baseN 是一次 L0 计�
 
 ### 2.1 入口与编译实例
 
-入口保留 x、filter_size、out_backprop、y、workspace、tiling 六个 GM 参数；filter_size 的值已经由 Host 校验并写入共享几何。当前用户 workspace 为零，不能仅因其指针为空而跳过本算子。
+入口保留 x、filter_size、out_backprop、y、workspace、tiling 六个 GM 参数；filter_size 的值已经由 Host 校验并写入共享几何。MN_StreamK type=0 不需要用户 workspace；type≠0 和 Winograd 则必须提供各自用户区。系统区与用户区通过工程接口区分，不能把系统区基址当成部分和地址。
 
 ```cpp
 template <uint32_t conv3DDWTemplateId, bool isSplitKernelHW,
@@ -89,26 +79,43 @@ template <uint32_t conv3DDWTemplateId, bool isSplitKernelHW,
 __global__ __aicore__ void conv3ddw_custom(
     GM_ADDR x, GM_ADDR filter_size, GM_ADDR out_backprop,
     GM_ADDR y, GM_ADDR workspace, GM_ADDR tiling) {
-    static_assert(conv3DDWTemplateId == TPL_MN_STREAM_K);
-    static_assert(!groupEnlarge && winogradTilingFlag == 0 && !winogradResidentFlag);
+    static_assert(!groupEnlarge);
     REGISTER_TILING_DEFAULT(Conv3DBackpropFilterV2TilingData);
     GET_TILING_DATA_WITH_STRUCT(Conv3DBackpropFilterV2TilingData, tilingData, tiling);
-    if (workspace != nullptr) SetSysWorkspace(workspace);
-    Conv3dDwInitOutput<float> init;
-    init.Init(y, &tilingData);
-    init.Process();
-    init.Destroy();
-    if ASCEND_IS_AIC {
-        Conv3dDwBasicBlockMNStreamK<DTYPE_X, FORMAT_X,
-            DTYPE_OUT_BACKPROP, FORMAT_OUT_BACKPROP,
-            float, FORMAT_Y, isSplitKernelHW, false> op;
-        op.Init(x, out_backprop, y, nullptr, &tilingData);
-        op.Process(); // 内部完成任务及 End；入口不再重复 End
+    GM_ADDR user1 = nullptr;
+    if (workspace != nullptr) {
+        SetSysWorkspace(workspace);
+        user1 = GetUserWorkspace(workspace);
+    }
+    if constexpr (winogradTilingFlag != TPL_WINOGRAD_DISABLE) {
+        if (user1 == nullptr) return;
+        TPipe pipe;
+        Conv3dDwWinograd<DTYPE_X,float,winogradTilingFlag,winogradResidentFlag> op;
+        op.Init(x,out_backprop,y,user1,&tilingData);
+        op.Process();
+    } else if constexpr (conv3DDWTemplateId == TPL_DLOAD) {
+        Conv3DDwDLoad<DTYPE_X> op;
+        op.Init(x,out_backprop,y,user1,&tilingData);
+        op.Process();
+    } else {
+        static_assert(conv3DDWTemplateId == TPL_STREAM_K);
+        if (tilingData.dwTiling.streamkType != NO_STREAMK_CALC && user1 == nullptr) return;
+        Conv3dDwInitOutput<float> init;
+        init.Init(y,&tilingData);
+        init.Process();
+        init.Destroy();
+        Conv3dDwBasicBlockMNStreamK<DTYPE_X,FORMAT_X,
+            DTYPE_OUT_BACKPROP,FORMAT_OUT_BACKPROP,
+            float,FORMAT_Y,isSplitKernelHW,false> op;
+        op.Init(x,out_backprop,y,user1,&tilingData);
+        op.Process(); // AIC/AIV 都进入；内部完成 End
     }
 }
 ```
 
-这是生成骨架。注册模板的 MIX 核类型在共享 TPL 声明中绑定，直调由启动配置承担；两者均与初始化协议配对，见 tilingkey-templates。输入同为 half 或同为 bfloat16_t，FORMAT_Y 选择已实现的三种输出格式。
+这是生成骨架。注册模板的 MIX 核类型在共享 TPL 声明中绑定，直调由启动配置承担；两者均与初始化协议配对，见 tilingkey-templates。输入同为 half、bfloat16_t 或 float，FORMAT_Y 按所选模板的已实现格式绑定；Winograd/DLoad 均在 MN_StreamK 预清零之前分发。
+
+后续第 2.2–10 节展开 MN_StreamK。DLoad 按[单批空间驻留模板](../../../generic/filter/tiling/templates/dload/tiling.md)实现独立的 Cout/Cin 任务、完整核部分和及直接写回，入口共享同一份 TilingData。
 
 ### 2.2 任务与归约骨架
 
@@ -116,14 +123,21 @@ __global__ __aicore__ void conv3ddw_custom(
 
 ```cpp
 __aicore__ inline void Process() {
-    if (block_idx >= usedCoreNum_) return; // 初始化协议已在入口完成
-    for (uint64_t idx = block_idx; idx < totalCnt_; idx += usedCoreNum_) {
-        uint32_t groupIdx = idx % td.realGroup;
-        uint32_t dkIdx = (idx/td.realGroup) % td.dk;
-        nCoreIndx_ = (idx/td.realGroup/td.dk) % nCnt_;
-        mCoreIndx_ = idx/(nCnt_*td.dk*td.realGroup);
-        cinCoreIndx_ = nCoreIndx_;
-        CalSingleBasicBlock(dkIdx, groupIdx);
+    if (block_idx >= coreNum_) return; // td.coreNum，不是 blockDim
+    if (calRound_ == 0) {
+        CalcStreamK(block_idx);
+    } else {
+        uint64_t idx = block_idx;
+        for (uint64_t j = 0; j < calRound_; ++j, idx += coreNum_) {
+            if (idx >= totalCnt_) break; // 仍进入统一 dw_.End 收尾
+            uint32_t groupIdx = idx % td.realGroup;
+            uint32_t dkIdx = (idx/td.realGroup) % td.dk;
+            nCoreIndx_ = (idx/td.realGroup/td.dk) % nCnt_;
+            mCoreIndx_ = idx/(nCnt_*td.dk*td.realGroup);
+            cinCoreIndx_ = nCoreIndx_;
+            CalSingleBasicBlock(dkIdx,groupIdx);
+        }
+        if (streamkType_ != NO_STREAMK_CALC) CalcStreamK(idx);
     }
     dw_.End();
 }
@@ -137,6 +151,7 @@ __aicore__ inline void CalSingleBasicBlock(uint32_t dkIdx, uint32_t groupIdx) {
         for (uint64_t h = 0; h < td.ho; h += reduceSegmentsH) {
             CalcOffset(bd/td.dout,bd%td.dout,groupIdx,dkIdx,h);
             ReCalDkCinSingleCoreShape(bd%td.dout,groupIdx,dkIdx);
+            if ASCEND_IS_AIV { continue; } // 原始分组：AIV 不计算主轮
             if (singleShapeMInCurrentHo_ == 0 || singleShapeNInCurrentHo_ == 0) continue;
             uint64_t mUse = min(mCoreUse,singleShapeMInCurrentHo_);
             uint64_t nUse = min(nCoreUse,singleShapeNInCurrentHo_);
@@ -151,6 +166,8 @@ __aicore__ inline void CalSingleBasicBlock(uint32_t dkIdx, uint32_t groupIdx) {
     }
 }
 ```
+
+coreNum_ 来自 td.coreNum。type=0 的 calRound_=ceilDiv(totalCnt_,coreNum_)；type≠0 的 calRound_=totalCnt_/coreNum_，尾余单独进入 CalcStreamK。
 
 mCoreUse/nCoreUse/ciCoreUse 是当前任务按数学尾长截断后的范围，ciStart=cinCoreIndx_*singleCoreCin；它们在进入段循环前由任务解码产生。CalcReduceSegments 的计算见 compute-flow 第 7.3 节。每个 IterateAll 完成该段全部 M/N 子块与 batch/dout、宽片、K 的计算和写回。
 
@@ -227,15 +244,15 @@ weight 使用每槽一个队列的形式，不能由共享层 input 的具体队
 | 初始化 UB | InitOutput 的 TPipe 管理 | 只在初始化阶段使用 |
 
 ```text
-+--------+------------------------------+--------------------------------------------+
-| memory | slot 0                       | slot 1, when enabled                       |
-+--------+------------------------------+--------------------------------------------+
-| L1A    | [0,aAligned)                 | [halfL1,halfL1+aAligned)                   |
-| L1B    | [aAligned,aAligned+bAligned) | [halfL1+aAligned,halfL1+aAligned+bAligned) |
-| L0A    | first input region           | second input region                        |
-| L0B    | first input region           | second region / single slot if split       |
-| L0C    | current segment              | next segment output slot                   |
-+--------+------------------------------+--------------------------------------------+
++------+------------------------------+--------------------------------------------+
+| 存储 | 槽 0                         | 槽 1（启用时）                             |
++------+------------------------------+--------------------------------------------+
+| L1A  | [0,aAligned)                 | [halfL1,halfL1+aAligned)                   |
+| L1B  | [aAligned,aAligned+bAligned) | [halfL1+aAligned,halfL1+aAligned+bAligned) |
+| L0A  | 首个输入区                   | 第二输入区                                 |
+| L0B  | 首个输入区                   | 第二区 / 拆核时单槽                        |
+| L0C  | 当前归约段                   | 下一段输出槽                               |
++------+------------------------------+--------------------------------------------+
 ```
 
 al1Bound/bl1Bound 的单位为元素。半区放置时，L1A ping=0、L1B ping=aAligned、L1A pong=L1Bytes/2、L1B pong=L1Bytes/2+aAligned；仅为实际份数创建队列，并逐段检查交叠和最大地址。
@@ -434,30 +451,85 @@ AIC 侧配对调用 `CrossCoreWaitFlag<2,PIPE_FIX>(VEC_FALG_ID)`。VEC_FALG_ID=9
 ### 7.2 主计算通路
 
 ```text
- +-----------------------------------------------------+
- | GET_TILING_DATA + optional system workspace binding |
- +--------------------------+--------------------------+
-                            |
-                            |
-                            v
-        +-------------------+-------------------+
-        | InitOutput.Init -> Process -> Destroy |
-        +-------------------+-------------------+
-                            |
-                            |
-                            v
- +--------------------------+--------------------------+
- | AIC: Init -> Process -> CalBasicBlock -> IterateAll |
- +--------------------------+--------------------------+
-                            |
-                            |
-                            v
-+---------------------------+---------------------------+
-| Process: release held buffers -> End -> TPipe cleanup |
-+-------------------------------------------------------+
+     +-------------------------------------------+
+     | GET_TILING_DATA + 可选系统 workspace 绑定 |
+     +---------------------+---------------------+
+                           |
+                           v
+       +-------------------+-------------------+
+       | InitOutput.Init -> Process -> Destroy |
+       +-------------------+-------------------+
+                           |
+                           v
++--------------------------+--------------------------+
+| AIC: Init -> Process -> CalBasicBlock -> IterateAll |
++--------------------------+--------------------------+
+                           |
+                           v
+   +-----------------------+-----------------------+
+   | Process: 释放持有 buffer -> End -> TPipe 收尾 |
+   +-----------------------------------------------+
 ```
 
-streamkType=0、groupEnlarge=false 时，AIV 清零、汇合并通知后返回；AIC 独立完成任务。主循环没有 AIC 等待 AIV 的跨核同步点，因此不需要 AIV 陪跑。若扩展到包含跨核归约的路径，应同时实现 AIV 配对路径；不能只添加 AIC 侧等待。
+streamkType=0、groupEnlarge=false 时，AIV 清零、汇合并通知后不做主轮数值工作；AIC 独立完成任务。主循环没有 AIC 等待 AIV 的跨核同步点，因此不需要 AIV 陪跑。
+
+### 7.3 尾轮 StreamK 与确定性归约
+
+仅最后一轮未铺满的输出任务切 K，方向及范围由 [MN_StreamK §4](../../../generic/filter/tiling/templates/mn-streamk/tiling.md#4-尾轮-streamk-选择) 决定。AIC/AIV 继续同一次 Process，不能在入口用 `if ASCEND_IS_AIC` 包住整个算子，也不存在完成主轮后再次启动 AIV 的步骤。
+
+令 `q=deterAddCoreNum=ceilDiv(batch*dout,singleCoreBatchDout)*ceilDiv(ho*wo,singleCoreK)`：
+
+| 坐标 | 计算 |
+|---|---|
+| 尾轮输出任务 | `(basicBlockIdx/coreNum)*coreNum+(basicBlockIdx%coreNum)/q` |
+| HWout 组内序号 | kCoreIndx_=block_idx%q，H 起点=kCoreIndx_*singleCoreHo |
+| BatchDout 起点 | `(block_idx%q)*singleCoreBatchDout` |
+| Cube 槽 | `slot=deterAddCoreInx+(block_idx/q)*q` |
+| Cube 元素偏移 | slot*CUBE_WORKSPACE；CUBE_WORKSPACE=平台L0CBytes/sizeof(float) |
+| Vector 中间区起点 | GetBlockNum()*CUBE_WORKSPACE；在设备执行上下文求值，不以 td.coreNum 代替 |
+
+Host 预算为 `2*td.coreNum*平台L0CBytes`；实际中间区地址由 GetBlockNum()、GetSubBlockIdx()、subCoreInx_ 及树层次构造，采用 GetRdGmAddr/GetStGmAddr 的目标分支。下面起点和槽跨度均为 FP32 元素：
+
+```text
+user1 / 0
+    |
+    v
+Cube 工作区：slot * CUBE_WORKSPACE
+    |
+    v
+Vector 中间区：GetBlockNum() * CUBE_WORKSPACE + 层内偏移
+    |
+    v
+最大末地址 * sizeof(float) <= Host 用户 workspace 字节预算
+```
+
+GetBlockNum 的执行视角与 MIX 配比一起核实。Vector 层内可能使用半槽或四分之一槽，不能把 Host 的两份上限预算画成始终固定的设备分割点。每个 M/N 子块执行以下闭环：
+
+```text
+AIV                                       AIC
+ClearWorkspace(Cube slot)
+    |
+VecNotifyCube --------------------------> CubeWaitVector
+                                              |
+                                      CalcIterateCube
+                                              |
+                                GetTensorC(Cube slot,1,true)
+                                局部 K 段原子加到已清零槽
+                                              |
+VecWaitCube <--------------------------- CubeNotifyVector
+    |
+DeterministicReduceKInUb
+    |
+DeterministicAddFunc: coreAddCnt = 1,2,4,...
+    |
+    +--> VecUb2Gm：中间层写 Vector workspace
+    |
+    +--> UBRearrange2Gm：末层还原格式，写 dedw
+```
+
+SetDeterAddCore4StreamK 将 q、组内序号、组起点及 isNoDeter 传给计算对象。GetCutShape/InitSubCoreInx 按目标 AIV 配比切 M/N；不能一律描述为对半切。每层 VecAddFunc 后 BarrierVector，按二叉树组合相关核结果，末层只写真实通道及核位置。
+
+无尾轮责任的核由 isNoDeter/IsCoreNonCalc 跳过数值工作，仍发送配对通知。CalcIterate 按统一 maxMIter/maxNIter 执行同步；AIC 全跳过时每 14 次通知增加 PIPE_ALL barrier，避免计数器累积过快。末次读完后才开始下一子块的清零；事件表见 [同步 §3.4](sync-implementation.md#34-尾轮确定性归约的跨核交接)。这里不套用 Winograd 的首段覆写、kd 子轮两处 SyncAll 协议。
 
 ## 8 CopyOut 输出通路逻辑
 

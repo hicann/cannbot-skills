@@ -36,17 +36,17 @@ BT 搬运按 64B 覆盖；GM→L1 的尾补齐只有 32B。当 `ceilDiv(validByt
 
 ```text
 AllocTensor<float>
-    |
-    v
-InitZeroValue (if needed)
-    |
-    v
+    │
+    ▼
+InitZeroValue（按需）
+    │
+    ▼
 DataCopyPad
-    |
-    v
+    │
+    ▼
 biasL1Que_.EnQue
-    |
-    v
+    │
+    ▼
 biasL1Que_.DeQue<float>
 ```
 
@@ -58,14 +58,14 @@ biasL1Que_.DeQue<float>
 
 ```text
 biasBTQue_.AllocTensor<float>
-    |
-    v
+    │
+    ▼
 DataCopy(BT, L1, params)
-    |
-    v
+    │
+    ▼
 biasBTQue_.EnQue
-    |
-    v
+    │
+    ▼
 biasBTQue_.DeQue<float>
 ```
 
@@ -94,7 +94,7 @@ if constexpr (hasBias) {
 params.cmatrixSource = 0;
 ```
 
-带 bias 的首次 MMAD 用 BT 初始化结果，后续累加沿用 L0C。完成归约后一次 Fixpipe 转为 FP16/BF16；包装层使用此融合路径时，输出交付直接消费该结果。
+带 bias 的首次 MMAD 用 BT 初始化结果，后续沿用 L0C。归约完成后，Fixpipe 将结果转为 FP16/BF16，或以 NoQuant 写出 FP32；包装层直接消费该结果。
 
 ## 5 ComputeForBias：无乘积贡献的输出块
 
@@ -125,7 +125,7 @@ SetFlag<HardEvent::M_MTE1>(l0Slot);
 l0Slot = (l0Slot + 1) % inputSlotCount;
 ```
 
-ComputeBTBias 在全量模式取得当前 BT 子段，在分块模式调用 LoadBiasToBT。本页阶段函数均由生成工程实现。纯 bias MMAD 的 K 临时取 C0，后续正常计算恢复 baseUseK_；不改变 Tiling 的 baseK 或完整 kValue。
+ComputeBTBias 在全量模式取得当前 BT 子段，在分块模式调用 LoadBiasToBT。纯 bias MMAD 的 K 临时取 C0（FP16/BF16 为 16，FP32 为 8），后续计算恢复 baseUseK_；baseK 和完整 kValue 保持原值。
 
 ## 6 生命周期与校验
 

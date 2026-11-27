@@ -54,12 +54,9 @@ routes:
         - references/paradigms/scatterupdate/adapters/dsl/example/tensor_scatter_nd_update_dsl
     ConvBackward:
       ascendc:
-        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddx_direct
-        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddx_aclnn
-        - references/paradigms/conv/backward/adapters/ascendc/example/conv3dtranspose_direct
-        - references/paradigms/conv/backward/adapters/ascendc/example/conv3dtranspose_aclnn
-        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddw_direct
-        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddw_aclnn
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddx
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3dtranspose
+        - references/paradigms/conv/backward/adapters/ascendc/example/conv3ddw
     Interpolation:
       ascendc:
         - references/paradigms/interpolation/adapters/ascendc/example/three_interpolate_package

@@ -1,72 +1,43 @@
 # 卷积反向权重梯度分支：tiling 切分算法
 
-本文是 weight 切分入口，确定模板、L0 基本块、L1 父段、任务范围与 Host–Kernel 字段。完整求解顺序见 [mn-streamk](templates/mn-streamk/tiling.md)，任务和布局见 [compute-flow](../compute-flow.md)。平台资源由适配层取得。
+本文是 filter 切分入口，先选择计算模板，再确定任务、驻留与 Host–Kernel 参数。第 3–9 节为 MN_StreamK 共用选块规则；Winograd 和 DLoad 的独立规则在各自模板中展开。任务和布局见 [compute-flow](../compute-flow.md)，平台资源由适配层取得。
 
 ## 1 总览：tiling 切什么、为什么切
 
-Tiling 使用三个尺度：baseM/N/K 决定一次 L0 计算，stepKa/stepKb 决定 L1 父段覆盖多少 K 块，singleCoreM/N/K 决定一个输出任务。核深度与组属于任务轴，batch×dout 属于核内归约轴。
+MN_StreamK 使用以下三个尺度（记号层次见 [language.md](../language.md) §3）；DLoad 和 Winograd 的任务与驻留由各自模板定义：
 
-```text
-       +---------------------------------------------+
-       | dedw tasks: group x kd x M-parts x N-parts  |
-       +----------------------+----------------------+
-                              |
-                              |
-                              v
-+-----------------------------+-----------------------------+
-| one task: singleCoreM / singleCoreN / complete reduction  |
-+-----------------------------+-----------------------------+
-                              |
-                              |
-                              v
-   +--------------------------+--------------------------+
-   | L0 subblock: baseM x baseN; consume baseK at a time |
-   +--------------------------+--------------------------+
-                              |
-                              |
-                              v
-      +-----------------------+-----------------------+
-      | L1 parents: stepKa / stepKb K blocks per load |
-      +-----------------------------------------------+
+```
+任务（group × kd × M 段 × N 段；一个任务完整归约 batch×dout×ho×wo）
+  ──► L0 基本块（baseM × baseN，每次消费 baseK）
+        ──► L1 父段（stepKa / stepKb：一份驻留覆盖的 K 块数）
 ```
 
 M 增大可复用 x 窗口，N 增大可复用 dedy，K 增大可减少循环和换驻；代价分别是 L0/L1 占用、输出尾块和任务数变化。优选块是规则求得的候选，实际性能最优性由同平台、同输入的测量确认。
+
+各路 buffer 份数取 1 或 2 即乒乓开关：**1=串行（装载与计算互等）、2=重叠流水**；本分支 L1 份数随「阶梯驻留候选」（第 6 节）从 (2,2) 退到 (1,1)，L0C 份数由容量不等式直接判定（第 4.1 节）。
 
 ## 2 模板选择
 
 ### 2.1 选择顺序
 
-当前模板为 [MN_StreamK](templates/mn-streamk/tiling.md)：按 M/N 输出范围铺核，当前执行配置采用 `streamkType=0、groupEnlarge=false`，每个任务自行完成全部归约。普通窗口、切宽和拆核是该模板内部的求解分支。
+模板按注册编号从小到大尝试：**DLoad(8) → Winograd(9) → MN_StreamK(10)**。DLoad 在准入阶段完成通道候选与驻留预算，形成可执行计划；其他模板按各自规则判定。IsCapable 不满足时继续，输入规格错误及已选计划的求解失败单独报告。
 
 ```text
-   +-------------------------------------------------------+
-   | normalized problem + platformInfo / SDK capabilities  |
-   +---------------------------+---------------------------+
-                               |
-                               |
-                               v
-                +--------------+--------------+
-                | MN_StreamK / streamkType=0  |
-                +--------------+--------------+
-                               |
-                               |
-                               v
-+------------------------------+------------------------------+
-| ordinary or split-kernel window; full width or width slices |
-+------------------------------+------------------------------+
-                               |
-                               |
-                               v
-    +--------------------------+--------------------------+
-    | final base* / singleCore* / step* / Bound / Pbuffer |
-    +--------------------------+--------------------------+
-                               |
-                               |
-                               v
-           +-------------------+-------------------+
-           | key + shared fields + launch contract |
-           +---------------------------------------+
+统一问题 + 平台/SDK 能力
+    |
+    +--> DLoad (8) ------> 单批空间驻留 / 通道切块 / 完整归约
+    |       不满足准入
+    v
+    +--> Winograd (9) ---> 双路正变换 / 16 点 MMAD / 逆变换
+    |       不满足准入
+    v
+    +--> MN_StreamK (10) -> 普通/拆核窗口，整宽/切宽，尾轮 K 切分
+    |
+    v
+模板对应字段 + key + blockDim + workspace + 初始化/同步契约
 ```
+
+[Winograd](templates/winograd/tiling.md)、[DLoad](templates/dload/tiling.md) 和 [MN_StreamK](templates/mn-streamk/tiling.md) 分别维护在线求解规则。DLoad 按直接搬运、单批空间驻留和完整输出块归约组织计算；Winograd 使用变换域流水；MN_StreamK 使用普通窗口与分段归约。
 
 ### 2.2 模板与编译分支
 
@@ -74,11 +45,14 @@ M 增大可复用 x 窗口，N 增大可复用 dedy，K 增大可减少循环和
 
 ### 2.3 扩展方式
 
-新增独立策略时增加 `templates/<name>/tiling.md`，说明准入、起点、任务、驻留、求解顺序和验收，并在选择表登记。共用尺寸和资源公式保留在本页；API 与 key 编码维护在 weight 适配层。
+新增独立策略时增加 `templates/<name>/tiling.md`，说明准入、起点、任务、驻留、求解顺序和验收，并在选择表登记。共用尺寸和资源公式保留在本页；API 与 key 编码维护在 filter 适配层。
 
+### 2.4 在线求解边界
+
+本范式的 tiling 一律**在线求解**：input 与 filter 分支不读取调优数据仓库（knowledge_tiling 等），不引入"命中记录即跳过求解"的回放路径。参考实现中的仓库回放机制属其工程侧调优流程，**不进入生成范式的知识与准入**；生成工程按 §4–§8 的规则求解并全程留痕。
 ## 3 输入与输出
 
-输入为统一 3D 几何、原张量步幅、dtype/format，以及 AIC/AIV 核数、L1/L0/UB 容量和指令限制。当前 `inputBytes=2、accBytes=outputBytes=4、m0=n0=k0=C0=16`。
+输入为统一 3D 几何、原张量步幅、dtype/format，以及目标芯片版本、platformInfo 和 SDK 对应的 AIC/AIV 核数、L1/L0/UB 可用容量和指令限制。`L1Bytes/L0ABytes/L0BBytes/L0CBytes/UBBytes` 与 Kernel 分配使用同一份平台能力记录。`inputBytes=sizeof(T)`，FP16/BF16 为 2、FP32 为 4；`accBytes=outputBytes=4`。MN_StreamK 数学选块粒度 C0=16，m0=n0=16；物理 k0/channelSize=32/inputBytes，FP32 为 8。资源计算不得继续套用两字节输入预算。
 
 | 方向 | 数学有效长度 | 内部选块长度 |
 |---|---|---|
@@ -86,7 +60,7 @@ M 增大可复用 x 窗口，N 增大可复用 dedy，K 增大可减少循环和
 | N | CinG*hk*wk | `nValue=alignUp(CinG,16)*hk*wk` |
 | K | ho*wo | `kValue=ho*wo` |
 
-输出为基本块、任务、step、buffer 份数、单份 L1 元素预算、splitWo、usedCoreNum 和执行分支。尾宽、任务计数和归约分段可以由 Kernel 复算，不作为另一份独立真值。
+输出为基本块、任务、step、buffer 份数、单份 L1 元素预算、splitWo、coreNum、启动 blockDim 和执行分支。尾宽、任务计数和归约分段可以由 Kernel 复算，不作为另一份独立真值。
 
 ## 4 L0 基本块与 InitBaseBlock
 
@@ -109,9 +83,7 @@ cl0Pbuffer = (baseM*baseN*4*2 <= L0CBytes) ? 2 : 1;
 
 `hk*wk=9` 时优先 144 的倍数；其他窗口先保持 16 对齐。完整通道窗口的约束落在任务 singleCoreN 上。**L0 baseN 按 16 对齐；普通整窗判定为 `(baseN/16) % (hk*wk) == 0`**，其余由非整窗搬运/写回状态维护核位置连续性。
 
-例如 `hk=wk=2、CinG=64`，nValue=256，起点 baseN=256；`CinG=128` 时 nValue=512，baseN 同为 256。容量回调若将它缩到 48，则任务仍按完整通道窗口恢复，Kernel 使用 head_/tail_ 分片写回。
-
-`hk=wk=5、CinG=16` 时，nValue=400，按上述规则得到 baseN 起点 208、singleCoreN=400；最终计算块仍需通过资源求解。任务整窗与 L0 非整窗可以同时成立。
+任务按完整通道窗口恢复，L0 块可继续细分；非整窗搬运与写回由 head_/tail_ 维护核位置和通道边界。
 
 ### 4.2 K 的容量与搬运对齐
 
@@ -121,8 +93,6 @@ cl0Pbuffer = (baseM*baseN*4*2 <= L0CBytes) ? 2 : 1;
 `maxKb=alignDown(L0BBytes/(baseN*inputBytes*2),16)`。
 
 初值 `baseK=min(maxKa,maxKb)`。若 `alignUp(kValue,16)<baseK`，截到该对齐值；否则，当 `splitWo<baseK` 且 splitWo 为 16 倍数时，向下对齐到 splitWo 的倍数。最终 K 为正且 16 对齐。
-
-例如 M=96、N=144、L0A/B 各 64 KiB 时，容量分别允许 K=160/112；若 kValue=64，则 baseK=64。
 
 ### 4.3 L0 三路容量
 
@@ -253,9 +223,9 @@ ShrinkBlockBaseK 的线性估计中，A 路每减一个 K 分形减少 `baseM*16
 | singleCoreCout | singleCoreM |
 | singleCoreK | kValue |
 | singleCoreHo | singleCoreK/wo |
-| singleCoreBatchDout | batch*dout（当前无跨核归约配置） |
+| singleCoreBatchDout | batch*dout（DoStreamKTiling 前的基值） |
 
-任务数 `totalCnt=ceilDiv(mValue,singleCoreM)*ceilDiv(nValue,singleCoreN)*dk*G`。usedCoreNum 使用所选平台核数，并作为启动 blockDim 和任务轮转步长；任务少于核数时允许存在无计算任务的核，它们仍履行初始化协议。
+任务数 `totalCnt=ceilDiv(mValue,singleCoreM)*ceilDiv(nValue,singleCoreN)*dk*G`。共享 coreNum 使用平台计算核数，Kernel 按它轮转。Host 的 usedCoreNum 决定 blockDim：type=0 时取 min(coreNum,totalCnt)，type≠0 时取 min(coreNum,coreStreamK*totalCnt)。尾轮切分随后可能修改 singleCoreBatchDout、singleCoreK；见 [MN_StreamK §4–§5](templates/mn-streamk/tiling.md)。
 
 iterateOrder 取 `mValue>nValue ? 1 : 0`，控制任务内子块顺序。MN_StreamK 当前任务编号解码固定为 group→kd→N→M（快→慢），见 compute-flow 第 6 节。
 
@@ -272,7 +242,8 @@ iterateOrder 取 `mValue>nValue ? 1 : 0`，控制任务内子块顺序。MN_Stre
 | dk/hk/wk | 核采样点数 | filter_size |
 | strideD/H/W、dilationD/H/W | 正向步长、膨胀率 | 属性归一 |
 | padFront/Back、padUp/Down、padLeft/Right | 正向两侧 pad | 属性归一 |
-| m0/n0/k0/channelSize | 当前均为 16 | 能力与类型 |
+| m0/n0 | 矩阵分形粒度，均为 16 | 能力与类型 |
+| k0/channelSize | 32/sizeof(T)，两字节输入为 16、FP32 为 8 | 物理输入通道块 |
 
 数学 CinG/CoutG、Host 的 cin1_g/cout1_g 块数和序列化字段 cin1G/cout1G 分别记录。当前原始分组配置的序列化字段分别取 cin/group、cout/group；单组时等于总通道数。对齐跨度用于 mValue/nValue，不改变 GM 通道跨度。
 
@@ -289,8 +260,11 @@ iterateOrder 取 `mValue>nValue ? 1 : 0`，控制任务内子块顺序。MN_Stre
 | al1/bl1/al0/bl0/cl0Pbuffer | 各路 buffer 份数 |
 | splitWo | 宽片长度；tailWo/splitWi/tailWi 按当前路径派生 |
 | iterateOrder | 任务内 M/N 子块遍历 |
-| usedCoreNum | blockDim 与任务轮转步长 |
-| streamkType | 当前为 0 |
+| coreNum | Kernel 调度基数；不以 blockDim 代替 |
+| streamkType | 尾轮 StreamK 三态：0=无 / 1=BatchDout / 2=HWout（判定链见 [mn-streamk §5](templates/mn-streamk/tiling.md)） |
+| hf32Flag | FP32 是否采用 hf32 计算模式；非 FP32 为 0 |
+
+usedCoreNum、coreStreamK、coreBindDirection 和 singleShapeK 是 Host 工作量，不在共享结构中新增同名字段；singleShapeK 的最终范围写入 singleCoreK。
 
 dtype/format、isSplitKernelHW 和模板编号可由编译实例传递；字段类型、共享结构和 key 在 [适配层绑定（Ascend C）](../../../adapters/ascendc/filter/tilingkey-templates.md) / [DSL](../../../adapters/dsl/filter/tiling.md) 定义。归约阈值由 Kernel 的 CalcReduceSegments 消费，不作为另一份可自由修改的 Host 字段。
 
@@ -302,5 +276,5 @@ dtype/format、isSplitKernelHW 和模板编号可由编译实例传递；字段�
 - [ ] L1 阶梯搜索和 try* 返回值语义一致，失败不作为成功发布。
 - [ ] singleCoreN 是整窗任务尺度，baseN 是实际计算尺度。
 - [ ] cin1G/cout1G 序列化单位是通道，与 Host 块数区分。
-- [ ] usedCoreNum、blockDim、任务轮转和初始化参与核一致。
-- [ ] 当前 streamkType=0、原始组映射与 Kernel 实例一致。
+- [ ] coreNum、blockDim、任务轮转和初始化参与核分别核对。
+- [ ] streamkType、hf32Flag、原始组映射与 Kernel 实例一致；其他模板按私有页校验。

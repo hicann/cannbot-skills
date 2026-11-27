@@ -2,6 +2,8 @@
 
 本页把 [计算流程的生命周期](../../../generic/input/compute-flow.md#8-dagbuffer-与流水) 映射为队列、事件和初始化通知。数据槽按 [buffer-and-types](../buffer-and-types.md) 分配。
 
+以下队列协议用于普通三模板及其数据准备扩展。完整 N/K 驻留保留同一份 L1B 到末次消费者，继续使用本页的 TQue 就绪与归还协议。
+
 ## 1 流水间交接
 
 | 对象 | 就绪与归还机制 | 释放时机 |
@@ -43,7 +45,7 @@ EnQue / DeQue       -- publish / wait M_FIX
 Fixpipe
     |
     v
-FreeTensor          -- publish FIX_M; slot reusable
+FreeTensor          ── 发布 FIX_M；槽可复用
 ```
 
 首次分配由队列初态管理；不额外等待一个尚未发布的 `FIX_M`。F 内部同流水 barrier 只排序 F 指令，M→F 仍由 CO1 队列保证。初始化 L1A 的 `PIPE_MTE2` barrier、L1A/L0A 的队列/事件和 L0C 的队列各自覆盖不同依赖。
@@ -64,9 +66,13 @@ FreeTensor          -- publish FIX_M; slot reusable
 
 存在 bias 时，Process 还归还持有的 bias L1/BT，End 对实际创建的队列调用 FreeAllEvent。全量与分块模式的归还位置见 [bias](bias-bt-path.md)，同一张量只释放一次。DX 不创建或等待 bias 资源。
 
+### 1.3 跨核（AIC/AIV）协同
+
+新增权重准备与 split-HW 输出重排的参与者、flagId、首令牌和收尾统一见 [C/V 协同](cv-collaboration.md)；输出初始化仍由本页第 3 节维护。C04 的单/双子块协议、MIX 核型和第二组 flag 按同一目标编译条件选择。无计算任务或 needComputeFlag_=false 时，先履行本实例要求的通知，不能统一提前返回。
+
 ## 2 L1B 驻留
 
-`l1-resident` 与其他模板使用相同的搬运、计算接口，区别在 L1B 的保留范围。完整驻留时，L1B 在首次 `DeQue` 后持续持有，多次 L0B 准备共用该张量；模板确定复用结束后再 `FreeTensor`。
+`l1-resident` 与其他模板使用相同的搬运、计算接口，区别在 L1B 的保留范围。普通 FullLoad 的跨任务保留条件排除 C04 和 vector group enlarge。允许完整驻留时，L1B 在首次 `DeQue` 后持续持有，多次 L0B 准备共用该张量；模板确定复用结束后再 `FreeTensor`。
 
 Host 的 `enableFullLoad`、Kernel 的 `curEnableFullLoad_` 和 `isB1FullLoadFlag_` 分别记录策略、当前任务是否保持驻留、父段是否完整驻留。
 
@@ -80,8 +86,8 @@ Host 的 `enableFullLoad`、Kernel 的 `curEnableFullLoad_` 和 `isB1FullLoadFla
 
 | 阶段 | 置 initOutputFlag=1 的条件 |
 |---|---|
-| SetInitOutput 前置检查 | `ρ_d>padBack`，或 `ρ_h>padDown`，或 `strideH>hk`，或 `dilationD>1` |
-| 当前常规核窗口 Tiling | `strideD>dk` |
+| SetInitOutput 前置检查 | `ρ_d>padBack`，或 `ρ_h>padDown`，或 `strideH>hk`，或 `strideD>dk`，或 `dilationD>1` |
+| Tiling 发布 | 保留前置置位结果；后续求解要求初始化时继续置位 |
 
 `ρ_d=(di+padFront+padBack-((dk-1)*dilationD+1))%strideD`，H 轴同理；形状合法性检查先保证余数口径成立。这些条件来自无贡献区域与跳过路径，不能只用其中一条代替完整判断。`SetRunInfoTiling` 写入前置结果，后续判断可以置位，`SetCommonTilingData` 发布最终值。
 
@@ -100,7 +106,7 @@ initBytes   = outputSize_*sizeof(DTYPE_Y)    // 调用侧容量检查，字节
 
 ### 3.1 范围分配
 
-工程内 InitOutput 按 AIV/AIC 分支执行清零与等待，分片规则与原 ProcessWithL0 一致。FP16/BF16 的清零主体为：
+工程内 InitOutput 按 AIV/AIC 分支执行清零与等待，分片规则与 ProcessWithL0 一致。yType 绑定 half、bfloat16_t 或 float：
 
 ```cpp
 uint64_t clearSizePerCore = AlignUp(Ceil(outputSize_, GetBlockNum()), ONE_BLK_SIZE);
@@ -118,7 +124,7 @@ Fill<yType>(yPart, realClearSize, static_cast<yType>(0));
 SyncAllCores();
 ```
 
-本片段的 Ceil/AlignUp 和 SyncAllCores 在工程内定义，分别表示向上取整除法、对齐和第 3.2 节的通知；`offset、realClearSize、clearSizePerCore` 均为元素数。该处 `ONE_BLK_SIZE` 数值为 32，因此 FP16/BF16 的分片粒度为 32 元素，不能直接表述为 128 字节。没有数据可清的参与单元也到达同步点。
+Ceil/AlignUp 和 SyncAllCores 在工程内定义，分别表示向上取整除法、对齐和第 3.2 节的通知。`offset、realClearSize、clearSizePerCore` 均为元素数；`ONE_BLK_SIZE=32`，对应 FP16/BF16 的 64B、FP32 的 128B。无清零任务的参与单元也到达同步点。
 
 ### 3.2 两个编译分支
 
@@ -146,45 +152,35 @@ CrossCoreWaitFlag(VEC_FALG_ID);
 #endif
 ```
 
-一般分离执行单元路径先汇合 AIV，再通知 AIC；耦合配置使用配套的 TQueSync。启动时按目标架构保留任务类型和 Host `SetScheduleMode(1)`，具体查询与核数检查见 [Buffer 与平台](../buffer-and-types.md)。
+一般分离执行单元路径先汇合 AIV，再通知 AIC；融合配置使用配套的 TQueSync。启动核型按已绑定的 1:1/1:2 执行配置选择，不由初始化函数隐式假定比例；使用 MODE0 的分离路径保留 Host `SetScheduleMode(1)`。能力查询见 [Buffer 与平台](../buffer-and-types.md)，参与者与核号映射见 [C/V 协同](cv-collaboration.md)。
 
 ### 3.3 入口顺序
 
 ```text
-+-----------------------------------------------------+
-| GET_TILING_DATA_WITH_STRUCT                         |
-| GetUserWorkspace                                    |
-+--------------------------+--------------------------+
-                           |
-                           |
-                           |
-                           v
-          +----------------+----------------+   no
-          | initOutputFlag == L0_INIT?      +----------------------------------------+
-          +----------------+----------------+                                        |
-                           |                                                         |
-                           |                                                         |
-                           | yes                                                     |
-                           |                                                         |
-                           v                                                         |
-        +------------------+------------------+                                      |
-        | InitOutput                          |                                      |
-        | clear slices -> notify / wait       |                                      |
-        | release initialization resources    |                                      |
-        +------------------+------------------+                                      |
-                           |                                                         |
-                           |                                                         |
-                           |                                                         |
-                           +---------------------------------------------------------+
-                           |
-                           |
-                           v
-      +--------------------+--------------------+
-      | Conv3DDxKernel::Init                    |
-      |   -> Conv3DDxKernel::Process            |
-      |      (FreeB1Tensor at end)              |
-      |   -> End -> TPipe destructor            |
-      +-----------------------------------------+
+    +-----------------------------+
+    | GET_TILING_DATA_WITH_STRUCT |
+    | GetUserWorkspace            |
+    +--------------+--------------+
+                   |
+                   v
+    +--------------+--------------+
+    | initOutputFlag == L0_INIT?  +-----------------+ 否
+    +--------------+--------------+                 |
+                   | 是                             |
+                   v                                |
+       +-----------+-----------+                    |
+       | InitOutput            |                    |
+       | 清零分片 -> 通知/等待 |                    |
+       | 释放初始化资源        |                    |
+       +-----------+-----------+                    |
+                   +--------------------------------+
+                   v
+   +---------------+---------------+
+   | Conv3DDxKernel::Init          |
+   |   -> Conv3DDxKernel::Process  |
+   |      （末尾 FreeB1Tensor）    |
+   |   -> End -> TPipe 析构        |
+   +-------------------------------+
 ```
 
 未参与主计算的核也先履行初始化协议。普通注册调用由此入口负责预清零，调用方无需预先把 dedx 置零；重复执行每次遵守相同顺序。

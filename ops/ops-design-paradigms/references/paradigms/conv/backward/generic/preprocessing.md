@@ -10,43 +10,11 @@
 
 ## 1 处理顺序
 
-```text
-     +---------------------------------------+
-     | Conv3DBackpropInput / Conv3DTranspose |
-     +-------------------+-------------------+
-                         |
-                         |
-                         v
-+------------------------+------------------------+
-| Resolve tensor roles, formats and spatial rank  |
-+------------------------+------------------------+
-                         |
-                         |
-                         v
-     +-------------------+-------------------+
-     | Normalize attributes and target shape |
-     +-------------------+-------------------+
-                         |
-                         |
-                         v
-               +---------+---------+
-               | Map 1D / 2D to 3D |
-               +---------+---------+
-                         |
-                         |
-                         v
-       +-----------------+-----------------+
-       | Validate shapes; derive geometry  |
-       +-----------------+-----------------+
-                         |
-                         |
-                         v
- +-----------------------+-----------------------+
- | Normalized problem + execution prerequisites  |
- +-----------------------------------------------+
-```
+设计前先完成规格整理，两种进入场景（Conv3DBackpropInput / Conv3DTranspose）在同一条流水线上归一：
 
-设计前先完成规格整理。
+```
+对象/格式/空间维数识别 ──► 属性归一与目标形状 ──► 1D/2D 升维 ──► 形状校验与派生量 ──► 统一问题 + 执行前置
+```
 
 ## 2 统一输入说明
 
@@ -68,7 +36,7 @@
 | 对象角色 | weight 为正向权重，dedy 为数值输入，dedx 为数值输出；X、Y 提供形状依据；转置卷积的 bias 为可选 FP32 向量 |
 | 逻辑形状 | dedx：`(N,Cin,Di,Hi,Wi)`；dedy：`(N,Cout,Dout,Ho,Wo)`；weight：`(Cout,CinG,Dk,Hk,Wk)`；bias：`(Cin,)` |
 | 存储描述 | 实际 shape、format、轴映射、元素步幅及基址偏移；连续张量按格式推导步幅，视图使用实际步幅 |
-| dtype | 已确认的 `fp16/float16` 统一为 `float16`，`bf16/bfloat16` 统一为 `bfloat16`；分别记录 weight、dedy、dedx 的类型；bias 为 FP32 |
+| dtype | `fp16/float16`、`bf16/bfloat16`、`fp32/float32` 分别统一为 `float16`、`bfloat16`、`float32`；分别记录数值输入与输出的类型；bias 为 FP32 |
 | 字段来源 | 标明调用方给定、接口默认或公式推导，保留对应原始字段 |
 
 逻辑形状统一后，NCDHW、NDHWC 仍保留各自的存储顺序。weight 格式中的 N 表示 Cout，C 表示组内输入通道数。dtype 组合由适配层核对，类型转换须单独声明。
@@ -79,16 +47,17 @@
 
 | 属性 | 统一形式 |
 |---|---|
-| strides | `(s_d,s_h,s_w)` |
-| dilations | `(δ_d,δ_h,δ_w)` |
-| pads | `(p_d^-,p_d^+,p_h^-,p_h^+,p_w^-,p_w^+)`，依次为前后、上下、左右 |
+| strides | `sD/sH/sW`（下标记号 `s_a`） |
+| dilations | `dD/dH/dW`（符号 `δ_a`） |
+| pads | `padHead/padTail`（D）、`padTop/padBottom`（H）、`padLeft/padRight`（W）；数学简写 `p_a^-、p_a^+`，头/上/左在前，尾/下/右在后 |
 | groups | 正整数 G；每组通道数为 `CinG`、`CoutG` |
-| output_padding | `(q_d,q_h,q_w)`；N/C 分量为 0，缺省为五个 0 |
+| output_padding | `outputpadD/outputpadH/outputpadW`（简写 `q_d/q_h/q_w`）；N/C 分量为 0，缺省为五个 0 |
+| enable_hf32 | input 的 FP32 使用 false，Host 发布 `hf32Flag=0`；filter 按自身模板绑定属性 |
 
 - 标量按接口约定扩展到**原始空间维数**，再补新增轴。缺省值注明来源。
 - 按张量轴序给出的 strides、dilations，先取空间分量；批次和通道分量须为 1。例如 NDHWC 的 `(1,2,3,4,1)` 归一为 `(2,3,4)`。
 - 对称 pad 展开为两侧值；非对称 pad 按轴和侧别重排。符号 padding 按已明确的规则求出两侧值。
-- output_padding 按轴序取空间分量：NCDHW 为 `[0,0,qD,qH,qW]`，NDHWC 为 `[0,qD,qH,qW,0]`；内部使用 `qD/qH/qW` 与空间轴逐一对应。
+- output_padding 按轴序取空间分量：NCDHW 为 `[0,0,outputpadD,outputpadH,outputpadW]`，NDHWC 为 `[0,outputpadD,outputpadH,outputpadW,0]`；内部使用 `outputpadD/outputpadH/outputpadW`（简写 q_a）与空间轴逐一对应。
 - 属性轴序、pad 侧别或默认规则不明确时，列出缺项；不能仅凭数组长度猜测含义。
 
 ## 3 1D / 2D 升维
@@ -149,7 +118,7 @@ X、Y、dedy、dedx 使用同一空间映射。weight 在对应核空间轴补 1
 
 input_size 全零表示属性推导；非零模式的五个尺寸均为正，N 与 x 相同，Cin 等于 `weight.CinG*G`。调用方另给 y 规格时校验一致。部分为零的形状报告具体字段错误。推导和实际 Tiling 共用这套规则。
 
-例如 `Lx=2、K=3、stride=2、pad=(1,1)、dilation=1、q=0`，属性模式得到 Ly=3；显式 Ly=4 的 rho=1，也满足本接口的形状关系。若业务要求唯一的属性推导输出，则在包装层选择属性模式。Host 形状检查使用的 `filter_*_dilation=Keff+q` 只服务于形状检查和初始化判定；Kernel 的真实核几何与 K 归约长度不受 q 影响。
+属性模式固定 Ly，显式模式允许 stride 产生的余量。Host 的 `filter_*_dilation=Keff+q` 只服务于形状检查和初始化判定，Kernel 的真实核几何及 K 长度仍由原权重决定。
 
 ### 4.3 派生量
 
@@ -187,42 +156,20 @@ dedy_expand、fmap、weight_rot 沿用 [input/scene.md](input/scene.md) 的逻�
 - 全部输出均无贡献时，仍须产出全零 dedx。局部累加器按计算块独立初始化。
 - 带 bias 时清零仍在主计算之前；主计算对无贡献位置写入 bias，清零本身不构成最终结果。
 
-需要独立清零时，执行顺序为：
+需要独立清零时，每次调用都遵守以下顺序（清零区与仍需读取的 weight、dedy 不重叠；后续清零不得覆盖已写回结果。连续 dedx 记录起点和有效字节数，带间隔存储记录有效地址区间）：
 
-```text
-         +-------------------+
-         | Output allocated  |
-         +---------+---------+
-                   |
-                   |
-                   v
-+------------------+------------------+
-| Required output region initialized  |
-+------------------+------------------+
-                   |
-                   |
-                   v
-   +---------------+---------------+
-   | Main computation writes dedx  |
-   +---------------+---------------+
-                   |
-                   |
-                   v
-        +----------+----------+
-        | dedx ready to read  |
-        +---------------------+
 ```
-
-每次调用都遵守此顺序。清零区与仍需读取的 weight、dedy 不重叠；后续清零不得覆盖已写回结果。连续 dedx 记录起点和有效字节数，带间隔存储记录有效地址区间。
+输出分配 ──► 需清零的输出区域置零 ──► 主计算写 dedx ──► dedx 可读
+```
 
 初始化判定（Host 的 initOutputFlag）按算子场景分别汇总：
 
 | 场景 | 置 initOutputFlag=1 的条件 |
 |---|---|
-| 输入梯度（DX 形状） | `ρ_d>padBack`，或 `ρ_h>padDown`，或 `strideH>hk`，或 `dilationD>1`；当前常规核窗口 Tiling 追加 `strideD>dk` |
-| 转置卷积（rho 按其形状关系计算） | `rhoD>padBack`、`rhoH>padDown` 或 `strideH>hk`；`qD>0` 或 `qH>0`，以及 `dilationD>1`；所选 Tiling 中 `strideD>dk` 的补充条件 |
+| 输入梯度（DX 形状） | `ρ_d>padBack`，或 `ρ_h>padDown`，或 `strideH>hk`，或 `strideD>dk`，或 `dilationD>1` |
+| 转置卷积（rho 按其形状关系计算） | `rhoD>padBack`、`rhoH>padDown` 或 `strideH>hk`、`strideD>dk`；`qD>0` 或 `qH>0`，以及 `dilationD>1` |
 
-例如 D 轴取 `di=5、dout=2、dk=2、strideD=dilationD=2、前后pad=0`，深度1、3没有有效贡献；此时 strideD 与 dk 相等，仍由 dilationD 条件启用清零。这些条件来自无贡献区域与跳过路径，不能只用其中一条代替完整判断；qW 通过输出宽度和窗口边界参与处理。最终标志还与主计算覆盖检查一同发布。
+深度 dilation 可产生没有有效贡献的中间平面；即使 strideD 不大于 dk，也不能省去 dilationD 的初始化条件。qW 通过输出宽度和窗口边界参与处理，最终标志与主计算覆盖检查一同发布。
 
 通用层产出清零条件、范围和依赖。适配层落实 API、执行单元及两种调用方式的接入，具体执行见 [adapters/ascendc/input/sync-implementation.md（Ascend C）](../adapters/ascendc/input/sync-implementation.md) / [DSL](../adapters/dsl/input/sync-implementation.md)。写回方案未确定时，将清零决策标为待确定。
 
@@ -230,39 +177,24 @@ dedy_expand、fmap、weight_rot 沿用 [input/scene.md](input/scene.md) 的逻�
 
 bias 缺省时 `hasBiasFlag_=false`。非空 bias 须为一维 FP32，长度 Cin；无元素的可选 Tensor 由包装层统一成缺省指针。输出通道的全局偏移为 `groupIdx*cinG+cinStart`，与 weight 的组内通道字段区分。带 bias 时，主计算还须为无贡献位置产生 bias：使用带 BT 的零乘积 MMAD，再按正常输出通路写回；预清零、L0C 首次初始化、bias 加一次分别承担各自职责，具体执行见 [adapters/ascendc/input/bias-bt-path.md（Ascend C）](../adapters/ascendc/input/bias-bt-path.md) / [DSL](../adapters/dsl/input/bias-bt-path.md)。
 
-## 6 示例
+## 6 归一化与执行前置校验
 
-以下只保留语义关键的小规模示例（转置卷积的 output_padding/bias 与输出预清零）；升维、属性归一与形状校验的规则见前文各表，完整规格推导属验证期工作，不在范式文档展开。
+将规格绑定和执行前置分别校验。以下关系不依赖某个具体 shape：
 
-### 6.1 转置卷积：output_padding 与 bias
-
-取 1D 问题 `x=[1,2]、weight=[3]、stride=2、pad=0、q=1、bias=5`，升维后核为 `(1,1,1)`、q 为 `(0,0,1)`，y 宽度为 4。乘积贡献为 `[3,0,6,0]`，最终 y 为 `[8,5,11,5]`。
-
-另取 `stride=1、dilation=2、q=1、核宽=2`：q 虽不小于 stride，但小于 dilation，满足属性条件。x 宽为 2 时，属性模式输出宽为 5；不能再用普通 DX 的正向形状式否定该目标。
-
-### 6.2 输出预清零
-
-取 3D NCDHW 问题，仅宽度方向非单维：
+| 场景 | 应保持的关系 | 校验重点 |
+|---|---|---|
+| 1D/2D 升维 | 原空间轴不变，新增空间轴为单维 | 元素数、原有 stride/dilation/pad 和逆映射一致 |
+| Transpose 的 q | 改变目标范围，不增加 K | 分别验证属性推导与显式目标形状；q 的合法性按 stride 或 dilation 判断 |
+| 可选 bias | 每个有效输出位置加一次对应通道 bias | 包括没有乘积贡献的位置；全局通道偏移正确 |
+| 输出初始化 | 无贡献位置为零，有贡献位置由主计算写回 | 非零预填与重复执行结果一致，清零先于主计算 |
 
 ```text
-dedx.shape   = (1,1,1,1,5)
-dedy.shape   = (1,1,1,1,3)
-weight.shape = (1,1,1,1,1)
-strides      = (1,1,2)
-dilations    = (1,1,1)
-pads         = (0,0,0,0,0,0)
-G            = 1
-
-dedy         = [1,2,3]
-weight       = [2]
-dedx before  = [9,9,9,9,9]
-
-Main computation writes contributing positions only:
-after zero   = [0,0,0,0,0]
-after write  = [2,0,4,0,6]
+规格/轴/属性归一
+  -> 推导目标范围与有符号边界
+  -> 校验布局与分组一致性
+  -> 建立输出初始化与 bias 契约
+  -> 把同一归一化问题交给 Tiling 与 Kernel
 ```
-
-宽度位置 1、3 无贡献，必须为零。若主计算负责完整写回，也应得到同一结果。重复调用时仍执行相应初始化协议。
 
 ## 7 产出与校验
 
@@ -286,7 +218,7 @@ after write  = [2,0,4,0,6]
 | 对象 | 统一逻辑轴 | 存储约定 |
 |---|---|---|
 | x | `(batch,Cin,Di,Hi,Wi)` | NCDHW 或 NDHWC |
-| dedy / out_backprop | `(batch,Cout,Dout,Ho,Wo)` | 与 x 相同格式、相同 FP16/BF16 类型 |
+| dedy / out_backprop | `(batch,Cout,Dout,Ho,Wo)` | 与 x 相同格式、相同 FP16/BF16/FP32 类型 |
 | dedw / y | `(Cout,CinG,Dk,Hk,Wk)` | FP32；格式独立选择 NCDHW、NDHWC 或 DHWCN |
 | filter_size | 目标 dedw 的物理 shape | 一维 5 元素整数张量；值按输出格式解释 |
 
@@ -296,11 +228,11 @@ filter_size 的三种轴序分别为 `(Cout,CinG,Dk,Hk,Wk)`、`(Cout,Dk,Hk,Wk,Ci
 
 复用 §2.3 的空间属性展开与 §4.1 的正向尺寸公式，输入长度取 x，输出长度取 dedy。检查批次相同、G 整除 Cin/Cout、`dedw.Cout=Cout`、`dedw.CinG=Cin/G`，并核对每轴输出长度。
 
-当前 filter 模型是普通正向卷积的权重梯度，接口 `output_padding` 缺省或显式全零，`enable_hf32=false`。保留属性的原始值和来源；带非零 output_padding 的转置卷积权重梯度需要独立的几何绑定。
+当前 filter 模型是普通正向卷积的权重梯度，接口 `output_padding` 缺省或显式全零，FP32 的 `enable_hf32` 按调用方属性与目标能力记录，非 FP32 不启用。保留属性的原始值和来源；带非零 output_padding 的转置卷积权重梯度需要独立的几何绑定。
 
 原始低维规格按 §3 插入空间单维，x、dedy 与 dedw 核轴使用同一映射，新增轴取长度 1、stride/dilation 1、pad 0。**调用方已给出的五维规格保持原轴名**；例如以 D 轴承载的一维问题，不能重新解释为 W 轴问题。
 
-例如原始 NWC 的 x=`(1,5,1)`、dedy=`(1,2,1)`，核宽 3、stride 2、pad 0：插入 D/H 单维后 x=`(1,1,1,5,1)`、dedy=`(1,1,1,2,1)`，NDHWC dedw=`(1,1,1,3,1)`。若原规格已是 x=`(1,5,1,1,1)`、dedy=`(1,2,1,1,1)`，则核沿 D，dedw=`(1,3,1,1,1)`；两种记录各自保留轴映射。
+原始 NWC 问题在 D/H 插入单维；已经用 D 轴承载的一维五维问题保留 D 轴。x、dedy、dedw 的核轴及属性使用同一轴记录，不能按相同元素数交换空间轴。
 
 ### 8.3 派生量与执行前置
 
@@ -310,7 +242,7 @@ filter_size 的三种轴序分别为 `(Cout,CinG,Dk,Hk,Wk)`、`(Cout,Dk,Hk,Wk,Ci
 | 输出网格 | ho×wo，batch×dout；核深度 kd 是输出任务轴 |
 | 正向采样 | `id=od*strideD+kd*dilationD-padFront`，H/W 同理；越界 x 贡献为零 |
 | 布局 | 原始格式、实际元素步幅、升维轴及逆映射 |
-| 初始化 | MN_StreamK 的每段结果原子累加到 dedw；每次调用先将实际 dedw 全部置零，并完成清零到首次写回的依赖 |
+| 初始化 | MN_StreamK 调用前清零实际 dedw，尾轮另清零局部 workspace；Winograd 用首段覆写、后续段累加；初始化随所选模板交付 |
 
 filter 不生成 dedy_expand 或 weight_rot；x_win 与 dedy_flat 的布局由 [filter/compute-flow](filter/compute-flow.md) 定义。输出清零与 L0C 首次乘加初始化各自保留；无贡献核位置保持零。融合 AIV 清零和独立清零是两套完整执行协议，适配层选定其一后连同 Kernel 等待条件一起实现。
 
@@ -320,7 +252,7 @@ filter 不生成 dedy_expand 或 weight_rot；x_win 与 dedy_flat 的布局由 [
 
 - 五维目标形状与 filter_size 一致，所有正向形状关系成立；尺寸和地址乘积不溢出。
 - 从原始 x/dedy 各取一个坐标，升维后的坐标指向同一数值；五维输入不二次换轴。
-- 用 x=`[1,2,3,4,5]`、dedy=`[10,20]` 验证上述核宽 3 的例子，dedw=`[70,100,130]`，核顺序不翻转。
+- 独立枚举正向连接求 dedw，检查升维前后贡献集合和核顺序一致。
 - 非零预填 dedw 后重复执行，结果不带上次残留；初始化由生成工程完成。
 
 随后进入 [filter 场景](filter/scene.md)、[filter 切分](filter/tiling/tiling.md) 和对应语言适配层。

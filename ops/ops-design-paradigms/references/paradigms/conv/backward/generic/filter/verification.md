@@ -4,37 +4,49 @@
 
 ## 1 验证闭环总览
 
-```text
-          +-------------------------------------------+
-          | case design + declared comparison policy  |
-          +---------------------+---------------------+
-                                |
-                                |
-                                v
-           +--------------------+--------------------+
-           | quantized x / dedy + independent Golden |
-           +--------------------+--------------------+
-                                |
-                                |
-                                v
-     +--------------------------+--------------------------+
-     | Host fields / actual device execution / output dump |
-     +--------------------------+--------------------------+
-                                |
-                                |
-                                v
-+-------------------------------+-------------------------------+
-| shape -> finite values -> elementwise comparison -> coverage  |
-+-------------------------------+-------------------------------+
-                                |
-                                |
-                                v
-+-------------------------------+-------------------------------+
-| locate failure -> update knowledge -> regenerate and regress  |
-+---------------------------------------------------------------+
+```
+       +---------------------+
+       | ① 用例设计          |
+       | （用例表+路径tag）  |
+       +----------+----------+
+                  |
+                  v
+         +--------+--------+
+         | ② 输入量化生成  |
+         | （固定 seed）   |
+         +--------+--------+
+                  |
+                  v
+       +----------+----------+
+       | ③ 独立 golden       |
+       | （torch 反向/FP64） |
+       +----------+----------+
+                  |
+                  v
+     +------------+------------+
+     | ④ Host 字段 / NPU 执行  |
+     | （dump 输出+实际字段）  |
+     +------------+------------+
+                  |
+                  v
+         +--------+--------+
+         | ⑤ 精度比对      |
+         | （逐点+匹配率） |
+         +-----------------+
+                  |
+                  +--> PASS
+                  | FAIL
+                  v
++-----------------+-----------------+
+| ⑥ 失败定位                        |
+| dump/字段/坐标反解回任务与 N 分形 |
++-----------------+-----------------+
+                  | 根因在范式知识
+                  v
+⑦ 范式回写 -> 独立重新生成并复验（第 8 节）
 ```
 
-先证明数学和布局，再验证 Host 选择、设备实现和整体调用。正确性通过与分支命中分别记录；文档算例通过不代替设备运行，设备精度通过也不替代目标路径覆盖。
+先证明数学和布局，再验证 Host 选择、设备实现和整体调用；正确性通过与分支命中分别记录，文档算例通过不代替设备运行，设备精度通过也不替代目标路径覆盖。
 
 ## 2 验证范围与用例设计
 
@@ -43,11 +55,11 @@
 | 维度 | 本分支约定 |
 |---|---|
 | 场景 | Conv1/2/3DBackpropFilter，低维规格升维后统一验证 |
-| 数值 | x/dedy 同为 FP16 或 BF16，dedw 为 FP32 |
+| 数值 | x/dedy 同为 FP16、BF16 或 FP32，dedw 为 FP32 |
 | 布局 | x/dedy 同为 NCDHW 或 NDHWC；dedw 独立为 NCDHW/NDHWC/DHWCN |
 | 分组 | 按实际 CinG/CoutG 独立计算，包括通道尾块 |
-| 路径 | MN_StreamK、streamkType=0，普通/拆核与整宽/切宽按最终计划 |
-| 执行 | 实际输出预清零，段内 L0C 累加、段间 GM 原子累加 |
+| 路径 | DLoad/Winograd/MN_StreamK 自然选择；MN_StreamK 的三态、窗口、宽片按最终计划 |
+| 执行 | MN_StreamK 清零与尾轮树形归约；Winograd 首段覆写、段间合并和尾轮交织写回 |
 
 ### 2.2 用例设计三层次
 
@@ -68,9 +80,9 @@
 | groups | 1、多组；给不同组分配不同数值特征 |
 | rank | 1D/2D/3D，同数学问题升维前后对应 |
 | 输出格式 | 对同一逻辑问题分别输出三种格式，转回逻辑坐标后相同 |
-| dtype | 两路同为 FP16 或 BF16；先量化输入再求 Golden |
+| dtype | 两路同为 FP16/BF16/FP32；Golden 消费同一批实际存储值，FP32/hf32 分别记录计算模式 |
 
-例如 x=(1,1,1,1,1)、核宽=3、左右 pad=1，合法输出宽为 1；两个边缘核位置的梯度为零。这个合法零贡献例子与“规格超接口核尺寸上限被拒绝”分别验证。
+分别验证合法的无贡献核位置和规格超接口范围的拒绝场景；数学梯度为零不等于规格非法。
 
 ### 2.4 L2 Tiling 状态覆盖
 
@@ -86,23 +98,36 @@
 | 无效深度段 | padFront/dilationD 产生全无效或部分无效 id | 跳过合法、首次有效贡献不丢失 |
 | 轮转与空任务核 | totalCnt 小于核数、大于核数且不整除 | 唯一归属、初始化通知和尾轮 |
 | 组内输入通道尾块 | CinG=17 且 dk>1 | nSize 不多写相邻 ci/kd |
+| Winograd tile 档 | 两档 clusters 不同或相同，输出 H/W 为奇数 | 覆盖块数比较、同数选档 2、边缘 tile 与驻留区布局 |
+| 尾轮 StreamK 三态 | totalCnt 对核数取余、余数过半/未过半、格式门禁 | streamkType 与决策链复算一致；HWout 的 stepK 收缩与回退恢复原值 |
+| 确定性归约 | streamkType≠0 重复执行 | 固定配置下结果逐位一致；Cube 槽清零/原子累加、Vector 中间层与最终写回闭环 |
+| DLoad 驻留与选块 | batch、Cin/Cout、独立 D/H/W、核尺寸及对称 pad 的组合；L1/L0 容量边界、通道尾块、空深度段、两种 hf32Flag | 按资源与字段条件选择计划；完整归约、有效写回和无贡献段置零正确；准入不满足时继续后继模板 |
+| winograd kd=3/hf32 | kd=1/3、FP32/hf32 计算模式、满足/不满足源码能力门禁 | kd 子轮屏障无脏写、平台门禁拦截正确、hf32 精度单独记录 |
+| winograd 驻留缺口通道 | Cout 搜索档 16/32/48 与默认 64、Cin 固定 64 | 入口 rtTiling 唯一；迭代、驻留和尾通道覆盖一致 |
+| winograd 尾轮切 K | cuttableK>1 且 kGroups 间不均衡 | 每位写回者读取全部 K 组；kd 子轮聚合前后均有屏障 |
+| winograd 混合核流水 | 闲置核陪跑、UB 正/逆分时切换 | 信号闭环、切换期无残留数据 |
+
+| Winograd D 无效步/段 | kd=3 的首尾 od，或分段全部无效 | 空驻留握手、全无效段 UB 输入清零、通知次数一致 |
+| Winograd 归约分段 | 块步数跨 32768/(th*tw) | 段内 firstK、每段逆变换、首段覆写及后续原子合并 |
+| Winograd workspace | x/dedy 的 D 不同、通道与 tile 尾部 | transX→transDy→驻留区→tailGm 的物理前缀和与真实范围 |
+| FP32 MN_StreamK | 整宽/切宽、1×1×1/普通/拆核、hf32Flag=0/1 | k0=8、逻辑窗口 16、双 repeat、模式恢复、用户区与系统区 |
 
 ### 2.5 窗口、搬运与写回的联动检查
 
-以下小尺寸用于函数和布局模型验证；真实生成工程由 Host 自然选择分支，保存最终 key、isSplitKernelHW、splitWo、base*、step* 与槽份数。函数参数示例不能代替自然命中记录。
+以下边界关系用于函数和布局模型验证；真实生成工程由 Host 自然选择分支，保存最终 key、isSplitKernelHW、splitWo、base*、step* 与槽份数。函数级构造不能代替自然命中记录。
 
-| 子问题 | 输入或状态 | 必须核对的结果 |
+| 子问题 | 输入或状态关系 | 必须核对的结果 |
 |---|---|---|
-| 宽片交叠与尾宽 | wi=25、wo=13、wk=3、strideW=2、两侧 pad=1、splitWo=8 | 两片真实 x 列为 `[0,16)`、`[15,25)`；原行步幅不变，尾片 K 状态重算 |
-| B 父段裁剪 | hi=7、ho=4、hk=3、strideH=2、padUp=1；W=8、baseK=16、stepKb=1 | 两父段真实行 `[0,4)`、`[3,7)`，顶部 pad 为 1、0；各槽恢复自身元数据 |
-| 父段内起点 | K 块从非整行起点开始，且 stepKa!=stepKb | 两路同一 K 对应相同 oh/ow，mStartPt 与 A 行内余数分别正确 |
-| 单个有效 co | tailM_=1，实际 K=31 | MTE2 只读一个 co，计算 M 暂扩为 16，CopyOut 恢复 M=1 |
-| 拆核采样 | x 平面 5×6、输出 3×3、核 3×3、stride=2、pad=1，固定 hkIdx=wkIdx=0 | 原采样坐标 `[-1,1,3]`；真实 2×2 父网格加采样 pad，等于直接 x 采样 |
-| 拆核 L0C 子片段 | baseM=32、三个 N0=16 片段 | float 偏移为 0、512、1024；各片段首次贡献独立，无贡献片段保持零 |
-| 拆核 M 尾部跨度 | baseM=144、有效 M=113 | N0 片段仍相隔 144*16 个 float；Fixpipe 按同一物理跨度取源，只写真实 113 个 co |
-| 父段跨 M/N 复用 | ORDER_M/ORDER_N；K 块数在 step*Pbuffer 两侧取值；批深度 1/2 | 对照 UpdateMNIdx 的重载、保留和归还标志；重复消费不重复 DeQue |
-| 非整窗写回 | hw=4、baseN=48、singleCoreN=64、真实 ci=1 | 核区间依次 `[0,3)`、`[3,4)`；三种格式均只写该真实 ci |
-| 写回状态重放 | 同一 N 被多个 M 使用，以及 N 回绕 | nLoopHead_/nLoopCinRemainLen_ 恢复到该 N 的起点，新任务/段重新初始化 |
+| 宽片交叠与尾宽 | wo 不能被 splitWo 整除，核覆盖相邻宽片 | 源区域按窗口交集计算，原行步幅不变，尾片 K 状态重算 |
+| B 父段裁剪 | 行带从顶部 pad 跨入有效 x，下一父段有重叠 | 每份父段保留自身真实行区间、补边和原点 |
+| 父段内起点 | 非整行 K 起点，且 stepKa!=stepKb | 两路配对同一 oh/ow，mStartPt 与 A 行内余数分别正确 |
+| 单个有效 co | co 尾长为 1，K 有尾块 | 搬运只读有效 co，计算 M 的扩展在写回前恢复 |
+| 拆核采样 | 原 stride/dilation 非单位，含前侧 pad | 采样网格裁剪与逐元素正向坐标一致 |
+| 拆核 L0C 子片段 | 一个 baseN 覆盖多个 N0 核位置片段 | 第 t 片段源偏移为 `t*baseM*N0`，首次贡献独立，无贡献片段为零 |
+| 拆核 M 尾部跨度 | 有效 M 小于 baseM | 片段仍按 baseM 跨度寻址，只写有效 co |
+| 父段跨 M/N 复用 | 两种迭代序、K 块数在换槽周期边界两侧 | 重载、保留与归还标志一致，重复消费不重复 DeQue |
+| 非整窗写回 | baseN 截在核窗口中间，ci 存在尾分形 | head_/tail_ 连续覆盖真实核坐标，三种输出格式均不写补齐通道 |
+| 写回状态重放 | 同一 N 被多个 M 使用，以及 N 回绕 | 恢复该 N 的起点；新任务和段重新初始化 |
 
 搬运验证用唯一编号的 x/dedy。先按原张量偏移取得数值，再独立枚举 `(n,od,oh,ow,ci,kh,kw)` 得到数学窗口；比较实际父布局与 MTE1 后的每个 A/B 元素。拆核与普通窗口使用相同数学坐标核对，补零点、有效点和对齐槽分别记录。
 
@@ -121,13 +146,13 @@
 | 身份 | case_id、seed、预期成功或错误类型 |
 | 张量 | x/dedy/filter_size、输入 dtype、输入格式与输出格式 |
 | 属性 | strides、六侧 pads、dilations、groups |
-| 路径标签 | template、isSplitKernelHW、splitWo、baseM/N/K、stepKa/b、五路份数、usedCoreNum |
+| 路径标签 | template、isSplitKernelHW、splitWo、baseM/N/K、stepKa/b、五路份数、coreNum/blockDim、streamkType、hf32Flag、Winograd 档/驻留方向 |
 | 精度 | rtol、atol、ptol 及其依据 |
 | 结果 | 编译/运行状态、实际 key/字段、精度、越界/同步状态 |
 
 预期标签与运行后的实际标签分开；只设置 desired tag 而未读取真实字段不算命中。
 
-### 2.6 判定依赖分级与增量接入
+### 2.7 判定依赖分级与增量接入
 
 数学、shape、分组、布局、dtype 和输出完整性是硬依赖；目标 SDK 编译与实际设备执行是实现验收依赖。性能基线是另外一层证据。
 
@@ -150,14 +175,15 @@ import torch
 def make_input(shape, dtype, seed):
     rng = np.random.default_rng(seed)
     a = rng.uniform(-0.5, 0.5, shape).astype(np.float32)
-    target = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+    target = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype]
     packed = torch.from_numpy(a).to(target).contiguous()
     decoded = packed.float().numpy()  # Golden 消费量化后的数值
     return packed, decoded
 
 def save_input(path, packed):
-    # 两种输入都保存真实的 16 位编码，BF16 不经 np.float16 转换。
-    packed.view(torch.uint16).numpy().tofile(path)
+    # 保留实际位编码；BF16 不经 FP16 转换，FP32 使用 32 位存储。
+    raw = packed.numpy() if packed.dtype == torch.float32 else packed.view(torch.uint16).numpy()
+    raw.tofile(path)
 
 x_bits, x_values = make_input((1, 2, 3, 3, 3), "bf16", seed=17)
 dy_bits, dy_values = make_input((1, 4, 2, 2, 2), "bf16", seed=29)
@@ -179,7 +205,9 @@ dy_bits, dy_values = make_input((1, 4, 2, 2, 2), "bf16", seed=29)
 
 ### 4.2 计算精度：量化输入抬到 FP32
 
-Golden 先读取真实 FP16/BF16 输入，再抬到 FP32 或更高精度计算；不能使用量化前的随机 FP32 值。当前输出固定 FP32，不执行 FP16 输出裁剪、饱和或转换。
+Golden 先读取真实 FP16/BF16/FP32 输入，再抬到 FP32 或更高精度计算；不能使用量化前的随机 FP32 值。当前输出固定 FP32，不执行 FP16 输出裁剪、饱和或转换。
+
+Winograd/hf32 仍使用同一普通卷积权重梯度 Golden，不以设备变换或 hf32 截断逻辑重写基准；分别按既定精度标准验收并记录模式。
 
 长归约可用 FP64 直接求和交叉验证。其结果与设备 FP32 累加存在合理舍入差异，容差依据输入类型、归约长度与既定验收要求记录。
 
@@ -197,19 +225,16 @@ strides/dilations 统一为空间三元组，pads 统一为 `(front,back,up,down
            +---------------------------------------+
            | actual packed FP16 / BF16 input bytes |
            +-------------------+-------------------+
-                               |
                                | same rounded values as device
                                v
         +----------------------+----------------------+
         | decode to FP32 -> permute x / dedy to NCDHW |
         +----------------------+----------------------+
-                               |
                                | forward sampling geometry
                                v
       +------------------------+------------------------+
       | explicit six-side x padding -> grad_weight FP32 |
       +------------------------+------------------------+
-                               |
                                | preserve group-local ci
                                v
 +------------------------------+------------------------------+
@@ -287,7 +312,7 @@ def golden_dw(x, dedy, filter_size, strides, pads, dilations, groups,
     return np.ascontiguousarray(a, dtype=np.float32)
 ```
 
-最小检查：`x=[1,2,3,4,5]`、dedy=[10,20]、filter_size=(1,1,1,1,3)、strideW=2、pad=0，Golden 为 `[70,100,130]`。三维 2×2×2 核的完整数值见 compute-flow 第 4.2 节。
+最小检查：`x=[1,2,3,4,5]`、dedy=[10,20]、filter_size=(1,1,1,1,3)、strideW=2、pad=0，Golden 为 `[70,100,130]`。一般三维窗口与输出的对应关系见 compute-flow 第 4.2 节。
 
 ### 4.7 高频陷阱
 
@@ -341,7 +366,7 @@ def compare_dw(output, golden, *, rtol, atol, ptol=0.0):
 
 ## 6 参考代码指引
 
-本页第 3～5 节提供独立输入、Golden 和比对骨架；compute-flow 提供小张量排布与窗口结果；mn-streamk 提供字段与预算复算；适配层提供实际参数与 Kernel 阶段代码。
+本页第 3～5 节提供独立输入、Golden 和比对骨架；compute-flow 提供小张量排布与窗口结果；mn-streamk 提供求解流程与产出校验；适配层提供实际参数与 Kernel 阶段代码。
 
 生成工程将这些内容落实为脚本和可重放用例，分别保存直调或注册入口的真实构建/执行记录。Host 字段对照、CPU 数学验证和 NPU 精度是不同证据层。
 

@@ -4,6 +4,8 @@
 
 沿用 x、dedy、dedw、dedy_flat、x_win。A 路为 dedy，B 路为 x；L1A/L1B 保存父段，L0A/L0B 为本次计算操作数，L0C 保存 FP32 部分和。轴序均从慢到快，示意小分形只说明顺序。
 
+本页主要展开 MN_StreamK 的主轮 im2col 数据流，具体分形图采用 FP16/BF16。FP32 的物理通道块及专用搬运见 [指令映射 §9](../../adapters/ascendc/filter/instruction-mapping.md#9-fp32-输入与-hf32-计算模式)；尾轮 K 切分见 [MN_StreamK](tiling/templates/mn-streamk/tiling.md)，Winograd 使用[独立变换流水](../../adapters/ascendc/filter/winograd-implementation.md)。
+
 ## 1 计算模型速览
 
 ### 1.1 从正向连接得到 dedw
@@ -16,31 +18,7 @@ $$
 x_g[n,ci,\mathbf o\odot\mathbf s+\mathbf k\odot\boldsymbol\delta-\mathbf p^-].
 $$
 
-越界 x 采样为零。固定 kd 后，dedy_flat 的 K 列和 x_win 的 K 行按同一个 `(oh,ow)` 配对；batch×dout 在矩阵乘外累加。
-
-```text
-dedy -- flatten output grid --> dedy_flat [M,K] --+
-                                                  |
-x -- sample forward windows --> x_win [K,N] ------+
-                                                  |
-                                                  |
-                                                  v
-                                  +---------------+---------------+
-                                  | multiply-add at fixed g / kd  |
-                                  +---------------+---------------+
-                                                  |
-                                                  |
-                                                  v
-                                       +----------+----------+
-                                       | sum(batch,od,oh,ow) |
-                                       +----------+----------+
-                                                  |
-                                                  |
-                                                  v
-                                    +-------------+-------------+
-                                    | dedw [Cout,CinG,Dk,Hk,Wk] |
-                                    +---------------------------+
-```
+越界 x 采样为零。固定 kd 后，dedy_flat 的 K 列和 x_win 的 K 行按同一个 `(oh,ow)` 配对；batch×dout 在矩阵乘外累加。矩阵映射图（A=dedy_flat、B=x_win、Y=dedw 块）见 [language.md](language.md) §2 的 GEMM 映射。
 
 img2col 将 x 的每个正向窗口排成 x_win 的一行。相邻窗口可重复读取同一 x 元素；窗口矩阵可以在搬运时形成，不要求预先存入 GM。
 
@@ -71,22 +49,13 @@ img2col 将 x 的每个正向窗口排成 x_win 的一行。相邻窗口可重�
 ### 2.2 dedy 侧：GM → L1A → L0A
 
 ```text
-+---------------------------+
-| dedy / GM: NCDHW or NDHWC |
-+-------------+-------------+
-              |
-              | MTE2: DN2NZ / ND2NZ
-              v
-+-------------+-------------+
-| L1A: (Cout1,K1,K0,Cout0)  |
-+-------------+-------------+
-              |
-              | MTE1: Load2D, transpose fractals
-              v
-+-------------+-------------+
-| L0A: (K1,Cout1,Cout0,K0)  |
-| NZ(M,K)                   |
-+---------------------------+
+dedy(GM, NCDHW/NDHWC)
+  │  DN2NZ / ND2NZ 布局转换搬运（随路 ND→NZ，装入当前 co 段与输出行带）
+  ▼
+L1A [Cout1, K1, K0, Cout0]    <-- dedy_flat 父段（不做滑窗展开）
+  │  LOAD2D（分形内两轴交换 + 分形重排，完成转置）
+  ▼
+L0A [K1, Cout1, Cout0, K0]    <-- NZ(M,K)：行=co（M）、列=输出位置（K）
 ```
 
 FP16/BF16 的常规 L1A 父布局为 `(Cout1,K1,K0,Cout0)`；Load2D 交换分形内两轴并重排分形，得到 `(K1,Cout1,Cout0,K0)`。K 指输出位置，不是核位置。
@@ -94,22 +63,13 @@ FP16/BF16 的常规 L1A 父布局为 `(Cout1,K1,K0,Cout0)`；Load2D 交换分形
 ### 2.3 x 侧：GM → L1B → L0B
 
 ```text
-     +-------------------------+
-     | x / GM: NCDHW or NDHWC  |
-     +------------+------------+
-                  |
-                  | MTE2: crop valid source + DN2NZ / ND2NZ
-                  v
-+-----------------+-----------------+
-| L1B: (Cin1,hiCopyLen,realWi,Cin0) |
-+-----------------+-----------------+
-                  |
-                  | MTE1: Load3D, forward windows
-                  v
-  +---------------+---------------+
-  | L0B: (K1,Cin1,kh,kw,Cin0,K0)  |
-  | ZN(K,N)                       |
-  +-------------------------------+
+x(GM, NCDHW/NDHWC)
+  │  DN2NZ / ND2NZ 布局转换搬运（只搬有效深度/行带；拆核路径按原核坐标采样分段）
+  ▼
+L1B [Cin1, hiCopyLen, realWi, Cin0]    <-- 原始 x 行带（未做滑窗展开！）
+  │  LOAD3D（按正向 stride/pad/dilation 取窗 = 硬件 im2col）
+  ▼
+L0B [K1, Cin1, kh, kw, Cin0, K0]       <-- x_win：ZN(K,N)，K=输出位置、N=(ci1,kh,kw,ci0)
 ```
 
 固定实际 x 深度，L1B 的典型视图为 `(Cin1,hiCopyLen,realWi,Cin0)`。Load3D 按正向 stride/dilation 和边界提取窗口，组织为本轮 x_win。普通路径和拆核路径的差别在窗口由哪一阶段展开。
@@ -117,21 +77,11 @@ FP16/BF16 的常规 L1A 父布局为 `(Cout1,K1,K0,Cout0)`；Load2D 交换分形
 ### 2.4 输出侧：MMAD → L0C → dedw GM
 
 ```text
-      +-------------------------------------+
-      | L0C segment partial sum / NZ / FP32 |
-      +------------------+------------------+
-                         |
-                         | wait for all segment contributions
-                         v
-+------------------------+------------------------+
-| SetAtomicAdd<float> -> Fixpipe -> SetAtomicNone |
-+------------------------+------------------------+
-                         |
-                         | valid channels and kernel positions only
-                         v
-      +------------------+------------------+
-      | dedw / GM: NCDHW or NDHWC or DHWCN  |
-      +-------------------------------------+
+L0A [K1,M1,M0,K0] -----+
+                       |
+L0B [K1,N1,N0,K0] -----+--> MMAD -> L0C（FP32 段内部分和）
+
+段内首次乘加初始化；L0C --FIXPIPE（原子累加，只写有效 M/N）--> dedw(GM, FP32)
 ```
 
 每个归约段第一次实际 MMAD 初始化 L0C，其余贡献继续累加。段末写回时 GM 中已有先前段结果，因此使用原子累加；新段不沿用旧 L0C。
@@ -139,81 +89,49 @@ FP16/BF16 的常规 L1A 父布局为 `(Cout1,K1,K0,Cout0)`；Load2D 交换分形
 ### 2.5 两路数据流总图
 
 ```text
-AIV: clear dedw -> notify -> AIC wait -> main computation
+前置：AIV Fill 清零有效 dedw -> 全员汇合 -> 发 MODE2 旗标 -> AIC 等待
+（两阶段衔接见 §8.2；段内首次乘加初始化 L0C）
 
-  +-----------------------------------+           +-----------------------------------+
-  | dedy / GM                         |           | x / GM                            |
-  +-----------------+-----------------+           +-----------------+-----------------+
-                    |                                               |
-                    | DataCopy                                      | DataCopy
-                    |                                               |
-                    |                                               |
-                    v                                               v
-  +-----------------+-----------------+           +-----------------+-----------------+
-  | L1A / parent segment              |           | L1B / x rows                      |
-  +-----------------+-----------------+           +-----------------+-----------------+
-                    |                                               |
-                    | Load2D + transpose                            | Load3D windows
-                    |                                               |
-                    |                                               |
-                    v                                               v
-  +-----------------+-----------------+           +-----------------+-----------------+
-  | L0A / NZ(M,K)                     |           | L0B / ZN(K,N)                     |
-  +-----------------+-----------------+           +-----------------+-----------------+
-                    |                                               |
-                    |                                               |
-                    +-----------------------+-----------------------+
-                                            |
-                                            | MMAD / FP32
-                                            v
-                          +-----------------+-----------------+
-                          | L0C / segment partial sum         |
-                          +-----------------+-----------------+
-                                            |
-                                            |
-                                            | Fixpipe / atomic add
-                                            |
-                                            v
-                          +-----------------+-----------------+
-                          | dedw / GM / FP32                  |
-                          +-----------------------------------+
+A 路（dedy）                                B 路（x）
++-----------------------------+             +-------------------------+
+| GM -> L1A（dedy_flat 父段） |             | GM -> L1B（x 有效行带） |
++--------------+--------------+             +------------+------------+
+               | LOAD2D 转置                             | LOAD3D 正向窗口 im2col
+               v                                         v
++--------------+--------------+             +------------+------------+
+| L0A（NZ[M,K] 分形）         |             | L0B（ZN[K,N] 分形）     |
++--------------+--------------+             +------------+------------+
+               |                                         |
+               +--------------------+--------------------+
+                                    |
+                                    v
+                    +---------------+---------------+
+                    | MMAD -> L0C（FP32 段部分和）  |
+                    +---------------+---------------+
+                                    | FIXPIPE / 原子累加
+                                    v
+                           +--------+--------+
+                           | GM（dedw,FP32） |
+                           +-----------------+
 ```
 
-预清零在两路主计算之前完成。streamkType=0、groupEnlarge=false 时，AIV 完成初始化协议后不承担每个计算块的乘加或归约。
+初始化与主计算分阶段衔接。MN_StreamK、streamkType=0、原始组模式下，AIV 清零、汇合并通知后不做主轮数值工作；段内乘加与段间原子合并由 AIC 完成。
 
 ## 3 数据格式与存储轴序
 
 ### 3.1 NCDHW、NDHWC 与 DHWCN
 
-对一般特征张量 T，固定 batch，示例取 `C=2、D=2、H=1、W=2`。标号为 `(c,d,w)`：
+NCDHW 使同一通道的空间体连续，NDHWC 使同一空间点的通道连续。dedw 的 N/C 分别对应 Cout/CinG，DHWCN 则让全局 co 连续：
 
 ```text
-Logical coordinates (c,d,w), H=1, fixed batch:
-+-------+-------------------+
-| c / d | w=0       w=1     |
-+-------+-------------------+
-| 0 / 0 | (0,0,0) (0,0,1)   |
-| 0 / 1 | (0,1,0) (0,1,1)   |
-| 1 / 0 | (1,0,0) (1,0,1)   |
-| 1 / 1 | (1,1,0) (1,1,1)   |
-+-------+-------------------+
+特征张量（固定 batch）：
+NCDHW: [c: d -> h -> w] [下一 c: d -> h -> w] ...
+NDHWC: [d,h,w: c ->]    [下一空间点: c ->] ...
 
-NCDHW: 000 001 010 011 | 100 101 110 111
-NDHWC: 000 100 001 101 | 010 110 011 111
-```
-
-NCDHW 先走完一个通道的空间体，NDHWC 先走完一个空间点的通道。处理组内片段时，原张量空间步幅仍使用总 Cin 或 Cout。
-
-dedw 的格式字符串中 N 对应正向 Cout、C 对应 CinG。用 `100*co+10*ci+kw` 给同一组元素编号，取 `Cout=CinG=2、dk=hk=1、wk=2`：
-
-```text
-+--------+-------------------+---------------------------+
-| format | slow -> fast axes | memory order              |
-+--------+-------------------+---------------------------+
-| NCDHW  | (co,ci,kd,kh,kw)  | 0 1 10 11 100 101 110 111 |
-| NDHWC  | (co,kd,kh,kw,ci)  | 0 10 1 11 100 110 101 111 |
-| DHWCN  | (kd,kh,kw,ci,co)  | 0 100 10 110 1 101 11 111 |
-+--------+-------------------+---------------------------+
+dedw 轴序:
+NCDHW: (co,ci,kd,kh,kw)
+NDHWC: (co,kd,kh,kw,ci)
+DHWCN: (kd,kh,kw,ci,co)
 ```
 
 连续存储的元素步幅如下；每项与该行的轴序一一对应：
@@ -232,108 +150,70 @@ dedw 的格式字符串中 N 对应正向 Cout、C 对应 CinG。用 `100*co+10*
 
 ### 3.2 ND、DN、NZ 与 ZN
 
-固定逻辑矩阵 T[R,S]，将 R/S 分别拆为块号 R1/S1 与块内坐标 R0/S0：
+先固定同一个逻辑矩阵 `T[R,S]`。ND 沿列连续，DN 沿行连续；NZ 在分形之间按列走、分形内按行走，ZN 在分形之间按行走、分形内按列走。N/D 记号与批次、卷积深度无关。
 
-| 格式 | 慢→快轴序 | 遍历顺序 |
+```text
+ND: 列连续（通道在内）              DN: 行连续（通道在外）
++-----+-----+-----+                 +-----+-----+-----+
+| T00 | T01 | ... |                 | T00 | T10 | ... |
++-----+-----+-----+                 +-----+-----+-----+
+| T10 | T11 | ... |                 | T01 | T11 | ... |
++-----+-----+-----+                 +-----+-----+-----+
+内存序: T00,T01,...,T10,T11,...     内存序: T00,T10,...,T01,T11,...
+```
+
+将行、列拆成块号 `(r1,s1)` 和块内坐标 `(r0,s0)`；分形大小为 bR×bS，块数为 `R1=ceilDiv(R,bR)`、`S1=ceilDiv(S,bS)`。
+
+| 格式 | 慢到快轴序 | 连续方向 |
 |---|---|---|
-| ND | `(R,S)` | 行连续 |
-| DN | `(S,R)` | 列连续 |
-| NZ | `(S1,R1,R0,S0)` | 块间列优先，块内行优先 |
-| ZN | `(R1,S1,S0,R0)` | 块间行优先，块内列优先 |
-
-同一个 4×4 矩阵，示意块为 2×2：
+| ND | `(R,S)` | 列元素 |
+| DN | `(S,R)` | 行元素 |
+| NZ | `(S1,R1,bR,bS)` | 分形内的列元素 |
+| ZN | `(R1,S1,bS,bR)` | 分形内的行元素 |
 
 ```text
-+-------+----+----+----+----+
-| r / c | 0  | 1  | 2  | 3  |
-+-------+----+----+----+----+
-| 0     | 0  | 1  | 2  | 3  |
-| 1     | 4  | 5  | 6  | 7  |
-| 2     | 8  | 9  | 10 | 11 |
-| 3     | 12 | 13 | 14 | 15 |
-+-------+----+----+----+----+
+分形网格；F00/F01/F10/F11 是块坐标，不是数据值：
++---------+---------+
+| F00     | F01     |
++---------+---------+
+| F10     | F11     |
++---------+---------+
 
-ND: 0 1 2 3 | 4 5 6 7 | 8 9 10 11 | 12 13 14 15
-DN: 0 4 8 12 | 1 5 9 13 | 2 6 10 14 | 3 7 11 15
-NZ: 0 1 4 5 | 8 9 12 13 | 2 3 6 7 | 10 11 14 15
-ZN: 0 4 1 5 | 2 6 3 7 | 8 12 9 13 | 10 14 11 15
+NZ: F00 -> F10 -> F01 -> F11；块间按列走、块内按行走
+ZN: F00 -> F01 -> F10 -> F11；块间按行走、块内按列走
 
-Each group of four numbers is one 2x2 fractal in NZ / ZN.
+pad (R,S) -> 拆 (R1,bR,S1,bS) -> 重排 -> 目的布局
 ```
 
-布局转换只改变地址，不改变 T 的数学坐标。例如 `T[2,1]=9` 在 ND/DN/NZ/ZN 中的元素偏移分别为 9/6/5/10。
+布局转换保持元素的数学坐标。紧致存储的偏移为：
 
-```text
- +-------------------------+
- | (R,S) / row-contiguous  |
- +------------+------------+
-              |
-              |
-              v
-  +-----------+-----------+
-  | pad -> (R1*R0,S1*S0)  |
-  +-----------+-----------+
-              |
-              |
-              v
-+-------------+-------------+
-| reshape -> (R1,R0,S1,S0)  |
-+-------------+-------------+
-              |
-              |
-              v
-    +---------+---------+
-    | NZ: (S1,R1,R0,S0) |
-    | ZN: (R1,S1,S0,R0) |
-    +-------------------+
-```
+$$
+\begin{aligned}
+\mathrm{off}_{NZ}&=((s_1R_1+r_1)b_R+r_0)b_S+s_0,\\
+\mathrm{off}_{ZN}&=((r_1S_1+s_1)b_S+s_0)b_R+r_0.
+\end{aligned}
+$$
 
-上述 pad/reshape/轴序重排是推导步骤，实际搬运可一次实现多步。ND2NZ/DN2NZ 的命名按其源矩阵朝向理解；先写清行列是谁，再配置 API。
+真实搬运可同时完成补齐、拆轴和重排；带间隔布局使用实际步幅。先说明矩阵的行列含义，再选择转换方向。
+
+读取 dedy 时，以输出空间为行、Cout 为列：NDHWC 为 ND，NCDHW 为 DN。计算的 dedy_flat 以 Cout 为行、输出空间 K 为列，由 Load2D 完成相应分形转置。x_win 以 K 为行、窗口通道 N 为列，由 Load3D 形成 ZN。
+
+filter 的 K 是输出位置，不采用 input 的“通道×核高宽”定义。
 
 ### 3.3 五维张量与片上视图
 
-固定 g、kd 和一个 batch/dout 后，两条五维张量通路变为：
+固定组、任务 kd 与实际 batch/od 后，两路五维张量分别选择深度切片，再形成父段：
 
 ```text
-    +---------------------------------------------+
-    | dedy [batch,Cout,Dout,Ho,Wo] / logical axes |
-    +----------------------+----------------------+
-                           |
-                           |
-                           v
-  +------------------------+------------------------+
-  | select batch / group / output depth / co block  |
-  +------------------------+------------------------+
-                           |
-                           |
-                           v
-+--------------------------+--------------------------+
-| L1A [Cout1,K1,K0,Cout0] -> L0A [K1,Cout1,Cout0,K0]  |
-+-----------------------------------------------------+
-```
+dedy[batch,Cout,Dout,Ho,Wo]
+  | 选择 batch / group / od / co 范围
+  v
+L1A(Cout1,K1,K0,Cout0) --Load2D--> L0A(K1,Cout1,Cout0,K0)
 
-```text
-  +---------------------------------------+
-  | x [batch,Cin,Di,Hi,Wi] / logical axes |
-  +-------------------+-------------------+
-                      |
-                      |
-                      v
-+---------------------+---------------------+
-| id = od*strideD + kd*dilationD - padFront |
-+---------------------+---------------------+
-                      |
-                      |
-                      v
-    +-----------------+-----------------+
-    | L1B [Cin1,hiCopyLen,realWi,Cin0]  |
-    +-----------------+-----------------+
-                      |
-                      |
-                      v
-  +-------------------+-------------------+
-  | x_win -> L0B [K1,Cin1,kh,kw,Cin0,K0]  |
-  +---------------------------------------+
+x[batch,Cin,Di,Hi,Wi]
+  | id = od*strideD + kd*dilationD - padFront
+  v
+L1B(Cin1,hiCopyLen,realWi,Cin0) --Load3D--> L0B(K1,Cin1,kh,kw,Cin0,K0)
 ```
 
 父段带有自己的起点、有效尺寸和实际跨度。L1A 的 alignedL1UseKa 可能大于本轮 kal1 的有效部分；L1B 中 bL1cin1CopyLen 在 Kernel 中表示实际搬入的通道数，Host 预算中的 bL1Cin1CopyLen 表示通道块数，二者相差 C0，须按各自名称与单位换算。
@@ -351,13 +231,13 @@ FP16/BF16 下 `M0=N0=K0=C0=16`。下表均为物理轴序：
 将 N1 展开，L0C 对应 `(Cin1,kh,kw,Cout1,Cout0,Cin0)`；固定 kd 的输出还须恢复外部格式中的 kd 轴。逻辑矩阵 `[M,N]` 的书写顺序不能替代物理分形顺序。
 
 ```text
-+----------+------------+---------------------+---------------+
-| buffer   | row        | col                 | physical axes |
-+----------+------------+---------------------+---------------+
-| L0A / NZ | M = co     | K = oh*wo+ow        | (K1,M1,M0,K0) |
-| L0B / ZN | the same K | N = (ci1,kh,kw,ci0) | (K1,N1,N0,K0) |
-| L0C / NZ | M = co     | the same N          | (N1,M1,M0,N0) |
-+----------+------------+---------------------+---------------+
++----------+--------+---------------------+---------------+
+| Buffer   | 行     | 列                  | 物理轴序      |
++----------+--------+---------------------+---------------+
+| L0A / NZ | M = co | K = oh*wo+ow        | (K1,M1,M0,K0) |
+| L0B / ZN | 同一 K | N = (ci1,kh,kw,ci0) | (K1,N1,N0,K0) |
+| L0C / NZ | M = co | 同一 N              | (N1,M1,M0,N0) |
++----------+--------+---------------------+---------------+
 ```
 
 这里的 `(ci1,kh,kw,ci0)` 为 N 的逻辑顺序。非整窗 baseN 可以截在相邻核位置或通道块之间，必须保留 head_/tail_/cinRemainLen_，由写回逻辑拆成合法片段。
@@ -373,122 +253,112 @@ FP16/BF16 下 `M0=N0=K0=C0=16`。下表均为物理轴序：
 解码 N 时，先取 `ci0=n%C0`，再将 `n//C0` 解为 kwIdx、khIdx、ci1。A 的 K 列与 B 的 K 行必须对应同一批次、同一输出深度和同一输出平面位置。
 
 ```text
-Fixed task (g,kd,co-range,ci-window-range):
+固定任务 (g,kd,co 范围,ci 窗口范围):
 
-  batch / od segment
-    -> ho segment
-      -> actual batch / od
-        -> output width slice
-          -> K block: oh / ow positions
+  batch / od 段
+    -> ho 段
+      -> 实际 batch / od
+        -> 输出宽片
+          -> K 块: oh / ow 位置
 
-N position: ci1 -> kh -> kw -> ci0 (fastest)
-A K column and B K row refer to the same actual batch / od / oh / ow.
+N 位置: ci1 -> kh -> kw -> ci0（最快）
+A 的 K 列与 B 的 K 行对应同一实际 batch / od / oh / ow。
 ```
 
 batch×dout 为外层归约域；ho 分段和 wo 切宽只是将同一输出网格分成不重叠区域。补齐通道只占内部存储，不增加有效乘积。
 
-### 4.2 三维例子：x 窗口与输出平面
+### 4.2 三维窗口与输出平面
 
-取 `x=(1,1,3,3,3)`、`dedw=(1,1,2,2,2)`、stride/dilation 均为 1、pad=0，得到 `dedy=(1,1,2,2,2)`。x 按深度顺序取 1～27，dedy 取 1～8：
-
-```text
-x, depth id=0       x, depth id=1       x, depth id=2
-+----+----+----+    +----+----+----+    +----+----+----+
-|  1 |  2 |  3 |    | 10 | 11 | 12 |    | 19 | 20 | 21 |
-|  4 |  5 |  6 |    | 13 | 14 | 15 |    | 22 | 23 | 24 |
-|  7 |  8 |  9 |    | 16 | 17 | 18 |    | 25 | 26 | 27 |
-+----+----+----+    +----+----+----+    +----+----+----+
-
-dedy, od=0    dedy, od=1
-+---+---+     +---+---+
-| 1 | 2 |     | 5 | 6 |
-| 3 | 4 |     | 7 | 8 |
-+---+---+     +---+---+
-```
-
-先固定 `kd=0、od=0`。四个输出位置需要四个 2×2 窗口：
+固定组、kd、batch 和输出深度 od。每个 `(oh,ow)` 同时提供一个 dedy 值和一个 x 窗口；将这些位置按 K 排列后，两路相乘得到当前批深度对 dedw 的贡献。
 
 ```text
-+---+---------+------------------+--------------+
-| K | (oh,ow) | x window at id=0 | row in x_win |
-+---+---------+------------------+--------------+
-| 0 | (0,0)   | [1 2; 4 5]       | 1 2 4 5      |
-| 1 | (0,1)   | [2 3; 5 6]       | 2 3 5 6      |
-| 2 | (1,0)   | [4 5; 7 8]       | 4 5 7 8      |
-| 3 | (1,1)   | [5 6; 8 9]       | 5 6 8 9      |
-+---+---------+------------------+--------------+
+dedy 平面: (co,oh,ow) -> dedy_flat[M,K]
+x 平面: 同一 (oh,ow) 的正向窗口 -> x_win[K,N]
+
+dedw[M,N] += dedy_flat[M,K] * x_win[K,N]
+
+一个 K 位置:
+  dedy_flat[:,K]  外积  x_win[K,:]  -> 对 dedw 的贡献
+
+下一 batch / od:
+  新输入值，同一输出核坐标
 ```
 
-将它们排入 x_win 的四行，同时将 dedy 平面排成 dedy_flat 的一行：
+M 对应 co，N 按 `(ci1,kh,kw,ci0)` 排列。核位置保持正向顺序，batch 和 dout 在矩阵乘外累加；没有插零或 rot180。
+
+### 4.3 LOAD3D（L1B→L0B，硬件 im2col）
+
+**im2col 原理**——按正向 stride/pad/dilation 在 x 上取窗，把滑窗展开写成矩阵：每个输出位置的窗口展平成 B 矩阵的一行：
+
+```
+L1B 中的 x 行带（hiCopyLen × realWi）   正向感受野(2×2)   L0B 上的 B 矩阵（K × N）
++---------------------+                 -- im2col -->     行 = 输出位置 k = oh·wo+ow
+| .  .  .  .  .  .  . |                                   列 = (ci, kh, kw) 展平
+| . [.  .] .  .  .  . |                                   +--------+-----------------------------+
+| . [.  .] .  .  .  . |                                   | 窗口行 | 展开后的元素                |
+| .  .  .  .  .  .  . |                                   +--------+-----------------------------+
++---------------------+                                   | k      | x(k,ci,0,0) x(k,ci,0,1) ... |
+窗口沿 W、H 按正向 stride 滑动                            | k+1    | x(k+1,ci,0,0) ...           |
+                                                          +--------+-----------------------------+
+```
+
+LOAD3D 一条指令完成"取窗 → 展开 → 摆成 ZN 分形"三件事，目标在 L0B。
+
+**相邻窗口的元素复用**（单位 stride/dilation、单通道小图；下一窗口右移一列，与前窗口共享一列元素）：
 
 ```text
-dedy_flat: [1 2 3 4]
-
-+-------+-------+-------+-------+-------+
-| K / N | (0,0) | (0,1) | (1,0) | (1,1) |
-+-------+-------+-------+-------+-------+
-| 0     | 1     | 2     | 4     | 5     |
-| 1     | 2     | 3     | 5     | 6     |
-| 2     | 4     | 5     | 7     | 8     |
-| 3     | 5     | 6     | 8     | 9     |
-+-------+-------+-------+-------+-------+
-
-dedy_flat [1x4] * x_win [4x4] = [37 47 67 77]
-Columns above show (kh,kw), fixed ci=0.
+L1B / x 行带          L0B / ZN：同一通道的选中元素
++---------------+     行 = 输出位置 K；列标签 = (kh,kw)
+| .  .  .  .  . |     +--------+-------+-------+-------+-------+
+| . [a  b] e  . |     | window | (0,0) | (0,1) | (1,0) | (1,1) |
+| . [c  d] f  . |     +--------+-------+-------+-------+-------+
+| .  .  .  .  . |     | 当前 k | a     | b     | c     | d     |
++---------------+     | 下一 k | b     | e     | d     | f     |
+窗口 -> 下一窗口      +--------+-------+-------+-------+-------+
+                      完整 N 序：(Cin1,kh,kw,Cin0)
+                      逻辑窗口 -> 物理分形
 ```
 
-这一批深度产生 `[37,47,67,77]`。继续归约 `od=1`，对 kd=0 得到最终 `[356,392,464,500]`；kd=1 的最终结果为 `[680,716,788,824]`。这些数值只用于验证连接、核顺序和矩阵化，实际计算的通道维按 C0 补齐。
+实际指令保留规格中的 stride/dilation。N 中还包含同一核位置的其他 Cin0。dedy_flat 的 K 列与 x_win 的 K 行对应同一个输出位置，随后在 L0C 中累加。
 
-### 4.3 img2col：从 x 的窗口到 L0B
+配置分两组（位域下发）：
 
-Load3D 的 m 方向表示当前输出位置 K，k 方向表示窗口/通道 N。它们与 GEMM 的 M/K 不是同一命名：
+| 配置组 | 内容 | 语义 |
+|---|---|---|
+| 窗口几何 | 当前 x 行带高宽、pad、原 stride/dilation、hk/wk、channelSize | "在哪张输入行带上取什么窗口" |
+| 块定位 | mStartPt/mExtension、kStartPt/kExtension、目的分形步幅 | "这次取出哪个 [K0,N0] 子块" |
 
-| 窗口参数 | 本分支含义 |
-|---|---|
-| mStartPt / mExtension | 输出网格起点 / 当前有效 K |
-| kStartPt / kExtension | 当前核窗口通道起点 / 当前 N 长度 |
-| channelSize | 当前提取覆盖的 ci 通道跨度 |
-| padList | 当前 x 父段的左、右、上、下边界 |
-| filter/stride/dilation | 原正向 H/W 采样几何；拆核时改为单位窗口并由外层定位原核坐标 |
+**块定位参数的精确语义**——⚠️ 本指令的 m/k 参数与 GEMM 的 M/K **同名不同义**（沿用窗口指令的行命名：m 组作用于**输出位置（K 方向）**、k 组作用于**窗口通道/核位置（N 方向）**，单位错误是本分支滑窗类 bug 的高发点）：
 
-```text
-          +---------------------------------+
-          | L1B: x row band [Cin1,H,W,Cin0] |
-          +----------------+----------------+
-                           |
-                           | select one output position
-                           v
-+--------------------------+--------------------------+
-| window origin: oh*strideH-padUp, ow*strideW-padLeft |
-+--------------------------+--------------------------+
-                           |
-                           | extract forward kernel
-                           v
-+--------------------------+--------------------------+
-| sample kh/kw with dilation; pack N=(ci1,kh,kw,ci0)  |
-+--------------------------+--------------------------+
-                           |
-                           | repeat for each valid K
-                           v
-              +------------+------------+
-              | L0B [K1,N1,N0,K0] / ZN  |
-              +-------------------------+
-```
+| 参数 | 单位/语义 | 取值规则 |
+|------|----------|---------|
+| mStartPt / mExtension | **输出网格局部起点** / 本轮展开的输出位置数 | 起点=本段首输出位置的行内列号（跨行不改变取值规则，**不要**手工乘 stride）；长度=本轮有效 `baseUseK_`（真值） |
+| kStartPt / kExtension | 相对**当前父段**的窗口通道起点 / 本轮窗口通道数 | `baseUseN_`；父段切换时按新段原点重算，**不是**全局 N 坐标 |
+| channelSize | 当前窗口覆盖的实际 ci 通道跨度 | **不是**窗口元素总数，也**不是**分形数 |
+| padList | 当前 x 父段的左、右、上、下边界 | 元素序固定 {left, right, top, bottom}；bottom 恒填兼容值 255 表示**下边界不设防**（真实行数由每次搬运更新的 l1H 覆盖），上界必须精确 |
+| filter/stride/dilation | 原正向采样几何 | 拆核路径由 MTE2 定位原 kh/kw，MTE1 使用单位窗口 |
+| repeat / dstStride | 目的步幅按 **N0 分形数**，由本轮 N 范围换算 | dstStride=本轮 N0 分形个数；repeatTime=1 |
 
-例如 `hk=wk=2、C0=16、baseUseN_=64、kStartPt=0`：覆盖一个完整的核高宽通道块，channelSize 为 16 个通道；kExtension 为 64 个窗口元素，不能把 64 误当成通道数。FP16/BF16 使用一条配套 Repeat/LoadData 调用；按分形循环多条命令是另一种 dtype 通路，不能直接移用。
+**K 位置跨多输出行的语义**（对应本分支的"一般 K 模式"）：
+
+- mExtension 允许 **> 当前宽片宽度**：输出位置序列跨输出行，行切换由硬件在 x 行带内自动完成，软件只需保证行带反推（§5.3.1）覆盖本段全部窗口的输入行；
+- mStartPt 仍取**本段首输出位置的行内列号**（跨行不改变取值规则）；
+- 跨行与宽片尾叠加时：mExtension 取本段真值，MMAD 的 k 取真值，FIXPIPE 按有效 M/N 写出——有效扩展长度与分形存储跨度分别传递，无额外修正。
+
+**参数限制（超限走拆核/切宽路径）**——范围来自当前窗口指令映射（[tiling](tiling/tiling.md) 与适配层），目标 SDK 更换时重新核实：
+
+| 限制 | 值 | 超限出路 |
+|------|----|---------|
+| stride（H/W 每维） | ≤ 63 | 拆核路径（isSplitKernelHW） |
+| dilation / hk / wk（每维） | ≤ 255 | 拆核路径 |
+| pad（H/W 四侧） | ≤ 255 | 拆核路径 |
+| hk·wk·C0 | ≤ 65536 | 拆核路径 |
+| wo | ≤ 512 | 切宽（splitWo 按 128 分段，见 §5.2.1） |
+| hi / wi（行带高宽） | ≤ 32767 | 行带预算上限，超限由 Tiling 准入拒绝 |
+
+FP16/BF16 使用配套的一组 Repeat/LoadData 调用；具体字段和原窗口、拆核窗口的差异见 [指令映射](../../adapters/ascendc/filter/instruction-mapping.md#5-l1b-到-l0b)。
 
 ### 4.4 核深度与批深度的处理
-
-```text
-+---------+---------+-----------------------------------+
-| task kd | dedy od | x id (strideD=dilationD=1, pad=0) |
-+---------+---------+-----------------------------------+
-| 0       | 0       | 0                                 |
-| 0       | 1       | 1                                 |
-| 1       | 0       | 1                                 |
-| 1       | 1       | 2                                 |
-+---------+---------+-----------------------------------+
-```
 
 对当前 batchDoutIdx，`n=batchDoutIdx//dout`、`od=batchDoutIdx%dout`；固定任务 kd 后，x 深度为 `od*strideD+kd*dilationD-padFront`。跨 dout 边界时 batch 增 1，x 深度重新从该 batch 的输出深度关系计算。
 
@@ -523,47 +393,19 @@ Load3D 的 m 方向表示当前输出位置 K，k 方向表示窗口/通道 N。
 
 kaStepIdx 为 A 父段号，其元素起点为 `kaStepIdx*kal1`；kal1Use 为本父段在当前宽片内的有效 K 长度。Kernel 按实际起点计算 `hoStart=floor(kaStepIdx*kal1/singleShapeWo)`、`hoEnd=ceilDiv(kaStepIdx*kal1+kal1Use,singleShapeWo)`，只搬 `hoEnd-hoStart` 行。预算与实际长度分别保存。
 
-```text
-Current output width = 100, kal1 = 128
-
-row 0: [ K   0 .............................................. K  99 ]
-row 1: [ K 100 .... K 127 | remaining positions in this output row   ]
-row 2: [ Host budget reserves crossing-row coverage when needed     ]
-
-At parent start 0: copy 2 real rows, keep actual parent stride.
-At a row-aligned final 64 positions: copy 1 real row.
-Host upper bound: floor(128/100)+2 = 3 rows.
-```
-
-例如 `kal1=128、singleShapeWo=100`：预算覆盖 3 行；从平面起点搬入首父段时实际覆盖 2 行。如果末父段只剩 64 个位置且从新行开始，实际只搬 1 行。128 不能被 100 整除。
+预算按最坏跨行覆盖保留，实际搬运按当前父段的起点与 kal1Use 重算。切宽后的行跨度使用当前 singleShapeWo，原 GM 行步幅仍保留完整 wo。
 
 #### 5.2.2 布局转换与计算分形
 
 NCDHW 使用 DN2NZ，源通道步幅是 `dout*ho*wo`；NDHWC 使用 ND2NZ，源行步幅是总 cout。两者形成相同 L1A 父布局，再由 Load2D 转置进入 L0A。
 
 ```text
-     +-------------------------------+
-     | NCDHW: source [co,K] / DN2NZ  |
-     | NDHWC: source [K,co] / ND2NZ  |
-     +---------------+---------------+
-                     |
-                     |
-                     v
-        +------------+------------+
-        | L1A [Cout1,K1,K0,Cout0] |
-        +------------+------------+
-                     |
-                     |
-                     v
-+--------------------+--------------------+
-| Load2D: swap K0 / Cout0, reorder blocks |
-+--------------------+--------------------+
-                     |
-                     |
-                     v
-        +------------+------------+
-        | L0A [K1,Cout1,Cout0,K0] |
-        +-------------------------+
+NCDHW / DN -- DN2NZ --+
+                      +--> L1A(Cout1,K1,K0,Cout0)
+NDHWC / ND -- ND2NZ --+            |
+                                   | Load2D: 转置并重排
+                                   v
+                        L0A(K1,Cout1,Cout0,K0)
 ```
 
 切宽后 alignedL1UseKa 取实际搬入行数与宽度形成的父跨度，Load2D 再加行内 K 起点。不能用最大槽长或原完整 wo 代替该跨度。
@@ -580,31 +422,28 @@ NCDHW 使用 DN2NZ，源通道步幅是 `dout*ho*wo`；NDHWC 使用 ND2NZ，源�
 拆核路径每次处理一个原核坐标，Host 预算为 `hiCal=hoCal、splitWi=splitWo`，原 stride/dilation 和原核起点由分段搬运表达。
 
 ```text
-hoCal=2, strideH=2, hk=3, dilationH=1
-
-output row 0 -> input rows [0 1 2]
-output row 1 -> input rows     [2 3 4]
-                              ^ shared row
-union       -> input rows [0 1 2 3 4] = 5 rows
-
-If origin is -1: logical rows [-1 0 1 2 3]
-  pad top -> [-1]
-  GM copy -> [ 0 1 2 3 ]
+输出行带
+  | stride、核跨度与 dilation
+  v
+所需 x 行带: [逻辑起点, 逻辑终点)
+  | 与 [0,hi) 取交集
+  v
+GM 拷贝: 只搬有效行；缺失的上下行由窗口补边表达
 ```
 
-例如 `hoCal=2、strideH=2、hk=3、dilationH=1`，普通路径需覆盖 5 行。若起点为 −1，则真实复制从 x 第 0 行开始，顶部缺失一行由 pad 表达。搬运只覆盖 x 的有效交集，不能将负 srcStride 当作越界修正。
+起点和交集先按有符号宽整数计算。只提交有效 x 区域的搬运；pad 用于窗口补零，不能用负 srcStride 修补越界。
 
 #### 5.3.2 原窗口与拆核窗口
 
 ```text
-+--------------+-----------------------------------------+-------------------------------+
-| path         | MTE2 / L1B                              | MTE1 / L0B                    |
-+--------------+-----------------------------------------+-------------------------------+
-| normal       | copy valid original x row band          | Load3D(hk,wk,stride,dilation) |
-| split kernel | select original kh/kw; sample by stride | Load3D(1,1,1,1)               |
-+--------------+-----------------------------------------+-------------------------------+
++----------+----------------------------+-------------------------------+
+| 路径     | MTE2 / L1B                 | MTE1 / L0B                    |
++----------+----------------------------+-------------------------------+
+| 普通窗口 | 拷贝有效原始 x 行带        | Load3D(hk,wk,stride,dilation) |
+| 拆核     | 选原 kh/kw；按 stride 采样 | Load3D(1,1,1,1)               |
++----------+----------------------------+-------------------------------+
 
-Both paths -> same x_win values at the same (K,N) coordinates.
+两条路径 -> 同一 (K,N) 坐标上的相同 x_win 值。
 ```
 
 普通路径在 Load3D 中完成整个核窗口；拆核路径在 GM→L1B 的选择中落实原 kh/kw，Load3D 只提取单位核。更换路径时，原核位置、源地址、窗口参数和目标 N 分形位置必须一起更新。
@@ -616,13 +455,13 @@ Both paths -> same x_win values at the same (K,N) coordinates.
 #### 5.4.1 段内初值与段间合并
 
 ```text
-dedw GM initially: 0
+dedw GM 初始: 0
 
-segment 0: init L0C -> add all valid contributions -> atomic add to dedw
-segment 1: init L0C -> add all valid contributions -> atomic add to dedw
-segment 2: init L0C -> add all valid contributions -> atomic add to dedw
+段 0: 初始化 L0C -> 累加全部有效贡献 -> 原子累加到 dedw
+段 1: 初始化 L0C -> 累加全部有效贡献 -> 原子累加到 dedw
+段 2: 初始化 L0C -> 累加全部有效贡献 -> 原子累加到 dedw
 
-dedw GM finally: segment0 + segment1 + segment2
+dedw GM 最终: 段0 + 段1 + 段2
 ```
 
 MMAD 使用当前计算 baseUseM_/N_/K_；内部槽占用另行对齐。适配实现会在单个有效 co 时临时把计算 M 扩到 16，写回前恢复有效 M；数学输出范围始终不变。isFirstMmad 跨本段的 batch/dout、切宽和 K 循环保留；段末将完整部分和原子累加到 dedw，下一段重新置 true。
@@ -630,19 +469,19 @@ MMAD 使用当前计算 baseUseM_/N_/K_；内部槽占用另行对齐。适配�
 #### 5.4.2 从 L0C 恢复三种输出格式
 
 ```text
-+----------------+----------------------------------+
-| stage / format | slow -> fast axes, fixed task kd |
-+----------------+----------------------------------+
-| L0C            | (Cin1,kh,kw,Cout1,Cout0,Cin0)    |
-| dedw / NCDHW   | (co,ci,kd,kh,kw)                 |
-| dedw / NDHWC   | (co,kd,kh,kw,ci)                 |
-| dedw / DHWCN   | (kd,kh,kw,ci,co)                 |
-+----------------+----------------------------------+
++--------------+-------------------------------+
+| 阶段/格式    | 慢 -> 快轴序（固定任务 kd）   |
++--------------+-------------------------------+
+| L0C          | (Cin1,kh,kw,Cout1,Cout0,Cin0) |
+| dedw / NCDHW | (co,ci,kd,kh,kw)              |
+| dedw / NDHWC | (co,kd,kh,kw,ci)              |
+| dedw / DHWCN | (kd,kh,kw,ci,co)              |
++--------------+-------------------------------+
 ```
 
 L0C 的 N 包含 `(ci1,kh,kw,ci0)`，不能将它作为连续 CinG 直接平铺到外部权重格式。普通核 NCDHW 写回需交换核位置与 ci0；NDHWC 保持核位置在 ci 之外；DHWCN 还使全局 co 成为最快轴。1×1×1 使用简化矩阵写回，普通核和非整窗 N 另有分发。
 
-例如 CinG=17 时，第二个 ci 分形只有一个有效通道。每个核位置只写这一个通道，余下 15 个内部补齐位置都不能写回；dk>1 时扩大 nSize 会落到相邻深度或通道区域。
+ci 尾分形按 `min(C0,CinG-ciStart)` 写回每个有效核位置，补齐通道不落 GM；dk>1 时保留完整核深度步幅，避免写到相邻任务。
 
 ### 5.5 原张量地址与三维步幅
 
@@ -657,12 +496,12 @@ L0C 的 N 包含 `(ci1,kh,kw,ci0)`，不能将它作为连续 CinG 直接平铺�
 DHWCN 的 dedw 偏移为 `((((kdIdx*hk+khIdx)*wk+kwIdx)*cinG+ci)*cout+c_o)`。
 
 ```text
-offsetA = batch base + group/co base + od plane + ho row
-offsetB = batch base + group/ci base + valid id plane + valid ih row
-offsetC = group/co base + ci base + fixed kd slice
+offsetA = batch 基址 + group/co 基址 + od 平面 + ho 行
+offsetB = batch 基址 + group/ci 基址 + 有效 id 平面 + 有效 ih 行
+offsetC = group/co 基址 + ci 基址 + 固定 kd 切片
 
-segment changes batch / od / ho -> recalculate offsetA and offsetB
-same task                     -> keep offsetC
+段切换 batch / od / ho -> 重算 offsetA 与 offsetB
+同一任务              -> 保持 offsetC
 ```
 
 offsetC_ 只随任务通道、组和核深度变化；batch/dout/ho 段切换重算 offsetA_/offsetB_。带 pad 的采样坐标先按有符号宽整数判断，只有确认有效后才能提交 GM 访问。
@@ -673,21 +512,28 @@ offsetC_ 只随任务通道、组和核深度变化；batch/dout/ho 段切换重
 
 `mCnt=ceilDiv(mValue,singleCoreM)`、`nCnt=ceilDiv(nValue,singleCoreN)`，`totalCnt=mCnt*nCnt*dk*G`。每个基本块绑定一个 g、kd 和 M/N 范围：
 
+| 任务 | co 范围（M） | ci/核窗口范围（N） | 固定轴 |
+|---|---|---|---|
+| (m0,n0) | [0, singleCoreM) | 首组完整通道窗口 | g、kd |
+| (m0,n1) | 同一 co 段 | 下一组完整通道窗口 | g、kd |
+| (m1,n0) | 下一 co 段 | 首组完整通道窗口 | g、kd |
+
+任务四元组在 M×N 输出平面上的投影（固定 g、kd 后的一层；每个格子 = 一个基本块任务，M/N 尾任务按"总长−起点"收缩）：
+
 ```text
-+---------+-----------------+----------------------------+------------+
-| task    | co range        | ci/window range            | fixed axes |
-+---------+-----------------+----------------------------+------------+
-| (m0,n0) | [0,singleCoreM) | first full channel windows | g,kd       |
-| (m0,n1) | same co range   | next full channel windows  | g,kd       |
-| (m1,n0) | next co range   | first full channel windows | g,kd       |
-+---------+-----------------+----------------------------+------------+
+M(co)
+  ^        n0              n1              n2
+  |
+m1|   task(m1,n0)    task(m1,n1)    task(m1,n2) ...
+m0|   task(m0,n0)    task(m0,n1)    task(m0,n2) ...
+  +------------------------------------------------> N(ci×核窗口)
 
 idx = (((mIdx*nCnt+nIdx)*dk+dkIdx)*G+gIdx)
-core assignment: idx = block_idx + round*usedCoreNum
+core assignment: idx = block_idx + round*coreNum
 ```
 
 ```cpp
-for (uint64_t idx = block_idx; idx < totalCnt; idx += usedCoreNum) {
+for (uint64_t idx = block_idx; idx < totalCnt; idx += coreNum) {
     uint32_t gIdx  = idx % G;
     uint32_t dkIdx = (idx / G) % dk;
     uint64_t nIdx  = (idx / G / dk) % nCnt;
@@ -712,13 +558,13 @@ for (uint64_t idx = block_idx; idx < totalCnt; idx += usedCoreNum) {
 
 ```text
 dedw
-`-- task: g / kd / co-range / ci-window-range
-    `-- reduction segment: batch*dout range / ho range
-        `-- M/N output subblock: baseM x baseN
-            `-- actual batch / od and output width slice
-                `-- K subblock: paired L0A / L0B
-                    -> accumulate in the same segment L0C
-        -> Fixpipe: add complete segment result to dedw
+`-- 任务: g / kd / co 范围 / ci 窗口范围
+    `-- 归约段: batch*dout 范围 / ho 范围
+        `-- M/N 输出子块: baseM x baseN
+            `-- 实际 batch / od 与输出宽片
+                `-- K 子块: 配对的 L0A / L0B
+                    -> 累加到同一归约段的 L0C
+        -> Fixpipe: 把完整段结果原子累加到 dedw
 ```
 
 singleCoreN 描述任务通道窗口，baseN 描述 L0 子块；一项任务可以有多个 N 子块。每个归约段的 L0C 必须包含当前输出块在该段内的全部有效贡献，再进入 Fixpipe。
@@ -729,12 +575,12 @@ singleCoreN 描述任务通道窗口，baseN 描述 L0 子块；一项任务可�
 
 ```text
 +----------------------+----+----+----+----+----+
-| K block number       | 0  | 1  | 2  | 3  | 4  |
+| K 块号               | 0  | 1  | 2  | 3  | 4  |
 +----------------------+----+----+----+----+----+
-| A parent, stepKa=2   | A0 | A0 | A1 | A1 | A2 |
-| B parent, stepKb=4   | B0 | B0 | B0 | B0 | B1 |
-| local K / baseK in A | 0  | 1  | 0  | 1  | 0  |
-| local K / baseK in B | 0  | 1  | 2  | 3  | 0  |
+| A 父段 / stepKa=2    | A0 | A0 | A1 | A1 | A2 |
+| B 父段 / stepKb=4    | B0 | B0 | B0 | B0 | B1 |
+| A 内局部 K / baseK   | 0  | 1  | 0  | 1  | 0  |
+| B 内局部 K / baseK   | 0  | 1  | 2  | 3  | 0  |
 +----------------------+----+----+----+----+----+
 ```
 
@@ -766,7 +612,7 @@ for (uint64_t bd = 0; bd < uint64_t(batch)*dout; bd += reduceSegmentsND) {
 }
 ```
 
-IterateAll 覆盖该段全部有效 batch/dout、切宽和 K 子块；第二参数 1 表示原子累加。示例 `batch*dout=128、ho=wo=32` 得到 H 段长 32、ND 段长 64，共两段，每段归约 65536 个输出位置。
+IterateAll 覆盖该段全部有效 batch/dout、切宽和 K 子块；第二参数 1 表示原子累加。段内累计所有有效贡献，段间只通过 GM 的原子累加合并。
 
 ### 7.4 有效范围、物理跨度与槽容量
 
@@ -780,13 +626,9 @@ IterateAll 覆盖该段全部有效 batch/dout、切宽和 K 子块；第二参�
 | cinRemainLen_ | 当前 ci 尾部剩余通道 | Fixpipe 有效 nSize |
 
 ```text
-Example ci tail: actual CinG=17
-
-ci block 0: [0 1 ... 15]       -> 16 valid channels
-ci block 1: [16 | pad ... pad] ->  1 valid channel, 16 stored lanes
-
-MMAD / buffer addressing: use actual extent + fractal storage contract
-Fixpipe: write the one valid ci for each original kernel position
+tail ci block: [ valid ci lanes ][ alignment padding ]
+each original kernel position writes valid ci lanes only
+stored width and effective output width are separate
 ```
 
 MMAD 使用源码更新后的有效 m/n/k，分形容量另外对齐。源地址对齐不等于扩大有效输出，补齐槽也不能作为额外通道写回。
@@ -804,33 +646,29 @@ MMAD 使用源码更新后的有效 m/n/k，分形容量另外对齐。源地址
 | K 块切换 | baseUseK_、父段内起点、输入槽 | 非末次消费者仍需的 L1 父段 |
 
 ```text
-        +---------------------------------------+
-        | task starts: output ownership / tails |
-        +-------------------+-------------------+
-                            |
++-------------------------------------------------------+
+| 任务开始: 输出归属 / 尾块                             |
++---------------------------+---------------------------+
                             |
                             v
 +---------------------------+---------------------------+
-| segment starts: source identity / first contribution  |
+| 段开始: 源身份 / 首次贡献                             |
 +---------------------------+---------------------------+
                             |
+                            v
++---------------------------+---------------------------+
+| batch-depth / 宽片 / K 循环: 保持段 L0C               |
++---------------------------+---------------------------+
                             |
                             v
-  +-------------------------+-------------------------+
-  | batch-depth / width / K loops: retain segment L0C |
-  +-------------------------+-------------------------+
-                            |
-                            |
-                            v
-  +-------------------------+-------------------------+
-  | segment finishes: F -> atomic add -> release L0C  |
-  +-------------------------+-------------------------+
-                            |
++---------------------------+---------------------------+
+| 段结束: F -> 原子累加 -> 释放 L0C                     |
++---------------------------+---------------------------+
                             |
                             v
-        +-------------------+-------------------+
-        | next segment: new L0C initialization  |
-        +---------------------------------------+
++---------------------------+---------------------------+
+| 下一段: 新的 L0C 初始化                               |
++-------------------------------------------------------+
 ```
 
 跨段不得误复用已经变化的 GM 父段；段内也不能在换 batch、换宽片时重置 isFirstMmad。
@@ -855,18 +693,15 @@ AIV 的 Fill 清零作为执行前置阶段，不计为主计算的一条常驻�
              | AIV: Fill entire actual dedw = 0  |
              +-----------------+-----------------+
                                |
-                               |
                                v
      +-------------------------+-------------------------+
      | all participating AIVs join -> publish MODE2 flag |
      +-------------------------+-------------------------+
                                |
-                               |
                                v
                +---------------+---------------+
                | AIC: wait initialization flag |
                +---------------+---------------+
-                               |
                                |
                                v
 +------------------------------+------------------------------+
@@ -874,60 +709,54 @@ AIV 的 Fill 清零作为执行前置阶段，不计为主计算的一条常驻�
 +-------------------------------------------------------------+
 ```
 
-清零覆盖实际 dedw 的全部 FP32 元素。没有清零分片的 AIV 也参加汇合；没有主计算任务的 AIC 先等待初始化通知。streamkType=0、原始分组模式下，AIV 清零、汇合并通知后返回，不进入主循环。
+清零覆盖实际 dedw 的全部 FP32 元素。没有清零分片的 AIV 也参加汇合；没有主计算任务的 AIC 先等待初始化通知。streamkType=0、原始分组模式下，AIV 清零、汇合并通知后不做主轮数值工作；统一 Process 中仅保持任务推进。
 
 AIV 是否需要参与主循环，取决于主循环是否存在跨核同步。本配置的 AIC 在初始化后不再等待 AIV；后续增加跨核归约路径时，必须同时实现 AIV 的配对路径，不能沿用本配置的提前返回规则。
 
 ### 8.3 四级流水图
 
-取两个归约段，每段有两轮 MMAD，输入和 L0C 均可双缓冲。seg0/seg1 的两路父段分别先完成，再消费相应的 j00/j01 和 j10/j11：
+四级流水沿用"搬入父段 → 准备操作数 → 乘加 → 段末原子写回"的顺序，四条流水（MTE2/MTE1/M/F）用双槽缓冲错开一级，使装载与计算重叠：
 
 ```text
-+-------+----------+----------+-----+-----+-----+-----+----+
-| stage | t0       | t1       | t2  | t3  | t4  | t5  | t6 |
-+-------+----------+----------+-----+-----+-----+-----+----+
-| MTE2  | seg0 A/B | seg1 A/B |     |     |     |     |    |
-| MTE1  |          | j00      | j01 | j10 | j11 |     |    |
-| M     |          |          | j00 | j01 | j10 | j11 |    |
-| F     |          |          |     |     | F0  |     | F1 |
-+-------+----------+----------+-----+-----+-----+-----+----+
-
-+---------------+------+-----+------+-----+
-| contribution  | j00  | j01 | j10  | j11 |
-+---------------+------+-----+------+-----+
-| segment       | 0    | 0   | 1    | 1   |
-| L0 input slot | 0    | 1   | 0    | 1   |
-| L0C slot      | 0    | 0   | 1    | 1   |
-| L0C action    | init | add | init | add |
-+---------------+------+-----+------+-----+
++----------------+--------+-------------+----------------+---------------+-----------------+
+| 流水 / 时间 -> | 阶段 0 | 阶段 1      | 阶段 2         | 阶段 3        | 阶段 4 / 后续   |
++----------------+--------+-------------+----------------+---------------+-----------------+
+| MTE2           | 装A0B0 | 装A1B1      | 装A2B2         | ...           |                 |
+| MTE1           |        | A0B0:L1->L0 | A1B1:L1->L0    | A2B2          | ...             |
+| M              |        |             | MMAD(段0,init) | MMAD(段0,add) | ...             |
+| F              |        |             |                |               | 原子累加段0->GM |
++----------------+--------+-------------+----------------+---------------+-----------------+
+每级错开一步，四条流水并行流动。
 ```
+
+取两个归约段示意流水，段内各有两次实际 MMAD。两路父段准备好后，MTE1 提取当前 K 子块；M 完成该段全部贡献后，F 才把段部分和原子累加到 dedw。
+
+```text
++-------+----------+----------+--------+-------+-----------+-------+-----------+
+| stage | t0       | t1       | t2     | t3    | t4        | t5    | t6        |
++-------+----------+----------+--------+-------+-----------+-------+-----------+
+| MTE2  | seg0 A/B | seg1 A/B |        |       |           |       |           |
+| MTE1  |          | j00      | j01    | j10   | j11       |       |           |
+| M     |          |          | init 0 | add 0 | init 1    | add 1 |           |
+| F     |          |          |        |       | atomic F0 |       | atomic F1 |
++-------+----------+----------+--------+-------+-----------+-------+-----------+
+```
+
+| 贡献 | j00 | j01 | j10 | j11 |
+|---|---|---|---|---|
+| 归约段 | 0 | 0 | 1 | 1 |
+| L0 输入槽 | 0 | 1 | 0 | 1 |
+| L0C 槽 | 0 | 0 | 1 | 1 |
+| L0C 操作 | 初始化 | 累加 | 初始化 | 累加 |
 
 每格表示逻辑可重叠阶段，不代表固定周期。F0 必须等 j01 完成，F1 必须等 j11 完成；F0 可与另一 L0C 槽上的 j10 重叠。若只有一份 L0C，则后段先等前段 F 归还。
 
 ### 8.4 DAG 与 Buffer 存活区间
 
 ```text
-MTE2 / L1A -> MTE1 / L0A --+
-                           |
-MTE2 / L1B -> MTE1 / L0B --+
-                           |
-                           |
-                           v
-                  +--------+--------+
-                  | MMAD: paired K  |
-                  +--------+--------+
-                           |
-                           |
-                           v
-           +---------------+---------------+
-           | full segment reduction in L0C |
-           +---------------+---------------+
-                           |
-                           |
-                           v
-              +------------+------------+
-              | F -> atomic add -> dedw |
-              +-------------------------+
+MTE2(dedy) -> MTE1(Load2D) -----+
+                                |
+MTE2(x) ----> MTE1(Load3D) -----+--> MMAD -> complete segment -> atomic F -> dedw
 ```
 
 | Buffer | 生产者→消费者 | 保留到何时 | 轮换依据 |
@@ -939,13 +768,13 @@ MTE2 / L1B -> MTE1 / L0B --+
 
 ```text
 +--------+------------------------------+--------------------------------------------+
-| memory | slot 0                       | slot 1, when enabled                       |
+| 存储   | 槽 0                         | 槽 1（启用时）                             |
 +--------+------------------------------+--------------------------------------------+
 | L1A    | [0,aAligned)                 | [halfL1,halfL1+aAligned)                   |
 | L1B    | [aAligned,aAligned+bAligned) | [halfL1+aAligned,halfL1+aAligned+bAligned) |
-| L0A    | first input region           | second input region                        |
-| L0B    | first input region           | second region / single slot if split       |
-| L0C    | current segment              | next segment output slot                   |
+| L0A    | 首个输入区                   | 第二输入区                                 |
+| L0B    | 首个输入区                   | 第二区 / 拆核时单槽                        |
+| L0C    | 当前归约段                   | 下一段输出槽                               |
 +--------+------------------------------+--------------------------------------------+
 ```
 
@@ -954,12 +783,12 @@ Host 预算包含 buffer 份数，Kernel 还检查固定槽基址与最大末地
 ### 8.5 就绪、归还与首末轮
 
 ```text
-L1:  MTE2 -- ready --> MTE1 -- return --> next MTE2 overwrite
-L0:  MTE1 -- ready --> M    -- return --> next MTE1 overwrite
-L0C: M    -- ready --> F    -- return --> next M output initialization
+L1:  MTE2 ──就绪──► MTE1 ──归还──► 下一次 MTE2 覆盖
+L0:  MTE1 ──就绪──► M    ──归还──► 下一次 MTE1 覆盖
+L0C: M    ──就绪──► F    ──归还──► 下一输出块的 M 初始化
 
-First slot: queue / verified TPipe initial state
-Final use : last consumer dependency -> queue End / TPipe cleanup
+首槽: 队列 / 已核实的 TPipe 初态
+末次使用: 最后消费者依赖 -> 队列 End / TPipe 收尾
 ```
 
 首次空槽由队列或所选 SDK 的事件初态提供；每次 Load/Compute/CopyOut 成对发布和消费令牌。最后一次提交消费者之后发布归还依赖，下一次覆盖前等待该依赖；提交不等于已完成。

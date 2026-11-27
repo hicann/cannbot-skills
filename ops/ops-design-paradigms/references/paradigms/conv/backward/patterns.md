@@ -1,6 +1,11 @@
 # 卷积反向范式入口（语言中立）
 
-本文件是非量化浮点三维卷积反向算子生成的统一入口，负责场景判定、求导分支选择、语言路由、知识索引和消费指引。通用层建立数学、规格与设计模型，语言适配层落实 API、平台能力及调用接口。
+> 本文件是卷积反向范式的**统一入口**：场景判定 + 求导分支选择 + 语言路由 + 知识索引与消费指引。具体知识分布在两个层次：
+>
+> - **通用知识层** `generic/` — 语言无关的术语与规格归一，及 input（dedx/Transpose）、filter（dedw）两分支的计算模型、切分与验证
+> - **语言适配层** `adapters/<lang>/` — 强耦合具体开发语言的落地知识，提供 example 示例
+>
+> 通用层建立数学、规格与设计模型，语言适配层落实 API、平台能力及调用接口。
 
 ## 1 场景判定
 
@@ -18,8 +23,8 @@
 
 | 分支 | 类型与布局 | 场景契约 |
 |---|---|---|
-| input | weight/dedy/dedx 使用相同 FP16 或 BF16；dedy/dedx 同为 NCDHW 或 NDHWC，weight 独立选择 NCDHW 或 NDHWC；Transpose bias 为 FP32 | 从 [input 索引](generic/input/index.md) 读取场景与 Tiling 契约 |
-| filter | x/dedy 使用相同 FP16 或 BF16、同为 NCDHW 或 NDHWC；dedw 为 FP32，独立选择 NCDHW、NDHWC 或 DHWCN | 从 [filter 索引](generic/filter/index.md) 读取场景；普通正向权重梯度，output_padding=0，MN_StreamK 最终运行时准入 |
+| input | weight/dedy/dedx 使用相同 FP16、BF16 或 FP32；dedy/dedx 同为 NCDHW 或 NDHWC，weight 独立选择 NCDHW 或 NDHWC；Transpose bias 为 FP32 | 从 [input 索引](generic/input/index.md) 读取场景与 Tiling 契约；FP32 使用普通精度模式 |
+| filter | x/dedy 使用相同 FP16、BF16 或 FP32、同为 NCDHW 或 NDHWC；dedw 为 FP32，独立选择 NCDHW、NDHWC 或 DHWCN | 从 [filter 索引](generic/filter/index.md) 读取场景；普通正向权重梯度，output_padding=0，类型/格式/hf32 及运行时条件按所选模板准入 |
 
 逻辑轴、属性及低维升维从公共知识进入；两分支各自建立 M/N/K、数据流、切分和初始化协议。目录名 filter 表示权重梯度分支，张量/API 中的 weight、dedw、filter_size 保留各自含义。
 
@@ -62,7 +67,7 @@
 
 1. 先读公共索引，再进入一个求导分支和一个语言适配层；单个子问题最多展开 5 个叶子文档。
 2. D4 与 D5 联动核算。基本块、buffer 份数或流水改变后，重新检查容量、实际地址和生命周期。
-3. 编码前读取所选语言的分支适配索引。Ascend C 按调用形态选源码示例；DSL 按接口映射和 Kernel 步骤实现，片段的适用范围见其说明，不把 Ascend C 示例当作 DSL 工程。
-4. input 沿用已验证模板的切分约定；filter 的 MN_StreamK 在 Host 按形状和平台资源求解 baseM/baseN/baseK。适配层将结果绑定到对应语言的编译配置和运行参数，Kernel 按容量处理有效尾块。
+3. 编码前读取所选语言的分支适配索引。Ascend C 按求导对象选取共享示例，再接入直调或 ACLNN 工程；DSL 按接口映射、入口和实现步骤生成对应代码。
+4. input 沿用所选语言适配层的切分约定；Ascend C 的 filter 先选择 DLoad、Winograd 或 MN_StreamK，再按模板求解和发布字段；DSL 按其适配层的模板契约绑定参数。Kernel 使用对应的数据流与尾块协议。
 5. 缺少平台或 API 依据时记录受影响的具体结论。数学推导、Host 复算、编译和设备结果分别保存。
 6. 示例审查或运行中的修正回写所属规则，再从独立目录重新生成与验证。

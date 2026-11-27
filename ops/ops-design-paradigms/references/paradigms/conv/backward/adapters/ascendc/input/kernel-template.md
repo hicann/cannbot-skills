@@ -1,6 +1,6 @@
 # 卷积反向算子 Ascend C Kernel 实现模板
 
-三个 Tiling 策略共用 `Conv3DDxKernel`。本页给出设备入口和阶段组织；完整数据流、任务与地址模型见 [compute-flow](../../../generic/input/compute-flow.md)，API 字段见 [instruction-mapping](instruction-mapping.md)。所有阶段及参数构造由生成工程实现。
+standard、small-shape、l1-resident 三个 Tiling 策略共用 `Conv3DDxKernel`；kernel-split 模板共用主计算阶段（装载、L1/L0 交接、MMAD），但入口分发、迭代循环与写回经子核分支扩展，见 [kernel-split 实现](kernel-split-implementation.md)。本页给出设备入口和阶段组织；完整数据流、任务与地址模型见 [compute-flow](../../../generic/input/compute-flow.md)，API 字段见 [instruction-mapping](instruction-mapping.md)。所有阶段及参数构造由生成工程实现。
 
 该计算类也供 Conv3DTranspose 使用；其设备入口与绑定点见第 2.3 节。本页六 GM 参数入口保持 DX 接口，公共 Process 按 hasBias 分支。类末尾增加默认类型参数 `BiasT=float`，Init 的末尾 bias 参数默认 nullptr；仅在 bias 存在时分配对应资源。
 
@@ -9,47 +9,37 @@
 ### 1.1 数据流图
 
 ```text
-+-------------------------+                      +-------------------------+
-| dedy / GM               |                      | weight / GM             |
-+------------+------------+                      +------------+------------+
-             |                                                |
-             | LoadToA1                                       | LoadToB1
-             | DataCopy + Fill                                | DataCopy
-             |                                                |
-             v                                                v
-+------------+------------+                      +------------+------------+
-| L1A / TQue              |                      | L1B / TQue              |
-+------------+------------+                      +------------+------------+
-             |                                                |
-             | LoadToA2                                       | LoadToB2 / Load2D
-             | Load3D(img2col)                                |
-             |                                                |
-             v                                                v
-+------------+------------+                      +------------+------------+
-| L0A / TBuf              |                      | L0B / TBuf              |
-+------------+------------+                      +------------+------------+
-             |                                                |
-             |                                                |
-             +-----------------------+------------------------+
-                                     |
-                                     | MmadLocal / MMAD
-                                     v
-                        +------------+------------+
-                        | L0C / FP32              |
-                        +------------+------------+
-                                     |
-                                     |
-                                     | LoadL0c2Gm / Fixpipe
-                                     |
-                                     v
-                        +------------+------------+
-                        | dedx / GM               |
-                        +-------------------------+
+A 路（dedy）                            B 路（weight）
++-------------+                         +-------------+
+| dedy / GM   |                         | weight / GM |
++------+------+                         +------+------+
+       | LoadToA1（DataCopy + Fill）           | LoadToB1（DataCopy）
+       v                                       v
++------+------+                         +------+------+
+| L1A / TQue  |                         | L1B / TQue  |
++------+------+                         +------+------+
+       | LoadToA2 / Load3D（img2col）          | LoadToB2 / Load2D
+       v                                       v
++------+------+                         +------+------+
+| L0A / TBuf  |                         | L0B / TBuf  |
++------+------+                         +------+------+
+       |                                       |
+       +-------------------+-------------------+
+                           | MmadLocal / MMAD
+                           v
+                    +------+------+
+                    | L0C / FP32  |
+                    +------+------+
+                           | LoadL0c2Gm / Fixpipe
+                           v
+                     +-----+-----+
+                     | dedx / GM |
+                     +-----------+
 ```
 
-L1A 保存插零视图 dedy_expand 的驻留片段；Load3D 提取边界视图 fmap 的窗口。L1B 保持原核位置，L0B 表达 `weight_rot`。输出初始化由 [前置处理协议](sync-implementation.md) 在主计算前完成。
+L1A 保存插零视图 dedy_expand 的驻留片段；Load3D 提取边界视图 fmap 的窗口。普通路径的 L1B 保持原核位置，L0B 表达 `weight_rot`；C04 在 AIV 整理时提前完成 H/W 逆序。输出初始化由 [前置处理协议](sync-implementation.md) 在主计算前完成。
 
-可选支路为 `bias/GM → biasL1Que_ → biasBTQue_ → 首次 MMAD`，细节见 [bias 通路](bias-bt-path.md)。它不改变两路窗口与权重布局。
+可选支路一为 `bias/GM → biasL1Que_ → biasBTQue_ → 首次 MMAD`，细节见 [bias 通路](bias-bt-path.md)；它不改变两路窗口与权重布局。可选支路二为前置权重转置：`filter/GM → AIV 转置 pass → workspace → LoadToB1`，AIC 的权重来源与源步幅切换，L1B/L0B 结果不变。可选支路三为 C04 / group enlarge：`filter/GM → UB → AIV 整理 → 直写 L1B`，AIC 的 B 路变换随之改写（C04 的 B2 不转置不逆序、enlarge 的 B2 仅逆序）。三种分支的作用范围见 [场景](../../../generic/input/scene.md#3-数据准备与分组合并)，C04 同时改变 A/B 两路的 K 排列。数据准备细节见 [指令映射 §3.4–§3.8](instruction-mapping.md)。
 
 ### 1.2 状态与术语
 
@@ -59,12 +49,15 @@ L1A 保存插零视图 dedy_expand 的驻留片段；Load3D 提取边界视图 f
 | mStart/cinStart、baseUseM_/baseUseN_ | 当前 dedx 空间/组内通道范围；任务内分块 |
 | kd、curDoutIdx | 原核深度和配对的真实 dedy 深度；有符号采样检查 |
 | kStart、baseUseK_ | 当前完整 K 起点和含通道补齐的长度 |
+| tmpSingleCoreK | 当前窗口的运行 K 长度；普通为对齐 singleCoreCout 乘 singleShapeHWk_，C04 为 4*singleShapeHWk_ |
 | a1/b1.segmentStart、segmentUse、curStep | 各父段实际范围；段定位 |
 | kLocalA/kLocalB | 相对各自父段的 K 起点 |
 | l0Slot、cSlot | L0 输入成对槽 / L0C 槽 |
 | needComputeFlag_ | 当前输出块是否进入计算；UpdateL1ComputeInfo 更新行带与深度采样后确定 |
 | firstContribution | 当前输出块是否尚无有效乘加；跨 K 和 kd 保留 |
 | computeBiasOnce_ | 当前输出块是否已引入 bias，输出块开始时重置 |
+| isB1FullLoadFlag_ | 当前 L1B 是否覆盖任务通道块的完整 K；InitFullLoadFlag 根据最终 Tiling 与布局判定 |
+| isLoadB1_ / cacheB1Buf_ | 是否需要重新装载 / 已持有的全载 B1；Init 置为需装载，实际出队后更新，归还时复位 |
 
 `ctx.baseUseM_/N_/K_` 分别对应本轮有效 `baseUseM_/baseUseN_/baseUseK_`，`ctx.curLoadKbl1_` 对应 L1B 实际父跨度。M 的有效长度和指令对齐长度按以下口径传递：
 
@@ -81,11 +74,10 @@ L1A 保存插零视图 dedy_expand 的驻留片段；Load3D 提取边界视图 f
 
 ### 2.1 入口与编译实例
 
-注册入口保留五模板实参和六 GM 参数；直调 launch 按自己的 ABI 传入相同计算数据：
+以下普通 AIC 入口使用三模板实参和六 GM 参数。DTYPE_* 绑定 FP16/BF16/FP32；float 实例在 Init 调用 `SetHF32Mode(false)`，输出使用 NoQuant。直调按自身 ABI 传入相同数据；MIX 入口的 AIV 职责见第 4.2.1 节：
 
 ```cpp
 template <uint8_t loadB2Condition, uint8_t kernelSplitMode,
-          uint8_t groupConvMode, bool isBasicBlockTiling,
           uint8_t loadB1Condition>
 __global__ __aicore__ void conv3ddx_custom(
     GM_ADDR input_size, GM_ADDR filter, GM_ADDR out_backprop,
@@ -103,13 +95,13 @@ __global__ __aicore__ void conv3ddx_custom(
 }
 ```
 
-算子包的入口分发与任务类型配置属工程封装知识，不在本范式内（注册形态参考 [example/conv3ddx_aclnn/](../example/conv3ddx_aclnn/README.md)，工程骨架见仓内技能 `ops/ascendc-registry-invoke-template`）；生成骨架不保留架构分发，宏形态与任务类型须与目标 SDK 核对。
+计算主体参考 [example/conv3ddx/](../example/conv3ddx/README.md)。算子包入口分发与注册接入由仓内技能 `ops/ascendc-registry-invoke-template` 提供工程骨架；生成骨架不保留架构分发，宏形态与任务类型须与目标 SDK 核对。
 
-这是生成骨架，`InitOutput` 与 `Conv3DDxKernel` 均须在本工程定义。支持的五参数组合由共享声明限制。Kernel 类型、SDK 宏和初始化方式按 [模板绑定](tilingkey-templates.md) 的核类型声明配对；先初始化、后允许无任务计算核返回。外部初始化版本的 `InitOutput` 不发起或等待融合通知。`Process` 负责计算及归还持有张量；入口只调用一次 `End`，等待并释放队列事件，随后由 TPipe 完成自身事件的收尾。
+这是生成骨架，`InitOutput` 与 `Conv3DDxKernel` 均须在本工程定义。支持的三实参组合由共享声明限制。Kernel 类型、SDK 宏和初始化方式按 [模板绑定](tilingkey-templates.md) 的核类型声明配对；先初始化、后允许无任务计算核返回。外部初始化版本的 `InitOutput` 不发起或等待融合通知。`Process` 负责计算及归还持有张量；入口只调用一次 `End`，等待并释放队列事件，随后由 TPipe 完成自身事件的收尾。
 
 ### 2.2 任务与归约骨架
 
-下面省略类和模板前缀，阶段函数按后文实现。TaskCoord 保存解码后的任务起点及有效长度；L1 父段状态分别保存实际范围、形状、槽和持有权限。
+下面省略类和模板前缀，阶段函数按后文实现。TaskCoord 保存任务起点和有效长度；L1 父段分别保存实际范围、形状、槽和持有权限。enableC04Flag 是入口绑定的配置常量，singleShapeHWk_ 是当前核高宽采样点数，二者在 Init 中确定；普通入口的 enableC04Flag=false，C04 扩展入口按第 4.2.1 节设置。
 
 ```cpp
 template <bool hasBias = false>
@@ -144,15 +136,20 @@ __aicore__ inline void Process() {
                     }
                     auto &q = (cSlot == 0 ? l0cPing : l0cPong);
                     auto useC1Buf = q.AllocTensor<float>();
+                    const uint64_t tmpSingleCoreK = enableC04Flag ?
+                        uint64_t(4)*singleShapeHWk_ :
+                        uint64_t(alignUp(td.singleCoreCout,td.c0))*singleShapeHWk_;
                     bool firstContribution = true;
                     for (uint32_t kd = 0; kd < td.dk; ++kd) {
                         int64_t dTmp = int64_t(curDinIdx_)+td.padFront-int64_t(kd)*td.dilationD;
                         if (dTmp < 0 || dTmp % td.strideD || dTmp / td.strideD >= td.dout) continue;
                         curDoutIdx = dTmp / td.strideD;
-                        for (uint64_t kStart = 0; kStart < kValue; kStart += td.baseK) {
-                            baseUseK_ = min(uint64_t(td.baseK),kValue-kStart);
+                        for (uint64_t kStart = 0; kStart < tmpSingleCoreK; kStart += td.baseK) {
+                            baseUseK_ = min(uint64_t(td.baseK),tmpSingleCoreK-kStart);
                             LoadToA1(curDoutIdx,kStart);
-                            LoadToB1(kd,kStart);
+                            if (!isB1FullLoadFlag_ || isLoadB1_) {
+                                LoadToB1(kd,kStart);
+                            }
                             if constexpr (hasBias) {
                                 if (firstContribution) ComputeBTBias();
                             }
@@ -221,11 +218,10 @@ LoadToA1/L1B 内部按各自 step 判断装载、出队或复用；ReleaseConsum
 
 任务循环、地址、MTE2/MTE1、MMAD、Fixpipe 和同步使用同一 `Conv3DDxKernel`；带 bias 的阶段按 [bias 通路](bias-bt-path.md) 接入公共实现。本节定义 Transpose 的外部设备入口。
 
-五个模板参数继续控制 weight 变换与执行配置。注册 ABI 的 GM 参数依次为 input_size、x、filter、bias、offset_w、y、workspace、tiling：
+三个模板参数继续控制 weight 变换与执行配置。注册 ABI 的 GM 参数依次为 input_size、x、filter、bias、offset_w、y、workspace、tiling：
 
 ```cpp
 template <uint8_t loadB2Condition, uint8_t kernelSplitMode,
-          uint8_t groupConvMode, bool isBasicBlockTiling,
           uint8_t loadB1Condition>
 __global__ __aicore__ void conv3dtranspose_custom(
     GM_ADDR input_size, GM_ADDR x, GM_ADDR filter,
@@ -248,7 +244,7 @@ __global__ __aicore__ void conv3dtranspose_custom(
 }
 ```
 
-共享类的最后一个类型参数 `BiasT` 默认 float，DX 入口仍可省略。`Init` 的 bias 参数默认 nullptr。当前 FP16/BF16 生成实例将 DTYPE_BIAS 绑定 float；SDK 可选输入缺省时，也在构建配置中明确这个编译类型。
+共享类的最后一个类型参数 BiasT 默认 float，DX 入口可省略；Init 的 bias 参数默认 nullptr。三种数值类型的 DTYPE_BIAS 均绑定 float。
 
 input_size 的值已由 Host 解析到几何，设备计算消费 td；offset_w 为接口保留槽，当前数值通路绑定缺省。工作流包装层统一空 bias 与 nullptr，Host 的 hasBiasFlag_、资源计划和设备分支保持一致。
 
@@ -268,7 +264,7 @@ input_size 的值已由 Host 解析到几何，设备计算消费 td；offset_w 
 
 output_padding 已折入目标形状及边界，内核不再给 dk/hk/wk、dilation 或 K 额外加 q。带 bias 和无 bias 使用相同的三种 weight 变换。
 
-产出校验：检查八个 GM 槽、编译宏、共享字段、五参数 key 和核类型一致；实际加载实例应使用本入口，检查输入顺序，特别是 x/filter 与 DX 入口的差别。
+产出校验：检查八个 GM 槽、编译宏、共享字段、三实参 key 和核类型一致；实际加载实例应使用本入口，检查输入顺序，特别是 x/filter 与 DX 入口的差别。
 
 ## 3 地址偏移计算
 
@@ -294,6 +290,8 @@ output_padding 已折入目标形状及边界，内核不再给 dk/hk/wk、dilat
 | weight | group*coutG+当前输出通道、组内 dedx 通道、原 kd/kh/kw |
 | dedx | batch、group*cinG+cinStart、当前 dedx 深度、mStart 解码的高宽 |
 
+表中的 group/通道地址适用于原始组路径。group enlarge 的 dedy/dedx 使用计算组通道起点；weight 必须先按原始组恢复源坐标，再放到对应对角块，不能以放大的 cinG 作为原 GM 的 Cin 步幅。具体映射见 [指令映射 §3.7](instruction-mapping.md#37-group-enlarge对角权重直写-l1b)。
+
 `kLocalA=kStart-a1.segmentStart`，`kLocalB=kStart-b1.segmentStart`。矩阵中对应的 K 元素必须指向同一 dedy 通道和核高宽位置。Tensor 下标单位为元素，容量及 Buffer 基址单位为字节。
 
 ### 3.3 Buffer 分配
@@ -312,22 +310,48 @@ output_padding 已折入目标形状及边界，内核不再给 dk/hk/wk、dilat
 
 | weight 格式 / weight 变换分支 | DataCopy 参数 | 目的父布局 |
 |---|---|---|
-| 任一 / 仅转置 | Nd2NzParams | `(Cin1,Cout1,Cout0,Cin0)` |
+| FP16/BF16 单位核 / 仅转置 | Nd2NzParams | `(Cin1,Cout1,Cout0,Cin0)` |
+| FP32 单位核 / B2 直接取块 | Dn2NzParams | `(Cout1,Cin1,16,8)` |
 | NCDHW / 转置加逆序 | Dn2NzParams | `(Cin1,Hk,Wk,Cout1,Cout0,Cin0)` |
 | NDHWC / 转置加逆序 | Nd2NzParams | 同上 |
 | NCDHW 或 NDHWC / 逆序 | Dn2NzParams | `(Cout1,Hk,Wk,Cin1,Cin0,Cout0)` |
+| 任一 / 逆序，前置转置态 | Dn2NzParams，源 Cin 轴跨度为 `alignUp(cin,16)` 个元素 | 同逆序行 |
+| NCDHW / 不转置不逆序（C04） | 不经 AIC：AIV gather pass 直写 L1B（`loadB1Condition=1`），L1B→L0B 无变换 | 四通道 × 四核位置的 K 分形，配套四通道 A 路窗口 |
 
-仅转置时核体积为 1，两种 weight 格式都化为 Co×CiG 矩阵。按实际父段和通道尾部构造参数，具体字段见[权重指令参数](instruction-mapping.md#3-weight-到-l1b)；不能从源函数名称猜 ND/DN 朝向。
+单位核的两种 weight 格式都化为 Co×CiG 矩阵。FP16/BF16 使用 ND2NZ 后在 B2 转置，FP32 使用 DN2NZ 后在 B2 直接取块，具体字段见[权重指令参数](instruction-mapping.md#3-weight-到-l1b)。前置转置态由 enableVecTrans 决定，源为 workspace 副本，按 `(Cout,DkHkWk,Cin1,Cin0)` 计算地址。该分支 groups=1，源 Cin 跨度、workspace 字节数及转置任务数均使用总 Cin。
+
+#### 4.2.1 权重准备分支的接入
+
+VecTranspose 在公共计算类之前执行一次权重准备，C04 与 group enlarge 在 B1 装载请求时由 AIV 准备。准入、缓冲、地址与 API 参数统一见 [指令映射 §3.4–§3.8](instruction-mapping.md)；跨核依赖见 [C/V 协同](cv-collaboration.md)。本骨架只保留接入点，不再重复各分支实现。
+
+| 分支 | 骨架接入点 | AIC 消费 |
+|---|---|---|
+| VecTranspose | 入口调用 Conv3dDxVecTranspose::Init/Process/Destroy；AIC 调 CrossCoreWaitVecTrans | filterGm_ 切到 workspace，更新源步幅；B2 仍仅逆序 |
+| C04 | loadB1Condition=TPL_VEC_TO_L1_C04 的入口实例化配置；C04TransdataWeight | A 路四通道窗口；B2 不转置不逆序 |
+| group enlarge | GroupTransdataWeight；原始与合并通道分别寻址 | 对角权重读入 L1B，B2 仅逆序；按实际合并组数处理尾块 |
 
 ### 4.3 父段与预取
 
 每路以 `stepK` 独立分段。第 j 个 K 迭代所属段起点为 `(j//stepK)*stepK*baseK`，末段 curStep 取剩余迭代数，segmentUse 取剩余实际 K 长度。下一段存在时才预取，段内消费结束后才能复用其槽。L1B 驻留命中时沿用持有的父段，不重复 Alloc/EnQue。
 
+### 4.4 完整 N/K 驻留分支
+
+当 [l1-resident](../../../generic/input/tiling/templates/l1-resident/tiling.md#41-nk-全载与-m-分核) 的最终参数覆盖全部 N/K 时，第 2.2 节的同一任务循环直接执行该分支。`InitFullLoadFlag` 先检查完整 K、任务通道范围、单份 B1 及当前布局；`CheckFullLoadEnable` 再检查跨任务保留权限和实际 weight 身份。两类判断均成立时才跨任务复用。
+
+| 时机 | 公共流程中的处理 |
+|---|---|
+| 首次消费 | isLoadB1_=true；LoadToB1 装载并交接整份父段，记录 cacheB1Buf_；出队后置 isLoadB1_=false |
+| 后续 M/K 消费 | 跳过重复 GM→L1B；LoadToB2 继续用当前 K 在 cacheB1Buf_ 内取数，L1A 按当前局部窗口更新 |
+| 权重身份改变 | 先按末次 MTE1 的归还依赖释放旧父段，复位装载状态，再按公共路径装入新父段 |
+| 任务结束 | FinishTaskB1 按完整驻留与当前权限决定保留或归还；全部任务结束后 FreeB1Tensor 归还剩余句柄 |
+
+L1B 的轴序、K 配对与 Load2D 参数仍由第 4.2、5.2 节定义；不因 N 全载而改成另一套布局。L0A/L0B 仍逐 K 块轮转，L0C 仍按完整输出块交接，可选 bias 和无贡献输出沿用公共处理。L1A 的多槽预取仅在容量与父段生命周期均满足时启用。
+
 ## 5 CopyIn MTE1 逻辑
 
 ### 5.1 LoadToA2：L1A 到 L0A
 
-Load3D 的 H/W stride 固定为 1，保留卷积 dilation；原 stride 已由 L1A 插零表达。mStartPt 指向当前行内位置，kStartPt 使用 kLocalA。FMatrix 的驻留形状和补边必须与 L1A 一致。
+Load3D 的 H/W stride 固定为 1，保留卷积 dilation；原 stride 由 L1A 插零表达。C04 使用 `channelSize_=4`，普通路径取 `min(curStepKa_*baseK/(hk*wk),alignUp(singleCoreCout,C0))`。C0 按类型取 16 或 8，channelSize_ 描述当前父片段。kernel-split 按子核重建窗口；mStartPt 取行内位置，kStartPt 使用 kLocalA。
 
 SDK 版本选择 `SetLoadDataRepeatWithStride + LoadDataWithStride` 或 `SetLoadDataRepeat + LoadData` 成对使用。M 有效范围与物理对齐跨度分开：例如 72 个有效位置占 80 的存储跨度，写回仍为 72；具体合法字段按目标头文件核实。
 
@@ -335,11 +359,13 @@ SDK 版本选择 `SetLoadDataRepeatWithStride + LoadDataWithStride` 或 `SetLoad
 
 | 分支 | ifTranspose / 源地址组织 |
 |---|---|
-| 仅转置 | true；Cout1 正向递增，每个源分形为 256 个输入元素 |
+| 仅转置，FP16/BF16 单位核 | true；Cout1 正向递增，每个源分形为 `16*C0` 个元素 |
+| FP32 单位核 | false；L1B 已为 `(Cout1,Cin1,16,8)`，按 K 子块连续抽取 |
 | 转置加逆序 | true；每个 Cout1 内按 H/W 核位置逆序 |
 | 逆序 | false；srcStride 为负的 N 分形数，每个 Cout1 的窗口分别提交 |
+| 不转置不逆序（C04） | false；按已整理好的 K 顺序抽取，保留 AIV 完成的逆序结果 |
 
-转置路径的源 stride 使用 L1B 实际父 K 跨度除 16；目的 stride 使用当前 N 分形数。K 块跨 Cout1 窗口时拆分提交，保持 Cout1 正序和每个窗口内部逆序。偏移、LoadData2DParamsV2 字段及跨窗例子见[L0B 指令参数](instruction-mapping.md#5-l1b-到-l0b)。
+转置路径的 srcStride 为实际父 K 跨度除 C0、dstStride 为 1；仅逆序路径的 srcStride 为负的 N 分形数、dstStride 为 N 分形数。跨 Cout1 窗口时分段提交，保持通道正序和窗口逆序。字段见 [L0B 指令参数](instruction-mapping.md#5-l1b-到-l0b)。
 
 ## 6 Compute 计算逻辑
 
@@ -351,7 +377,7 @@ L0C 保存当前输出块全部有效 kd 和 K 的部分和。`firstContribution
 
 ### 6.2 MmadLocal
 
-MmadParams 的 k 为 baseUseK_，n 为 baseUseN_；m 按所选模板的末 M 块规则设置。无 bias 时 `cmatrixSource=0、cmatrixInitVal=firstContribution`，调用 `Mmad(useC1Buf,a2,b2,params)`。带 bias 时首次实际乘加取 `cmatrixSource=1、cmatrixInitVal=false`，使用带 BT 的重载，此后恢复从 L0C 累加。两者均取 `unitFlag=0、kDirectionAlign=0`，输入 half/bfloat16_t，L0C float。
+普通分支 MmadParams.k=baseUseK_；C04 尾 K 块取 alignUp(baseUseK_,c0)，Load3D.kExtension 保留实际尾长。n 为 baseUseN_，m 按末 M 块规则设置。无 bias 时 `cmatrixSource=0、cmatrixInitVal=firstContribution`，调用 `Mmad(useC1Buf,a2,b2,params)`；有 bias 的首次乘加取 `cmatrixSource=1、cmatrixInitVal=false` 并使用带 BT 的重载，此后从 L0C 累加。输入类型为 half/bfloat16_t/float，L0C 为 float，`unitFlag=0、kDirectionAlign=0`。
 
 补齐 dedy 通道进入 baseUseK_，但其乘积为零；输出 M/N 尾部按有效范围写回。所有有效深度完成后，CO1 队列发布完整结果。
 
@@ -359,11 +385,11 @@ MmadParams 的 k 为 baseUseK_，n 为 baseUseN_；m 按所选模板的末 M 块
 
 ### 7.1 输出初始化
 
-工程内 InitOutput 按前置处理协议清零 dedx，并建立初始化完成到计算写回的依赖。融合版本保留参与核、通知和等待；外部版本由调用序列保证依赖。MTE3 流水只出现在初始化的跨核通知旗语中（见 [同步实现](sync-implementation.md#32-两个编译分支)），不参与结果搬运。
+工程内 InitOutput 按前置处理协议清零 dedx，并建立初始化完成到计算写回的依赖。融合版本保留参与核、通知和等待；外部版本由调用序列保证依赖。初始化的跨核通知见 [同步实现](sync-implementation.md#32-两个编译分支)。普通 AIC 结果直写使用 F；AIV 权重准备与 split-HW 输出重排另有 MTE3 搬运，依赖分别在专用文档维护。
 
 ### 7.2 主计算通路
 
-主结果由 F 从 L0C 直接写 GM。当前主计算无需 UB 结果累加或 MTE3 中转；辅助初始化与主计算结果各自按自己的执行通路同步。
+普通路径和 split-H 由 F 从 L0C 直接写 GM；split-HW 由 F 写 UB 或 workspace，再经 AIV 重排和 MTE3 写回 dedx。两条输出通路分别建立就绪与复用依赖。
 
 ## 8 CopyOut 输出通路逻辑
 
@@ -374,11 +400,13 @@ MmadParams 的 k 为 baseUseK_，n 为 baseUseN_；m 按所选模板的末 M 块
 | NCDHW | COLUMN_MAJOR，NZ2DN | di*hi*wi |
 | NDHWC | ROW_MAJOR，NZ2ND | cin |
 
-`mSize=baseUseM_、nSize=baseUseN_、srcStride=alignUp(baseUseM_,16)`；目标地址由第 3 节计算。FP32 转 FP16/BF16 分别设置 F322F16/F322BF16，按目标 SDK 对应的 Fixpipe 重载执行。
+`mSize=baseUseM_、nSize=baseUseN_、srcStride=alignUp(baseUseM_,16)`；目标地址由第 3 节计算。OutT 为 half、bfloat16_t、float 时分别设置 F322F16、F322BF16、NoQuant，使用对应行列布局的 Fixpipe 重载。
 
 ### 8.2 写回与归还
 
 只写有效 M/N，保留全局通道、空间和组间步幅。输出块在完整归约后完成 CO1 的 EnQue/DeQue，LoadL0c2Gm 只提交 Fixpipe；输出块末尾统一执行一次 FreeTensor。全无贡献且无 bias 时省略写回；带 bias 时写回 ComputeForBias 的结果。下一轮复用等待 F 归还，不能仅轮换下标就覆盖。
+
+kernel-split 的 split-HW 分支替换本节通路：Fixpipe 目标改为 UB（或 workspace 每核槽位），由 AIV 交织写回 GM，时序与旗语见 [kernel-split 实现](kernel-split-implementation.md) 第 5 节与 [C/V 协同](cv-collaboration.md)；split-H 保持本节通路，仅在目的地址上追加行相位偏移。
 
 ## 9 流水同步
 
@@ -388,7 +416,7 @@ MmadParams 的 k 为 baseUseK_，n 为 baseUseN_；m 按所选模板的末 M 块
 
 ## 10 Kernel 产出校验
 
-1. 共享字段、dtype/format、五参数实例与启动类型一致；所有工程内阶段函数有定义。
+1. 共享字段、dtype/format、三实参实例与启动类型一致；所有工程内阶段函数有定义。
 2. 逐元素核对 GM 地址、K 父段和三种 weight 变换的布局，覆盖跨 Cout1、尾段和多组。
 3. 分别核算 Host 预算、实际槽区间及 API 最大访问范围。
 4. 验证空行带、无有效深度、首次有效深度、完整归约、L1B 命中/失效和最后一次 F；跳过路径不消费未产生的事件。

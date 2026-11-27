@@ -71,9 +71,26 @@ M 同时受部分和容量、最小 K 下的操作数容量限制；K 由权重�
 
 容量回调中的 `LadderMatchStepKWithFullLoad()` 使用相同规则，但保留回调后的 buffer 份数。最终要求 step 为正、两路容量合法、窗口配对成立、`stepKa` 整除 `stepKb`，且 `stepKb*baseK>=kValue`。
 
-有效 K 与预留长度分别记录。例如 `kValue=320、baseK=240` 时，`stepKb=2`，预留 480 个位置，实际计算仍只覆盖 320 个位置。
+有效 K 与预留长度分别记录：预留长度按 baseK 向上取整，主计算仍按 kValue 截断，超出部分不增加归约贡献。
 
 容量检查使用公共 `IsL1ParamsValid`。容量不足时按 `LegalProtection` 回调；其中重选 step 的实现绑定本模板的完整 K 搜索，保留调整后的 Buffer 份数。回调成功后重新划分任务，再更新完整 K 的 step。
+
+### 4.1 N/K 全载与 M 分核
+
+在本模板准入域内，若完整 N 方向也能放入当前块，可取 `baseN=singleCoreCin=nValue`。这时每个活动核持有全部通道的权重，任务主要沿 batch、深度和 M 分配；它是公共流程的驻留分支，不新增模板、Kernel 类或 key。
+
+| 项目 | 约定 |
+|---|---|
+| 复用条件 | 原始单组、`dk=singleIterateDk=1`，普通 GM→L1 权重路径；沿用完整 L1B 与跨任务保留检查 |
+| 权重驻留 | `bl1Pbuffer=1`，`stepKb=ceilDiv(kValue,baseK)`，`enableFullLoad=1`；实际槽按公共父布局和容量公式分配 |
+| 局部 dedy | L1A 只保存当前 M 块所需的行带和通道父段；按窗口交集及反向边界裁剪，保留 stride 插零 |
+| M 候选 | 同时满足 L0A、L0C 和局部 L1A 预算；按第 3 节比较任务轮次与尾轮占用，容量不足时收缩 M 或恢复通道分块 |
+| Buffer 份数 | L1A 按驻留与预取预算选择；L0A/L0B 按 K 分块选择，L0C 按输出交接选择，三者分别核算 |
+| 编译绑定 | 仍按 weight 格式、核体积及最终 baseN 选择普通 loadB2Condition；N/K 全载不改变权重变换 |
+
+N 全载时，L0C 给出的 M 容量界为 `alignDown(L0CBytes//(nValue*accBytes*cl0Pbuffer),m0)`；它只是上界，仍须通过完整 L0/L1 检查。任务数为 `batch*ceilDiv(di,singleCoreDin)*ceilDiv(hi*wi,singleCoreM)`；并行度不足时先按合法粒度调整 M，不强制保留 N 全载。
+
+完整 B1 不等于一次 MMAD 消费完整 K。K 仍按 baseK 分块，stepKb 保持公共语义；只有 baseK 已覆盖完整 kValue 时，stepKb 才为 1。权重身份改变或跨任务保留条件失效时，按公共协议归还旧 B1；不能把“每核首次装载”解释为全程不再检查地址。
 
 ## 5 Host 求解顺序
 
@@ -92,25 +109,25 @@ if hasBiasFlag_ and not UpdateIsBiasFullLoad(l1,l0): return false
 SetTilingData(core,l1,l0)
 ```
 
-最终 `enableFullLoad=1`，完整驻留仍由 Kernel 实际范围与份数判定。组、dedx 通道或权重地址变化时，按 [L1B 生命周期](../../../compute-flow.md#84-三个模板的差异) 结束复用。每个输出块的 L0C 独立初始化。
+最终 `enableFullLoad=1`，完整驻留仍由 Kernel 实际范围与份数判定。组、dedx 通道或权重地址变化时，按 [L1B 生命周期](../../../compute-flow.md#84-各模板的差异) 结束复用。每个输出块的 L0C 独立初始化。
 
 ## 6 检查要点
 
 完整 K 驻留的 DAG 形态（一次 L1B 装载跨任务复用）：
 
 ```text
-core 0: one full L1B load (L1B_R)
-  |
-  +--> task 0: L0B[0,kA) -> L0B[kA,2kA) -> dedx
-  |
-  +--> task 1: L0B[0,kA) -> L0B[kA,2kA) -> dedx
-  |
-  +--> task 2: L0B[0,kA) -> L0B[kA,2kA) -> dedx
-  |
-  +--> task N: L0B[0,kA) -> L0B[kA,2kA) -> dedx
-  |
-  v
-last MTE1 read completes -> release L1B
+核 0: 一次完整 L1B 装载（L1B_R）
+  │
+  ├──► 任务 0: L0B[0,kA) -> L0B[kA,2kA) -> dedx
+  │
+  ├──► 任务 1: L0B[0,kA) -> L0B[kA,2kA) -> dedx
+  │
+  ├──► 任务 2: L0B[0,kA) -> L0B[kA,2kA) -> dedx
+  │
+  ├──► 任务 N: L0B[0,kA) -> L0B[kA,2kA) -> dedx
+  │
+  ▼
+末次 MTE1 读取完成 -> 释放 L1B
 ```
 
 - [ ] 有效 K 项、含通道补零的计算 K、驻留预留 K 三种长度分别记录，容量按预留、贡献按有效

@@ -1,6 +1,8 @@
 # filter 分支同步与初始化实现
 
-本页把 [计算流程的生命周期](../../../generic/filter/compute-flow.md#8-dagbuffer-与流水) 映射为队列、事件和初始化通知。当前为 MN_StreamK、streamkType=0、groupEnlarge=false：A=dedy，B=x，累加与 dedw 均为 FP32。资源能力见 [buffer-and-types](../buffer-and-types.md)，本分支的队列实例和物理槽见 [Kernel 模板](kernel-template.md#33-buffer-分配)。
+本页把 [计算流程的生命周期](../../../generic/filter/compute-flow.md#8-dagbuffer-与流水) 映射为队列、事件和初始化通知。本页为 MN_StreamK、groupEnlarge=false；第 1–3.3 节说明主轮，第 3.4 节补充 streamkType≠0 的尾轮交接。A=dedy，B=x，累加与 dedw 均为 FP32。资源能力见 [buffer-and-types](../buffer-and-types.md)，本分支的队列实例和物理槽见 [Kernel 模板](kernel-template.md#33-buffer-分配)。
+
+> winograd 模板不使用本页的队列与事件协议：其 AIV/AIC 协同为**跨核信用队列**（三 pipe 分工 + 信用计数）与变换流水专用同步，统一见 [winograd-implementation](winograd-implementation.md) §2。
 
 ## 1 流水间交接
 
@@ -39,29 +41,25 @@ ExecuteMTE1L0a/b 在首次使用父段时 DeQue，完成 LoadL12L0a/b 后按释�
     | AllocTensor<float>: segment output slot |
     +--------------------+--------------------+
                          |
-                         |
                          v
 +------------------------+------------------------+
 | all actual MMADs; or ClearBaseMNL0C zero result |
 +------------------------+------------------------+
-                         |
                          |
                          v
              +-----------+-----------+
              | EnQue / DeQue: M -> F |
              +-----------+-----------+
                          |
-                         |
                          v
        +-----------------+-----------------+
        | Fixpipe: atomicAdd to actual dedw |
        +-----------------+-----------------+
                          |
-                         |
                          v
- +-----------------------+-----------------------+
- | FreeTensor: publish F -> M; next Alloc waits  |
- +-----------------------------------------------+
+  +----------------------+----------------------+
+  | FreeTensor: 发布 F -> M；下一次 Alloc 等待  |
+  +---------------------------------------------+
 ```
 
 区分两种无贡献情况：
@@ -121,12 +119,12 @@ MTE2 搬运起点由父段号乘 step*baseK 确定。实现的 LoadToA1 下层�
 例如 stepKa=2、stepKb=4、当前有 5 个 K 子块，两路父段对应如下：
 
 ```text
-+---------------------+---+---+---+---+---+
-| K block             | 0 | 1 | 2 | 3 | 4 |
-+---------------------+---+---+---+---+---+
-| A parent / stepKa=2 | 0 | 0 | 1 | 1 | 2 |
-| B parent / stepKb=4 | 0 | 0 | 0 | 0 | 1 |
-+---------------------+---+---+---+---+---+
++-------------------+---+---+---+---+---+
+| K 块号            | 0 | 1 | 2 | 3 | 4 |
++-------------------+---+---+---+---+---+
+| A 父段 / stepKa=2 | 0 | 0 | 1 | 1 | 2 |
+| B 父段 / stepKb=4 | 0 | 0 | 0 | 0 | 1 |
++-------------------+---+---+---+---+---+
 ```
 
 A 路令 `nextK=k+stepKa`，B 路令 `nextK=k+stepKb`，各自仅在 `nextK<kIter_` 时预取。末段不预取不存在的下一段；段内跨 batch/dout 或宽片时重新计算父段状态。M/N 之间允许的父段复用由 UpdateMNIdx 与 isLoad2L1*/isFree* 共同决定。
@@ -249,48 +247,58 @@ if ASCEND_IS_AIC {
 ### 3.3 入口顺序
 
 ```text
-                          +-----------------------------------------------+
-                          | GET_TILING_DATA; system workspace binding     |
-                          | InitOutput.Init                               |
-                          +-----------------------+-----------------------+
-                                                  |
-                       +--------------------------+--------------------------+
-                       |                                                     |
-                       v                                                     v
- +---------------------+---------------------+         +---------------------+---------------------+
- | AIV: InitOutput.Process                   |         | AIC: InitOutput.Process                   |
- | Fill actual dedw                          |         | wait MODE2 / PIPE_FIX                     |
- | MODE0 join -> MODE2 notify                |         | initialization complete                   |
- +---------------------+---------------------+         +---------------------+---------------------+
-                       |                                                     |
-                       |                                                     |
-                       v                                                     v
-      +----------------+----------------+                   +----------------+----------------+
-      | InitOutput.Destroy              |                   | InitOutput.Destroy              |
-      +----------------+----------------+                   +----------------+----------------+
-                       |                                                     |
-                       |                                                     |
-                       v                                                     v
-      +----------------+----------------+              +---------------------+---------------------+
-      | AIV: return                     |              | AIC: main Init -> Process                 |
-      +---------------------------------+              | CalBasicBlock -> IterateAll               |
-                                                       +---------------------+---------------------+
-                                                                             |
-                                                                             |
-                                                                             v
-                                                       +---------------------+---------------------+
-                                                       | Process: dw_.End once                     |
-                                                       | main TPipe cleanup                        |
-                                                       +-------------------------------------------+
+                           +---------------------------------------+
+                           | GET_TILING_DATA；系统 workspace 绑定  |
+                           | InitOutput.Init                       |
+                           +-------------------+-------------------+
+                                               |
+                     +-------------------------+-------------------------+
+                     v                                                   v
++-----------------------------------------+         +-----------------------------------------+
+| AIV: InitOutput.Process                 |         | AIC: InitOutput.Process                 |
+| Fill 清零实际 dedw                      |         | 等待 MODE2 / PIPE_FIX                   |
+| MODE0 汇合 -> MODE2 通知                |         | 初始化完成                              |
++--------------------+--------------------+         +--------------------+--------------------+
+                     |                                                   |
+                     v                                                   v
+          +----------+----------+                             +----------+----------+
+          | InitOutput.Destroy  |                             | InitOutput.Destroy  |
+          +----------+----------+                             +----------+----------+
+                     |                                                   |
+                     v                                                   v
+              +------+------+                       +--------------------+--------------------+
+              | AIV: return |                       | AIC: main Init -> Process               |
+              +-------------+                       | CalBasicBlock -> IterateAll             |
+                                                    +--------------------+--------------------+
+                                                                         |
+                                                                         v
+                                                    +--------------------+--------------------+
+                                                    | Process: dw_.End once                   |
+                                                    | main TPipe cleanup                      |
+                                                    +-----------------------------------------+
 ```
 
-入口依次调用 Init、Process、Destroy。streamkType=0、groupEnlarge=false 时，AIV 清零、汇合并通知后返回；AIC 处理拥有的输出任务，Process 内完成 End。本配置主循环没有逐基本块的 AIC↔AIV 归约等待。
+入口依次调用 Init、Process、Destroy。streamkType=0、groupEnlarge=false 时，AIV 清零、汇合并通知后不做主轮数值工作；AIC 处理拥有的输出任务，Process 内完成 End。本配置主循环没有逐基本块的 AIC↔AIV 归约等待。上图的 AIV return 是 type=0 的等价裁剪；沿用统一入口时 AIV 仅推进骨架，CalSingleBasicBlock 跳过数值工作，type≠0 则不能裁掉 AIV。
 
 启动的 MIX 核类型、AIC/AIV 配比、blockDim、SetScheduleMode(1) 与该协议一起核验，见 [模板绑定](tilingkey-templates.md)。平台能力通过 platformInfo 和 SDK 确定。
 
+### 3.4 尾轮确定性归约的跨核交接
+
+streamkType≠0 时 AIC/AIV 均保留到同一次 Process 的尾轮；AIV 完成输出初始化后不能提前退出。每个 M/N 子块从 Cube workspace 清零开始，依次执行局部结果生产和固定树形归约，数据图及偏移见 [Kernel §7.3](kernel-template.md#73-尾轮-streamk-与确定性归约)。
+
+| 阶段函数 | 生产端 | 消费端 | 当前标识与作用 |
+|---|---|---|---|
+| VecNotifyCube / CubeWaitVector | AIV PIPE_MTE3 | AIC PIPE_FIX | AIV 先 MODE0 flag 2 汇合，再 MODE2 flag 6 通知清零完成 |
+| CubeNotifyVector / VecWaitCube | AIC PIPE_FIX | AIV PIPE_MTE2 | AIC 先 MODE0 flag 4 汇合，再 MODE2 flag 8 通知部分和完成 |
+| DeterministicAddFunc | Vector 中间层写入 | 下一层相关核读取 | 每层 BarrierVector；最终 UBRearrange2Gm 写 dedw |
+
+Cube 槽的零基值由 ClearWorkspace 建立，随后 GetTensorC(...,1,true) 原子合并本核精度段。Vector 中间区与 Cube 区分开寻址；其中间区起点为设备 GetBlockNum()*CUBE_WORKSPACE，与 Host 的 coreNum 预算分别检查。槽复用依赖完整的“清零通知 → AIC 生产 → 结果通知 → AIV 消费”闭环，不是首段非原子覆写加一次屏障。
+
+isNoDeter、isCurIter 和 IsCoreNonCalc 只裁剪数值工作，不能减少参与汇合的次数。AIC 无计算时仍配对通知；连续空迭代按 CalcIterate 的 14 次阈值插入 PIPE_ALL barrier。目标 SDK、AIV 数或 flag 分配变化后，同时核对两端及向量树形归约，不能沿用 Winograd 的信用队列。
+
 ## 4 直调和注册接入
 
-注册和直调均可使用上述融合初始化入口：每次调用清零 dedw，再做全部归约段的原子写回。用户 workspace=0 不省略初始化；平台/系统 workspace 与用户归约区分别处理。
+注册和直调均可使用上述融合初始化入口：每次调用清零 dedw，再做全部归约段的原子写回。streamkType=0 的用户 workspace=0 不省略初始化；streamkType≠0 另分配 Cube/Vector 两区；平台/系统 workspace 与用户归约区分别处理。
 
 直调也可将独立 aclrtMemsetAsync 与计算放在同一 stream。采用独立初始化时，同时移除设备内清零和 AIC 等待，按剩余执行路径重新声明核类型；跨 stream 使用明确的完成事件。不能只删 AIV 分支而保留初始化 WaitFlag。
 

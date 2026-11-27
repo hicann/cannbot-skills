@@ -4,7 +4,7 @@ Host 按 [Tiling](../../../generic/filter/tiling/tiling.md) 形成最终计划�
 
 ## 1 当前执行配置
 
-当前模板为 MN_StreamK，`streamkType=0、groupEnlarge=false、realGroup=group`，FP16/BF16 输入、FP32 累加与输出。isSplitKernelHW 取实际求解值，splitWo 为运行时字段。每个输出任务完成全部 batch×dout×ho×wo 归约，段间经 GM 原子累加合并。
+在线顺序为 DLoad → Winograd → MN_StreamK。当前采用原始分组，groupEnlarge=false、realGroup=group；x/dedy 同为 FP16/BF16/FP32、dedw 为 FP32，最终类型、格式和 hf32 由所选模板准入。MN_StreamK 的 streamkType 有 0/1/2 三态；Winograd 由非零 winogradTilingFlag 选择独立变换流水。
 
 ### 1.1 MN_StreamK 与求解器的对应
 
@@ -22,15 +22,24 @@ Host 按 [Tiling](../../../generic/filter/tiling/tiling.md) 形成最终计划�
 
 ## 2 模板参数声明与 key
 
-Host 与 Device 共用一份 TPL 声明。声明列表的取值和顺序参与编码，保留已选编码基线；SEL 只实例化当前两种窗口组合：
+Host 与 Device 共用一份声明。LIST 的**位置**参与编码，不直接把宏数值拼接成 key；TPL_MN_STREAM_K=2 为历史保留槽位，当前 Host 不发出，也不为它编译实例。不能从 LIST 删除它而移动 TPL_DLOAD 的位置。
+
+ASCENDC_TPL_MIX_AIC_VALUE 由目标构建元数据绑定为已核实的 MIX 类型；AIC/AIV 配比与平台查询、初始化及尾轮通知一致，不在本页写死芯片型号。
 
 ```cpp
 #include "ascendc/host_api/tiling/template_argument.h"
-#define TPL_MN_STREAM_K 2
+#define TPL_STREAM_K 1
+#define TPL_MN_STREAM_K 2  // 保留 LIST 位置
+#define TPL_DLOAD 3
+#define TPL_WINOGRAD_DISABLE 0
+#define TPL_WINOGRAD_SINGLE_SHAPE_TILE_1 1
+#define TPL_WINOGRAD_SINGLE_SHAPE_TILE_2 2
+#define TPL_WINOGRAD_RESIDENT_FMAP 0
+#define TPL_WINOGRAD_RESIDENT_DY 1
 
 ASCENDC_TPL_ARGS_DECL(Conv3DDwCustom,
     ASCENDC_TPL_UINT_DECL(conv3DDWTemplateId, ASCENDC_TPL_8_BW,
-        ASCENDC_TPL_UI_LIST, 1, 2, 3),
+        ASCENDC_TPL_UI_LIST, TPL_STREAM_K, TPL_MN_STREAM_K, TPL_DLOAD),
     ASCENDC_TPL_BOOL_DECL(isSplitKernelHW, 0, 1),
     ASCENDC_TPL_BOOL_DECL(groupEnlarge, 0, 1),
     ASCENDC_TPL_UINT_DECL(winogradTilingFlag, ASCENDC_TPL_8_BW,
@@ -39,29 +48,69 @@ ASCENDC_TPL_ARGS_DECL(Conv3DDwCustom,
 
 ASCENDC_TPL_SEL(
     ASCENDC_TPL_ARGS_SEL(
-        ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_1_2),
-        ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_MN_STREAM_K),
-        ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0, 1),
+        ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_VALUE),
+        ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
+        ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0),
+        ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
+        ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, 0),
+        ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, 0)),
+    ASCENDC_TPL_ARGS_SEL(
+        ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_VALUE),
+        ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
+        ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 1),
+        ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
+        ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, 0),
+        ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, 0)),
+    ASCENDC_TPL_ARGS_SEL(
+        ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_VALUE),
+        ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
+        ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0),
+        ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
+        ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, 1),
+        ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, 0)),
+    ASCENDC_TPL_ARGS_SEL(
+        ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_VALUE),
+        ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
+        ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0),
+        ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
+        ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, 1),
+        ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, 1)),
+    ASCENDC_TPL_ARGS_SEL(
+        ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_VALUE),
+        ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
+        ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0),
+        ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
+        ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, 2),
+        ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, 0)),
+    ASCENDC_TPL_ARGS_SEL(
+        ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_VALUE),
+        ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_STREAM_K),
+        ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0),
+        ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
+        ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, 2),
+        ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, 1)),
+    ASCENDC_TPL_ARGS_SEL(
+        ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_VALUE),
+        ASCENDC_TPL_UINT_SEL(conv3DDWTemplateId, ASCENDC_TPL_UI_LIST, TPL_DLOAD),
+        ASCENDC_TPL_BOOL_SEL(isSplitKernelHW, 0),
         ASCENDC_TPL_BOOL_SEL(groupEnlarge, 0),
         ASCENDC_TPL_UINT_SEL(winogradTilingFlag, ASCENDC_TPL_UI_LIST, 0),
         ASCENDC_TPL_BOOL_SEL(winogradResidentFlag, 0)));
 ```
 
-核类型来自模板选择元数据；注册入口不再叠加与之冲突的默认类型。直调按自己的编译/启动接口配置等价的混合核参与单元。目标能力从 platformInfo 取得，确认当前初始化所需 AIC/AIV 配比、MIX 启动、事件和 API 后启用。
+上例只实例化当前原始分组域。源码还包含 groupEnlarge=true 的组合，新增生成范围时需连同重排、workspace、队列和验证知识一起接入，不能仅扩大 SEL。
 
-使用 MODE0 汇合的直调入口声明 `__schedmode__(1)`；注册侧对应 `context->SetScheduleMode(1)`。两者都与 MIX 类型和实际 blockDim 配对，不只设置事件。若改用独立清零，须同时替换设备初始化等待，形成另一套完整协议。
-
-```cpp
-uint64_t tilingKey = GET_TPL_TILING_KEY(
-    TPL_MN_STREAM_K, isSplitKernelHW, false, 0, false);
-```
-
-| 组合 | Kernel 行为 |
+| 模板 | GET_TPL_TILING_KEY 的五个参数 |
 |---|---|
-| `(2,false,false,0,false)` | 普通窗口，可有运行时宽片 |
-| `(2,true,false,0,false)` | 原核坐标外移到搬运的拆核窗口 |
+| MN_StreamK | `(TPL_STREAM_K,isSplitKernelHW,0,0,0)` |
+| Winograd | `(TPL_STREAM_K,0,0,winogradTilingFlag,residentFlag)`，flag=1/2，resident=0/1 |
+| DLoad | `(TPL_DLOAD,0,0,0,0)` |
 
-key 使用 SDK 宏计算，测试分别核对 Host 值、构建实例和设备解码。splitWo、stepKa/b、base* 不编码进 key。模板名称包含 StreamK 不等于 streamkType 非零。
+DLoad 的几何、通道块和 hf32Flag 使用运行时字段；按[驻留与资源条件](../../../generic/filter/tiling/templates/dload/tiling.md)求得计划后发布 baseM/baseN/baseK、coreNum 和精度模式。生成入口据此组装 DLoadConfig，Cout/Cin 尾块的 MMAD 与 Fixpipe 共用实际计算跨度。
+
+streamkType、splitWo、base*、step* 是运行时字段，不编码进 key。测试同时核对 Host 值、编译实例与设备分发；不能将 MN_StreamK 模板名直接当作编号 2。
+
+使用 MODE0 汇合时，直调按 SDK 绑定 `__schedmode__(1)`，注册侧使用 `context->SetScheduleMode(1)`。核类型与参与单元由同一能力记录确定，入口不再叠加冲突的默认类型。
 
 ## 3 共享字段
 
@@ -80,13 +129,13 @@ key 使用 SDK 宏计算，测试分别核对 Host 值、构建实例和设备�
 | uint32_t | batch、cin、cout、cin1G、cout1G、group、realGroup | 批次、总通道、执行组通道跨度与分组 |
 | uint32_t | dout/ho/wo、di/hi/wi、dk/hk/wk | 原始几何 |
 | uint32_t | strideD/H/W、dilationD/H/W、六个 pad | 正向属性 |
-| uint32_t | m0/n0/k0/channelSize | 当前分形粒度 16 |
+| uint32_t | m0/n0、k0/channelSize | m0=n0=16；k0=channelSize=32/sizeof(T)，FP32 为 8 |
 | uint32_t | baseM/baseN/baseK、stepKa/stepKb | 计算块与驻留 |
 | uint32_t | al0/bl0/cl0/al1/bl1Pbuffer | 实际槽份数 |
 | uint32_t | al1Bound/bl1Bound | 单份 L1 元素数 |
 | uint32_t | singleCoreM/N/K/Cout/Ho/Dk/Group | 任务几何与范围 |
 | uint64_t | singleCoreBatch、singleCoreCin、singleCoreBatchDout | 宽整数的任务批次/通道/批深度范围 |
-| uint32_t | splitWo、usedCoreNum、iterateOrder、streamkType、hf32Flag | 执行计划；当前后两项中的 streamkType/hf32Flag 均为 0 |
+| uint32_t | splitWo、coreNum、iterateOrder、streamkType、hf32Flag | 调度基数、窗口与运行时分支；hf32 只用于 FP32 计算模式 |
 
 ### 3.2 名字相近、单位不同的字段
 
@@ -104,39 +153,34 @@ key 使用 SDK 宏计算，测试分别核对 Host 值、构建实例和设备�
 
 普通 POD 使用相同字段顺序、类型、padding 和总长度；所有填充置零并校验 `sizeof(Data)%8==0`。注册数据类与手写 POD 不能在未核对偏移时解释同一段字节。
 
-mValue/nValue/kValue、mCnt/nCnt/totalCnt、calRound、尾宽和精度归约段长按已发布几何与最终计划复算。Host 保存校验记录，Kernel 使用一致公式，避免两份可分别改动的派生真值。
+usedCoreNum、coreStreamK、coreBindDirection 是 Host 工作变量，不在 TConv3DDwTiling 中；blockDim 独立发布。mValue/nValue/kValue、mCnt/nCnt/totalCnt、calRound、尾宽和精度归约段长按已发布几何与最终计划复算。Host 保存校验记录，Kernel 使用一致公式，避免两份可分别改动的派生真值。
 
 ## 4 Host 流程与发布
 
 ```text
-      +-----------------------------------------------------+
-      | parse x / filter_size / out_backprop and attributes |
-      +--------------------------+--------------------------+
-                                 |
-                                 |
-                                 v
-     +---------------------------+---------------------------+
-     | normalize rank / formats -> validate forward geometry |
-     +---------------------------+---------------------------+
-                                 |
+          +---------------------------------------------+
+          | 解析 x / filter_size / out_backprop 与属性  |
+          +----------------------+----------------------+
                                  |
                                  v
-       +-------------------------+-------------------------+
-       | platformInfo + API / mixed-core capability record |
-       +-------------------------+-------------------------+
-                                 |
-                                 |
-                                 v
-      +--------------------------+--------------------------+
-      | MN_StreamK solver -> final window and resource plan |
-      +--------------------------+--------------------------+
-                                 |
+                 +---------------+---------------+
+                 | 归一化秩/格式 -> 校验正向几何 |
+                 +---------------+---------------+
                                  |
                                  v
- +-------------------------------+-------------------------------+
- | check fields / buffer addresses / ownership / initialization  |
- +-------------------------------+-------------------------------+
+              +------------------+------------------+
+              | platformInfo + API / 混合核能力记录 |
+              +------------------+------------------+
                                  |
+                                 v
+             +-------------------+-------------------+
+             | 模板在线求解 -> 最终任务与资源方案    |
+             +-------------------+-------------------+
+                                 |
+                                 v
+            +--------------------+--------------------+
+            | 检查字段 / buffer 地址 / 归属 / 初始化  |
+            +--------------------+--------------------+
                                  |
                                  v
 +--------------------------------+--------------------------------+
@@ -144,7 +188,7 @@ mValue/nValue/kValue、mCnt/nCnt/totalCnt、calRound、尾宽和精度归约段�
 +-----------------------------------------------------------------+
 ```
 
-生成工程在最终 isSplitKernelHW、splitWo、base*、step*、singleCore* 形成后，重新检查 L0/L1、固定槽区间、字段范围、任务覆盖、输入输出地址关系和初始化协议。
+生成工程按所选模板检查最终参数、L0/L1/UB、固定槽区间、字段范围、任务覆盖、地址和初始化。MN_StreamK 校验 base*/step*/Bound；Winograd 校验变换档、rtTiling 和四段 workspace；两者不混用资源模型。
 
 ```cpp
 auto *raw = context->GetRawTilingData();
@@ -156,11 +200,11 @@ if (memcpy_s(raw->GetData(),raw->GetCapacity(),&td,bytes) != EOK) {
     return ge::GRAPH_FAILED;
 }
 context->SetTilingKey(tilingKey);
-context->SetBlockDim(td.dwTiling.usedCoreNum);
+context->SetBlockDim(blockDim); // Host 按所选模板计算，与共享 coreNum 分别发布
 context->SetScheduleMode(1);
 raw->SetDataSize(bytes);
 ```
 
-平台/系统 workspace 按工程框架处理；当前用户 workspace=0，不创建归约缓冲。直调发布相同字段与启动核数，注册发布上述框架元数据；异步执行结束前保持输入输出、Device Tiling 和必要系统区有效。
+平台/系统 workspace 按工程框架处理。MN_StreamK type=0 用户区为 0，type≠0 为两份 coreNum×平台 L0C 容量；Winograd 使用预转换、驻留与尾轮四区；DLoad 无该用户归约区。直调发布相同字段与启动核数，注册发布上述框架元数据；异步执行结束前保持输入输出、Device Tiling 和必要系统区有效。
 
 发布检查包括实际输入 dtype 相同、输出 float、format 编译实例命中、字段乘积未溢出、原子初始化覆盖实际输出。日志保存真实 key、模板参数和运行时字段，不能只凭接口精度通过认定分支覆盖。

@@ -1,104 +1,140 @@
 # 卷积反向算子 Tiling 数据与模板绑定
 
-Host 按 [模板选择](../../../generic/input/tiling/tiling.md) 求解参数，再按最终块形状选择 loadB2Condition；Kernel 通过共享字段和编译实例消费结果。模板选择与 key 编码分别执行。
+Host 按 [模板选择](../../../generic/input/tiling/tiling.md) 求解参数，再绑定编译分支、运行字段和启动配置。本文定义新生成工程的三实参声明；自带示例的私有 ABI 见第 2 节末。
 
-## 1 当前执行配置
+## 1 执行配置与模板绑定
 
-采用原始分组寻址（按 G 组原始通道划分，groupConvMode=0）、GM→L1 权重搬入（loadB1Condition=0）、完整核深度归约，以及下表中的三种 weight 变换。运行时配置为 `singleIterateDk=dk、iterateOrder=1`；standard / small-shape / l1-resident 的 enableFullLoad 分别为 0 / 0 / 1。
+Tiling 模板决定求解策略，数据准备决定两路布局，编译声明决定可执行实例。准入见模板及 [指令映射](instruction-mapping.md)，本页只维护最终绑定。
 
-普通通道路径同时满足 `c0=16、enableC04Flag=false、tilingHkWkMode=0`。发布时核对选中路径的 `kernelSplitMode=0、isBasicBlockTiling=true、loadB1Condition=0、groupConvMode=0`，以及 `enableVecTrans=enableLocalW=loadB1FractalZ=0`、`enableSplitK=useUbAccumForSplitK=false`、`kSCoutFullLoad=kSUseWorkSpace=0`（量化残留字段 offsetX 恒为 0，不参与本路径判定）。这些是执行配置检查，不能通过改写原选择结果扩大准入。
+| 执行路径 | kernelSplitMode | loadB1Condition | loadB2Condition | 运行字段 |
+|---|---|---|---|---|
+| 普通布局 | 0 | 0 | FP16/BF16 在最终块上选 1/2；FP32 为 2 | enlarge=1 |
+| VecTranspose | 0 | 0 | 2 | enableVecTrans=1 |
+| C04 | 0 | 1 | 0 | 入口设置 enableC04Flag=true |
+| group enlarge | 0 | 0 | 2 | enlarge>1；group/oriGroup 按计算组/原始组发布 |
+| kernel-split | 1 或 2 | 0 | 2 | kSCoutFullLoad、kSUseWorkSpace；可配合 enableVecTrans |
 
-### 1.1 三模板与求解器的对应
+groupConvMode 是 Host 的分组状态，Kernel 从 enlarge 判断；它和 isBasicBlockTiling 都不是本声明的模板实参。C04、group enlarge、普通前置转置在当前浮点范围互斥；kernel-split 与 C04/group enlarge 不组合，前置转置按其模板条件判断。
 
-三模板与算子包 arch35 求解器的对应关系：
+standard 的 enableFullLoad=0，l1-resident 为 1；small-shape 发布全载收益复核后的实际值。singleIterateDk=dk、iterateOrder=1。kSCoutFullLoad 单独置位不要求 workspace；enableVecTrans 或 kSUseWorkSpace 置位时，入口必须取得相应用户空间。
 
-| 范式模板 | arch35 求解器（op_host/op_tiling 下同名 *_tiling 单元） | 说明 |
+| 模板 | 求解器 | 域内登记优先级 |
 |---|---|---|
-| standard | `conv3d_backprop_input_v2_inner_product_tiling` | 经验选块与常规任务分配 |
-| small-shape | `conv3d_backprop_input_v2_small_shape_tiling` | 小任务量 M/N 均衡 |
-| l1-resident | `conv3d_backprop_input_v2_fullLoad_tiling` | 完整 K 权重驻留 |
+| kernel-split 的 cout 全载变体 | Conv3DDXV2KernelSplitFullLoadTiling | 97 |
+| kernel-split | Conv3DDXV2KernelSplitTiling | 98 |
+| small-shape | Conv3DDXV2SmallShapeTiling | 99 |
+| l1-resident | Conv3DDXV2FullLoadTiling | 100 |
+| standard | Conv3DDXV2InnerProductTiling | 101 |
 
-算子包另含 `kernel_split` / `kernel_split_fullLoad`（kernelSplitMode=TPL_SPLIT_KERNEL_HW/H）、`small_kernel`（loadB1Condition=TPL_SMALL_KERNEL）、C04（TPL_VEC_TO_L1_C04）等扩展执行分支；本范式当前执行配置固定 `kernelSplitMode=0、loadB1Condition=0`（见上文"当前执行配置"），这些分支不在生成范围。arch22 的 basic_block/vec 求解器属 A2 平台路径，不在本范式范围。
+同一 key 可服务不同求解模板；驻留与任务仍由最终运行字段决定。按本范式准入和上述域内顺序选择，不先固定 key 再修改准入标志。
+
+dtype 由编译实例的 `DTYPE_FILTER/DTYPE_OUT_BACKPROP/DTYPE_Y` 绑定，key 保持三个实参。FP32 的 C0/K0=8、c0BitsA/B=3，按运行字段和 float 类型生成地址与计算参数。
 
 ## 2 loadB2Condition 判定与 key
 
-在第 1 节配置内，`GetLoadB2ConditionByFormatAndKernel` 按以下顺序使用最终块选择 loadB2Condition。几何已通过正值检查，核体积乘积可由 uint64_t 表示：
+普通求解器在最终块形状上选择 B2；kernel-split 固定为 REVERSE_ONLY。weightDtype 来自 weight 规格：
 
 ```cpp
-const uint64_t kernelHW = uint64_t(hk) * wk;
-const uint64_t kernelDHW = uint64_t(dk) * kernelHW;
-if (kernelDHW == 1) return TPL_TRANSPOSE_ONLY;
+if (enableC04Flag) return TPL_NO_TRANSPOSE_NO_REVERSE;
+if (weightDtype == ge::DT_FLOAT || filterFormat == ge::FORMAT_DHWCN ||
+    enlarge > 1 || enableVecTransFlag) {
+    return TPL_REVERSE_ONLY;
+}
+const uint64_t kernelHW = uint64_t(hk)*wk;
+const uint64_t kernelDHW = uint64_t(dk)*kernelHW;
+if (kernelDHW == 1) return TPL_TRANSPOSE_AND_REVERSE;
 if (filterFormat == ge::FORMAT_NDHWC && baseN >= kernelHW) return TPL_REVERSE_ONLY;
-if (filterFormat == ge::FORMAT_NCDHW && kernelDHW <= 64 / weightBytes / cin) {
+if (filterFormat == ge::FORMAT_NCDHW && kernelDHW <= 64/weightBytes/cin) {
     return TPL_REVERSE_ONLY;
 }
 return TPL_TRANSPOSE_AND_REVERSE;
 ```
 
-片段中的几何和 weightBytes 来自归一化问题，filterFormat 使用 ge::Format；返回值使用下文共享头的 TPL 常量。`cin` 是总输入通道数；判定不使用 cinG。64B 条件用正整数的等价除法避免乘积溢出。核体积为 1 的判断优先于格式和 64 字节阈值；即使 `cin*weightBytes<=64`，也选择仅转置。loadB2Condition 同时决定 GM→L1B 的父布局，映射见 [布局说明](instruction-mapping.md)。
+cin 为总输入通道数。核体积为 1 时，FP16/BF16 取分支 1，在 B2 转置；FP32 取分支 2，在 GM→L1B 形成通道朝向，B2 直接取块。C04 的逆序由 AIV gather 完成。单位核搬运见 [指令映射 §5.4](instruction-mapping.md#54-单位核按-dtype-选择搬运)。
 
-按这一确定性结果检查整条搬运链；所选路径不满足 API 或资源条件时返回具体原因。
+### 2.1 共享声明与合法组合
 
-共享头文件保留完整的声明列表顺序和位宽，`ASCENDC_TPL_SEL` 只选择本范式的三个组合。列表中的位置参与编码，不能通过缩短列表来裁剪实现范围。
+下面的 `CONV3DDX_CV_RATIO` 是工程编译常量，由已核实的目标执行配置绑定为 1 或 2，必须与 C/V 参与者和 Host 检查一致；它不是 platformInfo 的字段。SDK 核型名称保留准确拼写。
 
 ```cpp
 #include "ascendc/host_api/tiling/template_argument.h"
 
+#define TPL_NO_TRANSPOSE_NO_REVERSE 0
 #define TPL_TRANSPOSE_AND_REVERSE 1
 #define TPL_REVERSE_ONLY 2
-#define TPL_TRANSPOSE_ONLY 3
 #define TPL_NO_SPLIT_KERNEL 0
-#define TPL_GROUP_MODE_ORIGIN 0
+#define TPL_SPLIT_KERNEL_HW 1
+#define TPL_SPLIT_KERNEL_H 2
 #define TPL_GM_TO_L1 0
+#define TPL_VEC_TO_L1_C04 1
+
+#if CONV3DDX_CV_RATIO == 2
+#define CONV3D_DX_KERNEL_TYPE_SEL ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_1_2)
+#elif CONV3DDX_CV_RATIO == 1
+#define CONV3D_DX_KERNEL_TYPE_SEL ASCENDC_TPL_KERNEL_TYPE_SEL(ASCENDC_TPL_MIX_AIC_1_1)
+#else
+#error "Bind CONV3DDX_CV_RATIO to the selected MIX execution contract"
+#endif
 
 ASCENDC_TPL_ARGS_DECL(Conv3DDxCustom,
     ASCENDC_TPL_UINT_DECL(loadB2Condition, ASCENDC_TPL_8_BW,
-        ASCENDC_TPL_UI_LIST, 0, 1, 2, 3),
+        ASCENDC_TPL_UI_LIST, TPL_NO_TRANSPOSE_NO_REVERSE,
+        TPL_TRANSPOSE_AND_REVERSE, TPL_REVERSE_ONLY),
     ASCENDC_TPL_UINT_DECL(kernelSplitMode, ASCENDC_TPL_8_BW,
-        ASCENDC_TPL_UI_LIST, 0, 1, 2),
-    ASCENDC_TPL_UINT_DECL(groupConvMode, ASCENDC_TPL_8_BW,
-        ASCENDC_TPL_UI_LIST, 0, 1),
-    ASCENDC_TPL_BOOL_DECL(isBasicBlockTiling, 0, 1),
+        ASCENDC_TPL_UI_LIST, TPL_NO_SPLIT_KERNEL,
+        TPL_SPLIT_KERNEL_HW, TPL_SPLIT_KERNEL_H),
     ASCENDC_TPL_UINT_DECL(loadB1Condition, ASCENDC_TPL_8_BW,
-        ASCENDC_TPL_UI_LIST, 0, 1, 2, 3, 4));
+        ASCENDC_TPL_UI_LIST, TPL_GM_TO_L1, TPL_VEC_TO_L1_C04));
 
 ASCENDC_TPL_SEL(
-    ASCENDC_TPL_ARGS_SEL(
+    ASCENDC_TPL_ARGS_SEL(CONV3D_DX_KERNEL_TYPE_SEL,
         ASCENDC_TPL_UINT_SEL(loadB2Condition, ASCENDC_TPL_UI_LIST, TPL_TRANSPOSE_AND_REVERSE),
         ASCENDC_TPL_UINT_SEL(kernelSplitMode, ASCENDC_TPL_UI_LIST, TPL_NO_SPLIT_KERNEL),
-        ASCENDC_TPL_UINT_SEL(groupConvMode, ASCENDC_TPL_UI_LIST, TPL_GROUP_MODE_ORIGIN),
-        ASCENDC_TPL_BOOL_SEL(isBasicBlockTiling, 1),
         ASCENDC_TPL_UINT_SEL(loadB1Condition, ASCENDC_TPL_UI_LIST, TPL_GM_TO_L1)),
-    ASCENDC_TPL_ARGS_SEL(
+    ASCENDC_TPL_ARGS_SEL(CONV3D_DX_KERNEL_TYPE_SEL,
         ASCENDC_TPL_UINT_SEL(loadB2Condition, ASCENDC_TPL_UI_LIST, TPL_REVERSE_ONLY),
         ASCENDC_TPL_UINT_SEL(kernelSplitMode, ASCENDC_TPL_UI_LIST, TPL_NO_SPLIT_KERNEL),
-        ASCENDC_TPL_UINT_SEL(groupConvMode, ASCENDC_TPL_UI_LIST, TPL_GROUP_MODE_ORIGIN),
-        ASCENDC_TPL_BOOL_SEL(isBasicBlockTiling, 1),
         ASCENDC_TPL_UINT_SEL(loadB1Condition, ASCENDC_TPL_UI_LIST, TPL_GM_TO_L1)),
-    ASCENDC_TPL_ARGS_SEL(
-        ASCENDC_TPL_UINT_SEL(loadB2Condition, ASCENDC_TPL_UI_LIST, TPL_TRANSPOSE_ONLY),
+    ASCENDC_TPL_ARGS_SEL(CONV3D_DX_KERNEL_TYPE_SEL,
+        ASCENDC_TPL_UINT_SEL(loadB2Condition, ASCENDC_TPL_UI_LIST, TPL_REVERSE_ONLY),
+        ASCENDC_TPL_UINT_SEL(kernelSplitMode, ASCENDC_TPL_UI_LIST, TPL_SPLIT_KERNEL_HW),
+        ASCENDC_TPL_UINT_SEL(loadB1Condition, ASCENDC_TPL_UI_LIST, TPL_GM_TO_L1)),
+    ASCENDC_TPL_ARGS_SEL(CONV3D_DX_KERNEL_TYPE_SEL,
+        ASCENDC_TPL_UINT_SEL(loadB2Condition, ASCENDC_TPL_UI_LIST, TPL_REVERSE_ONLY),
+        ASCENDC_TPL_UINT_SEL(kernelSplitMode, ASCENDC_TPL_UI_LIST, TPL_SPLIT_KERNEL_H),
+        ASCENDC_TPL_UINT_SEL(loadB1Condition, ASCENDC_TPL_UI_LIST, TPL_GM_TO_L1)),
+    ASCENDC_TPL_ARGS_SEL(CONV3D_DX_KERNEL_TYPE_SEL,
+        ASCENDC_TPL_UINT_SEL(loadB2Condition, ASCENDC_TPL_UI_LIST, TPL_NO_TRANSPOSE_NO_REVERSE),
         ASCENDC_TPL_UINT_SEL(kernelSplitMode, ASCENDC_TPL_UI_LIST, TPL_NO_SPLIT_KERNEL),
-        ASCENDC_TPL_UINT_SEL(groupConvMode, ASCENDC_TPL_UI_LIST, TPL_GROUP_MODE_ORIGIN),
-        ASCENDC_TPL_BOOL_SEL(isBasicBlockTiling, 1),
-        ASCENDC_TPL_UINT_SEL(loadB1Condition, ASCENDC_TPL_UI_LIST, TPL_GM_TO_L1)));
+        ASCENDC_TPL_UINT_SEL(loadB1Condition, ASCENDC_TPL_UI_LIST, TPL_VEC_TO_L1_C04)));
 ```
 
-**核类型声明（registry/aclnn 编译必填，取值与初始化协议配对）**：Cube kernel 走注册编译时，在模板参数声明末位追加 `ASCENDC_TPL_KERNEL_TYPE_DECL(KT, <类型>)`，类型取值与所选初始化协议一致：主计算前独立初始化取 `ASCENDC_TPL_AIC_ONLY`；融合 AIV 清零取 `ASCENDC_TPL_MIX_AIC_1_2`（AIV 参与启动，等价于算子包在 Kernel 源内声明的 `KERNEL_TASK_TYPE_DEFAULT(KERNEL_TYPE_MIX_AIC_1_2)`）。**配对必须一致：融合初始化误声明 AIC_ONLY 会使 AIV 清零缺失、AIC 等待通知永久挂起；独立初始化误声明混合类型则空跑 AIV 份**。直调不经注册元数据，核类型/调度由启动侧配置承载。
+本范围共五个合法组合，VecTranspose/group enlarge 与普通仅逆序复用同一编译实例，按运行字段改变来源和计算组。Host/Device 共用声明、实参顺序和位宽，保留 LIST 的语义顺序。
 
-Host 在配置检查通过后调用共享声明生成 key：
+该声明使用融合 AIV 初始化的 MIX 入口。若生成普通 AIC-only 版本，须采用独立初始化或完整块写回协议，并为其声明匹配的 AIC-only 注册元数据；不能保留上述 MIX 元数据却删除 AIV 逻辑。核型不是第四个算子模板实参，详见 [C/V 协同](cv-collaboration.md)。
+
+### 2.2 编码与运行字段
 
 ```cpp
 const uint64_t tilingKey = GET_TPL_TILING_KEY(
-    loadB2Condition, 0, 0, true, 0);
+    loadB2Condition, kernelSplitMode, loadB1Condition);
 ```
 
-| 五参数语义值 | `tilingKey` | L1B→L0B |
-|---|---:|---|
-| `(1,0,0,true,0)` | 16777217 | 转置加逆序 |
-| `(2,0,0,true,0)` | 16777218 | 逆序 |
-| `(3,0,0,true,0)` | 16777219 | 仅转置；核体积为 1 |
+| 三实参语义值 | 数据路径 |
+|---|---|
+| `(1,0,0)` | 转置加逆序；单位核时仅转置 |
+| `(2,0,0)` | 普通仅逆序，或 VecTranspose/group enlarge |
+| `(2,1,0)` | split-HW |
+| `(2,2,0)` | split-H |
+| `(0,0,1)` | C04；B2 不再转置或逆序 |
 
-前面三个 UINT 字段分别占 8 位，BOOL 占 1 位，最后一个 UINT 接在第 25 位。当前三个组合均为 `2^24 + loadB2Condition`；实际代码通过 SDK 宏编码。构建实例和 Host 共用声明，切换 SDK 后重新核对结果。
+FP32 使用 `(2,0,0)`、`(2,1,0)` 或 `(2,2,0)`；其余两种组合用于 FP16/BF16。
+
+实际 key 由同一 SDK 的宏编码并在 Host/Device 分发中核对，不手写十进制值。group、oriGroup、enlarge、enableVecTrans、enableFullLoad 仍分别发布。
+
+### 2.3 自带示例的私有 ABI
+
+[conv3ddx](../example/conv3ddx/README.md) 与 [conv3dtranspose](../example/conv3dtranspose/README.md) 的 FP16/BF16 实现保留私有 loadB2=1/2/3 及配套 key/POD。私有 3 表示单位核仅转置；本文对同一 FP16/BF16 场景使用 1，FP32 使用 2。复用示例时成套使用其 Host、Kernel、共享头和调用分发；按本文声明生成时统一绑定三实参实例及共享字段。
 
 ## 3 共享字段
 
@@ -107,21 +143,26 @@ Host/Device 使用同一份定义。注册用 BEGIN_TILING_DATA_DEF/REGISTER_TIL
 | 类型 | 字段组 | 用途 |
 |---|---|---|
 | uint64_t | coreNum、singleCoreBatch、singleCoreM | 启动计算核数、任务 batch/空间范围 |
-| uint32_t | batch、cin/cout、cinG/coutG、group | batch/总通道/组内通道/分组 |
+| uint32_t | batch、cin/cout、cinG/coutG、group、oriGroup | batch/总通道/计算组通道/计算组数/原始组数；enlarge>1 时 cinG/coutG 已放大 |
 | uint32_t | di/hi/wi、dout/ho/wo、dk/hk/wk | 输入输出与核几何 |
 | uint32_t | strideD/H/W、dilationD/H/W、六侧 pad | 正向属性与采样 |
 | int32_t | backpropPadTail、backpropPadUp/Down/Left/Right | 与裁剪原点共同使用的反向边界 |
 | uint32_t | baseM/baseN/baseK、stepKa/stepKb | 计算块与驻留 |
 | uint32_t | singleCoreCin/Cout/Din/Group、singleIterateDk | 任务通道/深度/组及核深度归约 |
 | uint8_t | al1/bl1/al0/bl0/cl0Pbuffer、iterateOrder、c0 | Buffer 份数、遍历与粒度 |
+| uint8_t | c0BitsA、c0BitsB、hf32Flag | FP16/BF16 为 4/4/0，FP32 为 3/3/0 |
 | uint8_t | initOutputFlag、enableFullLoad | 初始化与驻留策略 |
 | uint8_t | isBiasFullLoad | 可选 bias 的全量/分块通道准备方式 |
+| uint32_t | kSCoutFullLoad、kSUseWorkSpace | kernel-split 的通道全载和重排 workspace 开关；全载不等于使用 workspace |
+| uint8_t | enableVecTrans | 前置转置开关；见 [指令映射 §3.5](instruction-mapping.md) |
+| 编译配置 | enableC04Flag | 由 loadB1Condition=TPL_VEC_TO_L1_C04 的入口实例化得到，不是原 TilingData 字段 |
+| uint8_t | enlarge | 合并倍数；原始组数发布到 oriGroup，计算组数发布到 group |
 
 其余派生量按公共 Tiling 的字段表在 Host 填写或在 Init 中复算，选择唯一生产方式。资源容量、L1A/L1B 槽大小可由同一目标的编译配置绑定，或随共享数据传入；它们必须与 Host 预算一致。结构尾部按序列化要求补齐，所有填充置零。
 
 共享数据使用本工程读取的字段集合，字段名、单位和计算遵从对应实现。它不是原完整 ABI 的二进制替代；不包含未实现功能的读取者。使用普通 struct 时检查 padding、字段偏移与总长度；设备不得用另一份结构解释相同字节。
 
-Transpose 复用五参数编码，将声明名和 TilingData 注册名绑定到自己的算子类型，使用 [八参数入口](kernel-template.md)。bias 存在性由外部指针与 Host 检查保持一致，不增加 key 位。isBiasFullLoad 与 enableFullLoad 分别发布；DX 不消费 bias 资源。
+Transpose 复用三实参编码，将声明名和 TilingData 注册名绑定到自己的算子类型，使用 [八参数入口](kernel-template.md)。bias 存在性由外部指针与 Host 检查保持一致，不增加 key 位。isBiasFullLoad 与 enableFullLoad 分别发布；DX 不消费 bias 资源。
 
 ## 4 Host 流程与发布
 
@@ -160,4 +201,4 @@ tilingData.SaveToBuffer(raw->GetData(),raw->GetCapacity());
 raw->SetDataSize(bytes);
 ```
 
-大乘积与地址先用宽整数检查，反向边界保留符号。注册数据长度和对齐满足 SDK；Device Tiling 内存、输入输出和 workspace 保持到异步执行结束。融合初始化按同步文档发布对应核类型及调度设置。
+大乘积与地址先用宽整数检查，反向边界保留符号。注册数据长度和对齐满足 SDK；Device Tiling 内存、输入输出和 workspace 保持到异步执行结束。融合初始化和数据准备按 [C/V 协同](cv-collaboration.md) 发布核类型及调度设置；使用 MODE0 的分离路径保留 SetScheduleMode(1)。

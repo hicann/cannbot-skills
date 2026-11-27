@@ -1,19 +1,18 @@
 # 权重梯度分支指令 API 落地要点
 
-本页落实 API、参数结构、有效长度、步幅单位与数值示例。布局和地址见 [compute-flow](../../../generic/filter/compute-flow.md)，阶段组织见 [kernel-template](kernel-template.md)。A=dedy、B=x，输入为 FP16/BF16，累加与 dedw 为 FP32。队列与事件协议见 [同步实现](sync-implementation.md)。
+本页落实 API、参数结构、有效长度、步幅单位与数值示例。布局和地址见 [compute-flow](../../../generic/filter/compute-flow.md)，阶段组织见 [kernel-template](kernel-template.md)。A=dedy、B=x，第 1–8 节的具体输入参数采用 FP16/BF16，累加与 dedw 为 FP32；FP32 输入的专用映射见第 9 节，Winograd 见其独立实现页。队列与事件协议见 [同步实现](sync-implementation.md)。
 
 ## 1 API 总表与参数结构
 
-| 通路 | API | 参数结构 |
-|---|---|---|
-| dedy GM→L1A | DataCopy，NCDHW 用 DN2NZ、NDHWC 用 ND2NZ | Dn2NzParams / Nd2NzParams |
-| x GM→L1B | DataCopy，按原格式转换为通道分块父布局 | Dn2NzParams / Nd2NzParams |
-| L1A→L0A | LoadData | LoadData2DParamsV2 |
-| L1B→L0B | LoadDataWithStride 或配套旧重载 | LoadData3DParamsV2 + Repeat |
-| 乘加 | Mmad | MmadParams |
-| 写回 | Fixpipe | FixpipeParamsArch3510，ROW_MAJOR/COLUMN_MAJOR |
-| 原子范围 | SetAtomicAdd<float> / SetAtomicNone | 围绕本次 Fixpipe 调用 |
-| 预清零 | Fill<float>，AIV 执行 | 实际输出区域与通知协议 |
+| # | 通路 | Ascend C 调用形式 | 参数结构体 |
+|---|---|---|---|
+| 1 | dedy GM→L1A | `DataCopy(a1, dedyGm[off], p)`（NCDHW 用 DN2NZ、NDHWC 用 ND2NZ） | `Dn2NzParams / Nd2NzParams` |
+| 2 | x GM→L1B | `DataCopy(b1, xGm[off], p)`（按原格式转通道分块父布局；拆核时逐行 `DataCopy(b1[row*l1W*16], xGm[off], p)`） | 同上 |
+| 3 | L1A→L0A | `LoadData(a2, a1[kOff*256+splitWLocalOffset], p)` | `LoadData2DParamsV2` |
+| 4 | L1B→L0B | `SetLoadDataRepeatWithStride(rp); LoadDataWithStride(b2, b1, load3d)`（旧 SDK 用配套旧重载，见 §5.2） | `LoadData3DParamsV2 + Repeat` |
+| 5 | 乘加 | `Mmad(c, a2_[l0Slot_*a2Slot_], b2_[l0Slot_*b2Slot_], p)` | `MmadParams` |
+| 6 | 写回（原子累加） | `SetAtomicAdd<float>(); Fixpipe<float,float,主序>(dedwGm[dst], l0c, p); SetAtomicNone();`——主序按输出格式分发（§7.1），原子范围与队列归还见 §7.4 | `FixpipeParamsArch3510`（ROW_MAJOR / COLUMN_MAJOR） |
+| 7 | 预清零 | `Fill<float>`，AIV 执行 | 实际输出区域与通知协议（[sync-implementation](sync-implementation.md)） |
 
 片段使用 `AscendC` 命名空间，T 为 half 或 bfloat16_t；td 为共享 Tiling 数据，a1/b1、a2/b2、l0c 分别为对应 LocalTensor。所有构造前先用宽整数检查，再赋给目标 SDK 的字段类型。
 
@@ -320,13 +319,11 @@ LoadData(a2, a1[kOffset*256 + splitWLocalOffset], p);
             | L1A: (M1,K1,K0,M0)  |
             +----------+----------+
                        |
-                       |
                        v
 +----------------------+----------------------+
 | Load2D: mStep=ceil(K/16); kStep=ceil(M/16)  |
 | ifTranspose=true                            |
 +----------------------+----------------------+
-                       |
                        |
                        v
             +----------+----------+
@@ -382,27 +379,24 @@ LoadDataWithStride(b2, b1, load3d);
 原 `hkIdx=hwkIdx/wk、wkIdx=hwkIdx%wk` 在外层决定采样地址与 L0C 列偏移。不能把单位窗口解释成整个卷积核退化。
 
 ```text
-+-------------------------------------------------+
-| original kh/kw -> signed x sampling coordinates |
-+------------------------+------------------------+
-                         |
-                         |
-                         v
-   +---------------------+---------------------+
-   | MTE2: selected points -> L1B sampled grid |
-   +---------------------+---------------------+
-                         |
-                         |
-                         v
-    +--------------------+--------------------+
-    | MTE1: 1x1 window -> one N0=16 fragment  |
-    +--------------------+--------------------+
-                         |
-                         |
-                         v
- +-----------------------+-----------------------+
- | MMAD: n=16 -> original kernel fragment in L0C |
- +-----------------------------------------------+
+  +-------------------------------+
+  | 原 kh/kw -> 有符号 x 采样坐标 |
+  +---------------+---------------+
+                  |
+                  v
++-----------------+-----------------+
+| MTE2: 选中采样点 -> L1B 采样网格  |
++-----------------+-----------------+
+                  |
+                  v
++-----------------+-----------------+
+| MTE1: 1x1 窗口 -> 一个 N0=16 分形 |
++-----------------+-----------------+
+                  |
+                  v
+ +----------------+----------------+
+ | MMAD: n=16 -> L0C 中的原核片段  |
+ +---------------------------------+
 ```
 
 ### 5.4 参数更新与分形单位
@@ -590,3 +584,42 @@ SetAtomicAdd 覆盖本次输出子块的全部实际 Fixpipe 片段，结束后�
 - FP16/BF16 不加载 FP32 输入通路的逐条窗口重排算法。
 - Fixpipe 选型同时检查输出格式、核体积和整窗关系。
 - 数值示例先复算参数，再做 SDK 编译与设备验证；参数复算不代表设备验收。
+
+## 9 FP32 输入与 hf32 计算模式
+
+本节对应 MN_StreamK 的 float 分支，不用于 Winograd 预转换。m0=n0=16，物理 k0=channelSize=8；32B 输入块有 8 个 FP32，512B 输入分形有 128 个 FP32。第 1–8 节的 `*16`、`*256` 源偏移不能整体复制到 float 通路。
+
+### 9.1 dedy：GM→L1A 与 L1A→L0A
+
+| 场景 | 源码阶段 | 关键映射 |
+|---|---|---|
+| NCDHW，整宽 | LoadToA1Fp32Nd2Nz | 用 ND2NZ 表达 Cout×HoWo：nValue=有效 M，dValue=本父 K，srcDValue=dout*ho*wo |
+| NDHWC，整宽 | LoadToA1Fp32Dn2Nz | 用 DN2NZ，nValue=有效 M，dValue=本父 K，srcDValue=cout |
+| 整宽 L1→L0A | CalcParamsL12L0a / LoadL12L0a | ifTranspose=0，mStep=ceilDiv(M,16)，kStep=ceilDiv(K,8)，srcStride=dstStride=mStep |
+| 切宽 L1→L0A | 同上 | ifTranspose=1，kStep=alignUp(M,16)/8，dstStride=kStep/2；mStep=ceilDiv(K,16)，srcStride=alignedL1UseKa/16 |
+
+整宽的 L1 视图为 `(K1,M1,M0,K0)`，K0=8；alignedL1UseM 是该父段有效 M 向上对齐 16 的跨度；元素偏移为 `((kPos%stepKa)*baseK/8)*alignedL1UseM*8`。切宽偏移改为 `floor((kPos%stepKa)*baseK/16)*16*8 + ((kPos/stepKa)*kal1_%singleShapeWo_)*8`。尾父段按实际剩余 K 搬运，源 stride 始终保留全张量值。
+
+### 9.2 x 窗口：两个 8 通道片组成逻辑 16 通道
+
+普通窗口且核体积不为 1 时，LoadL12L0bFp32 以 K 方向 repeat 拼接两个 8 通道片；不是把 FP16 参数里的元素类型替换成 float。
+
+```text
+L1B: ci 的前 8 通道 --+
+                     +--> K repeat 两次 --> L0B 的逻辑 16 通道窗口
+L1B: ci 的后 8 通道 --+
+                           每个目的分形 128 个 FP32
+```
+
+- kStartPt 由逻辑 `(usedN%(hk*wk*16))/2` 起算；kExtension=8。
+- repeatTime=2、repeatMode=1。singleCoreCin≤8 时 repeatStride=hk*wk*curSingleCoreDk_，否则为 hk*wk。
+- 目的 Repeat stride=ceilDiv(baseUseN_,16)；逐目的分形发 Load3D，L0B 元素起点每次加 128。
+- 每次源 kStartPt 加 8，完成一个 `hk*wk*8` 周期且 singleCoreCin>8 时，再跳过已 repeat 读取的另一半。
+
+新 SDK 使用 SetLoadDataRepeatWithStride / LoadDataWithStride，旧接口使用对应 Repeat / LoadData；按目标 SDK 绑定。核体积为 1 和 isSplitKernelHW 分别走自己的参数分支，不能一律套用本节双 repeat。输出仍为 FP32，格式恢复沿用 §7 的逻辑通道与原核顺序。
+
+### 9.3 计算模式与校验
+
+FP32 的 hf32Flag 为真时，在计算对象初始化设置 `SetHF32Mode(true); SetHF32TransMode(0);`，结束恢复 `SetHF32Mode(false); SetHF32TransMode(0);`。hf32 不改变 GM 类型、元素字节数或 channelSize。每个模板独立管理模式生命周期，不依赖上一次调用遗留状态。
+
+分别核对 FP32 整宽、切宽、核体积为 1、普通/拆核窗口、尾通道和两种 hf32Flag。Winograd 与 DLoad 使用独立计算实现，不能将本节的 im2col Load3D 配方用于它们。

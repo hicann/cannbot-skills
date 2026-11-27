@@ -1,8 +1,8 @@
 # 卷积反向算子 tiling 切分算法
 
-> **层级**：通用知识层（generic/input/tiling/），语言中立；本文件是 tiling 文件夹的入口文档，索引三个求解模板。
+> **层级**：通用知识层（generic/input/tiling/），语言中立；本文件是 tiling 文件夹的入口文档，索引四个求解模板。
 >
-> **分工**：本文件回答"**切什么、为什么切、三个模板怎么选、共用哪些计算规则、给 Kernel 哪些参数**"。模板决定求解顺序与任务/驻留策略，Kernel 使用同一套计算通路；三个模板的完整求解流程在 [standard](templates/standard/tiling.md)、[small-shape](templates/small-shape/tiling.md)、[l1-resident](templates/l1-resident/tiling.md) 各自展开。数据怎么流见 [compute-flow.md](../compute-flow.md)。
+> **分工**：本文件回答"**切什么、为什么切、四个模板怎么选、共用哪些计算规则、给 Kernel 哪些参数**"。standard、small-shape、l1-resident 共用计算主干；kernel-split 扩展相位循环与写回。完整求解流程在各模板中展开。数据怎么流见 [compute-flow.md](../compute-flow.md)。
 
 ---
 
@@ -10,62 +10,84 @@
 
 Tiling 决定一次计算的大小（L0 基本块 baseM/baseN/baseK）、L1 驻留范围（stepKa/stepKb 与五路 Buffer 份数）、以及每个输出任务的范围（singleCoreM/Cin/Din）。三个尺度分别使用：`singleCoreM` 决定任务起点，`baseM` 决定核内块容量，`baseUseM_/mCompute` 决定当前有效/对齐跨度；核深度在 K 循环之外完整归约。
 
-约束自底向上：L0 容量决定基本块上限，L1 容量决定驻留与任务规模，核数决定任务分发。候选超限时按「LegalProtection：容量回调」收缩；最终 loadB2Condition 与 tilingKey 由适配层在最终 baseN 上确定。
+五路 pbuffer 份数（al1/bl1/al0/bl0/cl0Pbuffer，取 1 或 2）即**乒乓（双缓冲）开关**：
+
+```
+单缓冲：装载 -> 计算等待 -> 计算 -> 装载等待 -> 装载 ...
+        串行，搬运期间计算等待。
+
+双缓冲：
++------+-------+--------+--------+-----+
+| 阶段 | 起步  | 稳态 0 | 稳态 1 | ... |
++------+-------+--------+--------+-----+
+| 搬运 | 装载0 | 装载1  | 装载2  | ... |
+| 计算 | 等待  | 计算0  | 计算1  | ... |
++------+-------+--------+--------+-----+
+装载与计算重叠，起步阶段等待。
+```
+
+- 搬运（MTE2/MTE1）与计算（M/F）使用异步硬件队列；双缓冲允许准备下一块时保留当前块。各层槽份数共同约束重叠，某层单份会限制该层复用，不等同于全部流水串行；
+- L1 空间紧张时按「容量回调」（第 7 节）把 L1 份数从 (2,2) 退到 (1,1)：用流水换块大小，取舍由容量不等式裁决，不靠改标志扩大准入。
+
+约束自底向上：L0 容量决定基本块上限，L1 容量决定驻留与任务规模，核数决定任务分发。普通模板的候选超限时按「LegalProtection：容量回调」收缩；专用模板使用自身求解。最终分支与 tilingKey 按所选模板在适配层绑定。
 
 ---
 
 ## 2 模板选择
 
-先完成规格和能力检查，再按以下优先序进入模板；最终参数形成后再选择 loadB2Condition。
+先完成规格和能力检查，再按以下优先序进入模板。普通三模板在最终块形状上选择 loadB2Condition；kernel-split 使用自身的固定分支。
 
-Conv3DTranspose 完成自身形状处理后复用本选择器。三种模板均调用「可选 bias 的候选预算与实际分配」的公共 L1 检查，并在最终任务确定后复核 bias/BT；bias 不作为第四种 Tiling 策略。
+Conv3DTranspose 完成自身形状处理后复用本选择器。small-shape、l1-resident、standard 三种模板均调用「可选 bias 的候选预算与实际分配」的公共 L1 检查，并在最终任务确定后复核 bias/BT；bias 不作为独立的 Tiling 策略。kernel-split 改写问题几何（核窗口按 stride 相位拆分），在自身容量模型中计入 bias/scale 预算。
 
 ### 2.1 选择顺序
 
 | 优先序 | 模板 | 选择条件与职责 |
 |---|---|---|
-| 1 | [small-shape](templates/small-shape/tiling.md) | K 上限及小任务量条件成立，联合搜索 M/N 与任务 |
-| 2 | [l1-resident](templates/l1-resident/tiling.md) | 前项未命中，完整 K 权重驻留的几何、收益与容量初筛成立 |
-| 3 | [standard](templates/standard/tiling.md) | 其余符合本计算路径的规格，经验选块与任务调整 |
+| 1 | [kernel-split](templates/kernel-split/tiling.md) | stride≥2 且核/步长比满足子核准入，核窗口按 stride 相位拆分为子核族 |
+| 2 | [small-shape](templates/small-shape/tiling.md) | K 上限及小任务量条件成立，联合搜索 M/N；可组合完整 K 驻留及收益回退 |
+| 3 | [l1-resident](templates/l1-resident/tiling.md) | 前项未命中，完整 K 权重驻留的几何、收益与容量初筛成立 |
+| 4 | [standard](templates/standard/tiling.md) | 其余符合本计算路径的规格，经验选块与任务调整 |
 
-条件在各模板的准入章节定义（standard 为「选择与优选起点」，small-shape/l1-resident 为「选择条件」）；small-shape 与 l1-resident 同时命中时选择前者。模板内容量回调使用该模板对应的 step 求解，失败返回原因，不通过修改标志改变已确认的准入结果。
+条件在各模板的准入章节定义。未命中的模板按登记顺序继续检查；已选模板的容量回调仍使用自身规则，不通过修改标志改变准入结果。
 
 ```text
-Normalized problem + layout + platform resources
-  |
-  |
-  |
-  small-shape IsCapable?     -- yes --> small-shape solver -----+
-  |                                                             |
-  | no                                                          |
-  v                                                             |
-  l1-resident IsCapable?     -- yes --> l1-resident solver -----+
-  |                                                             |
-  | no                                                          |
-  v                                                             |
-  Current path legal?        -- yes --> standard solver --------+
-                                                                |
-                                                                |
-                                                                v
-                                                   +------------+------------+
-                                                   | Final plan              |
-                                                   | base* / singleCore*     |
-                                                   | stepK* / Pbuffer        |
-                                                   +------------+------------+
-                                                                |
-                                                                |
-                                                                v
-                                               +----------------+----------------+
-                                               | loadB2Condition                 |
-                                               | key / shared fields / launch    |
-                                               +---------------------------------+
+Normalized problem + platform capabilities
+    |
+    +--> kernel-split: cout-full / regular candidate
+    |        |
+    |        +--> admitted plan ----------------------+
+    |                                                 |
+    +--> small-shape -> l1-resident -> standard       |
+             |                                        |
+             +----------------------------------------+
+                                                      |
+                                                      v
+                                    final blocks / residency / tasks
+                                                      |
+                                                      v
+                                       data preparation + key binding
+                                                      |
+                                                      v
+                                      fields / launch / workspace
 ```
 
 ### 2.2 模板与编译分支
 
-模板选择与 weight 变换（loadB2Condition）是两个独立决策：先按优先序选定求解模板，最终块形状确定后再按 [Tiling 绑定（Ascend C）](../../../adapters/ascendc/input/tilingkey-templates.md) / [DSL](../../../adapters/dsl/input/tiling.md) 的判定规则选择 loadB2Condition。同一 key 可以配合不同模板，enableFullLoad 和运行时字段继续决定执行行为；核体积为 1 时优先仅转置分支，且仍检查 stride/pad 的采样。
+先选择求解模板，再根据最终参数绑定编译分支。同一 key 可以服务不同求解模板，enableFullLoad 等运行时字段继续决定执行行为。具体支持范围与绑定见 [Ascend C](../../../adapters/ascendc/input/tilingkey-templates.md) 或 [DSL](../../../adapters/dsl/input/tiling.md)。
+
+| 数据准备或几何分支 | 对计算与绑定的影响 |
+|---|---|
+| 普通布局 | FP16/BF16 按格式、核体积与最终 baseN 选择 weight 变换；FP32 固定 B2 仅逆序，单位核直接取块 |
+| VecTranspose | 权重来源改为预转置 workspace，B2 仅逆序 |
+| C04 | 改写两路 K 排列，AIV 先整理 weight；B2 不转置不逆序 |
+| group enlarge | 按计算组通道求解，groupConvMode=1，B2 仅逆序 |
+| kernel-split | 改写 M/K 与输出相位，kernelSplitMode=1/2，B2 仅逆序 |
+
+前三种数据准备分支的模型见 [scene](../scene.md#3-数据准备与分组合并)，准入和实现见 [指令映射 §3.4–§3.8](../../../adapters/ascendc/input/instruction-mapping.md)；最终编码见 [Tiling 绑定](../../../adapters/ascendc/input/tilingkey-templates.md)。
 
 ### 2.3 扩展方式
+
+仅改变驻留范围、M 任务或 Buffer 份数时，优先使用现有模板和公共 Kernel 的条件分支。N/K 全载按 l1-resident 的参数组合处理，不另设入口。
 
 新增独立求解策略时增加 `templates/<name>/tiling.md`，说明选择条件、起点、求解步骤与参数，再在「模板选择」登记优先序。共用公式维护在本文档；计算/驻留行为变化同步更新 compute-flow 和语言适配层。
 
@@ -73,7 +95,7 @@ Normalized problem + layout + platform resources
 
 ## 3 输入与输出
 
-输入为前置处理后的几何、dtype/format、存储步幅，以及 platformInfo 对应的核数和 L1/L0 容量。当前输入 2B、累加 4B，分形粒度 `m0=n0=C0=16`。
+输入为前置处理后的几何、dtype/format、存储步幅，以及目标芯片版本、platformInfo 和 SDK 对应的核数、L1/L0/BT 可用容量。容量以 `L1Bytes/L0ABytes/L0BBytes/L0CBytes/BTBytes` 传入，同一份记录用于 Host 求解与 Kernel 分配。输入元素按 dtype（FP16/BF16=2B、FP32=4B），累加恒 4B；分形粒度 `m0=n0=16`，`C0=k0` 随 dtype（16 或 8）。
 
 公共求解接收已完成各自形状检查的 DX 或 Transpose 问题。Transpose 使用其前置处理（[preprocessing.md](../../preprocessing.md) 的转置卷积场景），并传入 hasBiasFlag_、biasBytes 和 BT 能力；DX 的 hasBiasFlag_ 为 false。output_padding 已体现为目标尺寸和边界，真实核长与 K 归约长度保持不变。
 
@@ -82,12 +104,16 @@ Normalized problem + layout + platform resources
 | M | hi*wi | mValue=alignUp(hi*wi,m0) |
 | N 方向 | cinG | nValue=alignUp(cinG,n0) |
 | K | coutG*hk*wk | kValue=alignUp(coutG,C0)*hk*wk |
+| K（C04） | 每个原始组的有效项仍为 coutG*hk*wk，通道容量按 4 | kValue=alignUp(hk*wk*4,C0)；小 cout 的 K 重定义，见 [C04 规则](../../../adapters/ascendc/input/instruction-mapping.md#36-c04配套的四通道窗口与权重) |
+| N/K（group enlarge） | cinOpt=enlarge*CinG、coutOpt=enlarge*CoutG；有效 K 为 coutOpt*hk*wk | 放大组口径，nValue/kValue 按打包组对齐（派生见 [场景分支](../scene.md#31-group-enlarge多个原始组合成一个计算组)） |
 
-输出包括计算块 `base*`、任务 `singleCore*`、两路 `stepK*`、五路 Buffer 份数、coreNum、输出初始化要求。最终 loadB2Condition 和 key 由适配层在最终 baseN 上确定。
+输出包括计算块 `base*`、任务 `singleCore*`、两路 `stepK*`、五路 Buffer 份数、coreNum、输出初始化要求。普通模板的 loadB2Condition 按最终 baseN 确定；专用模板按各自契约绑定，key 统一由适配层编码。
 
 三种尺度分别使用：`singleCoreM` 决定任务起点，`baseM` 决定核内块容量，`baseUseM_/mCompute` 决定当前有效/对齐跨度。核深度在 K 循环之外完整归约。
 
 ## 4 L0 基本块与 AdjustBaseMNK
+
+第 4～7 节的 AdjustBaseMNK、step 求解与容量回调供普通三模板使用。完整 N/K 驻留作为 l1-resident 的参数分支，沿用这些规则，见其 [N/K 全载分支](templates/l1-resident/tiling.md#41-nk-全载与-m-分核)。
 
 基本块为 `(baseM,baseN,baseK)`。较大 M 复用权重，较大 N 复用 fmap 窗口，较大 K 减少循环；同时分别增加操作数/部分和占用，并影响任务数量。经验优选块是搜索起点，最终效果由相同输入、平台上的性能验证确认。
 
@@ -118,7 +144,7 @@ Normalized problem + layout + platform resources
 
 ### 4.1 K 窗口配对
 
-一个 dedy 通道分形对应的完整核高宽窗口长度为 `windowSpan=Hk*Wk*C0`。当前两路 L0 的容量、元素字节数和 buffer 份数相同，K 上限为：
+`windowSpan` 对应 Host 的 lenHkWkC0：普通布局取 `Hk*Wk*C0`（C0 随 dtype），C04 取 `alignUp(Hk*Wk*4,C0)`。以下窗口整除与权重预算均使用该分支的 windowSpan。当前两路 L0 的容量、元素字节数和 buffer 份数相同，K 上限为：
 
 `maxK = min(kValue, max(C0, alignDown(L0ABytes//(al0Pbuffer*dedyBytes*max(baseM,baseN)), C0)))`。
 
@@ -132,15 +158,13 @@ Normalized problem + layout + platform resources
 
 取首个满足条件的候选，也就是满足条件的最大 K。没有命中时，保留进入本轮的 `baseK` 与 `maxK` 中较小者。随后按「L0 基本块与 AdjustBaseMNK」更新 L0C 份数并核对三路容量。
 
-例如 `maxK=256、windowSpan=80、Hk=1、Wk=5` 时，256 不满足配对条件，下一个候选 240 满足，故取 `baseK=240`。
-
 `AdjustBaseMNK` 依次完成本节的 M/N 调整、K 搜索和 L0C 份数更新。
 
 ## 5 L1 驻留容量
 
 `stepKa/stepKb` 分别表示一次 dedy、weight 驻留供给的 K 计算块数，预留长度为 `stepKa*baseK`、`stepKb*baseK`；`al1Pbuffer/bl1Pbuffer` 是两路 L1 buffer 份数。
 
-例如 `stepKa=2、stepKb=4`，dedy 每两轮 K 计算重新装载，weight 每四轮重新装载。两路消费同一归约位置；较大的 step 取较小 step 的整数倍，末次只计算剩余 K。
+两路分别按 stepKa/stepKb 轮 K 计算重装，始终消费同一归约区间。较大的 step 取较小 step 的整数倍；末次按剩余 K 收缩。
 
 **dedy 预算**先计算 M 块覆盖的 dedx 行数：
 
@@ -169,9 +193,9 @@ Normalized problem + layout + platform resources
 | 不整除且 `residentK>windowSpan` | `residentK//windowSpan+2` |
 | 不整除且 `residentK<windowSpan` | 2 |
 
-权重字节预算为 `wBudget=baseN*copyLines*windowSpan*weightBytes*bl1Pbuffer`。
+权重字节预算为 `wBudget=baseN*copyLines*windowSpan*weightBytes*bl1Pbuffer`，weightBytes 按输入类型取 2 或 4。
 
-`L1合法(stepKa,stepKb)` 表示以下条件全部成立：step 均为正；每路驻留长度覆盖完整 `kValue` 或为 `windowSpan` 的整数倍；**`dyBudget+wBudget+biasBudget < L1Bytes`**。两路 step 的整除关系及模板驻留要求在候选选择时一并检查。适配层继续核对 buffer 对齐、bank 间隔和最大访问地址。
+`L1合法(stepKa,stepKb)` 表示以下条件全部成立：step 均为正；每路驻留长度覆盖完整 `kValue` 或为 `windowSpan` 的整数倍；**`dyBudget+wBudget+biasBudget <= L1Bytes`**。两路 step 的整除关系及模板驻留要求在候选选择时一并检查。适配层继续核对 buffer 对齐、bank 间隔和最大访问地址。
 
 ### 5.1 可选 bias 的候选预算与实际分配
 
@@ -185,11 +209,11 @@ Normalized problem + layout + platform resources
 | BT 容量 | `biasAlloc<=BTBytes` |
 | L1 实际范围 | bias 槽加入 ping/pong 放置；同时存活区间不重叠，最大末地址不超过 L1Bytes |
 
-候选预算使用 baseN，实际全量 bias 使用 singleCoreCin；两者不同的任务必须复核后者。改变 baseN、singleCoreCin 或 Buffer 份数后重做检查。全量条件与实际容量不一致时继续调整合法计划或返回资源原因，不发布未通过的字段。三种模板使用同一规则；`enableFullLoad` 只控制权重驻留。
+候选预算使用 baseN，实际全量 bias 使用 singleCoreCin；两者不同的任务必须复核后者。改变 baseN、singleCoreCin 或 Buffer 份数后重做检查。全量条件与实际容量不一致时继续调整合法计划或返回资源原因，不发布未通过的字段。standard/small-shape/l1-resident 三种公共模板使用同一规则（kernel-split 在自身容量模型中计入 bias/scale 预算，不调用本节公共检查）；`enableFullLoad` 只控制权重驻留。
 
 ## 6 CalStepK：分块驻留的候选
 
-standard、small-shape 使用同一分块驻留算法；l1-resident 的完整 K 搜索在其模板中定义。
+standard 与 small-shape 的非全载分支使用下述分块驻留算法；small-shape 的全载分支复用 l1-resident 的完整 K 搜索。
 
 初始取 `al1Pbuffer=bl1Pbuffer=2`。`coutBlocks=ceilDiv(CoutG,C0)` 表示组内 dedy 通道分形数，候选以 `(stepKa,stepKb)` 记录。
 
@@ -201,7 +225,7 @@ standard、small-shape 使用同一分块驻留算法；l1-resident 的完整 K 
 | buffer 份数 `copies` | `al1Pbuffer` | `bl1Pbuffer` |
 | 初始通道分形数 `blocks` | `min(coutBlocks,max(1,(L1Bytes//2//copies)//blockBytes))` | 同左，代入本路参数 |
 
-当 `blocks*copies>=coutBlocks` 时，改取 `blocks=ceilDiv(coutBlocks,copies)`。得到 `dyBlocks/wBlocks` 后，保留较大者，将较小者减为不超过原值且能整除较大者的最大整数；例如 `(10,6)` 调整为 `(10,5)`。
+当 `blocks*copies>=coutBlocks` 时，改取 `blocks=ceilDiv(coutBlocks,copies)`。得到 `dyBlocks/wBlocks` 后，保留较大者，将较小者减为不超过原值且能整除较大者的最大整数。
 
 两路 step 换算为：
 
@@ -224,7 +248,15 @@ standard、small-shape 使用同一分块驻留算法；l1-resident 的完整 K 
 | 首次求解：`CalStepK` | 等分候选合法且 step 之和严格大于阶梯候选时选等分，否则选阶梯；最终结果继续检查 |
 | 容量回调：LadderMatchStepMNK/EqualL1MatchStepMNK | 先试阶梯候选；不合法时再试等分候选，返回其合法性 |
 
-候选求解使用当前计算块和 L1 buffer 份数。
+候选求解使用当前计算块和 L1 buffer 份数。目标启用驻留均衡策略时，还考虑双份 buffer 下的两路装载比例：
+
+| 条件 | 等分候选的比较规则 |
+|---|---|
+| 未启用该目标策略，或等分 step 比例不超过 3 | 沿用合法性和 step 之和比较 |
+| 启用策略、两路均双份、较大 step 超过较小 step 的 3 倍 | 先判断 B 流量是否主导；非 B 主导时选阶梯 |
+| 上项成立且 B 主导 | 按重装成本比较；成本相同再比较 step 之和 |
+
+这里 `bTraffic=mValue*baseN/baseM`、`aTraffic=nValue*baseM/baseN`，B 主导指 bTraffic>3*aTraffic。令 `kTaskCnt=ceilDiv(kValue,baseK)`，候选成本为 `bTraffic*ceilDiv(kTaskCnt,stepKb)+aTraffic*ceilDiv(kTaskCnt,stepKa)`。这些是相对搬运估计，策略开关按目标实现或验证记录绑定，不从容量直接推断。最终仍检查容量、窗口配对和实际 buffer 地址。
 
 ## 7 LegalProtection：容量回调
 
@@ -275,8 +307,8 @@ Host 将前置处理的统一问题和本模板最终切分结果交给 Kernel�
 |---|---|---|
 | `batch` | `N` | 批次 |
 | `cin、cout` | `Cin、Cout` | 总通道数；保留全局存储步幅 |
-| `cinG、coutG` | `CinG、CoutG` | 组内通道数 |
-| `group` | 数学分组数 G | 各组独立寻址 |
+| `cinG、coutG` | 原始组时为 CinG/CoutG，合并时为 enlarge*CinG/enlarge*CoutG | 计算组通道数，不能重复放大 |
+| `group、oriGroup` | 计算组数 real_g、原始组数 G | 合并后的任务数与原始张量寻址分别使用 |
 | `di、hi、wi` | `Di、Hi、Wi` | dedx 空间长度 |
 | `dout、ho、wo` | `Dout、Ho、Wo` | dedy 空间长度 |
 | `dk、hk、wk` | `Dk、Hk、Wk` | 核采样点数 |
@@ -298,7 +330,7 @@ Host 将前置处理的统一问题和本模板最终切分结果交给 Kernel�
 | coreNum | 循环任务分发，与启动计算核数一致 |
 | singleCoreBatch/Group | 当前均为 1，每任务一个 batch、一个组 |
 | singleCoreDin/M/Cin | 任务深度、空间、dedx 通道范围 |
-| singleCoreCout | coutG，单位为 dedy 通道；形成 K 时乘 hk*wk 并按通道粒度对齐 |
+| singleCoreCout | 普通路径取 coutG；C04 发布为 4。K 长度按当前分支的排列计算 |
 | singleIterateDk | dk，完成所有有效核深度贡献 |
 | baseM/baseN/baseK | 输出块容量、L0 计算与尾块 |
 | stepKa/stepKb | 两路父段边界、装载频率与实际尾段 |
@@ -307,8 +339,13 @@ Host 将前置处理的统一问题和本模板最终切分结果交给 Kernel�
 | isBiasFullLoad | 可选 bias 的任务通道全量/当前 N 子块准备方式；无 bias 时不分配对应资源 |
 | initOutputFlag | 衔接前置初始化与主计算 |
 | iterateOrder | 当前为 1，任务解码仍按计算流程中的轴顺序 |
+| kSCoutFullLoad | kernel-split 的 dedy/weight 通道全载判定；影响 L1 装载与执行分支 |
+| kSUseWorkSpace | kernel-split 输出重排经 GM workspace 中转的开关；AIV 首指令随之切换 |
+| enableVecTrans | 前置权重转置开关：AIV 预先把 B 路源布局整理进 workspace，AIC 改从 workspace 读取；standard 族置位时 loadB2Condition 被强制为仅逆序（见 [Tiling 绑定](../../../adapters/ascendc/input/tilingkey-templates.md)） |
+| C04 编译配置 | Host 的 enableC04Flag 决定 K 和四通道窗口，通过 loadB1Condition 绑定实例；不增加同名原 TilingData 字段 |
+| enlarge | group 放大倍数：>1 时按 real_g=ceilDiv(groups,enlarge) 个放大组求解；由运行字段表达，不另占 key 实参（见 [Tiling 绑定](../../../adapters/ascendc/input/tilingkey-templates.md)；模型见 [场景分支](../scene.md#31-group-enlarge多个原始组合成一个计算组)） |
 
-`mValue/nValue/kValue`、任务计数、起点和尾长可以由几何与最终字段复算。dtype/format 和 loadB2Condition 绑定编译实例；无需把模板名再传给 Kernel。字段类型、共享结构和 key 编码见 [Ascend C Tiling 绑定（Ascend C）](../../../adapters/ascendc/input/tilingkey-templates.md) / [DSL](../../../adapters/dsl/input/tiling.md)。
+`mValue/nValue/kValue`、任务计数、起点和尾长可以由几何与最终字段复算。运行 K 使用 tmpSingleCoreK，C04 与 Host 的对齐 kValue 分别处理，见 [分支记号](../language.md#2-mnk-三元组gemm-映射)。dtype/format 和 loadB2Condition 绑定编译实例；无需把模板名再传给 Kernel。字段类型、共享结构和 key 编码见 [Ascend C Tiling 绑定](../../../adapters/ascendc/input/tilingkey-templates.md)；DSL 的编译配置与运行参数见 [DSL Tiling 绑定](../../../adapters/dsl/input/tiling.md)。
 
 发布前检查：每个有效 dedx 坐标唯一归属，所有有效 K/核深度贡献完整；Buffer 预算、物理末地址、API 范围与初始化依赖同时满足。大乘积先用宽整数检查，再转目标字段。
 
@@ -318,9 +355,10 @@ Host 将前置处理的统一问题和本模板最终切分结果交给 Kernel�
 
 ## 10 检查点
 
-- [ ] 模板选择按优先序执行：small-shape → l1-resident → standard；同时命中取前者
+- [ ] 模板选择按优先序执行：kernel-split → small-shape → l1-resident → standard；small-shape 与 l1-resident 同时命中取前者
 - [ ] 三路 L0 容量不等式（含 pbuffer 份数）同时满足；K 窗口配对与 weight 核几何一致
-- [ ] 驻留预算 `dyBudget+wBudget+biasBudget < L1Bytes`；候选预算用 baseN、实际分配用 singleCoreCin 分别复核
+- [ ] 驻留预算 `dyBudget+wBudget+biasBudget <= L1Bytes`；候选预算用 baseN、实际分配用 singleCoreCin 分别复核
 - [ ] 容量回调按"减 K → 减 M/N → 恢复大 K → 调份数"顺序，不通过改标志扩大准入
+- [ ] kernel-split 的子核几何、相位起点与 baseK 整除约束按其模板第 11 节检查；失败回落公共选择器
 - [ ] 每个有效 dedx 坐标唯一归属一个任务；大乘积先用宽整数检查
 - [ ] 带 bias 时 UpdateIsBiasFullLoad 在最终 baseN/singleCoreCin 形成后重做，BT 容量单独核对
