@@ -84,9 +84,11 @@ def relative_file(name):
     return name
 
 
-def variant(spec, base=Path.cwd()):
+def variant(spec, base=None):
     """Hash the actual execution inputs; use the same spec in the verifier driver."""
     require(isinstance(spec, dict), "variant must be an object")
+    if base is None:
+        base = Path.cwd()
     root = (base / spec["root"]).resolve()
     names = spec["files"]
     require(
