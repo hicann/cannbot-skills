@@ -128,8 +128,8 @@ aclnn<算子名>.md
 **返回值表格（3 列）**:
 | 列名 | 宽度 | 说明 |
 |------|------|------|
-| 返回值 | 300px | 错误码名称，不能换行 |
-| 错误码 | 150px | 错误码数值 |
+| 返回码 | 300px | 错误码名称，不能换行 |
+| 码值 | 150px | 错误码数值 |
 | 描述 | 550px | 导致错误的原因 |
 
 ---
@@ -164,10 +164,10 @@ aclnnStatus：返回状态码，具体参见 [aclnn 返回码](链接)。
 **内容要求**:
 
 **必选项**:
-1. 确定性计算说明（三选一）:
+1. 确定性计算说明（必选，三选一，类似表达即可）:
    - aclnnXxx默认确定性实现。
-   - aclnnXxx默认非确定性实现，支持通过aclrtCtxSetSysParamOpt开启确定性。
-   - aclnnXxx默认非确定性实现，不支持通过aclrtCtxSetSysParamOpt开启确定性。
+   - aclnnXxx默认非确定性实现，支持通过aclrtSetSysParamOpt开启确定性。
+   - aclnnXxx默认非确定性实现，不支持通过aclrtSetSysParamOpt开启确定性。
 
 **可选项**:
 - 输入 shape 限制
@@ -175,6 +175,10 @@ aclnnStatus：返回状态码，具体参见 [aclnn 返回码](链接)。
 - 输入属性限制
 - 输入数据类型限制
 - 其他限制（按产品区分）
+- Batch一致性说明（可选，三选一，类似表达即可）：
+  - 默认Batch一致性实现：在xxx条件/xxx场景下满足。
+  - 默认非Batch一致性实现，支持通过aclrtSetSysParamOpt开启Batch一致性：在xxx条件/xxx场景下满足。
+  - 默认非Batch一致性实现，不支持通过aclrtSetSysParamOpt开启Batch一致性。
 
 **复杂约束格式**（使用 details/summary）:
 ```markdown

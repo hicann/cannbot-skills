@@ -1,26 +1,22 @@
 # aclnndropoutV3
 
-[📄 查看源码](https://gitcode.com/cann/ops-math/tree/master/random/drop_out_v3)
-
 ## 产品支持情况
 
 <!-- npu="950" id1 -->
 - <term>Ascend 950PR/Ascend 950DT</term>：支持
 <!-- end id1 -->
 <!-- npu="A3" id2 -->
-- <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：支持
+- <term>Atlas A3系列产品</term>：支持
 <!-- end id2 -->
 <!-- npu="910b" id3 -->
-- <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：支持
+- <term>Atlas A2系列产品</term>：支持
 <!-- end id3 -->
-<!-- npu="310b" id4 -->
-- <term>Atlas 200I/500推理产品</term>：不支持
-<!-- end id4 -->
+- <term>Atlas 200I/500 A2推理产品</term>：不支持
 <!-- npu="310p" id5 -->
-- Atlas 推理系列产品：不支持
+- Atlas推理系列产品：不支持
 <!-- end id5 -->
 <!-- npu="910" id6 -->
-- <term>Atlas 训练系列产品</term>：不支持
+- <term>Atlas训练系列产品</term>：不支持
 <!-- end id6 -->
 - <term>610Lite</term>：支持
 
@@ -98,7 +94,7 @@ aclnnStatus aclnnDropoutV3(
     <tr>
       <td>optionalNoise_Shape</td>
       <td>输入</td>
-      <td>预留参数，支持传入空指针。</td>
+      <td>预留参数，支持传入空指针。（图模式是必选参数）</td>
       <td>不支持空Tensor。</td>
       <td>QINT32</td>
       <td>ND</td>
@@ -140,7 +136,7 @@ aclnnStatus aclnnDropoutV3(
       <td>输出</td>
       <td>公式中的`out`</td>
       <td>数据类型需要是input可转换的数据类型，shape需要与input一致。</td>
-      <td>FLOAT、FLOAT16、BFLOAT16、HIFLOAT8</td>
+      <td>FLOAT、FLOAT16、BFLOAT16、HIFLOAT8（Atlas A2系列产品不支持）</td>
       <td>nd</td>
       <td>0-8</td>
       <td>√</td>
@@ -190,7 +186,7 @@ aclnnStatus aclnnDropoutV3(
   <thead>
     <tr>
       <th>返回码</th>
-      <th>错误码</th>
+      <th>码值</th>
       <th>描述</th>
     </tr></thead>
   <tbody>
@@ -230,18 +226,22 @@ aclnnStatus aclnnDropoutV3(
 
 ## 约束说明
 
-- <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>、<term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>不支持BFLOAT16。
-- <term>Atlas 训练系列产品</term>：输入参数不支持INT64。
+<!-- npu="A3,910b" id11 -->
+- <term>Atlas A3系列产品</term>、<term>Atlas A2系列产品</term>不支持BFLOAT16。
+<!-- end id11 -->
+<!-- npu="910" id10 -->
+- <term>Atlas训练系列产品</term>：输入参数不支持INT64。
+<!-- end id10 -->
 
 ## 支持的产品
 <!-- npu="950" id7 -->
 - <term>Ascend 950PR/Ascend 950DT</term>：支持
 <!-- end id7 -->
 <!-- npu="A3" id8 -->
-- <term>Atlas A3 训练系列产品/Atlas A3 推理系列产品</term>：支持
+- <term>Atlas A3系列产品</term>：支持
 <!-- end id8 -->
 <!-- npu="910b" id9 -->
-- <term>Atlas A2 训练系列产品/Atlas A2 推理系列产品</term>：支持
+- <term>Atlas A2系列产品</term>：支持
 <!-- end id9 -->
 
 ## 调用示例
@@ -346,7 +346,7 @@ int main() {
   // 3. 调用CANN算子库API，需要修改为具体的Api名称
   uint64_t workspaceSize = 0;
   aclOpExecutor* executor;
-  // 调用aclnnDropoutV2第一段接口
+  // 调用aclnnDropoutV2第一段接口（仅Ascend 950支持）
   ret = aclnnDropoutV3GetWorkspaceSize(self, optionalNoiseShape, p, seed, offset, out, maskOut, &workspaceSize, &executor);
   CHECK_RET(ret == ACL_SUCCESS, LOG_PRINT("aclnnDropoutV3GetWorkspaceSize failed. ERROR: %d\n", ret); return ret);
   // 根据第一段接口计算出的workspaceSize申请device内存

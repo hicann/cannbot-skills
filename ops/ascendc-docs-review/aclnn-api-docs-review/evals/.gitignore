@@ -1,0 +1,5 @@
+# 运行产物不入库（质检/bench 每次运行都会重新生成）
+# 首次基线能力数据报告见 baseline/ 目录
+/results/
+/bench-hit-report.json
+/bench-hit-report.md
