@@ -267,7 +267,11 @@ def run_full_pipeline(evidence_json: str, doc_part: str, style_dir: str = None, 
                     result_dict["issues"] = result_dict.get("issues", []) + [
                         {
                             "id": "internal_link_lost",
-                            "reason": f"原章节中的内部锚点链接 #{l} 在生成结果中丢失，必须原样保留（如 [{l} 相关描述](#{l})），除非链接指向的内容已被删除",
+                            "reason": (
+                                f"原章节中的内部锚点链接 #{ln} 在生成结果中丢失，"
+                                f"必须原样保留（如 [{ln} 相关描述](#{ln})），"
+                                "除非链接指向的内容已被删除"
+                            ),
                         }
                         for ln in lost
                     ]

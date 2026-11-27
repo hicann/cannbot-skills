@@ -271,10 +271,6 @@ def check_drawio_svg(path, rules, findings):
     container_fills = {c.upper() for c in d_rules.get("container_fill_colors", [])}
     neutral_fills = {c.upper() for c in d_rules.get("neutral_fill_colors", [])}
     fs_min = d_rules["font_size"]["min"]
-    hl_set = set()
-    for i in d_rules["palette"]["highlight"]:
-        hl_set.add((i["hex"] if isinstance(i, dict) else i).upper())
-
     text = open(path, encoding="utf-8", errors="replace").read()
     pages = extract_pages(text)
 
@@ -324,6 +320,11 @@ def check_page(
     fs_min,
     findings,
 ):
+    hl_set = {
+        (item["hex"] if isinstance(item, dict) else item).upper()
+        for item in d_rules["palette"]["highlight"]
+    }
+
     def add(cell, rule, level, expected, actual, message=""):
         findings.append(
             {

@@ -22,6 +22,8 @@ from setuptools.command.build_ext import build_ext
 from setuptools.dist import Distribution
 from torch_npu.utils.cpp_extension import NpuExtension
 
+BASE_DIR = os.path.dirname(os.path.realpath(__file__))
+
 
 class BinaryDistribution(Distribution):
     """Distribution which always forces a binary package with platform name"""

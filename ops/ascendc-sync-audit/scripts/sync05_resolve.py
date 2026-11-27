@@ -19,7 +19,10 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+
+if TYPE_CHECKING:
+    from sync_audit import Finding, SyncEvent
 
 FUNC_DEF_RE = re.compile(r'__aicore__\s+inline\s+\w+\s+(\w+)\s*\(')
 CLASS_DEF_RE = re.compile(r'class\s+(\w+)')

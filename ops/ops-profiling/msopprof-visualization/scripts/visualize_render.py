@@ -15,7 +15,8 @@ import csv
 import gzip
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+
 from visualize_common import VisualizationError
 
 PAYLOAD_TAG_PLAIN = '<script id="payload" type="application/json">'

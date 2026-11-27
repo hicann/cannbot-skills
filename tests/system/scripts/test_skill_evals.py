@@ -1236,7 +1236,7 @@ def _run_and_extract_text(opencode_runner, prompt: str, cwd: str,
 
 
 def _run_eval_with_retry(
-    opencode_runner, sandbox_path: str, inputs: EvalInputs,
+    opencode_runner, sandbox_path: str, inputs: _EvalInputs,
 ) -> None:
     """执行评测并支持重试，验证不通过时抛出异常。"""
     # EVAL_EXEC_RETRIES: 额外重试次数。0 = 不重试（1 次尝试），1 = 重试 1 次（2 次尝试），以此类推

@@ -311,31 +311,35 @@ def find_impl_files_for_api(api_name, decl_files, repo_root):
         base = os.path.basename(decl)
         base_name = base.replace("_intf.h", "")
         # 精确匹配: dav_*/{base_name}_impl.h
-        pat = os.path.join(IMPL_BASIC, "dav_*", f"{base_name}_impl.h")
+        pat = os.path.join(_DEFAULT_IMPL_BASIC, "dav_*", f"{base_name}_impl.h")
         impl_files.extend(glob.glob(os.path.join(repo_root, pat)))
         # reg_compute / reg_base 等也声明了 basic_api，需要用 kernel_operator 系列 impl
         if "/reg_compute/" in decl or "/reg_base/" in decl or "kernel_operator" in base:
-            pat2 = os.path.join(IMPL_BASIC, "dav_*", "kernel_operator_*_impl.h")
+            pat2 = os.path.join(
+                _DEFAULT_IMPL_BASIC, "dav_*", "kernel_operator_*_impl.h"
+            )
             impl_files.extend(glob.glob(os.path.join(repo_root, pat2)))
 
     # adv_api: impl/adv_api/detail/
-    pat_adv = os.path.join(IMPL_ADV, "detail", "**", f"*{api_name}*impl*.h")
+    pat_adv = os.path.join(_DEFAULT_IMPL_ADV, "detail", "**", f"*{api_name}*impl*.h")
     impl_files.extend(glob.glob(os.path.join(repo_root, pat_adv), recursive=True))
 
     # simt_api
-    pat_simt = os.path.join(IMPL_SIMT, "**", f"*{api_name}*impl*.h")
+    pat_simt = os.path.join(_DEFAULT_IMPL_SIMT, "**", f"*{api_name}*impl*.h")
     impl_files.extend(glob.glob(os.path.join(repo_root, pat_simt), recursive=True))
 
     # tensor_api
-    pat_tensor = os.path.join(IMPL_TENSOR, "**", f"*{api_name}*impl*.h")
+    pat_tensor = os.path.join(_DEFAULT_IMPL_TENSOR, "**", f"*{api_name}*impl*.h")
     impl_files.extend(glob.glob(os.path.join(repo_root, pat_tensor), recursive=True))
 
     # c_api
-    pat_c = os.path.join(IMPL_CAPI, "instr_impl", "npu_arch_*", f"*{api_name}*")
+    pat_c = os.path.join(
+        _DEFAULT_IMPL_CAPI, "instr_impl", "npu_arch_*", f"*{api_name}*"
+    )
     impl_files.extend(glob.glob(os.path.join(repo_root, pat_c)))
 
     # utils
-    pat_utils = os.path.join(IMPL_UTILS, "**", f"*{api_name}*.h")
+    pat_utils = os.path.join(_DEFAULT_IMPL_UTILS, "**", f"*{api_name}*.h")
     impl_files.extend(glob.glob(os.path.join(repo_root, pat_utils), recursive=True))
 
     # 验证：impl 文件中确实包含 API 名（尝试 Impl 后缀 + 原名）
@@ -354,7 +358,7 @@ def find_test_files_for_api(api_name, repo_root):
     test_files = []
     pattern_bytes = rf"\b{re.escape(api_name)}\s*[<(]".encode()
 
-    tests_path = os.path.join(repo_root, TEST_DIR)
+    tests_path = os.path.join(repo_root, _DEFAULT_TEST_DIR)
     if not os.path.isdir(tests_path):
         return []
 
@@ -378,7 +382,7 @@ def find_test_files_for_api(api_name, repo_root):
 def find_check_files_for_api(api_name, repo_root):
     """找到包含 API 的 kernel_check 文件。"""
     check_files = []
-    pat = os.path.join(repo_root, IMPL_BASIC, "utils", "kernel_check_*.h")
+    pat = os.path.join(repo_root, _DEFAULT_IMPL_BASIC, "utils", "kernel_check_*.h")
     for f in glob.glob(pat):
         if _api_in_file(f, [api_name]):
             check_files.append(os.path.relpath(f, repo_root))
@@ -388,7 +392,7 @@ def find_check_files_for_api(api_name, repo_root):
 def find_example_files_for_api(api_name, repo_root):
     """找到包含 API 的示例文件。"""
     example_files = []
-    examples_path = os.path.join(repo_root, EXAMPLES_DIR)
+    examples_path = os.path.join(repo_root, _DEFAULT_EXAMPLES_DIR)
     if not os.path.isdir(examples_path):
         return []
 

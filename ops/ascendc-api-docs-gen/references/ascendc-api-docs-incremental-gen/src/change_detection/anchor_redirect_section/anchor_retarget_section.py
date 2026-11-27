@@ -419,7 +419,7 @@ def process_anchor_data(
                 json.dump(update_anchor, f, ensure_ascii=False, indent=2)
             info(f"结果已保存到: {output_dir}")
         else:
-            info(output_text)
+            info(json.dumps(update_anchor, ensure_ascii=False, indent=2))
 
     if skipped_unchanged > 0:
         info(f"已跳过 {skipped_unchanged} 个未变更文件的 section anchor")

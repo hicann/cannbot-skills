@@ -402,7 +402,7 @@ def process_anchor_data(anchor_path, data_dir: str, output_dir: str, verbose: bo
                 json.dump(update_anchor, f, ensure_ascii=False, indent=2)
             info(f"结果已保存到: {output_dir}")
         else:
-            info(output_text)
+            info(json.dumps(update_anchor, ensure_ascii=False, indent=2))
 
     info(f"共处理 {len(all_results)} 个 anchor")
 

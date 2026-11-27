@@ -15,7 +15,7 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 import pytest
 from common import (
@@ -30,6 +30,9 @@ from common import (
     LOGS_DIR,
     SANDBOX_DIR,
 )
+
+if TYPE_CHECKING:
+    from sandbox_manager import SandboxManager
 
 logger = logging.getLogger(__name__)
 
