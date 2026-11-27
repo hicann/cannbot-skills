@@ -47,6 +47,34 @@ if [ ! -f "$DEPENDENCY_VALIDATOR" ]; then
     exit 1
 fi
 
+# Regression: do not discover a SKILL.md located at a nested Git repository root.
+python3 - "$DEPENDENCY_VALIDATOR" <<'PYEOF'
+import importlib.util
+import sys
+import tempfile
+from pathlib import Path
+
+validator_path = Path(sys.argv[1])
+spec = importlib.util.spec_from_file_location("dependency_validator_test", validator_path)
+validator_module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = validator_module
+spec.loader.exec_module(validator_module)
+
+with tempfile.TemporaryDirectory() as temporary:
+    root = Path(temporary).resolve()
+    nested = root / "ops" / "vendored-skill-repo"
+    (nested / ".git").mkdir(parents=True)
+    (nested / "SKILL.md").write_text(
+        "---\nname: vendored-skill-repo\ndescription: fixture\n---\n",
+        encoding="utf-8",
+    )
+    validator = validator_module.DependencyValidator(str(root))
+    validator.discover_skills()
+    assert "vendored-skill-repo" not in validator.all_skill_names
+
+print("Nested Git repository exclusion regression: PASSED")
+PYEOF
+
 print_section_header "Dependency Graph Validation (DG-01 to DG-09)"
 
 tmp=$(mktemp)

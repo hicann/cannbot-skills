@@ -57,8 +57,8 @@ SKIP_DIRS = {".git", "node_modules", ".opencode", ".claude", ".claude-plugin", "
 
 
 def _is_inside_nested_git_repo(file_path: Path, repo_root: Path) -> bool:
-    """Check if file resides inside a nested git repo (not the repo root itself)."""
-    current = file_path.parent
+    """Check whether a file or directory is inside a nested git repo."""
+    current = file_path if file_path.is_dir() else file_path.parent
     while current != repo_root and current != current.parent:
         if (current / ".git").exists() and current != repo_root:
             return True
