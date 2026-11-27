@@ -4,9 +4,12 @@
 
 ## 参考链接
 
-- CANN 仓源码: <https://gitcode.com/cann/cann-ops/blob/master/src/sample.py>
-- Ascend 仓文档: <https://gitcode.com/Ascend/mindstudio/blob/master/README.md>
-- PyPTO 示例: <https://gitcode.com/cann/pypto-gym/blob/master/README.md>
+gitcode 三条链接的路径为刻意不存在的探针路径 (替换后目标稳定 404, 用于验证
+"校验发现 404 时回退该链接修改并在清单中列明" 的行为)。
+
+- CANN 仓源码: <https://gitcode.com/cann/cann-ops/blob/master/src/docs-branch-update-404-probe.py>
+- Ascend 仓文档: <https://gitcode.com/Ascend/mindstudio/blob/master/docs-branch-update-404-probe.md>
+- PyPTO 示例: <https://gitcode.com/cann/pypto-gym/blob/master/docs-branch-update-404-probe.md>
 - 社区版文档: <https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/ops/sample>
 - Pytorch 文档: <https://www.hiascend.com/document/detail/zh/Pytorch/latest/model/sample>
 - TF 文档: <https://www.hiascend.com/document/detail/zh/TensorFlowCommunity/latest/ops/sample>

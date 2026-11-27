@@ -10,6 +10,12 @@
 # ----------------------------------------------------------------------------------------------------------
 """文档参考链接版本号更新: 按当前分支映射更新 gitcode.com 与 www.hiascend.com 链接中的版本号。
 
+先按映射直接修改链接, 修改完成后对全部替换后链接 (去重) 在线校验: 替换目标为 404 的
+链接逐处回退为原链接 (不保留无效修改), 修改清单中单独列明 404 回退明细 (链接列表与原因);
+限流/不可达/跳过 (hiascend 为 SPA 站点) 不回退, 如实报告。
+Ascend/pytorch 的映射分支从 Ascend/docs 仓 TorchNPU手册名称汇总表在线查询, 未获取时
+(仓还未创建对应 md、表中无 pytorch 链接或分支号等) 该类链接不做替换、保持原样,
+修改清单"未替换链接"部分逐条列明链接与具体原因。
 直接修改文件并输出修改清单 (修改后可用 git diff 复查、git checkout 回退)。
 全部处理采用字节级读写与替换, 保持文件原有编码(UTF-8/GBK)与行尾(LF/CRLF)不变。
 
@@ -59,8 +65,8 @@ PYTORCH_LINK_RE = re.compile(r'gitcode\.com/Ascend/pytorch/(?:blob|tree)/([^/\s)
 LINK_RULES = ('cann', 'cann/pypto-gym', 'Ascend', 'pytorch仓',
               'hiascendCANN', 'hiascendPytorch', 'hiascendTF')
 
-# Ascend/pytorch 映射分支懒加载缓存: 整个运行过程只查询一次
-PYTORCH_FETCH_STATE = {'fetched': False, 'repl': None}
+# Ascend/pytorch 映射分支懒加载缓存: 整个运行过程只查询一次; reason 记录未获取的具体原因
+PYTORCH_FETCH_STATE = {'fetched': False, 'repl': None, 'reason': None}
 
 
 def run_git(args):
@@ -142,11 +148,15 @@ def branch_to_prev_release(branch):
 
 def fetch_pytorch_branch(ascend_branch):
     """从 Ascend/docs 仓 FrameworkPTAdapter/CommonTerms 下 '<Ascend分支> TorchNPU手册名称汇总.md'
-    的表格第三列 (gitcode链接) 中, 取第一个 gitcode.com/Ascend/pytorch/ 链接的分支号。
-    例如 Ascend 分支 26.2.0 -> v2.14.0-26.2.0。获取或解析失败时返回 None。
+    的表格第三列 (gitcode链接) 中, 取第一个 gitcode.com/Ascend/pytorch 链接的分支号。
+    例如 Ascend 分支 26.2.0 -> v2.14.0-26.2.0。
+
+    返回 (分支号, 失败原因): 失败时分支号为 None 并携带具体原因, 供修改清单"未替换链接"
+    部分逐条列明 —— Ascend/docs 仓还未创建该 md (请等待创建)、md 表格中未找到
+    Ascend/pytorch 链接或分支号、网络或服务不可用等。
     """
     if not ascend_branch:
-        return None
+        return None, '当前分支无法映射 Ascend 分支, 未查询 TorchNPU手册名称汇总'
     url = ('https://gitcode.com/api/v5/repos/Ascend/docs/contents/'
            + urllib.parse.quote(PYTORCH_TERMS_PATH.format(ascend_branch)) + '?ref=master')
     try:
@@ -154,8 +164,15 @@ def fetch_pytorch_branch(ascend_branch):
         response = urllib.request.urlopen(request, timeout=30)
         payload = json.loads(response.read().decode('utf-8'))
         text = base64.b64decode(payload['content']).decode('utf-8')
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None, ("Ascend/docs 仓还未创建 '{0} TorchNPU手册名称汇总.md', "
+                          '请等待创建'.format(ascend_branch))
+        return None, "获取 '{0} TorchNPU手册名称汇总.md' 失败 (HTTP {1})".format(
+            ascend_branch, error.code)
     except Exception:
-        return None
+        return None, "获取 '{0} TorchNPU手册名称汇总.md' 失败 (网络或服务不可用)".format(
+            ascend_branch)
     for line in text.splitlines():
         if not line.startswith('|'):
             continue
@@ -164,20 +181,25 @@ def fetch_pytorch_branch(ascend_branch):
             continue
         match = PYTORCH_LINK_RE.search(cells[3])
         if match:
-            return match.group(1)
-    return None
+            return match.group(1), None
+    return None, ("'{0} TorchNPU手册名称汇总.md' 表格第三列未找到 Ascend/pytorch "
+                  '链接或分支号, 请检查该手册名称汇总表'.format(ascend_branch))
 
 
 def get_pytorch_repl(ascend_branch, warnings):
-    """懒加载并缓存 Ascend/pytorch 映射分支的替换模板。"""
+    """懒加载并缓存 Ascend/pytorch 映射分支的替换模板。
+
+    未获取时缓存具体原因 (供清单"未替换链接"部分列明) 并输出告警。
+    """
     if not PYTORCH_FETCH_STATE['fetched']:
         PYTORCH_FETCH_STATE['fetched'] = True
-        pytorch_branch = fetch_pytorch_branch(ascend_branch)
+        pytorch_branch, reason = fetch_pytorch_branch(ascend_branch)
         if pytorch_branch:
             PYTORCH_FETCH_STATE['repl'] = b'\\g<1>' + pytorch_branch.encode('utf-8')
         else:
-            warnings.append('无法从 Ascend/docs 仓 CommonTerms 获取 Ascend/pytorch 映射分支, '
-                            '相关链接保持 master')
+            PYTORCH_FETCH_STATE['reason'] = reason
+            warnings.append('规则 pytorch仓 映射未获取: {0}, 相关链接保持原样 '
+                            '(见清单"未替换链接"部分)'.format(reason))
     return PYTORCH_FETCH_STATE['repl']
 
 
@@ -236,7 +258,8 @@ def process_file(path, branch, link_rules, ascend_branch, warnings):
     with open(path, 'rb') as handle:
         original = handle.read()
     data = original
-    stats = {'links': {}, 'link_pairs': {}, 'checked_urls': set()}
+    stats = {'links': {}, 'link_pairs': {}, 'links_404': {},
+             'links_kept': {}, 'kept_reasons': {}, 'checked_urls': set()}
 
     for name, pattern, repl in link_rules:
         if not pattern.search(data):
@@ -245,6 +268,16 @@ def process_file(path, branch, link_rules, ascend_branch, warnings):
             # 懒加载: 仅当目标中实际存在该类链接时才在线查询 CommonTerms (运行级缓存)
             repl = get_pytorch_repl(ascend_branch, warnings)
             if repl is None:
+                # 映射未获取 (如 Ascend/docs 仓还未创建对应手册名称汇总 md): 该类链接
+                # 不做替换、保持原样, 逐处记录到 links_kept, 供清单"未替换链接"部分
+                # 连同具体原因一起列明
+                stats['kept_reasons'][name] = (PYTORCH_FETCH_STATE['reason']
+                                               or 'Ascend/pytorch 映射分支未获取')
+                for m in pattern.finditer(data):
+                    before_full = extract_full_url(data, m.start(), m.end(),
+                                                   m.group(0))
+                    key = (name, before_full)
+                    stats['links_kept'][key] = stats['links_kept'].get(key, 0) + 1
                 continue
         elif repl is None:
             warnings.append('规则 {0} 无法映射 (分支 {1} 不符合版本号规则), 相关链接保持原样'
@@ -410,6 +443,73 @@ def check_all_links(urls):
     return results
 
 
+def build_revert_info(pattern, repl):
+    """推导规则的回退信息, 返回 (pivot, 版本字节) 或 (None, None) 表示不可回退。
+
+    pivot 为原模式中的 master/latest 字面量 (替换时的被替换段); 版本取自替换模板
+    \\g<1>版本(\\g<2>?) 的中段。回退模式 = 原模式中的 pivot 换成转义后的版本。
+    """
+    if repl is None:
+        return None, None
+    pivot = b'master' if b'master' in pattern.pattern else b'latest'
+    lead = b'\\g<1>'
+    if not repl.startswith(lead):
+        return None, None
+    tail = b'\\g<2>'
+    version = repl[len(lead):-len(tail)] if repl.endswith(tail) else repl[len(lead):]
+    if not version:
+        return None, None
+    return pivot, version
+
+
+def revert_404_links(path, link_rules, blocked_404, stats):
+    """回退文件中替换目标为 404 的链接, 返回 (新数据, 是否有变化)。不写回。
+
+    以规则的反向模式 (原模式 pivot 换成转义后的替换版本) 定位替换后的链接, 逐处
+    计算完整 URL: 命中 blocked_404 时回退为原链接 (\\g<1>pivot(\\g<2>?)), 该处从
+    链接替换统计 (links / link_pairs) 移出并计入 links_404 (回退明细); 未命中的
+    保持不变 —— 本来就指向该版本、未经本次替换的既有链接, 其完整 URL 不在候选
+    集合中, 不会被回退。
+    """
+    with open(path, 'rb') as handle:
+        data = handle.read()
+    original = data
+    for name, pattern, repl in link_rules:
+        pivot, version = build_revert_info(pattern, repl)
+        if pivot is None:
+            continue
+        revert_pattern = re.compile(pattern.pattern.replace(pivot, re.escape(version)))
+        if not revert_pattern.search(data):
+            continue
+        back_tail = b'\\g<2>' if repl.endswith(b'\\g<2>') else b''
+        back_repl = b'\\g<1>' + pivot + back_tail
+
+        def back(match, name=name, back_repl=back_repl):
+            after_full = extract_full_url(data, match.start(), match.end(),
+                                          match.group(0))
+            if after_full not in blocked_404:
+                return match.group(0)
+            before = match.expand(back_repl)
+            before_full = extract_full_url(data, match.start(), match.end(), before)
+            key404 = (name, before_full, after_full)
+            stats['links_404'][key404] = stats['links_404'].get(key404, 0) + 1
+            pair_key = (name, before, match.group(0))
+            remaining = stats['link_pairs'].get(pair_key, 0) - 1
+            if remaining > 0:
+                stats['link_pairs'][pair_key] = remaining
+            else:
+                stats['link_pairs'].pop(pair_key, None)
+            remaining_links = stats['links'].get(name, 0) - 1
+            if remaining_links > 0:
+                stats['links'][name] = remaining_links
+            else:
+                stats['links'].pop(name, None)
+            return before
+
+        data = revert_pattern.sub(back, data)
+    return data, data != original
+
+
 def render_link_check(results):
     """渲染链接有效性校验段落, 问题链接在前。"""
     if not results:
@@ -425,7 +525,8 @@ def render_link_check(results):
         counts[status] = counts.get(status, 0) + 1
     lines.append('汇总: ' + ', '.join('{0} {1}'.format(k, v) for k, v in sorted(counts.items())))
     if '404' in counts:
-        lines.append('[WARN] 存在无效链接 (404), 请人工核查分支或路径是否正确')
+        lines.append('[WARN] {0} 个链接替换后经校验为 404, 已回退为原链接 '
+                     '(见"404 回退明细"), 请人工确认目标分支或路径'.format(counts['404']))
     if '限流' in counts:
         lines.append('[WARN] {0} 个链接因接口限流未能完成校验, 建议稍后重跑复查'
                      .format(counts['限流']))
@@ -456,10 +557,14 @@ def render_manifest(target, branch, ascend_branch, file_stats, warnings):
     changed = [fs for fs in file_stats if fs[1]['links']]
     lines.append('---- 修改文件 ({0}) ----'.format(len(changed)))
     for path, stats in changed:
-        lines.append('{0}    链接更新: {1}'.format(
+        reverted = sum(stats['links_404'].values())
+        line = '{0}    链接更新: {1}'.format(
             path, ', '.join(
                 '{0} {1}'.format(k, v)
-                for k, v in sorted(stats['links'].items()))))
+                for k, v in sorted(stats['links'].items())))
+        if reverted:
+            line += ' | 404 回退: {0} 处'.format(reverted)
+        lines.append(line)
 
     pair_counts = {}
     for _, stats in file_stats:
@@ -473,16 +578,52 @@ def render_manifest(target, branch, ascend_branch, file_stats, warnings):
                 name, before.decode('utf-8', errors='replace'),
                 after.decode('utf-8', errors='replace'), count))
 
+    reverted_counts = {}
+    for _, stats in file_stats:
+        for key, count in stats['links_404'].items():
+            reverted_counts[key] = reverted_counts.get(key, 0) + count
+    if reverted_counts:
+        lines.append('')
+        lines.append('---- 404 回退明细 (替换后无效, 已回退为原链接) ----')
+        lines.append('原因: 替换后目标经在线校验为 404 (分支或路径不存在), '
+                     '相应修改已回退, 文件中保持原链接。')
+        for (name, before, after), count in sorted(reverted_counts.items()):
+            lines.append('[{0}] {1} -> {2} (已回退, {3} 处)'.format(
+                name, before.decode('utf-8', errors='replace'),
+                after.decode('utf-8', errors='replace'), count))
+
+    kept_counts = {}
+    kept_reasons = {}
+    for _, stats in file_stats:
+        for key, count in stats['links_kept'].items():
+            kept_counts[key] = kept_counts.get(key, 0) + count
+        kept_reasons.update(stats['kept_reasons'])
+    if kept_counts:
+        lines.append('')
+        lines.append('---- 未替换链接 (保持原样) ----')
+        for name in sorted(set(rule for rule, _ in kept_counts)):
+            lines.append('[{0}] 原因: {1}'.format(name, kept_reasons.get(name, '')))
+            for (rule, before), count in sorted(kept_counts.items()):
+                if rule == name:
+                    lines.append('  {0} ({1} 处)'.format(
+                        before.decode('utf-8', errors='replace'), count))
+
     lines.append('')
     lines.append('---- 汇总 ----')
     total_links = sum(sum(s['links'].values()) for _, s in file_stats)
+    total_reverted = sum(sum(s['links_404'].values()) for _, s in file_stats)
+    total_kept = sum(sum(s['links_kept'].values()) for _, s in file_stats)
     if total_links:
         detail = ', '.join('{0} {1}'.format(
             name, sum(s['links'].get(name, 0) for _, s in file_stats))
             for name in LINK_RULES
             if any(s['links'].get(name) for _, s in file_stats))
-        lines.append('修改文件: {0} | 链接替换: {1} 处 ({2})'
-                     .format(len(changed), total_links, detail))
+        lines.append('修改文件: {0} | 链接替换: {1} 处 ({2}) | 404 回退: {3} 处'
+                     .format(len(changed), total_links, detail, total_reverted))
+    elif total_reverted:
+        lines.append('修改文件: 0 | 404 回退: {0} 处'.format(total_reverted))
+    if total_kept:
+        lines.append('未替换保持原样: {0} 处 (见"未替换链接"明细)'.format(total_kept))
 
     if warnings:
         lines.append('')
@@ -530,26 +671,41 @@ def main():
     files = collect_md_files(target)
     warnings = []
     file_stats = []
+    modified_paths = []
 
     for path in files:
         new_data, changed, stats = process_file(path, branch, link_rules,
-                                                 ascend_branch, warnings)
+                                                ascend_branch, warnings)
         file_stats.append((display_relpath(path), stats))
         if changed:
+            modified_paths.append(path)
             with open(path, 'wb') as handle:
                 handle.write(new_data)
 
-    manifest = render_manifest(target, branch, ascend_branch, file_stats, warnings)
-
-    # 修改完成后, 对本次修改产生的所有唯一链接做在线有效性校验
+    # 修改完成后, 对本次修改产生的所有唯一链接做在线有效性校验;
+    # 校验 404 的链接逐处回退为原链接 (不保留无效修改)
     checked_urls = set()
     for _, stats in file_stats:
         checked_urls.update(stats['checked_urls'])
+    check_lines = []
     if checked_urls:
         print('[INFO] 正在校验 {0} 个修改后链接的有效性...'.format(len(checked_urls)),
               file=sys.stderr)
         results = check_all_links(checked_urls)
-        manifest += '\n'.join(render_link_check(results))
+        blocked_404 = set(url for url, (status, _) in results.items()
+                          if status == '404')
+        if blocked_404:
+            stats_by_path = dict(zip(files, (stats for _, stats in file_stats)))
+            for path in modified_paths:
+                data, changed = revert_404_links(path, link_rules, blocked_404,
+                                                 stats_by_path[path])
+                if changed:
+                    with open(path, 'wb') as handle:
+                        handle.write(data)
+        check_lines = render_link_check(results)
+
+    manifest = render_manifest(target, branch, ascend_branch, file_stats, warnings)
+    manifest += '\n'.join(check_lines)
     print(manifest)
 
     if args.output:
