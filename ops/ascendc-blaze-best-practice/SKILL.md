@@ -88,7 +88,8 @@ ASC 联合编译中的 RegBase mask 可变性、`__VEC_SCOPE__` induction 类型
 launch/verifier 证据隔离按
 [`launcher-development.md`](references/launcher/launcher-development.md)执行。
 
-GMM 的 cumsum/count、逐组 Golden 写回和 grouped `GetTilingData` owner 读取
+GMM 的 cumsum/count、逐组 Golden 写回、grouped `GetTilingData` owner 读取和
+按专家实际任务数选块与分核，读取
 [`group-matmul-delta.md`](references/kernel-design/group-matmul-delta.md)；GLU 的
 act/gate、无 scale 参数和公式改写授权读取
 [`glu-development.md`](references/kernel-design/glu-development.md)。Golden
