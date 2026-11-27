@@ -15,7 +15,7 @@ description: 将用户合法拥有或已获授权的 CUDA 应用中的 Runtime �
 在满足上述授权与使用边界的前提下，本技能只负责将 CUDA 应用程序的 Runtime 层迁移到华为昇腾 NPU 的 CANN Runtime。基于 `assets/src` 目录下的兼容层源码，提供两种迁移方式：
 
 1. **兼容层方式**：替换头文件并链接兼容库，最小代码修改
-   说明：默认使用兼容层方式,除非用户明确要求“直接迁移方式、直接改成 CANN API”，并遵守以下约束：
+   说明：默认使用兼容层方式,除非用户明确要求“直接迁移方式、直接改成 CANN API”， 并遵守以下约束：
     - **尽量保持用户源码不变**：优先只替换 include、构建配置和 CUDA 编译器专用语法；不要无故重写控制流、变量名、输出文本、错误处理风格。
     - **不要主动引入新风格**：原代码没有 `CUDA_CHECK`、RAII、异常、封装类、`std::vector` 改写时，不要为了“更规范”而加入。
     - **CANN 细节不泄漏到业务源码**：兼容层方式下，业务源码不应直接 include `acl/acl.h`、`aclnnop/*.h`，也不应自己创建/销毁 `aclTensor`、`aclScalar`、workspace。
@@ -25,7 +25,7 @@ description: 将用户合法拥有或已获授权的 CUDA 应用中的 Runtime �
     - **每次迁移都要编译并运行最小验证**：不能只改代码不验证；如机器有坏卡或需指定设备，用环境变量如 `ASCEND_RT_VISIBLE_DEVICES` 限制可见设备。
 
 2. **直接迁移方式**：将 CUDA API 调用改写为 CANN Runtime API, 
-  说明：直接迁移方式适用于需要深度适配或优化的场景，或应用使用部分不支持 API 需自定义实现的情况。直接迁移方式下，程序需要将 CUDA API 调用改写为 CANN Runtime API 调用，并处理参数差异、错误码映射等细节。直接迁移方式的改写步骤包括：
+  说明： 直接迁移方式适用于需要深度适配或优化的场景，或应用使用部分不支持 API 需自定义实现的情况。直接迁移方式下，程序需要将 CUDA API 调用改写为 CANN Runtime API 调用，并处理参数差异、错误码映射等细节。直接迁移方式的改写步骤包括：
    - API 映射对照：参考 `references ` 中的 API 支持状态表、接口文档等文件，了解哪些 CUDA API 有对应的 CANN API 支持，不支持的接口如何处理，并查看 `assets/src` 中的实现示例。
    - 类型映射：了解 CUDA 类型与 CANN 类型的映射关系，如 `cudaStream_t` 映射为 `aclrtStream`。
    - 错误码转换：参考 `references/error_mapping.md` 进行错误码映射，将 CANN 错误码转换为 CUDA 错误码。  
@@ -80,11 +80,11 @@ grep -E "#include.*cuda(_runtime|\.h)" --include="*.c" --include="*.cpp" --inclu
 | **IPC**             | ✅ 完全支持 | cudaIpcGetMemHandle 等 5 个 API (注意 key/opaque handle 约束) |
 | **库/模块管理**     | ✅ 完全支持 | cudaLibraryLoadFromFile、cuModuleLoad、cuModuleGetFunction 等 API |
 | **内存池/UVM**        | ⚠️ 部分支持 | CUDA Managed Memory 基础分配、advise、prefetch、range attribute 查询按 CANN UVM 产品能力条件支持；CUDA SOMA 和 discard batch 类 UVM 扩展仍返回 cudaErrorNotSupported |
-| **Occupancy/Cooperative/高级 Graph/Driver JIT/Green Context/Multicast/Tensor Map** | ⚠️ 不支持 | 返回 cudaErrorNotSupported 或 CUDA_ERROR_NOT_SUPPORTED |
+| **Occupancy/Cooperative/高级 Graph/Driver JIT/Green Context/Multicast/Tensor Map** | ⚠️ 部分支持 | Model RI task 查询、参数更新、disable、exec update/id 为条件支持；其余无安全映射时返回不支持 |
 | **Texture/Surface** |  ❌ 不支持  | 需额外适配层                                              |
 | **Driver VMM/Context** | ✅ 完全支持 | cuMemCreate, cuMemMap, cuCtxGetCurrent, cuCtxSetCurrent 等 API |
 
-具体 API 映射和支持状态以 `references/api_support_table.md` 为准；需要核对接口语义时，继续查阅 `references/cuda_api_common.md` 和 `references/cann_api_common.md`。Graph/Stream capture 相关能力基于 CANN Model RI，部分接口为试验特性，不应承诺生产可用或长期 ABI 稳定。`cudaGraphAddNode` 仅支持 `cudaGraphNodeTypeConditional` 特例并映射到 `aclmdlRIAddCondTask`，其他 node type 仍按不支持处理；`cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies` 当前不支持。CUDA SOMA/UVM 不得误标为完整支持；Managed Memory 基础接口只能按 CANN UVM 产品能力条件支持并允许明确 `SKIP`，内存池、异步分配和 discard batch 类 UVM 扩展保持 not supported，且不进入转测验收。
+具体 API 映射和支持状态以 `references/api_support_table.md` 为准；需要核对接口语义时，继续查阅 `references/cuda_api_common.md` 和 `references/cann_api_common.md`。Graph/Stream capture 相关能力基于 CANN Model RI，部分接口为试验特性，不应承诺生产可用或长期 ABI 稳定。`cudaGraphAddNode`（包括 conditional node）、`cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies` 均不做 CUDA 对标，兼容层入口返回 `cudaErrorNotSupported`。CUDA SOMA/UVM 不得误标为完整支持；Managed Memory 基础接口只能按 CANN UVM 产品能力条件支持并允许明确 `SKIP`，内存池、异步分配和 discard batch 类 UVM 扩展保持 not supported，且不进入转测验收。
 
 #### 2.3 输出可行性分析报告
 
@@ -232,7 +232,7 @@ kernel<<<grid, block, shared_mem, stream>>>(args);
 - 将 CUDA kernel body 的等价 Host fallback 隔离成独立函数
 - 通过 `cudaCompatLaunchHostKernel()` 调用该 fallback，保留主流程中的“launch”语义
 - 对 `cudaLaunchKernel(func, grid, block, args, ...)` 的 host fallback，按 CUDA 参数数组语义解析 `args`：`args[i]` 是第 i 个实参的地址，不能把 `args` 或 `args[i]` 本身直接当成设备指针写入。
-- 如果源代码对已迁移为 Host fallback 的 CUDA kernel 调用 `cudaFuncGetAttributes`，改为调用 `cudaCompatFuncGetHostFallbackAttributes(&attrs)`；不要把 Host fallback 函数指针强行传给 `aclrtGetFunctionAttribute`。
+- 如果源代码对已迁移为 Host fallback 的 CUDA kernel 调用 `cudaFuncGetAttributes`，应保留明确的不支持结果并调整验证预期；不得把 Host fallback 函数指针传给 `aclrtGetFunctionAttribute`，也不得用全零属性伪装查询成功。
 - `cudaFuncGetName`、`cudaFuncGetParamCount`、`cudaFuncGetParamInfo`、`cudaLaunchKernelEx`、`cudaOccupancyAvailableDynamicSMemPerBlock` 的 CANN 成功路径必须使用 CANN Runtime 可识别的真实 `aclrtFuncHandle`，例如由 CANN binary/module 加载流程取得的 handle。迁移验证用例不得用 `reinterpret_cast<void *>(0x1)`、普通 host 函数指针、CUDA `__global__` 函数指针或 Host fallback 函数指针探测这些接口的成功路径；无真实 handle 时只保留空指针、非法配置等错误路径，并把成功路径写成明确 `SKIP - requires a real CANN aclrtFuncHandle`。
 - 在调用处添加注释，并在 README 或迁移报告中明确说明该路径在 Host/CPU 上执行，不是 NPU kernel 执行
 - 不使用 Host fallback 的结果声称已完成 NPU kernel 迁移、设备侧正确性验证或性能验证
@@ -254,11 +254,18 @@ CUDA `__device__` symbol 和 PTX 文本都属于 CUDA 设备侧资产，不能�
 迁移 CUDA conditional graph 时使用兼容层实现，不要把 CANN RI 细节散落到业务代码中。规则如下：
 
 - `cudaGraphConditionalHandleCreate` 映射到 `aclmdlRICondHandleCreate`，要求 graph 来自 active stream capture 或兼容层可识别的 Model RI。
-- `cudaGraphAddNode` 只有 `cudaGraphNodeTypeConditional` 特例映射到 `aclmdlRIAddCondTask`；`cudaGraphCondTypeIf/While/Switch` 分别映射到 `ACL_MODEL_RI_COND_TYPE_IF/WHILE/SWITCH`。非 conditional node type 不得宣称支持。
+- `cudaGraphConditionalHandleCreate_v2` 仅在 `ctx` 为空或等于当前 CANN context 时复用同一映射；不要忽略不匹配的显式 execution context。
+- `cudaGraphAddNode` 不做 CUDA 对标，包括 `cudaGraphNodeTypeConditional`；不要将 CANN 原生 `aclmdlRIAddCondTask` 视为该接口的替代实现。
 - `cudaStreamBeginCaptureToGraph` 映射到 `aclmdlRICaptureToModelRIBegin`，用于捕获 conditional node 输出的 body graph；不能用空 capture 作为能力验收。
 - `cudaStreamGetCaptureInfo` / `cudaStreamGetCaptureInfo_v3` 映射到 `aclmdlRICaptureGetInfo`，并由兼容层记录 graph 与 capture stream 的关联。
 - CUDA 侧 `cudaGraphSetConditional` 是 device-side 函数；迁移到 CANN Runtime 兼容层时，通过 `aclmdlRICondHandleGetCondPtr` 获取条件指针，再用 runtime 写入操作在 body capture 内更新条件值。验收用例必须通过输出结果证明 conditional body 真正执行。
-- `cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies`、`cudaStreamUpdateCaptureDependencies_v2` 当前没有 CANN 对标，迁移代码不能依赖这些接口完成验收；如输入依赖这些接口，应报告 not supported 或重构为不依赖 dependency update 的 capture 流程。
+- `cudaGraphSetConditional` 不等同于 `aclmdlRIAddCondTask`：后者只用于创建 conditional task，不能拿来替代运行期条件值写入。
+- `cudaGraphExecEventRecordNodeSetEvent`、`cudaGraphExecEventWaitNodeSetEvent`、`cudaGraphExecKernelNodeSetParams`、`cudaGraphExecNodeSetParams` 和 `cudaGraphNodeSetParams` 仅在 node 是 `aclmdlRITask` 且 task type 可映射时使用。先 `aclmdlRITaskGetParams`，只修改目标字段，再 `aclmdlRITaskSetParams`；exec 入口随后调用 `aclmdlRIUpdate`。
+- Kernel task 更新仅支持可解析的 CANN device entry symbol，或与已捕获 task 中相同的真实 CANN function handle，以及 grid block 数；未解析的 CUDA symbol 不得强转为 handle。CUDA `kernelParams`/`extra` 参数布局、动态 shared memory 或显式不同 context 不能安全转换时返回 `cudaErrorNotSupported`。
+- `cudaGraphNodeSetEnabled` 只支持 disable（`aclmdlRITaskDisable`）；CANN 没有 re-enable 对等接口，`isEnabled != 0` 不得伪造成功。
+- `cudaGraphExecUpdate` 只提交兼容层同一 Model RI 上的 task 参数修改，不实现 CUDA 在两个不同 graph 间的拓扑匹配；不能把跨 graph update 结果写成已支持。
+- `cudaDeviceGetGraphMemAttribute` 使用 `aclrtGetMemUsageInfo` 的设备组件总量作为近似值，不是 graph-only 统计；报告必须保留这个非完全等价点和产品限制。
+- `cudaGraphAddNode`、`cudaGraphNodeGetDependencies`、`cudaStreamUpdateCaptureDependencies`、`cudaStreamUpdateCaptureDependencies_v2` 没有 CANN 对标，迁移代码不能依赖这些接口完成验收；如输入依赖这些接口，应报告 not supported 或改写用例使其不依赖这些 CUDA 功能。
 
 ##### 4.1.7 Host Register / Zero-Copy 适配
 
@@ -347,10 +354,15 @@ cudaIpcOpenMemHandle(&d_ptr, handle, cudaIpcMemLazyEnablePeerAccess);
 | `cudaEventCreate`       | `aclrtCreateEvent`            | 直接映射                             |
 | `cudaLaunchKernel`      | `aclrtLaunchKernelWithArgsArray` / `aclrtLaunchKernelWithHostArgs` / SIMT Launch 系列 | 根据参数组织方式选择 |
 | `cudaLaunchKernelEx`    | `aclrtLaunchKernelWithHostArgs` | 查询 CANN function 参数布局后打包 HostArgs |
-| `cudaFuncGetName` / `cudaFuncGetParamCount` / `cudaFuncGetParamInfo` | `aclrtGetFunctionName` / `aclrtFunctionGetParamCount` / `aclrtFunctionGetParamInfo` | CANN function handle 查询 |
+| `cudaGetFuncBySymbol` | `aclrtGetFuncBySymbol` | device entry symbol 解析为 CANN function handle |
+| `cudaFuncGetAttributes` / `cudaFuncGetName` | 不支持 / `aclrtGetFuncBySymbol` + `aclrtGetFunctionName` | CANN function 属性与 CUDA 字段不等价；名称查询仍需真实 handle |
+| `cudaFuncGetParamCount` / `cudaFuncGetParamInfo` | `aclrtFunctionGetParamCount` / `aclrtFunctionGetParamInfo` | CANN function handle 参数查询 |
+| `cudaLibraryGetKernelCount` / `cudaLibraryEnumerateKernels` / `cudaLibraryGetKernel` | `aclrtBinaryGetFunctionCount` / `aclrtBinaryEnumerateFunctions` / `aclrtBinaryGetFunction` | binary function 查询；旧运行库缺符号时返回不支持 |
 | `cudaGraphDebugDotPrint` | `aclmdlRIDebugJsonPrint`     | Graph 调试信息导出                   |
 | `cudaGraphExecDestroy`  | `aclmdlRIDestroy`             | 销毁 Graph/RI 实例                   |
 | `cudaGraphLaunch`       | `aclmdlRIExecuteAsync`        | 异步执行 Graph/RI                    |
+| `cudaGraphNodeGetType` / `cudaGraph*NodeSetParams` | `aclmdlRITaskGetType` / `aclmdlRITaskSetParams` | 仅支持已记录 task 类型与字段子集 |
+| `cudaGraphExecUpdate` / `cudaGraphExecGetId` | `aclmdlRIUpdate` / `aclmdlRIGetId` | Model RI 参数提交与 ID 查询 |
 | `cudaRuntimeGetVersion` | `aclsysGetVersionNum`         | 查询 runtime 包版本号                |
 | `cudaSetDevice`         | `aclrtSetDevice`              | 直接映射                             |
 | `cudaDeviceSynchronize` | `aclrtSynchronizeDevice`      | 直接映射                             |

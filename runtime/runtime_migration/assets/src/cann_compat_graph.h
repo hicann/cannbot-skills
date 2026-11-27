@@ -8,11 +8,57 @@
 
 #include "cann_compat_types.h"
 #include <stdlib.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+    __attribute__((weak)) aclError aclrtGetFuncBySymbol(
+        const void *symbol, aclrtFuncHandle *funcHandle);
+
+    static inline cudaError_t cudaDeviceGetGraphMemAttribute(
+        int device, cudaGraphMemAttributeType attr, void *value)
+    {
+        if (!value) {
+            return cudaErrorInvalidValue;
+        }
+        if (attr < cudaGraphMemAttrUsedMemCurrent ||
+            attr > cudaGraphMemAttrReservedMemHigh) {
+            return cudaErrorInvalidValue;
+        }
+
+        enum { CUDA_COMPAT_MEM_USAGE_COMPONENTS = 64 };
+        aclrtMemUsageInfo usage[CUDA_COMPAT_MEM_USAGE_COMPONENTS];
+        memset(usage, 0, sizeof(usage));
+        size_t outputCount = 0;
+        aclError ret = aclrtGetMemUsageInfo(device, usage,
+                                            CUDA_COMPAT_MEM_USAGE_COMPONENTS,
+                                            &outputCount);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        if (outputCount > CUDA_COMPAT_MEM_USAGE_COMPONENTS) {
+            outputCount = CUDA_COMPAT_MEM_USAGE_COMPONENTS;
+        }
+
+        uint64_t currentBytes = 0;
+        uint64_t peakBytes = 0;
+        for (size_t i = 0; i < outputCount; ++i) {
+            if (UINT64_MAX - currentBytes < usage[i].curMemSize ||
+                UINT64_MAX - peakBytes < usage[i].memPeakSize) {
+                return cudaErrorInvalidValue;
+            }
+            currentBytes += usage[i].curMemSize;
+            peakBytes += usage[i].memPeakSize;
+        }
+        *(uint64_t *)value =
+            (attr == cudaGraphMemAttrUsedMemHigh ||
+             attr == cudaGraphMemAttrReservedMemHigh) ? peakBytes : currentBytes;
+        return cudaSuccess;
+    }
+
 
     static inline cudaError_t cudaGraphInstantiate(cudaGraphExec_t *pGraphExec,
                                                    cudaGraph_t graph,
@@ -61,80 +107,21 @@ extern "C"
     }
 
 
-    static inline cudaError_t cudaCompatGraphCondType(cudaGraphConditionalNodeType cudaType,
-                                                      aclmdlRICondTaskType *cannType)
-    {
-        if (!cannType) {
-            return cudaErrorInvalidValue;
-        }
-        switch (cudaType) {
-        case cudaGraphCondTypeIf:
-            *cannType = ACL_MODEL_RI_COND_TYPE_IF;
-            return cudaSuccess;
-        case cudaGraphCondTypeWhile:
-            *cannType = ACL_MODEL_RI_COND_TYPE_WHILE;
-            return cudaSuccess;
-        case cudaGraphCondTypeSwitch:
-            *cannType = ACL_MODEL_RI_COND_TYPE_SWITCH;
-            return cudaSuccess;
-        default:
-            return cudaErrorInvalidValue;
-        }
-    }
-
     static inline cudaError_t cudaGraphAddNode_v1(cudaGraphNode_t *pGraphNode,
                                                   cudaGraph_t graph,
                                                   const cudaGraphNode_t *dependencies,
                                                   size_t numDependencies,
                                                   cudaGraphNodeParams *nodeParams)
     {
+        (void)graph;
         (void)dependencies;
-        if (!pGraphNode || !graph || !nodeParams) {
+        (void)numDependencies;
+        (void)nodeParams;
+        if (!pGraphNode) {
             return cudaErrorInvalidValue;
         }
         *pGraphNode = NULL;
-        if (numDependencies != 0) {
-            return cudaErrorNotSupported;
-        }
-        if (nodeParams->type != cudaGraphNodeTypeConditional) {
-            return cudaErrorNotSupported;
-        }
-        if (!nodeParams->conditional.handle || nodeParams->conditional.size == 0) {
-            return cudaErrorInvalidValue;
-        }
-
-        cudaGraph_t *subGraphs = (cudaGraph_t *)calloc(nodeParams->conditional.size, sizeof(cudaGraph_t));
-        if (!subGraphs) {
-            return cudaErrorMemoryAllocation;
-        }
-
-        aclmdlRICondTaskType cannType = ACL_MODEL_RI_COND_TYPE_IF;
-        cudaError_t typeRet = cudaCompatGraphCondType(nodeParams->conditional.type, &cannType);
-        if (typeRet != cudaSuccess) {
-            free(subGraphs);
-            return typeRet;
-        }
-
-        cudaStream_t stream = cudaCompatFindGraphCaptureStream(graph);
-        if (!stream) {
-            free(subGraphs);
-            return cudaErrorNotSupported;
-        }
-
-        aclmdlRICondTaskParams params;
-        params.handle = nodeParams->conditional.handle;
-        params.type = cannType;
-        params.size = nodeParams->conditional.size;
-        params.modelRIArray = (aclmdlRI *)subGraphs;
-        aclError ret = aclmdlRIAddCondTask(params, stream, 0);
-        if (ret != ACL_SUCCESS) {
-            free(subGraphs);
-            return acl2cudaError(ret);
-        }
-
-        nodeParams->conditional.phGraph_out = subGraphs;
-        *pGraphNode = (cudaGraphNode_t)nodeParams->conditional.handle;
-        return cudaSuccess;
+        return cudaErrorNotSupported;
     }
 
 
@@ -210,6 +197,36 @@ extern "C"
             ACL_MODEL_RI_COND_HANDLE_ASSIGN_DEFAULT : (aclmdlRICondHandleFlag)0;
         aclError ret = aclmdlRICondHandleCreate(graph, defaultLaunchValue, cannFlag, pHandle);
         return acl2cudaError(ret);
+    }
+
+
+    static inline cudaError_t cudaGraphConditionalHandleCreate_v2(
+        cudaGraphConditionalHandle *pHandle,
+        cudaGraph_t graph,
+        cudaExecutionContext_t ctx
+#ifdef __cplusplus
+        ,
+        unsigned int defaultLaunchValue = 0,
+        unsigned int flags = 0
+#else
+        ,
+        unsigned int defaultLaunchValue,
+        unsigned int flags
+#endif
+    )
+    {
+        if (ctx != NULL) {
+            aclrtContext current = NULL;
+            aclError ret = aclrtGetCurrentContext(&current);
+            if (ret != ACL_SUCCESS) {
+                return acl2cudaError(ret);
+            }
+            if (current != ctx) {
+                return cudaErrorInvalidValue;
+            }
+        }
+        return cudaGraphConditionalHandleCreate(pHandle, graph,
+                                                defaultLaunchValue, flags);
     }
 
     static inline cudaError_t cudaCompatGraphGetStreams(cudaGraph_t graph,
@@ -309,6 +326,187 @@ extern "C"
         return cudaSuccess;
     }
 
+
+    static inline cudaError_t cudaCompatGraphTaskType(
+        aclmdlRITaskType cannType, cudaGraphNodeType *cudaType)
+    {
+        if (!cudaType) {
+            return cudaErrorInvalidValue;
+        }
+        switch (cannType) {
+            case ACL_MODEL_RI_TASK_DEFAULT:
+                *cudaType = cudaGraphNodeTypeEmpty;
+                return cudaSuccess;
+            case ACL_MODEL_RI_TASK_KERNEL:
+                *cudaType = cudaGraphNodeTypeKernel;
+                return cudaSuccess;
+            case ACL_MODEL_RI_TASK_EVENT_RECORD:
+                *cudaType = cudaGraphNodeTypeEventRecord;
+                return cudaSuccess;
+            case ACL_MODEL_RI_TASK_EVENT_WAIT:
+                *cudaType = cudaGraphNodeTypeWaitEvent;
+                return cudaSuccess;
+            case ACL_MODEL_RI_TASK_VALUE_WRITE:
+            case ACL_MODEL_RI_TASK_VALUE_WAIT:
+                *cudaType = cudaGraphNodeTypeBatchMemOp;
+                return cudaSuccess;
+            default:
+                return cudaErrorNotSupported;
+        }
+    }
+
+
+    static inline cudaError_t cudaGraphNodeGetType(cudaGraphNode_t node,
+                                                   cudaGraphNodeType *pType)
+    {
+        if (!node || !pType) {
+            return cudaErrorInvalidValue;
+        }
+        aclmdlRITaskType cannType = ACL_MODEL_RI_TASK_DEFAULT;
+        aclError ret = aclmdlRITaskGetType((aclmdlRITask)node, &cannType);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        return cudaCompatGraphTaskType(cannType, pType);
+    }
+
+
+    static inline cudaError_t cudaCompatGraphSetEvent(
+        cudaGraphNode_t node, cudaEvent_t event, aclmdlRITaskType expectedType)
+    {
+        if (!node || !event) {
+            return cudaErrorInvalidValue;
+        }
+        aclmdlRITaskParams params;
+        memset(&params, 0, sizeof(params));
+        aclError ret = aclmdlRITaskGetParams((aclmdlRITask)node, &params);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        if (params.type != expectedType) {
+            return cudaErrorInvalidValue;
+        }
+        if (expectedType == ACL_MODEL_RI_TASK_EVENT_RECORD) {
+            params.eventRecordTaskParams.event = event;
+        } else {
+            params.eventWaitTaskParams.event = event;
+        }
+        ret = aclmdlRITaskSetParams((aclmdlRITask)node, &params);
+        return acl2cudaError(ret);
+    }
+
+
+    static inline uint32_t cudaCompatGraphGridBlocks(dim3 gridDim)
+    {
+        uint64_t blocks = (uint64_t)gridDim.x * (uint64_t)gridDim.y *
+                          (uint64_t)gridDim.z;
+        return (blocks == 0 || blocks > UINT32_MAX) ? 0 : (uint32_t)blocks;
+    }
+
+
+    static inline cudaError_t cudaCompatGraphSetKernel(
+        cudaGraphNode_t node, const void *func, dim3 gridDim, dim3 blockDim,
+        unsigned int sharedMemBytes, void **kernelParams, void **extra)
+    {
+        if (!node || !func) {
+            return cudaErrorInvalidValue;
+        }
+        if ((uintptr_t)func < 4096U) {
+            return cudaErrorInvalidDeviceFunction;
+        }
+        if (blockDim.x == 0 || blockDim.y == 0 || blockDim.z == 0) {
+            return cudaErrorInvalidConfiguration;
+        }
+        uint32_t numBlocks = cudaCompatGraphGridBlocks(gridDim);
+        if (numBlocks == 0) {
+            return cudaErrorInvalidConfiguration;
+        }
+        /* CANN's task setter cannot safely infer CUDA argument-array layouts. */
+        if (sharedMemBytes != 0 || kernelParams != NULL || extra != NULL) {
+            return cudaErrorNotSupported;
+        }
+
+        aclmdlRITaskParams params;
+        memset(&params, 0, sizeof(params));
+        aclError ret = aclmdlRITaskGetParams((aclmdlRITask)node, &params);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        if (params.type != ACL_MODEL_RI_TASK_KERNEL) {
+            return cudaErrorInvalidValue;
+        }
+
+        aclrtFuncHandle handle = NULL;
+        if (aclrtGetFuncBySymbol != NULL) {
+            if (aclrtGetFuncBySymbol(func, &handle) != ACL_SUCCESS) {
+                handle = NULL;
+            }
+        }
+        /* A captured task already holds a validated CANN function handle.
+         * Do not pass an unresolved CUDA symbol to CANN as a handle. */
+        if (handle == NULL) {
+            if ((aclrtFuncHandle)func != params.kernelTaskParams.funcHandle) {
+                return cudaErrorNotSupported;
+            }
+            handle = params.kernelTaskParams.funcHandle;
+        }
+        params.kernelTaskParams.funcHandle = handle;
+        params.kernelTaskParams.numBlocks = numBlocks;
+        ret = aclmdlRITaskSetParams((aclmdlRITask)node, &params);
+        return acl2cudaError(ret);
+    }
+
+
+    static inline const void *cudaCompatGraphV2Function(
+        const cudaKernelNodeParamsV2 *params)
+    {
+        switch (params->functionType) {
+            case cudaKernelFunctionTypeUnspecified:
+            case cudaKernelFunctionTypeDeviceEntry:
+                return params->func;
+            case cudaKernelFunctionTypeKernel:
+                return params->kern;
+            case cudaKernelFunctionTypeFunction:
+                return params->cuFunc;
+            default:
+                return NULL;
+        }
+    }
+
+
+    static inline cudaError_t cudaGraphNodeSetParams(
+        cudaGraphNode_t node, cudaGraphNodeParams *nodeParams)
+    {
+        if (!node || !nodeParams) {
+            return cudaErrorInvalidValue;
+        }
+        switch (nodeParams->type) {
+            case cudaGraphNodeTypeKernel:
+                if (nodeParams->kernel.ctx != NULL) {
+                    return cudaErrorNotSupported;
+                }
+                return cudaCompatGraphSetKernel(
+                    node, cudaCompatGraphV2Function(&nodeParams->kernel),
+                    nodeParams->kernel.gridDim, nodeParams->kernel.blockDim,
+                    nodeParams->kernel.sharedMemBytes,
+                    nodeParams->kernel.kernelParams, nodeParams->kernel.extra);
+            case cudaGraphNodeTypeEventRecord:
+                if (nodeParams->eventRecord.ctx != NULL) {
+                    return cudaErrorNotSupported;
+                }
+                return cudaCompatGraphSetEvent(node, nodeParams->eventRecord.event,
+                                               ACL_MODEL_RI_TASK_EVENT_RECORD);
+            case cudaGraphNodeTypeWaitEvent:
+                if (nodeParams->eventWait.ctx != NULL) {
+                    return cudaErrorNotSupported;
+                }
+                return cudaCompatGraphSetEvent(node, nodeParams->eventWait.event,
+                                               ACL_MODEL_RI_TASK_EVENT_WAIT);
+            default:
+                return cudaErrorNotSupported;
+        }
+    }
+
     static inline cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle,
                                                       unsigned int value)
     {
@@ -348,6 +546,128 @@ extern "C"
             return cudaErrorInvalidValue;
         }
         aclError ret = aclmdlRIDebugJsonPrint(graph, path, flags);
+        return acl2cudaError(ret);
+    }
+
+
+    static inline cudaError_t cudaCompatGraphCommitExec(cudaGraphExec_t graphExec,
+                                                        cudaError_t setResult)
+    {
+        if (setResult != cudaSuccess) {
+            return setResult;
+        }
+        aclError ret = aclmdlRIUpdate(graphExec);
+        return acl2cudaError(ret);
+    }
+
+
+    static inline cudaError_t cudaGraphExecEventRecordNodeSetEvent(
+        cudaGraphExec_t graphExec, cudaGraphNode_t node, cudaEvent_t event)
+    {
+        if (!graphExec) {
+            return cudaErrorInvalidValue;
+        }
+        return cudaCompatGraphCommitExec(
+            graphExec,
+            cudaCompatGraphSetEvent(node, event,
+                                    ACL_MODEL_RI_TASK_EVENT_RECORD));
+    }
+
+
+    static inline cudaError_t cudaGraphExecEventWaitNodeSetEvent(
+        cudaGraphExec_t graphExec, cudaGraphNode_t node, cudaEvent_t event)
+    {
+        if (!graphExec) {
+            return cudaErrorInvalidValue;
+        }
+        return cudaCompatGraphCommitExec(
+            graphExec,
+            cudaCompatGraphSetEvent(node, event,
+                                    ACL_MODEL_RI_TASK_EVENT_WAIT));
+    }
+
+
+    static inline cudaError_t cudaGraphExecKernelNodeSetParams(
+        cudaGraphExec_t graphExec, cudaGraphNode_t node,
+        const cudaKernelNodeParams *params)
+    {
+        if (!graphExec || !params) {
+            return cudaErrorInvalidValue;
+        }
+        return cudaCompatGraphCommitExec(
+            graphExec,
+            cudaCompatGraphSetKernel(node, params->func, params->gridDim,
+                                     params->blockDim, params->sharedMemBytes,
+                                     params->kernelParams, params->extra));
+    }
+
+
+    static inline cudaError_t cudaGraphExecNodeSetParams(
+        cudaGraphExec_t graphExec, cudaGraphNode_t node,
+        cudaGraphNodeParams *nodeParams)
+    {
+        if (!graphExec) {
+            return cudaErrorInvalidValue;
+        }
+        return cudaCompatGraphCommitExec(
+            graphExec, cudaGraphNodeSetParams(node, nodeParams));
+    }
+
+
+    static inline cudaError_t cudaGraphExecUpdate(
+        cudaGraphExec_t graphExec, cudaGraph_t graph,
+        cudaGraphExecUpdateResultInfo *resultInfo)
+    {
+        if (resultInfo) {
+            memset(resultInfo, 0, sizeof(*resultInfo));
+            resultInfo->result = cudaGraphExecUpdateError;
+        }
+        if (!graphExec || !graph) {
+            return cudaErrorInvalidValue;
+        }
+        if (graphExec != graph) {
+            if (resultInfo) {
+                resultInfo->result = cudaGraphExecUpdateErrorNotSupported;
+            }
+            return cudaErrorGraphExecUpdateFailure;
+        }
+        aclError ret = aclmdlRIUpdate(graphExec);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        if (resultInfo) {
+            resultInfo->result = cudaGraphExecUpdateSuccess;
+        }
+        return cudaSuccess;
+    }
+
+
+    static inline cudaError_t cudaGraphNodeSetEnabled(
+        cudaGraphExec_t graphExec, cudaGraphNode_t node,
+        unsigned int isEnabled)
+    {
+        if (!graphExec || !node || isEnabled > 1) {
+            return cudaErrorInvalidValue;
+        }
+        if (isEnabled != 0) {
+            return cudaErrorNotSupported;
+        }
+        aclError ret = aclmdlRITaskDisable((aclmdlRITask)node);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        ret = aclmdlRIUpdate(graphExec);
+        return acl2cudaError(ret);
+    }
+
+
+    static inline cudaError_t cudaGraphExecGetId(cudaGraphExec_t graphExec,
+                                                 unsigned int *graphId)
+    {
+        if (!graphExec || !graphId) {
+            return cudaErrorInvalidValue;
+        }
+        aclError ret = aclmdlRIGetId(graphExec, graphId);
         return acl2cudaError(ret);
     }
 

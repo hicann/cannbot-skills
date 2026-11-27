@@ -224,17 +224,18 @@ CUDA array、texture、surface 相关 3D copy 不属于当前兼容层支持范�
 
 ### aclrtMemcpyBatchAsync
 ```c
-aclError aclrtMemcpyBatchAsyncV2(void **dsts, size_t *destMaxs,
-                                  void **srcs, size_t *sizes,
-                                  size_t numBatches,
-                                  aclrtMemcpyBatchAttr *attrs,
-                                  size_t *attrsIndexes,
-                                  size_t numAttrs,
-                                  aclrtStream stream);
+aclError aclrtMemcpyBatchAsync(void **dsts, size_t *destMaxs,
+                               void **srcs, size_t *sizes,
+                               size_t numBatches,
+                               aclrtMemcpyBatchAttr *attrs,
+                               size_t *attrsIndexes,
+                               size_t numAttrs,
+                               size_t *failIndex,
+                               aclrtStream stream);
 ```
 - 功能：批量异步内存拷贝
-- 参数：`dsts/srcs` 为地址数组，`destMaxs/sizes` 为大小数组，`attrs/attrsIndexes` 描述每段拷贝的 src/dst location。
-- 迁移注意：CUDA `cudaMemcpyBatchAsync` 为 CUDA Runtime 13.2+ 接口；CANN batch 成功路径受 copy 形态和 location hint 限制，不支持形态需记录为条件 `SKIP` 或返回明确错误。
+- 参数：`dsts/srcs` 为地址数组，`destMaxs/sizes` 为大小数组；`attrsIndexes[k]` 是 `attrs[k]` 开始生效的 copy 下标；`failIndex` 返回参数或方向校验失败的 copy 下标。
+- 迁移注意：CUDA 与 CANN 的属性分组下标语义一致，可直接传递。CANN batch 仅允许同一批全部 H2D 或全部 D2H；D2D、混合方向或产品不支持时需返回明确错误或记录条件 `SKIP`。
 
 ### aclrtMemset
 ```c
@@ -532,6 +533,7 @@ aclError aclrtIpcOpenEventHandle(aclrtEvent *event, aclrtIpcEventHandle handle);
 aclError aclprofInit(const char *profilerResultPath, size_t length);
 ```
 - 功能：初始化 profiler
+- 约束：`profilerResultPath` 不能为 `NULL` 或空字符串，`length` 必须等于 `strlen(profilerResultPath)`；兼容层通过 `CUDA_COMPAT_PROFILER_RESULT_PATH` 提供路径，默认 `/tmp/cuda_compat_profiling`
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclprofStart
@@ -580,6 +582,14 @@ aclError aclrtGetFunctionName(aclrtFuncHandle funcHandle, uint32_t maxLen, char 
 - 约束：`name` 由调用方提供缓冲区；兼容层为 `cudaFuncGetName` 使用内部静态缓冲区承接
 - 验证约束：`funcHandle` 必须来自 CANN binary/module 加载等真实获取流程。不要把 `0x1`、普通 host 函数指针、CUDA `__global__` 函数指针或 Host fallback 函数指针传入 CANN function 查询接口；无真实 handle 时应验证错误路径并明确 `SKIP` 成功路径。
 - 返回：ACL_SUCCESS 或错误码
+
+### aclrtGetFuncBySymbol
+```c
+aclError aclrtGetFuncBySymbol(const void *symbol, aclrtFuncHandle *funcHandle);
+```
+- 功能：把 device entry symbol 解析为 CANN function handle，供属性、名称与 Graph kernel task 更新接口使用。
+- 兼容层按弱符号调用；旧运行库不导出该符号时返回不支持。
+- 成功路径需要毕昇编译器混合编译并注册的 Ascend C device entry symbol；直接加载算子二进制所得的 function handle 不能替代该 symbol。910B3 / CANN 9.2.0 已用仓库 `5_fdtd_stencil` 样例验证兼容入口返回真实 handle。
 
 ### aclrtFunctionGetParamCount / aclrtFunctionGetParamInfo
 ```c
@@ -696,6 +706,7 @@ aclError aclmdlRICondHandleCreate(aclmdlRI modelRI, uint32_t defaultLaunchValue,
 ```
 - 功能：创建条件 handle
 - 约束：本接口在 CANN 文档中标注为试验特性，后续版本可能会存在变更，不支持应用于生产环境中
+- 910B3 / CANN 9.2.0 上已在 `aclmdlRICaptureBegin` 与 `aclmdlRICaptureEnd` 之间取得有效 Model RI 并调用，原生接口仍返回 `207000`（feature not supported）；不能把这个结果归因于普通 build RI 的句柄形态。
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclmdlRIAddCondTask
@@ -703,7 +714,7 @@ aclError aclmdlRICondHandleCreate(aclmdlRI modelRI, uint32_t defaultLaunchValue,
 aclError aclmdlRIAddCondTask(aclmdlRICondTaskParams params, aclrtStream stream, uint32_t flags);
 ```
 - 功能：向 capture active 状态的 ACL graph stream 注册 IF/WHILE/SWITCH 条件任务，并输出子 Model RI
-- 约束：用于 `cudaGraphAddNode(cudaGraphNodeTypeConditional)` 特例映射；通用 CUDA Graph node 不按此接口映射
+- 约束：CANN 原生条件任务接口；不作为 `cudaGraphAddNode` 的 CUDA 对标映射
 - 返回：ACL_SUCCESS 或错误码
 
 ### aclmdlRIGetStreams / aclmdlRIGetTasksByStream
@@ -733,6 +744,30 @@ aclError aclrtValueWrite(void *devAddr, uint64_t value, uint32_t flag, aclrtStre
 ---
 
 ## Graph/Capture API
+
+### aclmdlRITaskGetType / aclmdlRITaskGetParams / aclmdlRITaskSetParams / aclmdlRIUpdate
+```c
+aclError aclmdlRITaskGetType(aclmdlRITask task, aclmdlRITaskType *type);
+aclError aclmdlRITaskGetParams(aclmdlRITask task, aclmdlRITaskParams *params);
+aclError aclmdlRITaskSetParams(aclmdlRITask task, aclmdlRITaskParams *params);
+aclError aclmdlRIUpdate(aclmdlRI modelRI);
+```
+- 功能：查询 task 类型和完整参数、修改受支持字段，并把修改提交到 Model RI。
+- `aclmdlRITaskParams` 的所有保留字节必须初始化为 0；兼容层先 get 再修改，避免清空原 task 的必要字段。
+- 对同一 Model RI 的参数更新不支持并发；这些接口为 CANN 试验特性，产品支持范围有限。
+- 910B3 / CANN 9.2.0 原生探针显示 setter 仅接受 kernel/value-write/value-wait task，EVENT_RECORD 和 EVENT_WAIT 更新均被拒绝。真实捕获的 Ascend C kernel task 可通过 `cudaGraphExecKernelNodeSetParams` 更新并执行，须校验 Graph 输出数据。
+- CANN 的 EVENT_RESET task 没有安全的 CUDA Graph node type 对应项；`cudaGraphNodeGetType` 对此返回 `cudaErrorNotSupported`，用例应验证此预期行为。
+
+### aclrtBinaryGetFunctionCount / aclrtBinaryEnumerateFunctions
+```c
+aclError aclrtBinaryGetFunctionCount(aclrtBinHandle binHandle, uint32_t *count);
+aclError aclrtBinaryEnumerateFunctions(aclrtBinHandle binHandle,
+                                       aclrtFuncHandle *funcHandles,
+                                       uint32_t numFunctions);
+```
+- 功能：查询 binary 中的 function 数量并枚举 handle，对应 CUDA library kernel 枚举接口。
+- 兼容层使用弱符号保护旧版 CANN 动态库。
+- 910B3 / CANN 9.2.0 的 `libacl_rt.so` 未导出这两个查询符号；必须在目标 Runtime 实际导出时才执行成功路径验收。
 
 ### aclmdlRICaptureBegin
 ```c
@@ -797,11 +832,15 @@ aclError aclmdlRICaptureToModelRIBegin(aclrtStream stream, aclmdlRI modelRI,
 | `aclrtMemcpyFromSymbolAsync` | `cudaMemcpyFromSymbolAsync` | 异步从设备符号拷贝 |
 | `aclrtGetSymbolSize` | `cudaGetSymbolSize` | 查询设备符号大小 |
 | `aclrtMemsetD32Async` | `cuMemsetD32Async` | D32 异步 memset |
-| `aclrtGetFunctionAttribute` | `cudaFuncGetAttributes` | 查询 function 属性 |
+| `aclrtGetFunctionAttribute` | 无等价 CUDA 属性集 | 仅提供 CANN kernel type、ratio 和调度模式，不能填入 CUDA `cudaFuncAttributes` |
 | `aclrtFunctionGetAvailDynUbufPerBlock` | `cudaOccupancyAvailableDynamicSMemPerBlock` | 查询 CANN function 每 block 可用动态 UBuf |
-| `aclrtGetCurrentContext` | `cuCtxGetCurrent` | 获取当前 context |
-| `aclrtSetCurrentContext` | `cuCtxSetCurrent` | 设置当前 context |
+| `aclrtGetCurrentContext` | `cuCtxGetCurrent` | 无当前 Context 时 CANN 9.2 返回 `ACL_ERROR_RT_CONTEXT_NULL`，兼容层将其归一为成功及空句柄 |
+| `aclrtSetCurrentContext` | `cuCtxSetCurrent` | CANN 9.2 拒绝空 Context；兼容层使用线程局部状态表示 CUDA 的 detach，选择有效 Context 或 Device 时清除 |
 | `aclrtGetPrimaryCtxState` | `cuDevicePrimaryCtxGetState` | 查询 primary context |
+| `aclrtCreateContext` | `cuCtxCreate` | 在指定 Device 显式创建 Context；CUDA 调度 flags、执行亲和参数及 CIG 参数没有直接映射，兼容层遇到非零 flags 或非空创建参数返回不支持 |
+| `aclrtDestroyContext` | `cuCtxDestroy` | 仅释放显式创建的 Context；默认 Context 不可由此释放 |
+| `aclrtGetDevice` | `cuCtxGetDevice` | 获取当前 Context 关联的 Device |
+| `aclrtDeviceGetStreamPriorityRange` | `cuCtxGetStreamPriorityRange` | 查询当前设备 Stream 优先级范围；兼容层使用两个临时输出以支持 CUDA 侧单输出调用 |
 | `aclrtBinaryLoadFromFile` | `cuModuleLoad` | 从文件加载 binary |
 | `aclrtBinaryLoadFromData` | `cuModuleLoadData` | 从内存加载 binary |
 | `aclrtBinaryGetFunction` | `cuModuleGetFunction` | 获取 function handle |

@@ -29,6 +29,9 @@ extern "C"
 {
 #endif
 
+int cudaCompatContextIsDetached(void);
+void cudaCompatContextSetDetached(int detached);
+
 #define MOCK_CUDA_MAJOR_VERSION 13
 #define MOCK_CUDA_MINOR_VERSION 3
 #ifndef CUDART_VERSION
@@ -217,6 +220,7 @@ extern "C"
         uint32_t flags;
         int profiler_initialized;
         int profiler_running;
+        void *profiler_config;
     } cudaCompatContext_t;
 
     extern cudaCompatContext_t g_cuda_context;

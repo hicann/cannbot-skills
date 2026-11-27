@@ -25,6 +25,11 @@ extern "C"
                                                         const char *name,
                                                         void **dptr,
                                                         size_t *bytes);
+    __attribute__((weak)) aclError aclrtBinaryGetFunctionCount(
+        const aclrtBinHandle binHandle, uint32_t *count);
+    __attribute__((weak)) aclError aclrtBinaryEnumerateFunctions(
+        const aclrtBinHandle binHandle, aclrtFuncHandle *funcHandles,
+        uint32_t numFunctions);
 
     /* =================================================================
      * Type Definitions
@@ -93,7 +98,26 @@ extern "C"
 
     static inline cudaError_t cudaLibraryUnload(cudaLibrary_t library)
     {
+        if (!library)
+        {
+            return cudaErrorInvalidResourceHandle;
+        }
         aclError ret = aclrtBinaryUnLoad(library);
+        return acl2cudaError(ret);
+    }
+
+
+    static inline cudaError_t cudaLibraryGetKernel(cudaKernel_t *kernel,
+                                                   cudaLibrary_t library,
+                                                   const char *name)
+    {
+        if (!kernel || !library || !name)
+        {
+            return cudaErrorInvalidValue;
+        }
+
+        *kernel = NULL;
+        aclError ret = aclrtBinaryGetFunction(library, name, kernel);
         return acl2cudaError(ret);
     }
 
@@ -102,12 +126,46 @@ extern "C"
                                                      cudaLibrary_t library,
                                                      const char *name)
     {
-        if (!func || !name)
+        return cudaLibraryGetKernel((cudaKernel_t *)func, library, name);
+    }
+
+
+    static inline cudaError_t cudaLibraryGetKernelCount(unsigned int *count,
+                                                        cudaLibrary_t library)
+    {
+        if (!count || !library)
         {
             return cudaErrorInvalidValue;
         }
+        *count = 0;
+        if (aclrtBinaryGetFunctionCount == NULL)
+        {
+            return cudaErrorNotSupported;
+        }
+        uint32_t functionCount = 0;
+        aclError ret = aclrtBinaryGetFunctionCount(library, &functionCount);
+        if (ret == ACL_SUCCESS)
+        {
+            *count = functionCount;
+        }
+        return acl2cudaError(ret);
+    }
 
-        aclError ret = aclrtBinaryGetFunction(library, name, (aclrtFuncHandle *)func);
+
+    static inline cudaError_t cudaLibraryEnumerateKernels(cudaKernel_t *kernels,
+                                                          unsigned int numKernels,
+                                                          cudaLibrary_t library)
+    {
+        if (!library || (numKernels != 0 && !kernels))
+        {
+            return cudaErrorInvalidValue;
+        }
+        if (aclrtBinaryEnumerateFunctions == NULL)
+        {
+            return cudaErrorNotSupported;
+        }
+        aclError ret = aclrtBinaryEnumerateFunctions(library, kernels,
+                                                     (uint32_t)numKernels);
         return acl2cudaError(ret);
     }
 
@@ -121,7 +179,7 @@ extern "C"
         {
             return cudaErrorNotSupported;
         }
-        if (!name)
+        if (!library || !name || (!dptr && !bytes))
         {
             return cudaErrorInvalidValue;
         }

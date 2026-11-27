@@ -50,6 +50,22 @@
     typedef aclmdlRI cudaGraphExec_t;
     typedef void *cudaGraphNode_t;
     typedef aclmdlRICondHandle cudaGraphConditionalHandle;
+    typedef aclrtContext cudaExecutionContext_t;
+    typedef aclrtFuncHandle cudaFunction_t;
+    typedef aclrtFuncHandle cudaKernel_t;
+
+#if !defined(__VECTOR_TYPES_H__) && !defined(CANN_COMPAT_DIM3_DEFINED) && \
+    (!defined(INC_EXTERNAL_ACL_ACL_RT_H_) || defined(__BISHENG_CCEC__))
+#define CANN_COMPAT_DIM3_DEFINED
+    typedef struct dim3 {
+        unsigned int x;
+        unsigned int y;
+        unsigned int z;
+#ifdef __cplusplus
+        constexpr dim3(unsigned int vx = 1, unsigned int vy = 1, unsigned int vz = 1) : x(vx), y(vy), z(vz) {}
+#endif
+    } dim3;
+#endif
 
 #define cudaGraphCondAssignDefault 0x1U
 
@@ -73,6 +89,81 @@
 
     typedef enum
     {
+        cudaGraphMemAttrUsedMemCurrent = 0,
+        cudaGraphMemAttrUsedMemHigh = 1,
+        cudaGraphMemAttrReservedMemCurrent = 2,
+        cudaGraphMemAttrReservedMemHigh = 3
+    } cudaGraphMemAttributeType;
+
+    typedef enum
+    {
+        cudaGraphExecUpdateSuccess = 0,
+        cudaGraphExecUpdateError = 1,
+        cudaGraphExecUpdateErrorTopologyChanged = 2,
+        cudaGraphExecUpdateErrorNodeTypeChanged = 3,
+        cudaGraphExecUpdateErrorFunctionChanged = 4,
+        cudaGraphExecUpdateErrorParametersChanged = 5,
+        cudaGraphExecUpdateErrorNotSupported = 6,
+        cudaGraphExecUpdateErrorUnsupportedFunctionChange = 7,
+        cudaGraphExecUpdateErrorAttributesChanged = 8
+    } cudaGraphExecUpdateResult;
+
+    typedef struct
+    {
+        cudaGraphExecUpdateResult result;
+        cudaGraphNode_t errorNode;
+        cudaGraphNode_t errorFromNode;
+    } cudaGraphExecUpdateResultInfo;
+
+    typedef struct
+    {
+        void *func;
+        dim3 gridDim;
+        dim3 blockDim;
+        unsigned int sharedMemBytes;
+        void **kernelParams;
+        void **extra;
+    } cudaKernelNodeParams;
+
+    typedef enum
+    {
+        cudaKernelFunctionTypeUnspecified = 0x00,
+        cudaKernelFunctionTypeDeviceEntry = 0x01,
+        cudaKernelFunctionTypeKernel = 0x02,
+        cudaKernelFunctionTypeFunction = 0x03
+    } cudaKernelFunctionType;
+
+    typedef struct
+    {
+        cudaKernelFunctionType functionType;
+        union
+        {
+            void *func;
+            cudaKernel_t kern;
+            cudaFunction_t cuFunc;
+        };
+        dim3 gridDim;
+        dim3 blockDim;
+        unsigned int sharedMemBytes;
+        void **kernelParams;
+        void **extra;
+        cudaExecutionContext_t ctx;
+    } cudaKernelNodeParamsV2;
+
+    typedef struct
+    {
+        cudaEvent_t event;
+        cudaExecutionContext_t ctx;
+    } cudaEventRecordNodeParams;
+
+    typedef struct
+    {
+        cudaEvent_t event;
+        cudaExecutionContext_t ctx;
+    } cudaEventWaitNodeParams;
+
+    typedef enum
+    {
         cudaGraphCondTypeIf = 0,
         cudaGraphCondTypeWhile = 1,
         cudaGraphCondTypeSwitch = 2
@@ -89,10 +180,16 @@
     typedef struct
     {
         cudaGraphNodeType type;
+        int reserved0[3];
         union
         {
             cudaGraphConditionalNodeParams conditional;
+            cudaKernelNodeParamsV2 kernel;
+            cudaEventRecordNodeParams eventRecord;
+            cudaEventWaitNodeParams eventWait;
+            long long reserved1[29];
         };
+        long long reserved2;
     } cudaGraphNodeParams;
 
     typedef struct cudaCompatGraphCaptureEntry_st
@@ -155,19 +252,6 @@
             }
         }
     }
-
-#if !defined(__VECTOR_TYPES_H__) && !defined(CANN_COMPAT_DIM3_DEFINED) && \
-    (!defined(INC_EXTERNAL_ACL_ACL_RT_H_) || defined(__BISHENG_CCEC__))
-#define CANN_COMPAT_DIM3_DEFINED
-    typedef struct dim3 {
-        unsigned int x;
-        unsigned int y;
-        unsigned int z;
-#ifdef __cplusplus
-        constexpr dim3(unsigned int vx = 1, unsigned int vy = 1, unsigned int vz = 1) : x(vx), y(vy), z(vz) {}
-#endif
-    } dim3;
-#endif
 
     typedef aclrtLaunchKernelAttr cudaLaunchAttribute;
 

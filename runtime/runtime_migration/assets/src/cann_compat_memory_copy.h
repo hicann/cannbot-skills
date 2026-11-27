@@ -35,7 +35,7 @@ extern "C"
     }
 
 
-    cudaError_t cudaMemcpyBatchAsync(const void *const *dsts, const void *const *srcs,
+    cudaError_t cudaMemcpyBatchAsync(void *const *dsts, const void *const *srcs,
                                      const size_t *sizes, size_t count,
                                      cudaMemcpyAttributes *attrs, size_t *attrsIdxs, size_t numAttrs, cudaStream_t stream);
 
@@ -226,15 +226,27 @@ extern "C"
     static inline cudaError_t cudaMemcpyWithAttributesAsync(void *dst, const void *src, size_t count,
                                                            cudaMemcpyAttributes *attrs, cudaStream_t stream)
     {
-        if (!dst || !src || count == 0) {
+        if (!dst || !src || count == 0 || !attrs || !stream ||
+            attrs->srcAccessOrder == cudaMemcpySrcAccessOrderInvalid ||
+            attrs->srcAccessOrder >= cudaMemcpySrcAccessOrderMax ||
+            (attrs->flags & ~((unsigned int)cudaMemcpyFlagPreferOverlapWithCompute)) != 0) {
             return cudaErrorInvalidValue;
         }
-        (void)attrs;
-        if (stream == NULL) {
-            return cudaCompatMemcpyChecked(dst, count, src, count);
+        int srcHost = cudaCompatPtrLikelyHost(src);
+        int dstHost = cudaCompatPtrLikelyHost(dst);
+        if (srcHost && dstHost) {
+            return cudaErrorNotSupported; /* CANN has no stream-ordered H2H copy. */
         }
-        aclError ret = aclrtMemcpyAsync(dst, count, src, count, ACL_MEMCPY_DEFAULT, stream);
-        return acl2cudaError(ret);
+        aclrtMemcpyKind kind = srcHost ? ACL_MEMCPY_HOST_TO_DEVICE :
+                               dstHost ? ACL_MEMCPY_DEVICE_TO_HOST : ACL_MEMCPY_DEVICE_TO_DEVICE;
+        aclError ret = aclrtMemcpyAsync(dst, count, src, count, kind, stream);
+        if (ret != ACL_SUCCESS) {
+            return acl2cudaError(ret);
+        }
+        if (attrs->srcAccessOrder == cudaMemcpySrcAccessOrderDuringApiCall) {
+            return acl2cudaError(aclrtSynchronizeStream(stream));
+        }
+        return cudaSuccess;
     }
 
     static inline cudaMemLocationType cudaCompatInferMemcpyLocation(cudaMemLocationType hint,
@@ -310,14 +322,37 @@ extern "C"
     static inline cudaError_t cudaMemcpy3DBatchAsync(size_t numOps, cudaMemcpy3DBatchOp *opList,
                                                      unsigned long long flags, cudaStream_t stream)
     {
-        if (!opList || numOps == 0 || flags != 0) {
+        if (!opList || numOps == 0 || flags != 0 || !stream) {
             return cudaErrorInvalidValue;
+        }
+        /* Validate the whole batch before enqueueing any operation. */
+        for (size_t i = 0; i < numOps; ++i) {
+            if (opList[i].srcAccessOrder == cudaMemcpySrcAccessOrderInvalid ||
+                opList[i].srcAccessOrder >= cudaMemcpySrcAccessOrderMax ||
+                (opList[i].flags & ~((unsigned int)cudaMemcpyFlagPreferOverlapWithCompute)) != 0) {
+                return cudaErrorInvalidValue;
+            }
+            cudaMemcpy3DParms p;
+            cudaError_t valid = cudaCompatMemcpy3DBatchOpToParms(&opList[i], &p);
+            if (valid != cudaSuccess) {
+                return valid;
+            }
+            valid = cudaCompatValidateMemcpy3DPtr(&p);
+            if (valid != cudaSuccess) {
+                return valid;
+            }
         }
         for (size_t i = 0; i < numOps; ++i) {
             cudaMemcpy3DParms p;
             cudaError_t ret = cudaCompatMemcpy3DBatchOpToParms(&opList[i], &p);
             if (ret != cudaSuccess) {
                 return ret;
+            }
+            if (opList[i].srcAccessOrder == cudaMemcpySrcAccessOrderDuringApiCall) {
+                ret = acl2cudaError(aclrtSynchronizeStream(stream));
+                if (ret != cudaSuccess) {
+                    return ret;
+                }
             }
             ret = cudaMemcpy3DAsync(&p, stream);
             if (ret != cudaSuccess) {
@@ -331,7 +366,65 @@ extern "C"
                                                               unsigned long long flags,
                                                               cudaStream_t stream)
     {
-        return cudaMemcpy3DBatchAsync(1, op, flags, stream);
+        cudaError_t valid = cudaCompatBatchPointerOperands(op);
+        if (valid != cudaSuccess) {
+            return valid;
+        }
+        if (flags != 0 || !stream ||
+            op->srcAccessOrder == cudaMemcpySrcAccessOrderInvalid ||
+            op->srcAccessOrder >= cudaMemcpySrcAccessOrderMax ||
+            (op->flags & ~((unsigned int)cudaMemcpyFlagPreferOverlapWithCompute)) != 0) {
+            return cudaErrorInvalidValue;
+        }
+
+        size_t srcRowLength = op->src.op.ptr.rowLength ? op->src.op.ptr.rowLength : op->extent.width;
+        size_t dstRowLength = op->dst.op.ptr.rowLength ? op->dst.op.ptr.rowLength : op->extent.width;
+        size_t srcLayerHeight = op->src.op.ptr.layerHeight ? op->src.op.ptr.layerHeight : op->extent.height;
+        size_t dstLayerHeight = op->dst.op.ptr.layerHeight ? op->dst.op.ptr.layerHeight : op->extent.height;
+        if (srcRowLength < op->extent.width || dstRowLength < op->extent.width ||
+            srcLayerHeight < op->extent.height || dstLayerHeight < op->extent.height ||
+            op->extent.depth > SIZE_MAX / op->extent.height) {
+            return cudaErrorInvalidValue;
+        }
+
+        size_t copyCount = op->extent.depth * op->extent.height;
+        if (copyCount > SIZE_MAX / sizeof(void *) || copyCount > SIZE_MAX / sizeof(size_t)) {
+            return cudaErrorInvalidValue;
+        }
+        void **dsts = (void **)calloc(copyCount, sizeof(void *));
+        const void **srcs = (const void **)calloc(copyCount, sizeof(void *));
+        size_t *sizes = (size_t *)calloc(copyCount, sizeof(size_t));
+        if (!dsts || !srcs || !sizes) {
+            free(dsts);
+            free(srcs);
+            free(sizes);
+            return cudaErrorMemoryAllocation;
+        }
+
+        size_t copyIndex = 0;
+        for (size_t z = 0; z < op->extent.depth; ++z) {
+            for (size_t y = 0; y < op->extent.height; ++y) {
+                srcs[copyIndex] = (const char *)op->src.op.ptr.ptr +
+                    (z * srcLayerHeight + y) * srcRowLength;
+                dsts[copyIndex] = (char *)op->dst.op.ptr.ptr +
+                    (z * dstLayerHeight + y) * dstRowLength;
+                sizes[copyIndex] = op->extent.width;
+                ++copyIndex;
+            }
+        }
+
+        cudaMemcpyAttributes attr;
+        attr.srcAccessOrder = op->srcAccessOrder;
+        attr.srcLocHint = op->src.op.ptr.locHint;
+        attr.dstLocHint = op->dst.op.ptr.locHint;
+        attr.flags = op->flags;
+        size_t attrsIndex = 0;
+        cudaError_t ret = cudaMemcpyBatchAsync(dsts, srcs, sizes, copyCount,
+                                               &attr, &attrsIndex, 1, stream);
+        free(dsts);
+        free(srcs);
+        free(sizes);
+        return ret;
     }
 
 
@@ -339,8 +432,27 @@ extern "C"
                                             const void *src, int srcDevice,
                                             size_t count)
     {
-        (void)dstDevice;
-        (void)srcDevice;
+        uint32_t deviceCount = 0;
+        aclError countRet = aclrtGetDeviceCount(&deviceCount);
+        if (countRet != ACL_SUCCESS) {
+            return acl2cudaError(countRet);
+        }
+        if (dstDevice < 0 || srcDevice < 0 ||
+            (uint32_t)dstDevice >= deviceCount || (uint32_t)srcDevice >= deviceCount) {
+            return cudaErrorInvalidDevice;
+        }
+
+        aclrtPtrAttributes ptrAttr;
+        if (aclrtPointerGetAttributes(dst, &ptrAttr) == ACL_SUCCESS &&
+            ptrAttr.location.type == ACL_MEM_LOCATION_TYPE_DEVICE &&
+            ptrAttr.location.id != (uint32_t)dstDevice) {
+            return cudaErrorInvalidDevice;
+        }
+        if (aclrtPointerGetAttributes(src, &ptrAttr) == ACL_SUCCESS &&
+            ptrAttr.location.type == ACL_MEM_LOCATION_TYPE_DEVICE &&
+            ptrAttr.location.id != (uint32_t)srcDevice) {
+            return cudaErrorInvalidDevice;
+        }
 
         aclError ret = aclrtMemcpy(dst, count, src, count,
                                     ACL_MEMCPY_DEVICE_TO_DEVICE);

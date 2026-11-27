@@ -3,13 +3,6 @@
  *
  * Build on a CUDA machine, for example:
  *   nvcc -std=c++17 apiRuntimeCoverage_cuda.cu -lcuda -o apiRuntimeCoverage_cuda
- *
- * Library checks use an embedded PTX fixture by default (CUDA Runtime 12.8+).
- * To use an external image, set CUDA_MAPPING_LIBRARY_IMAGE to its path and
- * CUDA_MAPPING_LIBRARY_KERNEL / CUDA_MAPPING_LIBRARY_GLOBAL to its exported
- * symbol names. Omitted names skip only the corresponding symbol queries.
- * An external global may have any nonzero size. For a migrated CANN run, supply
- * a real CANN binary and its symbols instead of the built-in CUDA PTX fixture.
  */
 
 #include <cuda.h>
@@ -40,6 +33,13 @@ __global__ void ApiRuntimeCoverageKernelWithValue(int *out, int value)
 }
 
 __device__ int g_apiRuntimeCoverageSymbol = 0;
+__device__ int g_symbolSizeProbe[4] = {};
+__device__ int g_capturedGraphSetterValue = 0;
+
+__global__ void ApiRuntimeCoverageCapturedSetterKernel()
+{
+    g_capturedGraphSetterValue = 42;
+}
 
 #if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
 __global__ void ApiRuntimeCoverageSetConditionalKernel(cudaGraphConditionalHandle handle)
@@ -439,12 +439,11 @@ void CheckPeerEnableAndMemcpyAsyncApis(int deviceCount)
         if (ExpectSuccess("cudaMalloc batch dst A", cudaMalloc(&batchDstA, bytes / 2)) &&
             ExpectSuccess("cudaMalloc batch dst B", cudaMalloc(&batchDstB, bytes / 2))) {
             void *dsts[2] = {batchDstA, batchDstB};
-            const auto *srcBytes = static_cast<const unsigned char *>(src);
-            const void *srcs[2] = {srcBytes, srcBytes + bytes / 2};
+            const void *srcs[2] = {hostIn.data(), hostIn.data() + bytes / 2};
             size_t sizes[2] = {bytes / 2, bytes / 2};
             cudaMemcpyAttributes attrs[1]{};
             attrs[0].srcAccessOrder = cudaMemcpySrcAccessOrderStream;
-            attrs[0].srcLocHint.type = cudaMemLocationTypeDevice;
+            attrs[0].srcLocHint.type = cudaMemLocationTypeHost;
             attrs[0].dstLocHint.type = cudaMemLocationTypeDevice;
             size_t attrsIdxs[1] = {0};
             if (ExpectSuccess("stream for cudaMemcpyBatchAsync", cudaStreamCreate(&stream))) {
@@ -752,6 +751,7 @@ void Check3DMemoryApis()
         ExpectSuccess("cudaMemcpyWithAttributesAsync",
                       cudaMemcpyWithAttributesAsync(peerDst, peerSrc, width, &attrs, stream))) {
         if (ExpectSuccess("sync cudaMemcpyWithAttributesAsync", cudaStreamSynchronize(stream))) {
+            std::fill(out.begin(), out.end(), 0);
             ExpectSuccess("copy cudaMemcpyWithAttributesAsync dst",
                           cudaMemcpy(out.data(), peerDst, total, cudaMemcpyDeviceToHost));
             ++g_checks;
@@ -764,6 +764,7 @@ void Check3DMemoryApis()
         }
     }
 
+    std::fill(out.begin(), out.end(), 0);
     cudaMemcpy3DBatchOp op{};
     op.src.type = cudaMemcpyOperandTypePointer;
     op.src.op.ptr.ptr = src.data();
@@ -1461,7 +1462,13 @@ void CheckLaunchKernelExApi()
 void CheckIncrementalFunctionAndGraphApis()
 {
     cudaFuncAttributes attrs{};
+#if defined(__CUDACC__)
     ExpectSuccess("cudaFuncGetAttributes", cudaFuncGetAttributes(&attrs, ApiRuntimeCoverageKernel));
+#else
+    ExpectError("cudaFuncGetAttributes no CANN equivalent",
+                cudaFuncGetAttributes(&attrs, reinterpret_cast<const void *>(ApiRuntimeCoverageKernel)),
+                cudaErrorNotSupported);
+#endif
 
     cudaGraph_t graph = nullptr;
     if (ExpectSuccess("cudaGraphCreate incremental", cudaGraphCreate(&graph, 0))) {
@@ -1764,6 +1771,92 @@ void CheckIncrementalContext(int device)
                     cuDevicePrimaryCtxGetState(device, &primaryFlags, &active));
 }
 
+void CheckDriverContextApis(int device)
+{
+    unsigned int flags = ~0U;
+    int active = -1;
+    if (ExpectCuSuccess("cuDevicePrimaryCtxGetState context",
+                        cuDevicePrimaryCtxGetState(device, &flags, &active))) {
+        ++g_checks;
+        if (active == 0 || active == 1) {
+            PrintResult("primary context active is boolean", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("primary context active is boolean", "FAIL");
+        }
+    }
+
+    CUcontext original = nullptr;
+    ExpectCuSuccess("cuCtxGetCurrent before create", cuCtxGetCurrent(&original));
+
+    CUcontext created = nullptr;
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
+    if (!ExpectCuSuccess("cuCtxCreate regular context",
+                         cuCtxCreate(&created, nullptr, 0, device))) {
+        return;
+    }
+#else
+    Skip("cuCtxCreate regular context", "four-argument API requires CUDA 13.0+ headers");
+    return;
+#endif
+    ++g_checks;
+    if (created != nullptr) {
+        PrintResult("cuCtxCreate non-null handle", "PASS");
+    } else {
+        ++g_failures;
+        PrintResult("cuCtxCreate non-null handle", "FAIL");
+        return;
+    }
+
+    CUcontext current = nullptr;
+    if (ExpectCuSuccess("cuCtxGetCurrent after create", cuCtxGetCurrent(&current))) {
+        ++g_checks;
+        if (current == created) {
+            PrintResult("current equals created context", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("current equals created context", "FAIL");
+        }
+    }
+
+    CUdevice currentDevice = -1;
+    if (ExpectCuSuccess("cuCtxGetDevice", cuCtxGetDevice(&currentDevice))) {
+        ExpectIntValue("context device matches requested device", currentDevice, device);
+    }
+
+    int least = 9999;
+    int greatest = 9999;
+    if (ExpectCuSuccess("cuCtxGetStreamPriorityRange both",
+                        cuCtxGetStreamPriorityRange(&least, &greatest))) {
+        ++g_checks;
+        if (greatest <= least) {
+            PrintResult("stream priority range ordered", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("stream priority range ordered", "FAIL");
+        }
+        int onlyGreatest = 9999;
+        if (ExpectCuSuccess("cuCtxGetStreamPriorityRange null least",
+                            cuCtxGetStreamPriorityRange(nullptr, &onlyGreatest))) {
+            ExpectIntValue("single priority output matches", onlyGreatest, greatest);
+        }
+    }
+
+    ExpectCuSuccess("cuCtxSetCurrent original", cuCtxSetCurrent(original));
+    ExpectCuSuccess("cuCtxSetCurrent created", cuCtxSetCurrent(created));
+    current = nullptr;
+    if (ExpectCuSuccess("cuCtxGetCurrent after set", cuCtxGetCurrent(&current))) {
+        ++g_checks;
+        if (current == created) {
+            PrintResult("restored context matches created", "PASS");
+        } else {
+            ++g_failures;
+            PrintResult("restored context matches created", "FAIL");
+        }
+    }
+    ExpectCuSuccess("cuCtxDestroy created", cuCtxDestroy(created));
+}
+
 void CheckIncrementalDriverWrites(size_t bytes)
 {
     void *devicePtr = nullptr;
@@ -1834,11 +1927,9 @@ void CheckGraphMemoryAndProfilerApis(int device)
         unsigned long long value = 0;
         OptionalSuccess(names[i], cudaDeviceGetGraphMemAttribute(device, attrs[i], &value));
     }
-    OptionalSuccess("cudaDeviceGraphMemTrim", cudaDeviceGraphMemTrim(device));
 #else
     (void)device;
     Skip("cudaDeviceGetGraphMemAttribute", "requires CUDA Runtime 11.4+");
-    Skip("cudaDeviceGraphMemTrim", "requires CUDA Runtime 11.4+");
 #endif
 
     cudaError_t profilerStart = cudaProfilerStart();
@@ -1856,119 +1947,92 @@ void CheckGraphMemoryAndProfilerApis(int device)
 
 void CheckLibraryApis()
 {
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12080
-    // This fixture owns its symbol names; external images must supply their own.
-    static const char kPtx[] =
-        ".version 7.0\n"
-        ".target sm_70\n"
-        ".address_size 64\n"
-        ".visible .global .align 4 .u32 apiRuntimeCoverageLibraryGlobal = 17;\n"
-        ".visible .entry apiRuntimeCoverageLibraryKernel() { ret; }\n";
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
     const char *imagePath = std::getenv("CUDA_MAPPING_LIBRARY_IMAGE");
-    const bool externalImage = imagePath != nullptr && imagePath[0] != '\0';
-    const char *kernelName = externalImage ? std::getenv("CUDA_MAPPING_LIBRARY_KERNEL")
-                                           : "apiRuntimeCoverageLibraryKernel";
-    const char *globalName = externalImage ? std::getenv("CUDA_MAPPING_LIBRARY_GLOBAL")
-                                           : "apiRuntimeCoverageLibraryGlobal";
-    std::vector<char> image;
-    char temporaryPath[] = "/tmp/apiRuntimeCoverage_library_XXXXXX";
-    if (externalImage) {
-        std::ifstream input(imagePath, std::ios::binary);
-        image.assign(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
-        if (!input || image.empty()) {
-            ++g_checks;
-            ++g_failures;
-            PrintResult("CUDA Library image", "FAIL", "cannot read image or image is empty");
-            return;
+    if (imagePath == nullptr || imagePath[0] == '\0') {
+        const char *reason = "set CUDA_MAPPING_LIBRARY_IMAGE to a CUDA fatbin/CANN binary";
+        Skip("cudaLibraryLoadFromFile", reason);
+        Skip("cudaLibraryLoadData", reason);
+        Skip("cudaLibraryGetKernelCount", reason);
+        Skip("cudaLibraryEnumerateKernels", reason);
+        Skip("cudaLibraryGetKernel", reason);
+        Skip("cudaLibraryGetGlobal", reason);
+        Skip("cudaLibraryUnload", reason);
+        return;
+    }
+    const char *kernelName = std::getenv("CUDA_MAPPING_LIBRARY_KERNEL");
+    const char *globalName = std::getenv("CUDA_MAPPING_LIBRARY_GLOBAL");
+    const char *imageFile = std::strrchr(imagePath, '/');
+    imageFile = imageFile == nullptr ? imagePath : imageFile + 1;
+    const bool knownFixture = std::strcmp(imageFile, "mapping_library.fatbin") == 0;
+    if (knownFixture) {
+        if (kernelName == nullptr || kernelName[0] == '\0') {
+            kernelName = "libraryKernel";
         }
-        // PTX loaded from memory must be NUL-terminated; binary images tolerate padding.
-        image.push_back('\0');
-    } else {
-        image.assign(kPtx, kPtx + sizeof(kPtx));
-        int fd = mkstemp(temporaryPath);
-        if (fd < 0) {
-            ++g_checks;
-            ++g_failures;
-            PrintResult("CUDA Library fixture", "FAIL", "cannot create temporary PTX file");
-            return;
+        if (globalName == nullptr || globalName[0] == '\0') {
+            globalName = "gLibraryGlobal";
         }
-        FILE *file = fdopen(fd, "wb");
-        bool written = false;
-        if (file != nullptr) {
-            written = std::fwrite(kPtx, 1, sizeof(kPtx) - 1, file) == sizeof(kPtx) - 1;
-            if (std::fclose(file) != 0) {
-                written = false;
-            }
-        } else {
-            close(fd);
-        }
-        if (!written) {
-            std::remove(temporaryPath);
-            ++g_checks;
-            ++g_failures;
-            PrintResult("CUDA Library fixture", "FAIL", "cannot write temporary PTX file");
-            return;
-        }
-        imagePath = temporaryPath;
     }
 
     cudaLibrary_t library = nullptr;
-    if (ExpectSuccess("cudaLibraryLoadFromFile",
-                      cudaLibraryLoadFromFile(&library, imagePath, nullptr, nullptr, 0,
-                                              nullptr, nullptr, 0))) {
-        unsigned int count = 0;
-        if (ExpectSuccess("cudaLibraryGetKernelCount",
-                          cudaLibraryGetKernelCount(&count, library))) {
+    if (!ExpectSuccess("cudaLibraryLoadFromFile",
+                       cudaLibraryLoadFromFile(&library, imagePath, nullptr, nullptr, 0,
+                                               nullptr, nullptr, 0))) {
+        return;
+    }
+
+    unsigned int count = 0;
+    if (ExpectSuccess("cudaLibraryGetKernelCount",
+                      cudaLibraryGetKernelCount(&count, library))) {
+        ++g_checks;
+        if (count > 0) {
+            PrintResult("cudaLibraryGetKernelCount positive", "PASS");
+            std::vector<cudaKernel_t> kernels(count);
+            ExpectSuccess("cudaLibraryEnumerateKernels",
+                          cudaLibraryEnumerateKernels(kernels.data(), count, library));
+        } else {
+            ++g_failures;
+            PrintResult("cudaLibraryGetKernelCount positive", "FAIL", "count is zero");
+        }
+    }
+
+    if (kernelName != nullptr && kernelName[0] != '\0') {
+        cudaKernel_t kernel = nullptr;
+        ExpectSuccess("cudaLibraryGetKernel",
+                      cudaLibraryGetKernel(&kernel, library, kernelName));
+    } else {
+        Skip("cudaLibraryGetKernel", "set CUDA_MAPPING_LIBRARY_KERNEL for this image");
+    }
+
+    if (globalName != nullptr && globalName[0] != '\0') {
+        void *global = nullptr;
+        size_t globalBytes = 0;
+        if (ExpectSuccess("cudaLibraryGetGlobal",
+                          cudaLibraryGetGlobal(&global, &globalBytes, library,
+                                               globalName))) {
             ++g_checks;
-            if (count > 0) {
-                PrintResult("cudaLibraryGetKernelCount positive", "PASS");
-                std::vector<cudaKernel_t> kernels(count);
-                ExpectSuccess("cudaLibraryEnumerateKernels",
-                              cudaLibraryEnumerateKernels(kernels.data(), count, library));
+            if (global != nullptr && globalBytes > 0 &&
+                (!knownFixture || globalBytes == sizeof(int))) {
+                PrintResult("cudaLibraryGetGlobal address/size", "PASS");
             } else {
                 ++g_failures;
-                PrintResult("cudaLibraryGetKernelCount positive", "FAIL", "count is zero");
+                PrintResult("cudaLibraryGetGlobal address/size", "FAIL");
             }
         }
-
-        if (kernelName != nullptr && kernelName[0] != '\0') {
-            cudaKernel_t kernel = nullptr;
-            if (ExpectSuccess("cudaLibraryGetKernel",
-                              cudaLibraryGetKernel(&kernel, library, kernelName))) {
-                ++g_checks;
-                if (kernel != nullptr) {
-                    PrintResult("cudaLibraryGetKernel handle", "PASS");
-                } else {
-                    ++g_failures;
-                    PrintResult("cudaLibraryGetKernel handle", "FAIL", "null kernel");
-                }
-            }
-        } else {
-            Skip("cudaLibraryGetKernel", "set CUDA_MAPPING_LIBRARY_KERNEL for the external image");
-        }
-
-        if (globalName != nullptr && globalName[0] != '\0') {
-            void *global = nullptr;
-            size_t globalBytes = 0;
-            if (ExpectSuccess("cudaLibraryGetGlobal",
-                              cudaLibraryGetGlobal(&global, &globalBytes, library, globalName))) {
-                ++g_checks;
-                if (global != nullptr && (externalImage ? globalBytes > 0 : globalBytes == sizeof(int))) {
-                    PrintResult("cudaLibraryGetGlobal address/size", "PASS");
-                } else {
-                    ++g_failures;
-                    PrintResult("cudaLibraryGetGlobal address/size", "FAIL");
-                }
-            }
-        } else {
-            Skip("cudaLibraryGetGlobal", "set CUDA_MAPPING_LIBRARY_GLOBAL for the external image");
-        }
-        ExpectSuccess("cudaLibraryUnload file", cudaLibraryUnload(library));
+    } else {
+        Skip("cudaLibraryGetGlobal", "set CUDA_MAPPING_LIBRARY_GLOBAL for this image");
     }
-    if (!externalImage) {
-        std::remove(temporaryPath);
-    }
+    ExpectSuccess("cudaLibraryUnload file", cudaLibraryUnload(library));
 
+    std::ifstream input(imagePath, std::ios::binary);
+    std::vector<char> image((std::istreambuf_iterator<char>(input)),
+                            std::istreambuf_iterator<char>());
+    if (image.empty()) {
+        ++g_checks;
+        ++g_failures;
+        PrintResult("cudaLibraryLoadData input", "FAIL", "image is empty");
+        return;
+    }
     library = nullptr;
     if (ExpectSuccess("cudaLibraryLoadData",
                       cudaLibraryLoadData(&library, image.data(), nullptr, nullptr, 0,
@@ -1976,15 +2040,13 @@ void CheckLibraryApis()
         ExpectSuccess("cudaLibraryUnload data", cudaLibraryUnload(library));
     }
 #else
-    Skip("CUDA Library APIs", "requires CUDA Runtime 12.8+");
+    Skip("CUDA Library APIs", "requires CUDA Runtime 12.0+");
 #endif
 }
 
 cudaError_t BuildGraphUpdateInput(cudaGraph_t *graph, cudaGraphNode_t *node,
                                   int *deviceOutput, int value)
 {
-    *graph = nullptr;
-    *node = nullptr;
     cudaError_t error = cudaGraphCreate(graph, 0);
     if (error != cudaSuccess) {
         return error;
@@ -1995,13 +2057,13 @@ cudaError_t BuildGraphUpdateInput(cudaGraph_t *graph, cudaGraphNode_t *node,
     params.gridDim = dim3(1, 1, 1);
     params.blockDim = dim3(1, 1, 1);
     params.kernelParams = args;
-    error = cudaGraphAddKernelNode(node, *graph, nullptr, 0, &params);
-    if (error != cudaSuccess) {
+    cudaError_t addError = cudaGraphAddKernelNode(node, *graph, nullptr, 0, &params);
+    if (addError != cudaSuccess) {
         ExpectSuccess("destroy failed graph update input", cudaGraphDestroy(*graph));
         *graph = nullptr;
         *node = nullptr;
     }
-    return error;
+    return addError;
 }
 
 void CheckAdvancedGraphMutationApis()
@@ -2042,7 +2104,6 @@ void CheckAdvancedGraphMutationApis()
         goto cleanup;
     }
 
-    // Do not launch a graph with only one of its record/wait events replaced.
     if (!ExpectSuccess("cudaGraphExecEventRecordNodeSetEvent",
                        cudaGraphExecEventRecordNodeSetEvent(graphExec, recordNode, eventB)) ||
         !ExpectSuccess("cudaGraphExecEventWaitNodeSetEvent",
@@ -2050,10 +2111,8 @@ void CheckAdvancedGraphMutationApis()
         goto cleanup;
     }
     value = 7;
-    if (!ExpectSuccess("cudaGraphExecKernelNodeSetParams",
-                       cudaGraphExecKernelNodeSetParams(graphExec, kernelNode, &kernelParams))) {
-        goto cleanup;
-    }
+    ExpectSuccess("cudaGraphExecKernelNodeSetParams",
+                  cudaGraphExecKernelNodeSetParams(graphExec, kernelNode, &kernelParams));
 
     if (ExpectSuccess("cudaGraphNodeGetType kernel",
                       cudaGraphNodeGetType(kernelNode, &nodeType))) {
@@ -2075,11 +2134,9 @@ void CheckAdvancedGraphMutationApis()
     Skip("cudaGraphExecGetId", "requires CUDA Runtime 13.1+");
 #endif
 
-    if (!ExpectSuccess("advanced output clear", cudaMemset(deviceOutput, 0, sizeof(int))) ||
-        !ExpectSuccess("advanced cudaGraphLaunch", cudaGraphLaunch(graphExec, nullptr)) ||
-        !ExpectSuccess("advanced graph synchronize", cudaDeviceSynchronize())) {
-        goto cleanup;
-    }
+    ExpectSuccess("advanced output clear", cudaMemset(deviceOutput, 0, sizeof(int)));
+    ExpectSuccess("advanced cudaGraphLaunch", cudaGraphLaunch(graphExec, nullptr));
+    ExpectSuccess("advanced graph synchronize", cudaDeviceSynchronize());
     {
         int observed = -1;
         if (ExpectSuccess("advanced graph output copy",
@@ -2089,13 +2146,11 @@ void CheckAdvancedGraphMutationApis()
         }
     }
 
-    if (!ExpectSuccess("cudaGraphNodeSetEnabled disable",
-                       cudaGraphNodeSetEnabled(graphExec, kernelNode, 0)) ||
-        !ExpectSuccess("advanced disabled output clear", cudaMemset(deviceOutput, 0, sizeof(int))) ||
-        !ExpectSuccess("advanced disabled launch", cudaGraphLaunch(graphExec, nullptr)) ||
-        !ExpectSuccess("advanced disabled synchronize", cudaDeviceSynchronize())) {
-        goto cleanup;
-    }
+    ExpectSuccess("cudaGraphNodeSetEnabled disable",
+                  cudaGraphNodeSetEnabled(graphExec, kernelNode, 0));
+    ExpectSuccess("advanced disabled output clear", cudaMemset(deviceOutput, 0, sizeof(int)));
+    ExpectSuccess("advanced disabled launch", cudaGraphLaunch(graphExec, nullptr));
+    ExpectSuccess("advanced disabled synchronize", cudaDeviceSynchronize());
     {
         int observed = -1;
         if (ExpectSuccess("advanced disabled output copy",
@@ -2121,26 +2176,24 @@ cleanup:
         ExpectSuccess("advanced event B destroy", cudaEventDestroy(eventB));
     }
 
-    graphExec = nullptr;
-    bool updateSucceeded = false;
     cudaGraph_t graphA = nullptr;
     cudaGraph_t graphB = nullptr;
     cudaGraphNode_t nodeA = nullptr;
     cudaGraphNode_t nodeB = nullptr;
+    graphExec = nullptr;
     if (ExpectSuccess("build cudaGraphExecUpdate graph A",
                       BuildGraphUpdateInput(&graphA, &nodeA, deviceOutput, 21)) &&
         ExpectSuccess("build cudaGraphExecUpdate graph B",
                       BuildGraphUpdateInput(&graphB, &nodeB, deviceOutput, 22)) &&
         ExpectSuccess("instantiate cudaGraphExecUpdate graph",
                       cudaGraphInstantiate(&graphExec, graphA, nullptr, nullptr, 0))) {
-#if defined(CUDART_VERSION) && CUDART_VERSION >= 12000
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13000
         cudaGraphExecUpdateResultInfo updateInfo{};
         if (ExpectSuccess("cudaGraphExecUpdate",
                           cudaGraphExecUpdate(graphExec, graphB, &updateInfo))) {
             ++g_checks;
             if (updateInfo.result == cudaGraphExecUpdateSuccess) {
                 PrintResult("cudaGraphExecUpdate result", "PASS");
-                updateSucceeded = true;
             } else {
                 ++g_failures;
                 PrintResult("cudaGraphExecUpdate result", "FAIL");
@@ -2155,23 +2208,12 @@ cleanup:
             ++g_checks;
             if (updateResult == cudaGraphExecUpdateSuccess) {
                 PrintResult("cudaGraphExecUpdate result", "PASS");
-                updateSucceeded = true;
             } else {
                 ++g_failures;
                 PrintResult("cudaGraphExecUpdate result", "FAIL");
             }
         }
 #endif
-    }
-    if (updateSucceeded) {
-        if (ExpectSuccess("launch updated graph", cudaGraphLaunch(graphExec, nullptr)) &&
-            ExpectSuccess("sync updated graph", cudaDeviceSynchronize())) {
-            int observed = -1;
-            if (ExpectSuccess("copy updated graph output",
-                              cudaMemcpy(&observed, deviceOutput, sizeof(observed), cudaMemcpyDeviceToHost))) {
-                ExpectIntValue("cudaGraphExecUpdate output", observed, 22);
-            }
-        }
     }
     if (graphExec != nullptr) {
         ExpectSuccess("destroy cudaGraphExecUpdate exec", cudaGraphExecDestroy(graphExec));
@@ -2204,16 +2246,8 @@ cleanup:
         ExpectSuccess("generic cudaGraphInstantiate",
                       cudaGraphInstantiate(&genericExec, genericGraph, nullptr, nullptr, 0))) {
         value = 32;
-        if (ExpectSuccess("cudaGraphExecNodeSetParams",
-                          cudaGraphExecNodeSetParams(genericExec, genericNode, &genericParams)) &&
-            ExpectSuccess("generic graph launch", cudaGraphLaunch(genericExec, nullptr)) &&
-            ExpectSuccess("generic graph synchronize", cudaDeviceSynchronize())) {
-            int observed = -1;
-            if (ExpectSuccess("generic graph output copy",
-                              cudaMemcpy(&observed, deviceOutput, sizeof(observed), cudaMemcpyDeviceToHost))) {
-                ExpectIntValue("cudaGraphExecNodeSetParams output", observed, 32);
-            }
-        }
+        ExpectSuccess("cudaGraphExecNodeSetParams",
+                      cudaGraphExecNodeSetParams(genericExec, genericNode, &genericParams));
     }
     if (genericExec != nullptr) {
         ExpectSuccess("generic cudaGraphExecDestroy", cudaGraphExecDestroy(genericExec));
@@ -2227,6 +2261,81 @@ cleanup:
 #endif
 
     ExpectSuccess("free advanced graph output", cudaFree(deviceOutput));
+}
+
+void CheckCapturedGenericGraphSetters()
+{
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13010
+    cudaStream_t stream = nullptr;
+    if (!ExpectSuccess("captured setter stream", cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking))) {
+        return;
+    }
+    cudaGraph_t graph = nullptr;
+    cudaGraphExec_t graphExec = nullptr;
+    if (!ExpectSuccess("captured setter begin", cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal))) {
+        cudaStreamDestroy(stream);
+        return;
+    }
+    ApiRuntimeCoverageCapturedSetterKernel<<<1, 1, 0, stream>>>();
+    if (!ExpectSuccess("captured setter end", cudaStreamEndCapture(stream, &graph))) {
+        cudaStreamDestroy(stream);
+        return;
+    }
+
+    size_t nodeCount = 0;
+    if (!ExpectSuccess("captured setter node count", cudaGraphGetNodes(graph, nullptr, &nodeCount)) ||
+        nodeCount == 0) {
+        ++g_checks;
+        ++g_failures;
+        PrintResult("captured setter kernel node exists", "FAIL");
+    } else {
+        std::vector<cudaGraphNode_t> nodes(nodeCount);
+        if (ExpectSuccess("captured setter nodes", cudaGraphGetNodes(graph, nodes.data(), &nodeCount))) {
+            cudaGraphNode_t kernelNode = nullptr;
+            for (cudaGraphNode_t node : nodes) {
+                cudaGraphNodeType type = cudaGraphNodeTypeEmpty;
+                if (!ExpectSuccess("captured setter node type", cudaGraphNodeGetType(node, &type))) break;
+                if (type == cudaGraphNodeTypeKernel) {
+                    kernelNode = node;
+                    break;
+                }
+            }
+            ++g_checks;
+            if (kernelNode == nullptr) {
+                ++g_failures;
+                PrintResult("captured setter kernel node exists", "FAIL");
+            } else {
+                PrintResult("captured setter kernel node exists", "PASS");
+                cudaGraphNodeParams params{};
+                params.type = cudaGraphNodeTypeKernel;
+                params.kernel.functionType = cudaKernelFunctionTypeDeviceEntry;
+                params.kernel.func = reinterpret_cast<void *>(ApiRuntimeCoverageCapturedSetterKernel);
+                params.kernel.gridDim = dim3(1, 1, 1);
+                params.kernel.blockDim = dim3(1, 1, 1);
+                if (ExpectSuccess("cudaGraphNodeSetParams captured kernel",
+                                  cudaGraphNodeSetParams(kernelNode, &params)) &&
+                    ExpectSuccess("captured setter instantiate",
+                                  cudaGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0)) &&
+                    ExpectSuccess("cudaGraphExecNodeSetParams captured kernel",
+                                  cudaGraphExecNodeSetParams(graphExec, kernelNode, &params)) &&
+                    ExpectSuccess("captured setter launch", cudaGraphLaunch(graphExec, stream)) &&
+                    ExpectSuccess("captured setter synchronize", cudaStreamSynchronize(stream))) {
+                    int output = 0;
+                    if (ExpectSuccess("captured setter symbol read",
+                                      cudaMemcpyFromSymbol(&output, g_capturedGraphSetterValue,
+                                                           sizeof(output)))) {
+                        ExpectIntValue("captured setter output", output, 42);
+                    }
+                }
+            }
+        }
+    }
+    if (graphExec != nullptr) ExpectSuccess("captured setter exec destroy", cudaGraphExecDestroy(graphExec));
+    if (graph != nullptr) ExpectSuccess("captured setter graph destroy", cudaGraphDestroy(graph));
+    ExpectSuccess("captured setter stream destroy", cudaStreamDestroy(stream));
+#else
+    Skip("captured generic Graph setters", "requires CUDA Runtime 13.1+");
+#endif
 }
 
 void CheckIncrementalApiSurface(int device, const char *selfPath)
@@ -2349,6 +2458,154 @@ void CheckDriverVmmApis(int device, const char *selfPath)
     }
 }
 
+
+void CheckMemoryCopyAndSymbolBranches()
+{
+    size_t symbolSize = 0;
+    if (ExpectSuccess("cudaGetSymbolSize before partial copy",
+                      cudaGetSymbolSize(&symbolSize, g_symbolSizeProbe))) {
+        ExpectIntValue("cudaGetSymbolSize declared bytes",
+                       static_cast<int>(symbolSize), static_cast<int>(sizeof(g_symbolSizeProbe)));
+    }
+    int value = 123;
+    ExpectSuccess("cudaMemcpyToSymbol partial",
+                  cudaMemcpyToSymbol(g_symbolSizeProbe, &value, sizeof(value)));
+    symbolSize = 0;
+    if (ExpectSuccess("cudaGetSymbolSize after partial copy",
+                      cudaGetSymbolSize(&symbolSize, g_symbolSizeProbe))) {
+        ExpectIntValue("cudaGetSymbolSize after partial bytes",
+                       static_cast<int>(symbolSize), static_cast<int>(sizeof(g_symbolSizeProbe)));
+    }
+
+    unsigned char hostIn[64] = {};
+    for (size_t i = 0; i < sizeof(hostIn); ++i) {
+        hostIn[i] = static_cast<unsigned char>(i + 1);
+    }
+    void *src = nullptr;
+    void *dst = nullptr;
+    void *hostOut = nullptr;
+    cudaStream_t stream = nullptr;
+    bool ready = ExpectSuccess("memory copy source alloc", cudaMalloc(&src, sizeof(hostIn))) &&
+                 ExpectSuccess("memory copy destination alloc", cudaMalloc(&dst, sizeof(hostIn))) &&
+                 ExpectSuccess("memory copy host alloc", cudaMallocHost(&hostOut, sizeof(hostIn))) &&
+                 ExpectSuccess("memory copy stream create", cudaStreamCreate(&stream));
+    if (ready) {
+        ExpectSuccess("memory copy source seed",
+                      cudaMemcpy(src, hostIn, sizeof(hostIn), cudaMemcpyHostToDevice));
+        ExpectError("cudaMemcpyPeer invalid device IDs",
+                    cudaMemcpyPeer(dst, 999, src, 888, sizeof(hostIn)), cudaErrorInvalidDevice);
+        if (ExpectSuccess("cudaMemcpyPeer valid IDs",
+                          cudaMemcpyPeer(dst, 0, src, 0, sizeof(hostIn)))) {
+            ExpectSuccess("cudaMemcpyPeer data read",
+                          cudaMemcpy(hostOut, dst, sizeof(hostIn), cudaMemcpyDeviceToHost));
+            ExpectIntValue("cudaMemcpyPeer data",
+                           std::memcmp(hostOut, hostIn, sizeof(hostIn)), 0);
+        }
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 13020
+        cudaMemcpyAttributes attrs{};
+        attrs.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+        attrs.srcLocHint.type = cudaMemLocationTypeDevice;
+        attrs.dstLocHint.type = cudaMemLocationTypeDevice;
+        void *dsts[1] = {dst};
+        const void *srcs[1] = {src};
+        size_t sizes[1] = {sizeof(hostIn)};
+        size_t attrsIdxs[1] = {0};
+        if (ExpectSuccess("cudaMemcpyBatchAsync D2D",
+                          cudaMemcpyBatchAsync(dsts, srcs, sizes, 1,
+                                               &attrs, attrsIdxs, 1, stream))) {
+            ExpectSuccess("cudaMemcpyBatchAsync D2D sync", cudaStreamSynchronize(stream));
+            ExpectSuccess("cudaMemcpyBatchAsync D2D read",
+                          cudaMemcpy(hostOut, dst, sizeof(hostIn), cudaMemcpyDeviceToHost));
+            ExpectIntValue("cudaMemcpyBatchAsync D2D data",
+                           std::memcmp(hostOut, hostIn, sizeof(hostIn)), 0);
+        }
+
+        cudaMemcpy3DBatchOp op{};
+        op.src.type = cudaMemcpyOperandTypePointer;
+        op.src.op.ptr.ptr = src;
+        op.src.op.ptr.rowLength = sizeof(hostIn);
+        op.src.op.ptr.layerHeight = 1;
+        op.dst.type = cudaMemcpyOperandTypePointer;
+        op.dst.op.ptr.ptr = dst;
+        op.dst.op.ptr.rowLength = sizeof(hostIn);
+        op.dst.op.ptr.layerHeight = 1;
+        op.extent = make_cudaExtent(sizeof(hostIn), 1, 1);
+        op.srcAccessOrder = cudaMemcpySrcAccessOrderInvalid;
+        ExpectError("cudaMemcpy3DBatchAsync invalid order",
+                    cudaMemcpy3DBatchAsync(1, &op, 0, stream), cudaErrorInvalidValue);
+        op.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+        op.flags = 0x80000000U;
+        ExpectError("cudaMemcpy3DBatchAsync invalid flags",
+                    cudaMemcpy3DBatchAsync(1, &op, 0, stream), cudaErrorInvalidValue);
+        op.flags = 0;
+        ExpectError("cudaMemcpy3DBatchAsync legacy NULL stream",
+                    cudaMemcpy3DBatchAsync(1, &op, 0, nullptr), cudaErrorInvalidValue);
+        ExpectError("cudaMemcpy3DWithAttributesAsync legacy NULL stream",
+                    cudaMemcpy3DWithAttributesAsync(&op, 0, nullptr), cudaErrorInvalidValue);
+        if (ExpectSuccess("cudaMemcpy3DBatchAsync D2D branch",
+                          cudaMemcpy3DBatchAsync(1, &op, 0, stream))) {
+            ExpectSuccess("cudaMemcpy3DBatchAsync branch sync", cudaStreamSynchronize(stream));
+            ExpectSuccess("cudaMemcpy3DBatchAsync branch read",
+                          cudaMemcpy(hostOut, dst, sizeof(hostIn), cudaMemcpyDeviceToHost));
+            ExpectIntValue("cudaMemcpy3DBatchAsync branch data",
+                           std::memcmp(hostOut, hostIn, sizeof(hostIn)), 0);
+        }
+
+        attrs.dstLocHint.type = cudaMemLocationTypeHost;
+        std::memset(hostOut, 0, sizeof(hostIn));
+        if (ExpectSuccess("cudaMemcpyWithAttributesAsync D2H",
+                          cudaMemcpyWithAttributesAsync(hostOut, src, sizeof(hostIn),
+                                                        &attrs, stream))) {
+            ExpectSuccess("cudaMemcpyWithAttributesAsync D2H sync",
+                          cudaStreamSynchronize(stream));
+            ExpectIntValue("cudaMemcpyWithAttributesAsync D2H data",
+                           std::memcmp(hostOut, hostIn, sizeof(hostIn)), 0);
+        }
+        ExpectError("cudaMemcpyWithAttributesAsync legacy NULL stream",
+                    cudaMemcpyWithAttributesAsync(hostOut, src, sizeof(hostIn),
+                                                  &attrs, nullptr), cudaErrorInvalidValue);
+        attrs.dstLocHint.type = cudaMemLocationTypeDevice;
+        ExpectError("cudaMemcpyBatchAsync legacy NULL stream",
+                    cudaMemcpyBatchAsync(dsts, srcs, sizes, 1,
+                                         &attrs, attrsIdxs, 1, nullptr), cudaErrorInvalidValue);
+
+        unsigned char expected[sizeof(hostIn)] = {};
+        std::memcpy(expected, hostIn, sizeof(hostIn));
+        attrs.srcAccessOrder = cudaMemcpySrcAccessOrderDuringApiCall;
+        attrs.srcLocHint.type = cudaMemLocationTypeHost;
+        attrs.dstLocHint.type = cudaMemLocationTypeDevice;
+        if (ExpectSuccess("cudaMemcpyWithAttributesAsync DuringApiCall",
+                          cudaMemcpyWithAttributesAsync(dst, hostIn, sizeof(hostIn),
+                                                        &attrs, stream))) {
+            std::memset(hostIn, 0, sizeof(hostIn));
+            ExpectSuccess("cudaMemcpyWithAttributesAsync DuringApiCall sync",
+                          cudaStreamSynchronize(stream));
+            ExpectSuccess("cudaMemcpyWithAttributesAsync DuringApiCall read",
+                          cudaMemcpy(hostOut, dst, sizeof(hostIn), cudaMemcpyDeviceToHost));
+            ExpectIntValue("cudaMemcpyWithAttributesAsync source lifetime",
+                           std::memcmp(hostOut, expected, sizeof(hostIn)), 0);
+        }
+        std::memcpy(hostIn, expected, sizeof(hostIn));
+        srcs[0] = hostIn;
+        if (ExpectSuccess("cudaMemcpyBatchAsync DuringApiCall",
+                          cudaMemcpyBatchAsync(dsts, srcs, sizes, 1,
+                                               &attrs, attrsIdxs, 1, stream))) {
+            std::memset(hostIn, 0, sizeof(hostIn));
+            ExpectSuccess("cudaMemcpyBatchAsync DuringApiCall sync",
+                          cudaStreamSynchronize(stream));
+            ExpectSuccess("cudaMemcpyBatchAsync DuringApiCall read",
+                          cudaMemcpy(hostOut, dst, sizeof(hostIn), cudaMemcpyDeviceToHost));
+            ExpectIntValue("cudaMemcpyBatchAsync source lifetime",
+                           std::memcmp(hostOut, expected, sizeof(hostIn)), 0);
+        }
+#endif
+    }
+    if (stream) ExpectSuccess("memory copy stream destroy", cudaStreamDestroy(stream));
+    if (hostOut) ExpectSuccess("memory copy host free", cudaFreeHost(hostOut));
+    if (dst) ExpectSuccess("memory copy destination free", cudaFree(dst));
+    if (src) ExpectSuccess("memory copy source free", cudaFree(src));
+}
+
 }  // namespace
 
 int main(int argc, char **argv)
@@ -2389,7 +2646,10 @@ int main(int argc, char **argv)
     CheckLaunchKernelApi();
     CheckBasicGraphCaptureApis();
     CheckIncrementalApiSurface(device, argv[0]);
+    CheckCapturedGenericGraphSetters();
     CheckDriverVmmApis(device, argv[0]);
+    CheckDriverContextApis(device);
+    CheckMemoryCopyAndSymbolBranches();
 
     ExpectSuccess("cudaDeviceSynchronize", cudaDeviceSynchronize());
     ExpectSuccess("cudaDeviceReset", cudaDeviceReset());

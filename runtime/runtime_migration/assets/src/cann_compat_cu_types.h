@@ -29,6 +29,14 @@ extern "C"
     typedef void *CUdeviceptr;
     typedef int CUdevice;
     typedef void *CUcontext;
+    /* CUDA 13.x cuCtxCreate accepts this optional parameter block. The
+     * compatibility layer keeps its source fields but currently supports
+     * only a NULL block; no member is passed to CANN. */
+    typedef struct CUctxCreateParams_st {
+        void *execAffinityParams;
+        int numExecAffinityParams;
+        void *cigParams;
+    } CUctxCreateParams;
     typedef void *CUgreenCtx;
     typedef void *CUdevResource;
     typedef void *CUstream;

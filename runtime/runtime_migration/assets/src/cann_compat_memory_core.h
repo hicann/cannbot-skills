@@ -24,8 +24,9 @@ extern "C"
      * ================================================================= */
 
 
-    __attribute__((weak)) aclError aclrtMemcpyBatchAsyncV2(void **dsts, size_t *destMaxs, void **srcs, size_t *sizes,
-        size_t numBatches, aclrtMemcpyBatchAttr *attrs, size_t *attrsIndexes, size_t numAttrs, aclrtStream stream);
+    __attribute__((weak)) aclError aclrtMemcpyBatchAsync(void **dsts, size_t *destMaxs, void **srcs, size_t *sizes,
+        size_t numBatches, aclrtMemcpyBatchAttr *attrs, size_t *attrsIndexes, size_t numAttrs, size_t *failIndex,
+        aclrtStream stream);
 
     __attribute__((weak)) aclError aclrtMallocHostAndRegister(void **ptr, size_t size, uint32_t flag);
 

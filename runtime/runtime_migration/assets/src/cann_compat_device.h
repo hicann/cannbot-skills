@@ -31,6 +31,9 @@ static inline cudaError_t cudaGetDeviceCount(int *count) {
 
 static inline cudaError_t cudaSetDevice(int device) {
     aclError ret = aclrtSetDevice(device);
+    if (ret == ACL_SUCCESS) {
+        cudaCompatContextSetDetached(0);
+    }
     return acl2cudaError(ret);
 }
 

@@ -141,22 +141,16 @@ static inline cudaError_t cudaMemcpyToSymbol(const T &symbol, const void *src,
     if (!slot) {
         return cudaErrorMemoryAllocation;
     }
-    size_t needed = offset + count;
-    if (!slot->devicePtr || slot->size < needed) {
-        if (slot->devicePtr) {
-            cudaError_t freeRet = cudaFree(slot->devicePtr);
-            if (freeRet != cudaSuccess) {
-                return freeRet;
-            }
-            slot->devicePtr = nullptr;
-            slot->size = 0;
-        }
-        cudaError_t allocRet = cudaMalloc(&slot->devicePtr, needed);
+    if (offset > sizeof(T) || count > sizeof(T) - offset) {
+        return cudaErrorInvalidValue;
+    }
+    if (!slot->devicePtr) {
+        cudaError_t allocRet = cudaMalloc(&slot->devicePtr, sizeof(T));
         if (allocRet != cudaSuccess) {
             return allocRet;
         }
         slot->symbol = hostSymbol;
-        slot->size = needed;
+        slot->size = sizeof(T);
     }
     return cudaMemcpy(static_cast<uint8_t *>(slot->devicePtr) + offset, src, count, kind);
 }
@@ -168,6 +162,9 @@ static inline cudaError_t cudaMemcpyFromSymbol(void *dst, const T &symbol,
 {
     if (!dst || kind != cudaMemcpyDeviceToHost) {
         return cudaMemcpyFromSymbol(dst, reinterpret_cast<const void *>(&symbol), count, offset, kind);
+    }
+    if (offset > sizeof(T) || count > sizeof(T) - offset) {
+        return cudaErrorInvalidValue;
     }
     void *devicePtr = nullptr;
     cudaError_t addrRet = cudaGetSymbolAddress(&devicePtr, symbol);
@@ -217,13 +214,10 @@ static inline cudaError_t cudaGetSymbolSize(size_t *size, const T &symbol)
     if (!size) {
         return cudaErrorInvalidValue;
     }
-    const void *hostSymbol = reinterpret_cast<const void *>(&symbol);
-    cudaCompatSymbolRecord *record = cudaCompatFindSymbolRecord(hostSymbol, 0);
-    if (record && record->devicePtr) {
-        *size = record->size;
-        return cudaSuccess;
-    }
-    return cudaGetSymbolSize(size, hostSymbol);
+    (void)symbol;
+    /* The C++ symbol type retains the declared size even before backing exists. */
+    *size = sizeof(T);
+    return cudaSuccess;
 }
 #endif
 

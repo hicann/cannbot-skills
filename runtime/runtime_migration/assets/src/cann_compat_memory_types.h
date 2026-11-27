@@ -116,6 +116,12 @@
         cudaMemcpySrcAccessOrderMax = 0x7FFFFFFF
     } cudaMemcpySrcAccessOrder;
 
+    typedef enum cudaMemcpyFlags
+    {
+        cudaMemcpyFlagDefault = 0,
+        cudaMemcpyFlagPreferOverlapWithCompute = 1
+    } cudaMemcpyFlags;
+
 
     typedef struct
     {
@@ -183,8 +189,9 @@
 
     typedef enum
     {
-        cudaMemcpyOperandTypePointer = 0,
-        cudaMemcpyOperandTypeArray = 1
+        cudaMemcpyOperandTypePointer = 1,
+        cudaMemcpyOperandTypeArray = 2,
+        cudaMemcpyOperandTypeMax = 0x7fffffff
     } cudaMemcpy3DOperandType;
 
     typedef struct
@@ -213,7 +220,7 @@
         cudaMemcpy3DOperand dst;
         cudaExtent extent;
         cudaMemcpySrcAccessOrder srcAccessOrder;
-        cudaMemcpyAttributes attr;
+        unsigned int flags;
     } cudaMemcpy3DBatchOp;
 
     static inline cudaPos make_cudaPos(size_t x, size_t y, size_t z)

@@ -20,8 +20,23 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define CUDA_COMPAT_MAX_MEMCPY_BATCH_ATTRS 1024U
+
+/* CANN 9.2 rejects aclrtSetCurrentContext(NULL). Keep the CUDA Driver
+ * thread-local detached state until a context or device is selected again. */
+static __thread int g_cuda_compat_context_detached = 0;
+
+int cudaCompatContextIsDetached(void)
+{
+    return g_cuda_compat_context_detached;
+}
+
+void cudaCompatContextSetDetached(int detached)
+{
+    g_cuda_compat_context_detached = detached != 0;
+}
 
 cudaError_t cudaCompatRegisterSymbol(void *binHandle, const void *hostVar,
                                      const char *deviceVarName, size_t size,
@@ -123,7 +138,8 @@ cudaCompatContext_t g_cuda_context = {
     .initialized = 0,
     .flags = cudaDeviceScheduleAuto,
     .profiler_initialized = 0,
-    .profiler_running = 0};
+    .profiler_running = 0,
+    .profiler_config = NULL};
 
 /* =================================================================
  * Initialization
@@ -167,10 +183,16 @@ static cudaError_t cudaCompatFinalize(void)
 
     if (g_cuda_context.profiler_initialized)
     {
+        aclprofConfig *config = (aclprofConfig *)g_cuda_context.profiler_config;
         if (g_cuda_context.profiler_running)
         {
-            aclprofStop(NULL);
+            aclprofStop(config);
             g_cuda_context.profiler_running = 0;
+        }
+        if (config != NULL)
+        {
+            aclprofDestroyConfig(config);
+            g_cuda_context.profiler_config = NULL;
         }
         aclprofFinalize();
         g_cuda_context.profiler_initialized = 0;
@@ -436,13 +458,9 @@ static cudaError_t cudaCompatMemcpyBatchLocation(const void *ptr, cudaMemLocatio
     if (!loc) {
         return cudaErrorInvalidValue;
     }
-    if (hint.type != cudaMemLocationTypeInvalid) {
-        if ((size_t)hint.type >= sizeof(g_cuda2aclMemType) / sizeof(g_cuda2aclMemType[0])) {
-            return cudaErrorInvalidValue;
-        }
-        loc->id = (uint32_t)hint.id;
-        loc->type = g_cuda2aclMemType[hint.type];
-        return cudaSuccess;
+    if (hint.type != cudaMemLocationTypeInvalid &&
+        (size_t)hint.type >= sizeof(g_cuda2aclMemType) / sizeof(g_cuda2aclMemType[0])) {
+        return cudaErrorInvalidValue;
     }
 
     aclrtPtrAttributes ptrAttr;
@@ -452,6 +470,13 @@ static cudaError_t cudaCompatMemcpyBatchLocation(const void *ptr, cudaMemLocatio
          ptrAttr.location.type == ACL_MEM_LOCATION_TYPE_MANAGED ||
          ptrAttr.location.type == ACL_MEM_LOCATION_TYPE_HOST ||
          ptrAttr.location.type == ACL_MEM_LOCATION_TYPE_HOST_NUMA)) {
+        /* CUDA location hints do not override fixed pointer locations. */
+        if (ptrAttr.location.type == ACL_MEM_LOCATION_TYPE_MANAGED &&
+            hint.type != cudaMemLocationTypeInvalid) {
+            loc->id = (uint32_t)hint.id;
+            loc->type = g_cuda2aclMemType[hint.type];
+            return cudaSuccess;
+        }
         *loc = ptrAttr.location;
         return cudaSuccess;
     }
@@ -483,52 +508,73 @@ static cudaMemcpyKind cudaCompatMemcpyBatchKind(const void *dst, const void *src
     return cudaMemcpyHostToHost;
 }
 
-static cudaError_t cudaCompatMemcpyBatchFallback(const void *const *dsts, const void *const *srcs,
-                                                 const size_t *sizes, size_t count, cudaStream_t stream)
+static cudaError_t cudaCompatMemcpyBatchFallback(void *const *dsts, const void *const *srcs,
+                                                 const size_t *sizes, size_t count,
+                                                 const cudaMemcpyAttributes *attrs,
+                                                 const size_t *attrsIdxs, size_t numAttrs,
+                                                 cudaStream_t stream)
 {
+    size_t attrIndex = 0;
     for (size_t i = 0; i < count; ++i) {
+        if (attrIndex + 1 < numAttrs && i >= attrsIdxs[attrIndex + 1]) {
+            ++attrIndex;
+        }
         cudaMemcpyKind kind = cudaCompatMemcpyBatchKind(dsts[i], srcs[i]);
+        if (kind == cudaMemcpyHostToHost) {
+            return cudaErrorNotSupported;
+        }
         cudaError_t ret = cudaMemcpyAsync((void *)dsts[i], srcs[i], sizes[i], kind, stream);
         if (ret != cudaSuccess) {
             return ret;
+        }
+        if (attrs[attrIndex].srcAccessOrder == cudaMemcpySrcAccessOrderDuringApiCall) {
+            ret = acl2cudaError(aclrtSynchronizeStream(stream));
+            if (ret != cudaSuccess) {
+                return ret;
+            }
         }
     }
     return cudaSuccess;
 }
 
-static cudaError_t cudaCompatValidateMemcpyBatchAttrs(const void *const *dsts, const void *const *srcs,
+static cudaError_t cudaCompatValidateMemcpyBatchAttrs(void *const *dsts, const void *const *srcs,
                                                       const size_t *sizes, size_t count,
                                                       const cudaMemcpyAttributes *attrs,
                                                       const size_t *attrsIdxs, size_t numAttrs)
 {
-    if (!dsts || !srcs || !sizes || !attrs || !attrsIdxs) {
+    if (!dsts || !srcs || !sizes || !attrs || !attrsIdxs || count == 0 || numAttrs > count) {
         return cudaErrorInvalidValue;
     }
     if (numAttrs == 0 || numAttrs > CUDA_COMPAT_MAX_MEMCPY_BATCH_ATTRS ||
         numAttrs > SIZE_MAX / sizeof(aclrtMemcpyBatchAttr)) {
         return cudaErrorInvalidValue;
     }
+    if (attrsIdxs[0] != 0) {
+        return cudaErrorInvalidValue;
+    }
+    for (size_t i = 0; i < numAttrs; ++i) {
+        if (attrsIdxs[i] >= count || (i > 0 && attrsIdxs[i] <= attrsIdxs[i - 1]) ||
+            attrs[i].srcAccessOrder == cudaMemcpySrcAccessOrderInvalid ||
+            attrs[i].srcAccessOrder >= cudaMemcpySrcAccessOrderMax ||
+            (attrs[i].flags & ~((unsigned int)cudaMemcpyFlagPreferOverlapWithCompute)) != 0) {
+            return cudaErrorInvalidValue;
+        }
+    }
     for (size_t i = 0; i < count; ++i) {
-        if (attrsIdxs[i] >= numAttrs) {
+        if (!dsts[i] || !srcs[i] || sizes[i] == 0) {
             return cudaErrorInvalidValue;
         }
     }
     return cudaSuccess;
 }
 
-static cudaError_t cudaCompatFillMemcpyBatchAttrs(const void *const *dsts, const void *const *srcs,
-                                                  size_t count, const cudaMemcpyAttributes *attrs,
+static cudaError_t cudaCompatFillMemcpyBatchAttrs(void *const *dsts, const void *const *srcs,
+                                                  const cudaMemcpyAttributes *attrs,
                                                   const size_t *attrsIdxs, size_t numAttrs,
                                                   aclrtMemcpyBatchAttr *cannAttrs)
 {
     for (size_t i = 0; i < numAttrs; i++) {
-        size_t opIndex = 0;
-        for (size_t j = 0; j < count; ++j) {
-            if (attrsIdxs[j] == i) {
-                opIndex = j;
-                break;
-            }
-        }
+        size_t opIndex = attrsIdxs[i];
         cudaError_t srcLocRet = cudaCompatMemcpyBatchLocation(srcs[opIndex],
                                                               attrs[i].srcLocHint, &cannAttrs[i].srcLoc);
         if (srcLocRet != cudaSuccess) {
@@ -543,20 +589,42 @@ static cudaError_t cudaCompatFillMemcpyBatchAttrs(const void *const *dsts, const
     return cudaSuccess;
 }
 
-cudaError_t cudaMemcpyBatchAsync(const void *const *dsts, const void *const *srcs, const size_t *sizes, size_t count,
+cudaError_t cudaMemcpyBatchAsync(void *const *dsts, const void *const *srcs, const size_t *sizes, size_t count,
                                  cudaMemcpyAttributes *attrs, size_t *attrsIdxs, size_t numAttrs, cudaStream_t stream)
 {
-    if (aclrtMemcpyBatchAsyncV2 == NULL)
-    {
-        return cudaCompatMemcpyBatchFallback(dsts, srcs, sizes, count, stream);
+    if (!stream) {
+        return cudaErrorInvalidValue; /* CUDA batch copy rejects the legacy NULL stream. */
     }
-
     cudaError_t validRet = cudaCompatValidateMemcpyBatchAttrs(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs);
     if (validRet != cudaSuccess) {
         return validRet;
     }
-    if (numAttrs == 0 || numAttrs > SIZE_MAX / sizeof(aclrtMemcpyBatchAttr)) {
+    if (numAttrs > SIZE_MAX / sizeof(aclrtMemcpyBatchAttr)) {
         return cudaErrorInvalidValue;
+    }
+    cudaMemcpyKind nativeKind = cudaCompatMemcpyBatchKind(dsts[0], srcs[0]);
+    if (nativeKind == cudaMemcpyHostToHost) {
+        return cudaErrorNotSupported;
+    }
+    int useFallback = aclrtMemcpyBatchAsync == NULL ||
+                      (nativeKind != cudaMemcpyHostToDevice && nativeKind != cudaMemcpyDeviceToHost);
+    for (size_t i = 1; i < count; ++i) {
+        cudaMemcpyKind kind = cudaCompatMemcpyBatchKind(dsts[i], srcs[i]);
+        if (kind == cudaMemcpyHostToHost) {
+            return cudaErrorNotSupported;
+        }
+        if (kind != nativeKind) {
+            useFallback = 1;
+        }
+    }
+    for (size_t i = 0; i < numAttrs; ++i) {
+        if (attrs[i].srcAccessOrder == cudaMemcpySrcAccessOrderDuringApiCall) {
+            useFallback = 1;
+        }
+    }
+    if (useFallback) {
+        return cudaCompatMemcpyBatchFallback(dsts, srcs, sizes, count,
+                                              attrs, attrsIdxs, numAttrs, stream);
     }
     size_t attrBytes = numAttrs * sizeof(aclrtMemcpyBatchAttr);
     aclrtMemcpyBatchAttr *cannAttrs = (aclrtMemcpyBatchAttr *)calloc(1, attrBytes);
@@ -565,18 +633,20 @@ cudaError_t cudaMemcpyBatchAsync(const void *const *dsts, const void *const *src
         return cudaErrorMemoryAllocation;
     }
 
-    cudaError_t attrRet = cudaCompatFillMemcpyBatchAttrs(dsts, srcs, count, attrs, attrsIdxs, numAttrs, cannAttrs);
+    cudaError_t attrRet = cudaCompatFillMemcpyBatchAttrs(dsts, srcs, attrs, attrsIdxs, numAttrs, cannAttrs);
     if (attrRet != cudaSuccess) {
         free(cannAttrs);
         return attrRet;
     }
 
-    aclError ret = aclrtMemcpyBatchAsyncV2((void **)dsts, (size_t *)sizes, (void **)srcs, (size_t *)sizes, count,
-                                         cannAttrs, attrsIdxs, numAttrs, stream);
+    size_t failIndex = SIZE_MAX;
+    aclError ret = aclrtMemcpyBatchAsync((void **)dsts, (size_t *)sizes, (void **)srcs, (size_t *)sizes, count,
+                                        cannAttrs, attrsIdxs, numAttrs, &failIndex, stream);
     free(cannAttrs);
     cudaError_t cudaRet = acl2cudaError(ret);
     if (cudaRet == cudaErrorNotSupported) {
-        return cudaCompatMemcpyBatchFallback(dsts, srcs, sizes, count, stream);
+        return cudaCompatMemcpyBatchFallback(dsts, srcs, sizes, count,
+                                              attrs, attrsIdxs, numAttrs, stream);
     }
     return cudaRet;
 
@@ -950,10 +1020,20 @@ const char *cudaGetErrorString(cudaError_t error)
 
 cudaError_t cudaProfilerStart(void)
 {
+    if (g_cuda_context.profiler_running)
+    {
+        return cudaErrorProfilerAlreadyStarted;
+    }
+
     // Initialize profiler on first call
     if (!g_cuda_context.profiler_initialized)
     {
-        aclError ret = aclprofInit(NULL, 0); // Initialize with default config
+        const char *profilerPath = getenv("CUDA_COMPAT_PROFILER_RESULT_PATH");
+        if (profilerPath == NULL || profilerPath[0] == '\0')
+        {
+            profilerPath = "/tmp/cuda_compat_profiling";
+        }
+        aclError ret = aclprofInit(profilerPath, strlen(profilerPath));
         if (ret != ACL_SUCCESS)
         {
             return acl2cudaError(ret);
@@ -961,10 +1041,41 @@ cudaError_t cudaProfilerStart(void)
         g_cuda_context.profiler_initialized = 1;
     }
 
-    // Start profiling if not already running
-    aclError ret = aclprofStart(NULL); // Start with default config
+    cudaError_t deviceRet = cudaCompatEnsureMemoryDevice();
+    if (deviceRet != cudaSuccess)
+    {
+        (void)aclprofFinalize();
+        g_cuda_context.profiler_initialized = 0;
+        return deviceRet;
+    }
+
+    int32_t currentDevice = 0;
+    aclError ret = aclrtGetDevice(&currentDevice);
     if (ret != ACL_SUCCESS)
     {
+        (void)aclprofFinalize();
+        g_cuda_context.profiler_initialized = 0;
+        return acl2cudaError(ret);
+    }
+    uint32_t deviceId = (uint32_t)currentDevice;
+    aclprofConfig *config = aclprofCreateConfig(
+        &deviceId, 1, ACL_AICORE_NONE, NULL,
+        ACL_PROF_ACL_API | ACL_PROF_RUNTIME_API);
+    if (config == NULL)
+    {
+        (void)aclprofFinalize();
+        g_cuda_context.profiler_initialized = 0;
+        return cudaErrorProfilerNotInitialized;
+    }
+    g_cuda_context.profiler_config = config;
+
+    ret = aclprofStart(config);
+    if (ret != ACL_SUCCESS)
+    {
+        (void)aclprofDestroyConfig(config);
+        g_cuda_context.profiler_config = NULL;
+        (void)aclprofFinalize();
+        g_cuda_context.profiler_initialized = 0;
         return acl2cudaError(ret);
     }
     g_cuda_context.profiler_running = 1;
@@ -977,18 +1088,28 @@ cudaError_t cudaProfilerStop(void)
 {
     if (!g_cuda_context.profiler_initialized)
     {
-        // Treat a stopped profiler as an idempotent success.
-        return cudaSuccess;
+        return cudaErrorProfilerNotInitialized;
     }
 
+    aclprofConfig *config = (aclprofConfig *)g_cuda_context.profiler_config;
     if (g_cuda_context.profiler_running)
     {
-        aclError ret = aclprofStop(NULL); // Stop with default config
+        aclError ret = aclprofStop(config);
         if (ret != ACL_SUCCESS)
         {
             return acl2cudaError(ret);
         }
         g_cuda_context.profiler_running = 0;
+    }
+
+    if (config != NULL)
+    {
+        aclError ret = aclprofDestroyConfig(config);
+        if (ret != ACL_SUCCESS)
+        {
+            return acl2cudaError(ret);
+        }
+        g_cuda_context.profiler_config = NULL;
     }
 
     aclError ret = aclprofFinalize();

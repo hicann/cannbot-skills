@@ -469,15 +469,35 @@ cudaError_t cudaIpcOpenEventHandle(cudaEvent_t *event, cudaIpcEventHandle_t hand
 ```c
 cudaError_t cudaProfilerStart(void);
 ```
-- 功能：启动 profiler 数据收集
+- 功能：启动 profiler 数据收集。
+- 兼容层口径：初始化 CANN profiler，针对当前 device 创建 `aclprofConfig`，并以同一 config 调用 `aclprofStart`；结果目录读取 `CUDA_COMPAT_PROFILER_RESULT_PATH`，未设置时使用 `/tmp/cuda_compat_profiling`；重复 start 返回 `cudaErrorProfilerAlreadyStarted`。
 - 返回：cudaSuccess 或错误码
 
 ### cudaProfilerStop
 ```c
 cudaError_t cudaProfilerStop(void);
 ```
-- 功能：停止 profiler 数据收集
+- 功能：停止 profiler 数据收集。
+- 兼容层口径：使用 start 时保存的同一 `aclprofConfig` 调用 `aclprofStop`，随后销毁 config 并调用 `aclprofFinalize`。
 - 返回：cudaSuccess 或错误码
+
+---
+
+## Library API
+
+```c
+cudaError_t cudaLibraryGetKernelCount(unsigned int *count, cudaLibrary_t library);
+cudaError_t cudaLibraryEnumerateKernels(cudaKernel_t *kernels,
+                                        unsigned int numKernels,
+                                        cudaLibrary_t library);
+cudaError_t cudaLibraryGetKernel(cudaKernel_t *kernel,
+                                 cudaLibrary_t library,
+                                 const char *name);
+```
+
+- 分别映射到 `aclrtBinaryGetFunctionCount`、`aclrtBinaryEnumerateFunctions`、`aclrtBinaryGetFunction`；返回的 kernel handle 在 library unload 后失效。
+- 新版正式 CUDA 名称是 `cudaLibraryGetKernel`。兼容层继续保留旧 `cudaLibraryGetFunction` 别名，旧名不作为对外支持表主入口。
+- count/enumerate 的 CANN 符号按弱符号处理；目标运行库未导出时返回 `cudaErrorNotSupported`。
 
 ---
 
@@ -489,6 +509,7 @@ cudaError_t cudaRuntimeGetVersion(int *runtimeVersion);
 ```
 - 功能：获取 CUDA Runtime 版本号
 - 参数：runtimeVersion - 版本号输出
+- 兼容层映射：调用 `aclsysGetVersionNum("runtime", ...)`
 - 返回：cudaSuccess 或错误码
 
 ### cudaDriverGetVersion
@@ -579,9 +600,11 @@ cudaError_t cudaMemcpy3DBatchAsync(size_t numOps, cudaMemcpy3DBatchOp *opList,
 cudaError_t cudaMemcpy3DWithAttributesAsync(cudaMemcpy3DBatchOp *op,
                                             unsigned long long flags, cudaStream_t stream);
 ```
-- 功能：带属性 hint 的异步 copy
-- 兼容层口径：当前保留编译和基本 copy 能力，忽略 CUDA access-order/location hint。1D 形态映射到 `aclrtMemcpyAsync(ACL_MEMCPY_DEFAULT)`；3D batch op 仅支持 pointer operand，按 op 和 depth 逐项下发 2D async copy，flags 仅支持 0。
-- `cudaMemcpyBatchAsync` 为 CUDA Runtime 13.2+ 接口，兼容层映射到 `aclrtMemcpyBatchAsyncV2`。CANN batch 成功路径受 src/dst location hint 和 copy 形态限制；不支持的形态应返回明确错误或在用例中记录为条件 SKIP。
+- 功能：带属性 hint 的异步 copy。
+- `cudaMemcpyWithAttributesAsync` 根据源/目的指针的位置选择 H2D、D2H 或 D2D，使用 `aclrtMemcpyAsync`；H2H 返回不支持，legacy NULL stream 返回 `cudaErrorInvalidValue`。固定位置指针的 location hint 不覆盖实际位置；`srcAccessOrderDuringApiCall` 通过同步 stream 保证返回前源数据访问完成，其余合法顺序以 stream 有序执行；overlap flag 仅作提示。
+- `cudaMemcpy3DWithAttributesAsync` 支持 pointer operand，把 pitched 3D 区域逐 row 展平后映射到 batch 或逐项回退；顶层 flags 仅支持 0，legacy NULL stream 返回 `cudaErrorInvalidValue`，array operand 返回 `cudaErrorNotSupported`。D2D 走逐项回退，H2H 不支持。
+- `cudaMemcpy3DBatchAsync` 在提交任务前校验每项的 `srcAccessOrder`、flags、pointer 参数和非 legacy NULL stream；`DuringApiCall` 通过同步 stream 保证源数据访问在返回前结束。
+- `cudaMemcpyBatchAsync` 的 `attrsIdxs` 长度为 `numAttrs`，每项表示对应属性组开始生效的 copy 下标；首项为 0，后续项严格递增且小于 `count`。同方向 H2D/D2H 优先 CANN 原生 batch，D2D 与混合方向逐项异步回退；H2H 不支持，legacy NULL stream 返回 `cudaErrorInvalidValue`。
 
 ---
 
@@ -613,15 +636,24 @@ cudaError_t cudaLaunchHostFunc_v2(cudaStream_t stream, cudaHostFn_t fn,
 - 功能：v2 Host 回调入口。
 - 兼容层口径：映射到 `aclrtLaunchHostFunc`；`syncMode` 当前无 CANN 等价差异，兼容层忽略该参数；空回调作为 no-op 返回 `cudaSuccess`。
 
-### cudaFuncGetName / cudaFuncGetParamCount / cudaFuncGetParamInfo
+### cudaGetFuncBySymbol / cudaFuncGetAttributes / cudaFuncGetName
 ```c
+cudaError_t cudaGetFuncBySymbol(cudaFunction_t *functionPtr, const void *symbolPtr);
+cudaError_t cudaFuncGetAttributes(cudaFuncAttributes *attr, const void *func);
 cudaError_t cudaFuncGetName(const char **name, const void *func);
+```
+- `cudaGetFuncBySymbol` 映射 `aclrtGetFuncBySymbol`。
+- 属性和名称查询先尝试把 device entry symbol 解析为 `aclrtFuncHandle`；入参本身已是 `cudaLibraryGetKernel` 等返回的真实 CANN handle 时可直接查询。
+- CANN 可查询的 kernel type、ratio、调度模式与 CUDA 的架构版本、线程上限、缓存属性不等价；`cudaFuncGetAttributes` 对真实 CANN function handle 返回 `cudaErrorNotSupported`，不再填入误导值。`cudaFuncGetName` 返回兼容层内部静态缓冲区。
+
+### cudaFuncGetParamCount / cudaFuncGetParamInfo
+```c
 cudaError_t cudaFuncGetParamCount(const void *func, size_t *paramCount);
 cudaError_t cudaFuncGetParamInfo(const void *func, size_t paramIndex,
                                  size_t *paramOffset, size_t *paramSize);
 ```
-- 功能：查询 CANN function handle 的名称、参数个数以及参数 offset/size。
-- 兼容层口径：分别映射到 `aclrtGetFunctionName`、`aclrtFunctionGetParamCount`、`aclrtFunctionGetParamInfo`；`cudaFuncGetName` 返回兼容层内部静态缓冲区指针。
+- 功能：查询 CANN function handle 的参数个数以及参数 offset/size。
+- 兼容层口径：分别映射到 `aclrtFunctionGetParamCount`、`aclrtFunctionGetParamInfo`。
 - 限制：`func` 必须是 CANN Runtime 可识别的 function handle，不支持普通 CUDA `__global__` 函数指针作为 NPU 成功路径。
 - 验证规则：不得用 `reinterpret_cast<void *>(0x1)`、普通 host 函数指针、CUDA `__global__` 函数指针或 Host fallback 函数指针伪造成功路径；没有真实 CANN function handle 时，只验证空指针/非法输出参数等错误路径，并将成功路径记录为明确 `SKIP`。
 
@@ -638,6 +670,15 @@ cudaError_t cudaLaunchKernelEx(const cudaLaunchConfig_t *config,
 ---
 
 ## Graph API
+
+### cudaDeviceGetGraphMemAttribute
+```c
+cudaError_t cudaDeviceGetGraphMemAttribute(int device,
+                                           cudaGraphMemAttributeType attr,
+                                           void *value);
+```
+- CANN 没有 CUDA Graph allocator 的完全等价统计接口。兼容层用 `aclrtGetMemUsageInfo` 的设备组件当前/峰值总量作为四个 Graph memory attribute 的近似值，不能解释为 graph-only 使用量。
+- `aclrtGetMemUsageInfo` 在 Ascend 950PR/950DT 不支持，目标产品返回的 feature-not-support 必须作为条件限制记录。
 
 ### cudaGraphDebugDotPrint
 ```c
@@ -677,6 +718,35 @@ cudaError_t cudaGraphConditionalHandleCreate(cudaGraphConditionalHandle *pHandle
 - 功能：为条件 Graph 节点创建条件 handle
 - 返回：cudaSuccess 或错误码
 
+`cudaGraphConditionalHandleCreate_v2` 额外接受 `cudaExecutionContext_t ctx`；兼容层仅支持 `ctx == NULL` 或等于当前 CANN context 的情形。
+
+### Graph task 查询与更新
+```c
+cudaError_t cudaGraphNodeGetType(cudaGraphNode_t node, cudaGraphNodeType *pType);
+cudaError_t cudaGraphExecEventRecordNodeSetEvent(cudaGraphExec_t graphExec,
+                                                 cudaGraphNode_t node,
+                                                 cudaEvent_t event);
+cudaError_t cudaGraphExecEventWaitNodeSetEvent(cudaGraphExec_t graphExec,
+                                               cudaGraphNode_t node,
+                                               cudaEvent_t event);
+cudaError_t cudaGraphExecKernelNodeSetParams(cudaGraphExec_t graphExec,
+                                             cudaGraphNode_t node,
+                                             const cudaKernelNodeParams *params);
+cudaError_t cudaGraphExecNodeSetParams(cudaGraphExec_t graphExec,
+                                       cudaGraphNode_t node,
+                                       cudaGraphNodeParams *params);
+cudaError_t cudaGraphNodeSetParams(cudaGraphNode_t node,
+                                   cudaGraphNodeParams *params);
+```
+- node handle 必须来自 Model RI task 查询路径；更新前使用 `aclmdlRITaskGetParams` 保留未修改字段，再调用 `aclmdlRITaskSetParams`。exec 入口随后调用 `aclmdlRIUpdate`。
+- CUDA 13.x `cudaKernelNodeParamsV2::functionType` 的 device-entry 枚举正式名称是 `cudaKernelFunctionTypeDeviceEntry`（值 `0x01`），不是 `cudaKernelFunctionTypeDevice`；其余值依次为 `Unspecified=0x00`、`Kernel=0x02`、`Function=0x03`。编写 CUDA 13.x baseline 和兼容类型时必须保持名称和值一致。
+- 泛型参数入口实现 kernel、event-record、event-wait task 分派。kernel 更新支持可解析的 device entry symbol、与已捕获 task 相同的真实 CANN function handle，以及 grid block 数；未解析的 CUDA symbol 返回 `cudaErrorNotSupported`。CUDA `kernelParams`/`extra` 参数数组以及动态 shared memory 更新缺少安全等价表示，返回 `cudaErrorNotSupported`。
+- CANN 9.2 / Ascend 910B3 实测 `aclmdlRITaskSetParams` 只接受 kernel/value-write/value-wait，EVENT_RECORD/EVENT_WAIT 更新会返回无效参数；因此两个 event setter 及泛型 event 参数更新在该版本只验收错参保护并明确条件 `SKIP`，不能宣称成功路径通过。
+- `cudaGraphNodeSetEnabled` 仅支持 disable；CANN 没有 re-enable 对等接口。
+- `cudaGraphExecUpdate` 仅提交兼容层同一 RI 上的 task 修改，不实现 CUDA 对不同 graph 的拓扑匹配。
+- conditional handle 还要求输入是 CANN 可识别的 AclGraph；CANN 9.2 对普通 capture/build RI 返回不支持。
+- 以上 Model RI task API 均为 CANN 试验特性，不用于生产环境。
+
 ### cudaGraphGetNodes
 ```c
 cudaError_t cudaGraphGetNodes(cudaGraph_t graph, cudaGraphNode_t *nodes, size_t *numNodes);
@@ -684,7 +754,7 @@ cudaError_t cudaGraphGetNodes(cudaGraph_t graph, cudaGraphNode_t *nodes, size_t 
 - 功能：查询 Graph 中的节点列表
 - 返回：cudaSuccess 或错误码
 
-### cudaGraphAddNode (conditional node only)
+### cudaGraphAddNode（不支持）
 ```c
 cudaError_t cudaGraphAddNode(cudaGraphNode_t *pGraphNode,
                              cudaGraph_t graph,
@@ -693,9 +763,9 @@ cudaError_t cudaGraphAddNode(cudaGraphNode_t *pGraphNode,
                              size_t numDependencies,
                              cudaGraphNodeParams *nodeParams);
 ```
-- 功能：`nodeParams->type == cudaGraphNodeTypeConditional` 时创建条件 Graph 节点
-- 约束：仅 conditional node 特例映射到 CANN Model RI 条件任务；其他 node type 不属于当前 Runtime 兼容范围
-- 返回：cudaSuccess 或错误码
+- 功能：CUDA 添加 Graph 节点
+- 约束：CANN Runtime 不提供该 CUDA 功能的对标映射，包括 conditional node；兼容层仅保留编译期入口
+- 返回：`cudaErrorNotSupported`（输出节点置空）
 
 ### cudaGraphSetConditional
 ```c
@@ -719,11 +789,10 @@ cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned 
 | `cudaMemcpyToSymbolAsync` | 异步向设备符号拷贝数据；C++ host fallback symbol 立即完成 |
 | `cudaMemcpyFromSymbol` | 从设备符号拷贝数据 |
 | `cudaMemcpyFromSymbolAsync` | 异步从设备符号拷贝数据；C++ host fallback symbol 立即完成 |
-| `cudaGetSymbolSize` | 查询设备符号大小；C++ host fallback symbol 返回兼容层 backing size |
+| `cudaGetSymbolSize` | 查询设备符号大小；C++ host fallback symbol 返回声明类型的 `sizeof(T)` |
 | `cuMemsetD32Async` | Driver D32 异步 memset |
-| `cudaFuncGetAttributes` | 查询 kernel/function 属性 |
+| `cudaFuncGetAttributes` | CANN 无等价 CUDA function 属性集；返回不支持 |
 | `cudaGraphConditionalHandleCreate` | 创建条件 Graph handle |
-| `cudaGraphAddNode(cudaGraphNodeTypeConditional)` | 添加条件 Graph 节点 |
 | `cudaGraphGetNodes` | 查询 Graph 节点 |
 | `cudaGraphSetConditional` | 设置条件 handle 值 |
 | `cudaStreamBeginCaptureToGraph` | 将 stream capture 接入已有 Graph |
@@ -731,8 +800,12 @@ cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned 
 | `cudaStreamGetCaptureInfo` | 查询 capture 信息 |
 | `cudaStreamGetCaptureInfo_v3` | 查询 v3 capture 信息 |
 | `cuCtxGetCurrent` | 获取当前 Driver context |
-| `cuCtxSetCurrent` | 设置当前 Driver context |
+| `cuCtxSetCurrent` | 设置当前 Driver context；空句柄表示当前线程 detach，兼容层在 CANN 9.2 用线程局部状态实现 |
 | `cuDevicePrimaryCtxGetState` | 查询 primary context 状态 |
+| `cuCtxCreate` | CUDA 13.x 使用四参数签名：输出 Context、可选创建参数、flags、Device；当前兼容层仅支持空创建参数及零 flags |
+| `cuCtxDestroy` | 销毁由 `cuCtxCreate` 显式创建的 Context |
+| `cuCtxGetDevice` | 查询当前 Context 对应的 Device |
+| `cuCtxGetStreamPriorityRange` | 查询当前 Context 的 Stream 优先级范围；允许只提供一个输出指针 |
 | `cuModuleGetFunction` | 从 module 获取 kernel function |
 | `cuModuleLoad` | 从文件加载 module |
 | `cuModuleLoadData` | 从内存加载 module |
@@ -751,7 +824,7 @@ cudaError_t cudaGraphSetConditional(cudaGraphConditionalHandle handle, unsigned 
 - `cudaLaunchCooperativeKernel`
 - `cudaGetDriverEntryPoint`
 - `cudaGetDriverEntryPointByVersion`
-- `cudaGraphAddNode` 非 conditional node 类型
+- `cudaGraphAddNode`（包括 conditional node）
 - `cudaGraphAddNode_v2`
 - `cudaGraphDestroy`
 - `cudaGraphInstantiateWithFlags`

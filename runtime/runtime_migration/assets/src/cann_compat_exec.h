@@ -18,6 +18,9 @@ extern "C"
     typedef void (*cudaHostFn_t)(void *userData);
     typedef cudaError_t (*cudaCompatHostKernelFn_t)(void *userData);
 
+    __attribute__((weak)) aclError aclrtGetFuncBySymbol(
+        const void *symbol, aclrtFuncHandle *funcHandle);
+
 
     static inline cudaError_t cudaCompatLaunchHostKernel(cudaCompatHostKernelFn_t fn,
                                                          void *userData)
@@ -33,12 +36,7 @@ extern "C"
         if (!attr) {
             return cudaErrorInvalidValue;
         }
-#ifdef __cplusplus
-        *attr = cudaFuncAttributes();
-#else
-        *attr = (cudaFuncAttributes){0};
-#endif
-        return cudaSuccess;
+        return cudaErrorNotSupported;
     }
 
     static inline int cudaCompatLikelyInvalidFunctionHandle(const void *func)
@@ -50,6 +48,35 @@ extern "C"
          * through to CANN may crash before an error code can be returned.
          */
         return ((uintptr_t)func) < 4096U;
+    }
+
+
+    static inline cudaError_t cudaGetFuncBySymbol(cudaFunction_t *functionPtr,
+                                                  const void *symbolPtr)
+    {
+        if (!functionPtr || !symbolPtr) {
+            return cudaErrorInvalidValue;
+        }
+        *functionPtr = NULL;
+        if (cudaCompatLikelyInvalidFunctionHandle(symbolPtr)) {
+            return cudaErrorInvalidDeviceFunction;
+        }
+        if (aclrtGetFuncBySymbol == NULL) {
+            return cudaErrorNotSupported;
+        }
+        aclError ret = aclrtGetFuncBySymbol(symbolPtr, functionPtr);
+        return acl2cudaError(ret);
+    }
+
+
+    static inline aclrtFuncHandle cudaCompatResolveFunctionHandle(const void *func)
+    {
+        aclrtFuncHandle handle = NULL;
+        if (aclrtGetFuncBySymbol != NULL &&
+            aclrtGetFuncBySymbol(func, &handle) == ACL_SUCCESS && handle != NULL) {
+            return handle;
+        }
+        return (aclrtFuncHandle)func;
     }
 
 
@@ -92,29 +119,9 @@ extern "C"
         *attr = (cudaFuncAttributes){0};
 #endif
 
-        int64_t attrValue = 0;
-        aclError ret = aclrtGetFunctionAttribute((aclrtFuncHandle)func,
-                                                 ACL_FUNC_ATTR_KERNEL_TYPE,
-                                                 &attrValue);
-        if (ret != ACL_SUCCESS) {
-            return acl2cudaError(ret);
-        }
-        attr->binaryVersion = (int)attrValue;
-
-        ret = aclrtGetFunctionAttribute((aclrtFuncHandle)func,
-                                        ACL_FUNC_ATTR_KERNEL_RATIO,
-                                        &attrValue);
-        if (ret == ACL_SUCCESS) {
-            attr->maxThreadsPerBlock = (int)attrValue;
-        }
-
-        ret = aclrtGetFunctionAttribute((aclrtFuncHandle)func,
-                                        ACL_FUNC_ATTR_KERNEL_SCHED_MODE,
-                                        &attrValue);
-        if (ret == ACL_SUCCESS) {
-            attr->cacheModeCA = (int)attrValue;
-        }
-        return cudaSuccess;
+        /* CANN kernel type/ratio/scheduling do not represent CUDA binary
+         * architecture, threads per block, or cache mode. */
+        return cudaErrorNotSupported;
     }
 
     static inline cudaError_t cudaFuncGetName(const char **name, const void *func)
@@ -126,7 +133,8 @@ extern "C"
         if (cudaCompatLikelyInvalidFunctionHandle(func)) {
             return cudaErrorInvalidDeviceFunction;
         }
-        aclError ret = aclrtGetFunctionName((aclrtFuncHandle)func, (uint32_t)sizeof(funcName), funcName);
+        aclrtFuncHandle handle = cudaCompatResolveFunctionHandle(func);
+        aclError ret = aclrtGetFunctionName(handle, (uint32_t)sizeof(funcName), funcName);
         if (ret != ACL_SUCCESS) {
             return acl2cudaError(ret);
         }
