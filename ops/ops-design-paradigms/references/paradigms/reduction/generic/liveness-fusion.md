@@ -47,8 +47,10 @@ P ≥ L 一般成立。`REG_CHAIN_FUSION`=true 的语言可打破：中间值全
 - **归约前段 / 归约后段各自独立分析**：各自追踪存活峰值，两段独立分配 buffer、不复用（前段 buffer 含 R 维，后段不含——归约后 R 维消失，空间大小不同）
 - **归约前段结果独占分配**：不与本段内任何节点复用（含写入前）——Phase A 主尾配对时要保持不动等待尾块，提前写入会被覆写
 - **其余节点**：生命周期不重叠时可复用同一物理 buffer；所有片上 buffer 统一按本算子参与计算的最大 dtype 宽度分配容量（`COMPUTE_PRECISION` 与输入 dtype 取宽者），跨 dtype 复用不受尺寸约束，buffer 份数统一覆盖全部 dtype 实例
-- **归约段固定 3 buffer**：归约 src + 归约指令 scratch（由尾配对块兼作，见下）+ 归约 dst（树缓存兼作，不额外分配）——buffer 份数与 src 复用语义（isReuseSource）无关
+- **归约段 buffer 份数**：由 `REDUCE_OP` 的 scratch 约定、src 复用语义、dst alias 能力决定，不写死；AscendC 当前为 3 份（归约 src + 尾配对块兼作 scratch + 树缓存兼作 dst）
 - **树缓存的额外影响**（二分缓存树引入，见 [tree-reduction.md](tree-reduction.md)）：主尾配对块是归约前段的额外 +1 份（P_pre_ext，固定 1）；树根（归约结果）驻树缓存最高层，不占归约后段 P
+- **Group Phase 2 的存活**：Phase 2 读 workspace `[rGroupCnt, aTotal]`，R 全载、无二分树。可复用 Phase 1 的 reduce src 槽（接收 workspace）；若 `REDUCE_OP` 需要 scratch，复用 Phase 1 的尾配对块（`P_pre_ext`）；复用树缓存槽作为 reduce dst。复用条件为同 dtype 宽度、容量足够、Phase 1 生命周期已结束且跨核栅栏完成。`P_pre / P_pre_ext` 只复用、不重复计入 Phase 2 预算；`P_post` 只在 Phase 2 计一次
+- **Empty 模板的存活**：EMPTY_A 不分配任何片上 buffer；EMPTY_R 不发生归约段（无 src/scratch/dst，也无树缓存），只分配归约后段 buffer。`P_post` 至少为 1（输出搬出 buffer）；有 PostElewise / post_reduce_input 时按实际后处理路数计入，不得因 R 为空置 0
 
 ## 3 融合决策方法论
 

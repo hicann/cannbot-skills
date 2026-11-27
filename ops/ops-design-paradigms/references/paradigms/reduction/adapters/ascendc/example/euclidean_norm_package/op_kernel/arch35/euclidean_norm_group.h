@@ -270,7 +270,7 @@ __aicore__ inline void EuclideanNormGroupKernel<DType>::Phase1OutputToWorkspace(
 }
 
 // Phase2：workspace（rGroupCnt 行 × aTotal 列）按行方向 RA 归约得完整 Σx²，Sqrt+Cast 后写 GM y。
-// aUbFactorP2 在 kernel 内现算（preBufSize/postBufSize/aTotal 三重约束取 min），A chunk 重切分多核。
+// aUbFactorP2 在 kernel 内现算（preBufSize/postBufSize/cacheBuf/aTotal 四重约束取 min），A chunk 重切分多核。
 template <typename DType>
 __aicore__ inline void EuclideanNormGroupKernel<DType>::Phase2Process()
 {
@@ -278,14 +278,20 @@ __aicore__ inline void EuclideanNormGroupKernel<DType>::Phase2Process()
 
     const int64_t preInElems = Base::td_->preBufSize / static_cast<int64_t>(sizeof(float));
     constexpr int64_t bsFp32 = UB_BLOCK_BYTES / static_cast<int64_t>(sizeof(float));
+    constexpr int64_t maxDtypeSize = sizeof(DType) > sizeof(float) ? sizeof(DType) : sizeof(float);
 
     int64_t aUbFactorP2 = preInElems / Base::td_->rGroupCnt;
     if (aUbFactorP2 >= bsFp32) {
         aUbFactorP2 = (aUbFactorP2 / bsFp32) * bsFp32;
     }
     {
-        int64_t limit1 = Base::td_->postBufSize / static_cast<int64_t>(sizeof(DT));
+        int64_t limit1 = Base::td_->postBufSize / maxDtypeSize;
         aUbFactorP2 = (aUbFactorP2 < limit1) ? aUbFactorP2 : limit1;
+        int64_t limitCache = Base::td_->cacheBufUbSize / static_cast<int64_t>(sizeof(float));
+        if (limitCache >= bsFp32) {
+            limitCache = (limitCache / bsFp32) * bsFp32;
+        }
+        aUbFactorP2 = (aUbFactorP2 < limitCache) ? aUbFactorP2 : limitCache;
         aUbFactorP2 = (aUbFactorP2 < aTotal_) ? aUbFactorP2 : aTotal_;
     }
 

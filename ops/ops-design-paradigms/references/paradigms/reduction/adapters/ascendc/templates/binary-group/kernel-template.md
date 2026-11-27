@@ -137,9 +137,12 @@ for aLoopIdx in [aChunkIdx, aChunkIdx+1):   # aPerCore=1
 
 ```pseudocode
 # kernel 侧现算 aUbFactorP2（优先全载 rGroupCnt，剩余切 A 轴）
+maxDtypeSize = max(sizeof(D_T), sizeof(fp32))
 aUbFactorP2 = preBufSize / sizeof(fp32) / rGroupCnt
 if (aUbFactorP2 >= BS_FP32): aUbFactorP2 = FloorAlign(aUbFactorP2, BS_FP32)   # 小值不归零
-aUbFactorP2 = min(aUbFactorP2, postBufSize / sizeof(D_T))
+aUbFactorP2 = min(aUbFactorP2, postBufSize / maxDtypeSize)   # 保守口径：按分配宽度换算
+cacheElemMax = FloorAlign(cacheBufUbSize / sizeof(fp32), BS_FP32)   # 树缓存 dst 容量上界
+aUbFactorP2 = min(aUbFactorP2, cacheElemMax)
 aUbFactorP2 = min(aUbFactorP2, aTotal)
 aSplitChunkCnt = CeilDiv(aTotal, aUbFactorP2)
 
@@ -180,11 +183,14 @@ void Phase2Process() {
     // ⚠ aUbFactorP2 ≠ TilingData 的 aUbFactor（Phase 1），详见 §3.1
     const int64_t preInElems = preBufSize / sizeof(fp32);
     constexpr int64_t BS_FP32 = 32 / sizeof(fp32);                 // = 8
+    constexpr int64_t maxDtypeSize = sizeof(D_T) > sizeof(float) ? sizeof(D_T) : sizeof(float);
     int64_t aUbFactorP2 = preInElems / rGroupCnt_;                 // floor
     if (aUbFactorP2 >= BS_FP32)
         aUbFactorP2 = FloorAlign(aUbFactorP2, BS_FP32);            // ★ burst 尾轴对齐，小值不归零
-    aUbFactorP2 = min(aUbFactorP2, postBufSize_ / sizeof(D_T)); // 上界：postReducePhase buffer 容量
-    aUbFactorP2 = min(aUbFactorP2, aTotal_);                       // 上界：aTotal
+    aUbFactorP2 = min(aUbFactorP2, postBufSize_ / maxDtypeSize); // 上界：postReducePhase buffer 容量
+    const int64_t cacheElemMax = FloorAlign(cacheBufUbSize_ / sizeof(float), BS_FP32);
+    aUbFactorP2 = min(aUbFactorP2, cacheElemMax);                   // 上界：树缓存 dst 容量
+    aUbFactorP2 = min(aUbFactorP2, aTotal_);                        // 上界：aTotal
     const int64_t aSplitChunkCnt = CeilDiv(aTotal_, aUbFactorP2);
     const int64_t aLoopCntTotal  = aSplitChunkCnt;                 // outerAProd = 1
 
@@ -289,11 +295,14 @@ aEnd        = aChunkIdx + 1
 // 1) aUbFactorP2：基于 preBufSize / postBufSize 反推，与 Phase 1 的 aUbFactor 不同
 preInElems   = preBufSize / sizeof(fp32)
 BS_FP32      = kBlockBytes / sizeof(fp32)            // 32B / 4B = 8
+maxDtypeSize = sizeof(D_T) > sizeof(float) ? sizeof(D_T) : sizeof(float)
 aUbFactorP2  = preInElems / rGroupCnt_               // 按 R 分组均分 preBuf
 if (aUbFactorP2 >= BS_FP32) {
     aUbFactorP2 = (aUbFactorP2 / BS_FP32) * BS_FP32  // 32B 对齐
 }
-aUbFactorP2  = min(aUbFactorP2, postBufSize / sizeof(D_T))  // postBuf 容量约束
+aUbFactorP2  = min(aUbFactorP2, postBufSize / maxDtypeSize)  // postBuf 容量约束（保守口径）
+cacheElemMax = FloorAlign(cacheBufUbSize_ / sizeof(float), BS_FP32)  // 树缓存 dst 容量上界
+aUbFactorP2  = min(aUbFactorP2, cacheElemMax)
 aUbFactorP2  = min(aUbFactorP2, aTotal_)             // 不超过 A 总长
 
 // 2) 切分与核数（全部现算，不进 TilingData）

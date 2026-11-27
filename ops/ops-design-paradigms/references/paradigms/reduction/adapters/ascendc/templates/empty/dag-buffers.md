@@ -61,7 +61,7 @@ EMPTY_R:
 
 **EMPTY_A**：无 DAG（零计算、零 IO）。
 
-**EMPTY_R**：R 轴有 0 → reduce 沿空集合 → 每个 output entry 取算子常量 `kEmptyROutputValue`。Kernel 直接 `Duplicate(kEmptyROutputValue)` 写目标 buf。
+**EMPTY_R**：R 轴有 0 → reduce 沿空集合 → 每个 `reduced_value` 取算子常量 `kEmptyROutputValue`；最终输出由后段决定。Kernel 直接 `Duplicate(kEmptyROutputValue)` 写目标 buf。
 
 VF 融合分析方法参考 [vf-fusion-rules.md](../../vf-fusion-rules.md)。
 

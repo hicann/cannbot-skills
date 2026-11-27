@@ -15,6 +15,7 @@
 | `SINGLE_BUF_MAX` | **64 KB**（Empty 模板单 buf 封顶 `MAX_SINGLE_UB_BYTES`） | [templates/empty/dag-buffers.md](templates/empty/dag-buffers.md) §1.3 |
 | `FUSION_CHAIN_MAX_LEN` | **7**（超过 7 条 Vector 操作必须拆为多次 `asc_vf_call`） | [vf-fusion-rules.md](vf-fusion-rules.md) §1.1 |
 | `CONVERT_IN_CHAIN` | **true**（`Reg::Cast` 寄存器指令可串入 VF 链，不作为断点） | [common/cast-rules.md](../../../common/cast-rules.md) §4.3 |
+| `FUSED_ARITH` | `Reg::MulAddDst`（VF-safe，`dst = src0*src1 + dst`，dst 就地覆写）。MemBase 的 `FusedMulAdd` / `AddRelu` / `SubRelu` / `Axpy` VF=No，待核验 dst 覆写语义后再纳入 | [API 白名单](../../../../knowledge/api/regbase_api_whitelist.md) “Binary reg compute” / “Binary compute” |
 | `REG_CHAIN_FUSION` | **true**（`asc_vf_call` + RegBase 寄存器链，中间值不落 UB，P < L 合法） | [common/vf-programming-rules.md](../../../common/vf-programming-rules.md) |
 | `BUFFER_MODEL` | **TBuf 显式单缓冲**（禁 TQue）；Double Buffer 当前**不开启** | [templates/binary-base/dag-buffers.md](templates/binary-base/dag-buffers.md) §1.4 |
 | `SYNC_PRIMITIVE` | `SetFlag<HardEvent::XXX>` / `WaitFlag<HardEvent::XXX>` 成对使用；eventID 经 `GetTPipePtr()->FetchEventID()` 获取，不可硬编码；同类型事件可共用编号 | [common/sync-and-consistency.md](../../../common/sync-and-consistency.md) §2.2 |

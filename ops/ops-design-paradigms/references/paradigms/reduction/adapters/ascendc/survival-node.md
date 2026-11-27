@@ -43,7 +43,7 @@
 | 差异来源 | 公平？ | 说明 |
 |---------|--------|------|
 | 跨步 buffer 复用 | ✓ | 生命周期不重叠可共用物理 buffer，物理侧允许 |
-| MulAddDst 硬件融合 | ✓ | 硬件保证 dst 就地覆写，计为 API 能力 |
+| `FUSED_ARITH` 硬件融合（如 `Reg::MulAddDst`） | ✓ | 融合指令在白名单中存在且 dst 就地覆写，计为 API 能力（见 [capability-mapping.md](capability-mapping.md)） |
 | 软件 StoreAlign 覆写 | ✗ | 逻辑侧/物理基线均不假设 in-place |
 | VF 寄存器链融合 | ✓ | 中间值全程在寄存器（见下文） |
 

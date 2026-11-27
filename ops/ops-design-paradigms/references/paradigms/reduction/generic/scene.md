@@ -30,6 +30,20 @@
 
 坐标系经合轴预处理归一（见 [axis-preprocessing.md](axis-preprocessing.md)）：A 起头、A/R 严格交替、除补位轴外每轴 size ≥ 2。轴类型由位置奇偶唯一决定（i 偶 → A，i 奇 → R）。
 
+**Reducer 语义**（combine 用于主尾配对/跨 chunk 合并，pad / identity 用于 R 向 padding 与无效 lane，empty_r_output_value 用于空 R）：
+
+| reducer | combine | pad / identity（计算域） | empty_r_output_value（OutT 域） |
+|---------|---------|---------------------------|----------------------------------|
+| sum | add | 0 | 0 |
+| mean | add | 0 | **NaN** |
+| max | max | 浮点 `-Inf`；整数 `dtype::lowest()` | 浮点 `-Inf`；整数 `dtype::lowest()`（按算子契约） |
+| min | min | 浮点 `+Inf`；整数 `dtype::highest()` | 浮点 `+Inf`；整数 `dtype::highest()`（按算子契约） |
+| prod | mul | 1 | 1 |
+| any | or | false | false |
+| all | and | true | true |
+
+> `mean` 的最终除法属于归约后处理；空 R 时即使 combine 的 identity 为 0，输出仍为 NaN。`pad / identity` 不是统一 0，必须按 reducer 取值。浮点 max/min 的 padding 必须用 `-Inf` / `+Inf`，不能用有限极值；整数用 `dtype::lowest()` / `dtype::highest()`。空集合返回值以算子契约为准，未显式规定时取表中默认值。`empty_r_output_value` 是 OutT 域常量；`has_post_elewise` 时先转换为计算域再 Duplicate，无 PostElewise 时直接按 OutT 写出。
+
 ## 3 模板分类
 
 按多核切分轴分三类模板（每算子选 1~3 个）：
@@ -63,8 +77,9 @@
 ```
 
 - **preReduceResult / reduceResult** 是两个桥接节点；归约前段与归约后段**独立**做存活节点分析与融合分析，不跨归约段融合
+- **归约前段顺序**：PreElewise 必须逐 chunk 完成，R 方向 padding / 无效 lane 在 PreElewise 之后清成 reducer identity；主尾配对和树形累加只合并已完成前置计算的块，禁止先合并原始 chunk 再对合并结果做 PreElewise（如平方和：`x² + y² ≠ (x + y)²`）。identity 取值见 §2 Reducer 语义表
 - **Base 模板**单阶段完成三段；**Group 模板**拆两阶段：Phase 1 = 归约前段 + 局部 R 段归约（partial 结果写中间存储），Phase 2 = 剩余 R 维归约 + 归约后段，两阶段经跨核栅栏衔接（见 [sync-model.md](sync-model.md) §5）
-- **Empty 模板**无归约：EMPTY_A 零计算零 IO；EMPTY_R 以固定值填充（`empty_r_output_value`，由算子语义决定，如 sum=0 / max=identity）替代归约，后接可选 PostElewise
+- **Empty 模板**无归约：EMPTY_A 零计算零 IO；EMPTY_R 只把归约段替换为固定值 `empty_r_output_value`（取值见 §2 Reducer 语义表），**归约后段不短路**——若算子含 PostElewise / post_reduce_input，仍按 aTotal 切分并执行后处理与写出
 
 ## 5 编译期特化
 

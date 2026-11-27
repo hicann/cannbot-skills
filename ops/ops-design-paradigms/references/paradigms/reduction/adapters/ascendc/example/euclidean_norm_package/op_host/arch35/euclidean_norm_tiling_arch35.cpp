@@ -34,6 +34,9 @@ namespace optiling {
 static constexpr size_t INPUT_X_IDX = 0;
 static constexpr size_t INPUT_AXES_IDX = 1;
 
+// 当前框架输入 rank 上限；MAX_PATTERN_RANK 的推导基于 rank ≤8。
+static constexpr size_t MAX_INPUT_RANK = 8;
+
 // A/R 规整后轴数合法区间：上限取通用类别 MAX_PATTERN_RANK = 9。
 static constexpr int32_t MIN_AXIS_NUM = 2;
 static constexpr int32_t MAX_AXIS_NUM = MAX_PATTERN_RANK;
@@ -157,6 +160,11 @@ static ge::graphStatus GetShapeAndDtype(gert::TilingContext* context, EuclideanN
     OP_CHECK_NULL_WITH_CONTEXT(context, xShapePtr);
     const gert::Shape& xS = xShapePtr->GetStorageShape();
     const size_t rank = xS.GetDimNum();
+    OP_CHECK_IF(rank > MAX_INPUT_RANK,
+                OP_LOGE_FOR_INVALID_ARGUMENT_WITH_REASON(
+                    context->GetNodeName(), "x",
+                    "rank=" + std::to_string(rank) + " exceeds max supported rank " + std::to_string(MAX_INPUT_RANK)),
+                return ge::GRAPH_FAILED);
     ctx.xShape.clear();
     if (rank == 0) {
         ctx.xShape.push_back(1);

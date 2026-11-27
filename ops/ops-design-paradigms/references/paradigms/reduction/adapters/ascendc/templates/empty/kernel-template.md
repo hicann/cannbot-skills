@@ -30,7 +30,7 @@ EMPTY_A:
   if (blockIdx >= usedCoreNum) return;        // usedCoreNum=0 → 所有核早退
 ```
 
-**EMPTY_R**：R 轴有 0 → reduce 沿空集合 → 每个 output entry 取算子常量 `kEmptyROutputValue`。
+**EMPTY_R**：R 轴有 0 → reduce 沿空集合 → 每个 `reduced_value` 取算子常量 `kEmptyROutputValue`；最终输出由后段决定。
 
 ```
 EMPTY_R:
@@ -66,9 +66,9 @@ if (aStart >= aEnd) return
 
 # Duplicate 一次：empty_r_output_value 是标量常数，与 aOff 无关
 if (has_post_elewise):
-    tmpBuf = Duplicate(empty_r_output_value, aUbFactor)     # fp32 tmpBuf
+    tmpBuf = Duplicate(cast_to_fp32(empty_r_output_value), aUbFactor)  # 转计算域
 else:
-    outBuf = Duplicate(empty_r_output_value, aUbFactor)     # D_T outBuf 直接
+    outBuf = Duplicate(cast_to_D_T(empty_r_output_value), aUbFactor)   # 按 OutT 直接写
 
 # for 循环：变量部分（postIn 每个 aOff 不同）
 for aOff in [aStart, aEnd):
@@ -123,8 +123,8 @@ public:
 
         // Duplicate 一次：kEmptyROutputValue 是标量常数，与 aOff 无关
         if constexpr (has_post_elewise) {
-            // 有 PostElewise：Duplicate kEmptyROutputValue 写 fp32 tmpBuf
-            DuplicateEmptyROutputVf<float>(tmpBuf_reduce_output, kEmptyROutputValue, aUbFactor_);
+            // 有 PostElewise：OutT 域常量转换到 fp32 后写 tmpBuf
+            DuplicateEmptyROutputVf<float>(tmpBuf_reduce_output, static_cast<float>(kEmptyROutputValue), aUbFactor_);
         } else {
             // 无 PostElewise：直接 Duplicate kEmptyROutputValue（D_T 域）→ outBuf
             DuplicateEmptyROutputVf<D_T>(outBuf, static_cast<D_T>(kEmptyROutputValue), aUbFactor_);
@@ -232,12 +232,12 @@ DataCopyPad(postInBuf, postReduceInputGm[aOff], ext, padParams);
 | any | `false` (0) |
 | all | `true` (1) |
 
-> 算子代码中的常量 `kEmptyROutputValue` 即上表的 empty_r_output_value。
+> 算子代码中的常量 `kEmptyROutputValue` 即上表的 empty_r_output_value。浮点 `-Inf` / `+Inf` 需按 bit 模式直构。
 
 **实现要点**：
 - 多数 reducer 的 `empty_r_output_value` 为单位元，**mean = NaN**（与 numpy 一致：空 R 时 reduce 元素数 = 0，`mean = 0/0 = NaN`）
 - mean 算子 `empty_r_output_value = NaN`，需用 bit 模式直构（bf16/fp16 的 −inf/+inf/NaN 不能依赖类型系统默认值）
-- 有 PostElewise 时写 fp32 tmpBuf，无 PostElewise 时直接写 D_T outBuf
+- 有 PostElewise 时把 OutT 域常量转换为 fp32 计算域后写 tmpBuf；无 PostElewise 时直接按 OutT 写 D_T outBuf
 
 **伪码**：
 
@@ -270,7 +270,7 @@ __aicore__ inline void DuplicateEmptyROutputVf(__ubuf__ T* dst, T value, uint32_
 
 **要点**：
 - `kEmptyROutputValue` 作为参数传入 VF（常量经参数传入，VF 保持纯函数；dtype 转换在调用侧完成）
-- Duplicate 目标 dtype 由 `has_post_elewise` 决定：有 → fp32 tmpBuf；无 → D_T outBuf
+- Duplicate 目标 dtype 由 `has_post_elewise` 决定：有 → 转换到 fp32 计算域后写 tmpBuf；无 → 直接按 OutT 写 D_T outBuf
 
 ### 5.2 Cast知识
 

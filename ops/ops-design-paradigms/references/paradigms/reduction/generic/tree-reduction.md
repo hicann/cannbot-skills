@@ -22,13 +22,15 @@
 
 取 P = **严格小于** M 的最大 2 幂，尾段 T = M − P。将尾段 T 块与主段前 T 块**两两配对合并**，每对产生 1 个部分结果：
 
+> 本文只描述跨 chunk 的树形累加。`preChunk` 指归约前段输出的块；其载入与前置计算见 [scene.md](scene.md) §4 数据流。
+
 ```
 Phase A (配对, i=0..T-1):
-    chunk[i] 与 chunk[i+P] 配对
+    preChunk[i] 与 preChunk[i+P] 配对
     → 载入两块 → 逐元素运算合并成 1 块 → 归约 → 1 个部分结果
 
 Phase B (独立, i=T..P-1):
-    chunk[i] 单独处理
+    preChunk[i] 单独处理
     → 载入 → 归约 → 1 个部分结果
 ```
 
@@ -116,12 +118,12 @@ L = log2(P) + 1               # 缓存树层数
 for i = 0 to P-1:
     # 1. 载入并归约
     if i < T:                            # Phase A: 主尾配对
-        load chunk[i]    → buf0
-        load chunk[i+P]  → buf1
+        load preChunk[i]    → buf0
+        load preChunk[i+P]  → buf1
         buf0 = elementwise_merge(buf0, buf1)
         result = reduce(buf0)
     else:                                # Phase B: 独立
-        load chunk[i]    → reduce → result
+        load preChunk[i]    → reduce → result
 
     # 2. 写入缓存树
     k = GetCacheID(i)                    # 末尾连续 1 的个数 = 写入层级

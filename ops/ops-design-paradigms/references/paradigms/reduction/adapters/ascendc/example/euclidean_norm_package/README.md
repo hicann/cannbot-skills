@@ -70,7 +70,7 @@ euclidean_norm_package/
 
 | Name | I/O/Attr | Description | DataType | Format |
 |---|---|---|---|---|
-| x | input | Input tensor of arbitrary rank `[D0, ..., Dn-1]` | FLOAT, FLOAT16, BFLOAT16, INT32 | ND |
+| x | input | Input tensor of rank 0-8 `[D0, ..., Dn-1]` | FLOAT, FLOAT16, BFLOAT16, INT32 | ND |
 | axes | input | 1-D tensor of axes to reduce; value-dependent input (must be Const in graph mode) | INT32, INT64 | ND |
 | keep_dims | optional attr | Retain reduced axes as size-1 if true | BOOL | - |
 | y | output | Euclidean norm result; dtype matches x | FLOAT, FLOAT16, BFLOAT16, INT32 | ND |

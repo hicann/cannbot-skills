@@ -579,13 +579,13 @@ const uint32_t levelStride = (laneA + BLOCK_F32 - 1) / BLOCK_F32 * BLOCK_F32;
 **ExtensionPad**：（使用 `ClearChunkExtensionVf` 清零）
 partial chunk 的 stale 区域，无论 tail 类型都必须显式清。
 
-**pad_value 取值表（fp32 计算域）**：
+**pad_value 取值表（计算域；浮点按 fp32）**：
 
 | reducer | pad_value |
 |---------|-----------|
 | sum / mean | `0` |
-| max | `-Inf`（负无穷） |
-| min | `+Inf`（正无穷） |
+| max | 浮点 `-Inf`；整数 `dtype::lowest()` |
+| min | 浮点 `+Inf`；整数 `dtype::highest()` |
 | prod | `1` |
 | any | `false` (0) |
 | all | `true` (1) |

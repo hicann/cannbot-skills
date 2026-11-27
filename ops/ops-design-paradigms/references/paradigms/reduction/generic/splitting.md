@@ -3,6 +3,8 @@
 > **层级**：通用知识层（generic/），语言中立。
 >
 > 来源：adapters/ascendc/templates/binary-base/tiling.md §1/§2/§5（原 reduction-binary-base-tiling.md）、adapters/ascendc/templates/binary-group/tiling.md §2/§5、adapters/ascendc/templates/empty/tiling.md §1/§2/§5。C++ 实现（`ComputeAUbFactor()` / `ComputeRUbFactor()` 等）在适配层。
+>
+> **预算公式适用范围**：本文所有 UB 预算公式按 AscendC `REDUCE_OP` 契约——scratch 复用主尾配对块、dst 复用树缓存。若适配层不满足这两个 alias 前提，需按实际 scratch / dst 份数扩展预算，不得直接套用本文公式。
 
 ## 1 记号与输入
 
@@ -151,11 +153,36 @@ rGroupCnt   = numBlocks / aOuter     # 整除
 
 **调度模式**：Group 使用跨核栅栏（`CROSS_CORE_FENCE`），host 侧须按语言要求声明调度模式（等全部核空闲才启动）。
 
+### 4.1 Phase 2 final reduce
+
+Phase 2 处理 workspace `[rGroupCnt, aTotal]`：pattern = RA（R = `rGroupCnt` 全载，A = `aTotal`），无 R 切分、无二分树，树缓存层数 = 1。
+
+```
+precisionWidth = 计算精度字节宽度
+alignElems     = ALIGN_GRANULARITY / precisionWidth
+cacheElemMax   = FloorAlign(TREE_CACHE_CAPACITY / precisionWidth, alignElems)
+
+preElemMax = preBufSize / (rGroupCnt × precisionWidth)   # 复用 Phase 1 reduce src 槽
+if preElemMax >= alignElems: preElemMax = FloorAlign(preElemMax, alignElems)
+
+aUbFactorP2 = min(
+    preElemMax,
+    postBufSize / maxDtypeSize,                  # 归约后段单份 buffer（按分配宽度保守换算）
+    cacheElemMax,                                # dst 复用树缓存
+    aTotal
+)
+aSplitChunkCnt2 = CeilDiv(aTotal, aUbFactorP2)
+```
+
+以 Phase 1 `usedCoreNum` 为核数上界，按 §3 做大小核均衡；实际核数不超过 Phase 1 `usedCoreNum`。
+
+**槽位承接**：Phase 2 可复用 Phase 1 的 reduce src 槽接收 workspace；若 `REDUCE_OP` 需要 scratch，复用 Phase 1 的尾配对块（`P_pre_ext`）；复用树缓存槽作为 reduce dst。这些槽位不重复计入 Phase 2 预算，post 阶段 buffer 只由 Phase 2 使用。复用条件见 [liveness-fusion.md](liveness-fusion.md) §2。
+
 ## 5 Empty 切分
 
-**EMPTY_A**：无切分。使用核数为 0，按 `BLOCK_DISPATCH_MIN` 发起，所有核早退。
+**EMPTY_A**：无切分。使用核数为 0，按 `BLOCK_DISPATCH_MIN` 发起，所有核早退；不分配任何片上 buffer。
 
-**EMPTY_R**：按 **a 元素数**切（aTotal = 合所有 A 轴后的线性元素数）：
+**EMPTY_R**：只跳过归约段的 src/scratch/dst，归约后段仍存在。按 **a 元素数**切（aTotal = 合所有 A 轴后的线性元素数）：
 
 ```
 maxDtypeSize = max(sizeof(D_T), 精度宽度)
@@ -170,6 +197,8 @@ aUbFactor = min(aUbFactor, aTotal)
 ```
 
 之后按 `aLoopCntTotal = CeilDiv(aTotal, aUbFactor)` 做大小核均衡（同 §3）。`postBufSize = CeilAlign(max(aUbFactor × maxDtypeSize, ALIGN_GRANULARITY), ALIGN_GRANULARITY)`（单份至少一个对齐粒度）。
+
+`P_post` 是归约后段物理 buffer 份数，至少为 1（输出搬出 buffer）；有 PostElewise / post_reduce_input 时按实际后处理路数取，不得置 0。Empty 不使用树缓存，预算不扣 `TREE_CACHE_CAPACITY`。
 
 ## 6 UB 预算不等式与 buffer 大小公式
 

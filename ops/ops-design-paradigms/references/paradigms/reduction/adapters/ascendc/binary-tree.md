@@ -58,11 +58,11 @@ for i in 0..M-1:
 
 ```
 Phase A (配对, i=0..3):
-    chunk[i] 与 chunk[i+P] 配对
+    preChunk[i] 与 preChunk[i+P] 配对
     → 载入两块 → 逐元素相加成 1 块 → reduce → 1 个部分和
 
 Phase B (独立, i=4..15):
-    chunk[i] 单独处理
+    preChunk[i] 单独处理
     → 载入 → reduce → 1 个部分和
 ```
 
@@ -71,6 +71,8 @@ Phase B (独立, i=4..15):
 > **为什么取"严格小于"而非"≤"**：当 M 本身为 2 幂时（如 M=16），取 P=M/2=8 而非 M=16，树深少 1 层，缓存空间省一个 fp32 槽；代价是需多做 M/2 次配对（Phase A）。M 非 2 幂时（如 M=20），两种取法结果相同。用一点计算换空间更划算。
 
 > 配对时两块逐元素相加成一个块再 reduce，而非各自 reduce 后再加两个标量——这样元素级配对精度更好，且只调一次 reduce。尾块可能不足 B 个数（如最后一个 272），与主块配对时将尾块的有效元素逐元素加到主块对应位置即可（等价于尾块补零到 B 再逐元素相加），不影响求和结果。
+
+> **前置计算顺序**：`preChunk` 指归约前段输出的块；其载入与前置计算见通用层 [scene.md](../../generic/scene.md) §4，AscendC 落地写法见 [kernel-template.md](templates/binary-base/kernel-template.md) §1.2(2)。本文只描述跨 chunk 树。
 
 ---
 
@@ -156,36 +158,36 @@ i=15: cache[4]=S+cache[0]+cache[1]+cache[2]+cache[3]  树: [_, _, _, _, S] ← �
 
 ## 五、数据流图
 
+> 图中 `preChunk` 指已完成 PreElewise 的块（见 §3 与 [kernel-template.md](templates/binary-base/kernel-template.md) §1.2）。
+
 ```
 GM: 10000 个 fp32
      │
-     │  分块载入 (每块 B=512)
+     │  分块载入 + PreElewise (每块 B=512)
      ▼
- ┌──────────────────────────────────────────────────────┐
- │  chunk[0]  chunk[1]  ...  chunk[15]  │  chunk[16..19] │
- │  ─────── 主段 P=16 块 ──────────  │  ─尾段 T=4 块─ │
- └────┬────────┬─────────────┬────────┴──────┬─────────┘
-      │        │             │               │
-      │   Phase A (i<T): chunk[i] 与 chunk[i+P] 配对     │
-      │       → 载入两块 → 逐元素相加成 1 块 → reduce     │
-      │   Phase B (i≥T): chunk[i] 独立处理               │
-      │       → 载入 → reduce                            │
-      │        │             │               │
-      ▼        ▼             ▼               │
-   每块/每对载入 UB → 向量 reduce → 1 个 fp32  │
-      │        │             │               │
-      ▼        ▼             ▼               │
- ┌────────────────────────────────────────┐  │
- │       二分缓存树 (UB, 仅 5 个 fp32)      │  │
- │                                        │  │
- │  cache[0]  cache[1]  cache[2]  ...  cache[4] │
- │                                        │  │
- │  按"末尾 1 个数"规则确定写入层级,         │  │
- │  写入前吸收所有低层, 覆盖写本层           │  │
- └────────────────────────────────────────┘  │
-                   │                        │
-                   ▼                        │
-           cache[4] = 最终总和 ◄──────────────┘
+ ┌──────────────────────────────────────────────────────────────────────┐
+ │  preChunk[0..15] 主段 P=16 块 + preChunk[16..19] 尾段 T=4 块         │
+ └───────────────────────────┬──────────────────────────────────────────┘
+                             │
+                             │  Phase A (i<T): preChunk[i] 与 preChunk[i+P] 配对
+                             │      → 逐元素相加成 1 块 → reduce
+                             │  Phase B (i≥T): preChunk[i] 独立处理
+                             │      → reduce
+                             ▼
+   每块/每对载入 UB → 向量 reduce → 1 个 fp32
+                             │
+                             ▼
+ ┌──────────────────────────────────────────┐
+ │       二分缓存树 (UB, 仅 5 个 fp32)       │
+ │                                          │
+ │  cache[0]  cache[1]  ...  cache[4]       │
+ │                                          │
+ │  按"末尾 1 个数"规则确定写入层级,         │
+ │  写入前吸收所有低层, 覆盖写本层           │
+ └──────────────────────────────────────────┘
+                             │
+                             ▼
+                     cache[4] = 最终总和
 ```
 
 ---
@@ -231,12 +233,12 @@ L = log2(P) + 1              // 5,  缓存树层数
 for i = 0 to P-1:
     // ── 1. 载入并求和 ──
     if i < T:                                // Phase A: 主尾配对
-        load chunk[i]    → tmpBuf[0]
-        load chunk[i+P]  → tmpBuf[1]
+        load preChunk[i]    → tmpBuf[0]
+        load preChunk[i+P]  → tmpBuf[1]
         tmpBuf[0] = tmpBuf[0] + tmpBuf[1]    // 逐元素相加成 1 块
         result = reduce(tmpBuf[0])           // 1 个 fp32
     else:                                    // Phase B: 独立
-        load chunk[i]    → reduce → result
+        load preChunk[i]    → reduce → result
 
     // ── 2. 写入缓存树 ──
     k = GetCacheID(i)                        // 末尾连续1的个数 = 写入层级

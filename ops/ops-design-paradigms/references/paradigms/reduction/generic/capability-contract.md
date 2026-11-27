@@ -15,7 +15,7 @@
 
 | 谓词 | 类型 | 含义 | 影响的通用层知识点 |
 |------|------|------|------------------|
-| `REDUCE_OP` | desc | 片上归约指令实体：支持按 pattern 方向（AR=沿内层归约 / RA=沿外层归约）做二维块归约的指令族，含其 scratch buffer 约定与 src 可否复用语义 | scene 三段式数据流；liveness-fusion 归约段 buffer 份数（3 份：src + scratch + dst） |
+| `REDUCE_OP` | desc | 片上归约指令实体：支持按 pattern 方向（AR=沿内层归约 / RA=沿外层归约）做二维块归约的指令族，含其 scratch buffer 约定、src 可否复用语义与 dst alias 能力 | scene 三段式数据流；liveness-fusion 归约段 buffer 份数（由 scratch / src 复用 / dst alias 约定决定） |
 | `REDUCE_OP_PRECISION` | desc | 归约指令内部的累加方式（顺序累加 vs 内部树形折叠），决定单次归约的精度上界 | tree-reduction 两级树精度论证 |
 | `TREE_CACHE_CAPACITY` | bytes | 树形累加缓存的容量约定（范式统一固定值），树缓存的预算上界 | splitting UB 预算（先扣固定树缓存）；tree-reduction R 全载钳制 |
 | `COMPUTE_PRECISION` | type | 归约统一采用的计算精度类型（低精度输入先扩位到此精度再归约） | splitting buffer 容量（max dtype 宽度）；liveness-fusion Cast 参与链 |

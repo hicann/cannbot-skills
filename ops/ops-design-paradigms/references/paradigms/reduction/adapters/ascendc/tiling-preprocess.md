@@ -69,7 +69,7 @@ reduce 系列通常 `x` 在 0、`axes` 在 1 → 填 `{1}`：
 
 **空 tensor 短路**（`HandleEmptyTensor()`）：检查 axisShape（必须在合轴四步之前）：
 - 任一 A 轴 size == 0 → **EMPTY_A**（output 空 tensor），不进入合轴，跳转 Empty 模板
-- 任一 R 轴 size == 0 且所有 A 轴 size > 0 → **EMPTY_R**（output = `empty_r_output_value`），不进入合轴，跳转 Empty 模板
+- 任一 R 轴 size == 0 且所有 A 轴 size > 0 → **EMPTY_R**（归约结果 = `empty_r_output_value`；有 PostElewise / post_reduce_input 时继续归约后段），不进入合轴，跳转 Empty 模板
 - 否则（所有 axisShape ≥ 1）→ 进入合轴四步
 
 **优先级**：**EMPTY_A > EMPTY_R**（A=0 时 output 必空，无论 R 是否 0）。
@@ -142,19 +142,27 @@ MAX_PATTERN_RANK = 该算子合轴后 pattern 的**最大可能轴数**，用于
 **推导方法**：
 
 1. 按算子自身语义确定 reduce 轴信息——来源因算子而异：可能是 axes/axis/dim 等显式输入，可能是 attr，也可能由 format 隐式决定（如 NCHW 格式下固定 C 为 A 轴、其余为 R 轴），还可能是算子公式固化的（如固定尾轴 reduce 的算子恒有 1 根 R 轴）。无论来源如何，最终都要得到输入张量各轴的 A/R 标记
-2. 在最坏情况下，将连续的 R 轴视为 1 段，统计 R 的连续段数，记为 `rseg`
-3. 合轴后 A 与 R 严格交替、A 起头，A 段数最多 = `rseg + 1`，因此合轴后最大轴数 = `2 × rseg + 1`（A/R 类型标记以 A 结尾时达上限；以 R 结尾（含全 R）时为 `2 × rseg`）；纯 A（`rseg=0`，即不 reduce）补 R 增广后为 ARA = 3（A=1 全 1 退化时为 AR = 2）。标记由算子的 reduce 轴语义确定：固定 reduce 轴按固定标记取精确 MAX（如 NCHW reduce N/HW，标记 `R A R` → MAX = ARAR = 4，即使 HW=1 去 1 后成 ARA 也只是变小）；axes 由输入决定时按最坏情形（以 A 结尾）取 `2 × rseg + 1`，rseg 不定则兜底 9
-4. 框架上界为 9，取 `min(推导值, 9)`
+2. **在合法输入域内枚举四步预处理的所有可达极端形态**，不能只看初始标记：
+   - **非退化形态且 rseg > 0**（无 size==1 轴）：将连续的 R 轴视为 1 段，记段数为 `rseg`；合轴后 A/R 严格交替、A 起头，最大轴数 = `2 × rseg + (标记以 A 结尾 ? 1 : 0)`——以 A 结尾时达 `2 × rseg + 1`，以 R 结尾时为 `2 × rseg`
+   - **纯 A（rseg=0，无 reduce 轴）**：不套用上式，按 `PadRIfPureA` 取：A>1 → `ARA = 3`；∏shape==1 → `AR = 2`
+   - **R 轴全退化为 1 且 ∏A > 1**：所有 R 轴被去 1 删除，剩余纯 A 进入 `PadRIfPureA`；A>1 → 前置 `[A=1, R=1]` → `ARA = 3`
+   - **所有轴 size 都为 1（∏shape == 1）**：去 1 后保留占位 `A=1` → 末尾补 `R=1` → `AR = 2`
+3. 取以上可达形态的最大轴数：固定标记按算子合法输入域判断哪些形态可达（如 NCHW reduce N/HW：标记 `R A R`，rseg=2、以 R 结尾 → 非退化形态 `ARAR = 4`；即使 HW=1 去 1 后成 ARA 也只是变小，MAX 仍为 4）；axes 由输入决定时按最坏情形（以 A 结尾）取 `2 × rseg + 1`，rseg 不定则兜底 9
+4. 当前框架输入 rank ≤8，pattern 上界为 9；若目标框架支持更高 rank，需同步提高该上界。取 `min(推导值, 9)`
 
 **典型例子**：
 
 | reduce 轴语义 | 合轴后 pattern | MAX_PATTERN_RANK |
 |------|------|------|
-| 固定标记，以 R 结尾（全 R 为其 rseg=1 特例；如 NCHW reduce N/HW：`R A R`） | `(AR) × rseg` | `2 × rseg` |
+| 固定标记，以 R 结尾且含 A 轴（如固定尾 R 的 `AR`） | `(AR) × rseg`；去 1 后可达 `ARA` | `max(2 × rseg, 3)` |
+| 固定标记，全 R（如 NCHW 全轴 reduce） | `AR` | `2` |
 | 固定标记，以 A 结尾（如 `R A R A`） | `(AR) × rseg + A` | `2 × rseg + 1` |
+| 纯 A（rseg=0，即不 reduce） | `ARA`（A 可 >1）或 `AR`（规格固定全 1） | `3` 或 `2` |
 | axes 任意（rseg 不定） | 兜底 | 9 |
 
-> 例：`RARA` → R0 是 1 段、R2 是 1 段 → `rseg=2` → MAX=5。合轴四步：R A R A → 补 leading A → `A R A R A`（5 轴，A 结尾达上限）。
+> 例 1：`RARA` → R0 是 1 段、R2 是 1 段 → `rseg=2` → MAX=5。合轴四步：R A R A → 补 leading A → `A R A R A`（5 轴，A 结尾达上限）。
+>
+> 例 2（退化反例）：固定尾 R 的 `AR`，输入 shape `(2,1)`、R 轴 size=1 → 去 1 后 `A=2` → `PadRIfPureA` 前置 `[A=1,R=1]` → `ARA=3`。因此该算子 MAX 必须取 3，不能取 `2 × rseg = 2`。
 
 推导出的 MAX_PATTERN_RANK 定义在各算子 `tiling_data.h` 中（无前缀，直接 `constexpr int32_t MAX_PATTERN_RANK = N;`），host 和 kernel 共享。
 
@@ -201,7 +209,7 @@ MAX_PATTERN_RANK = 该算子合轴后 pattern 的**最大可能轴数**，用于
 - A 轴 = {0, 2}，R 轴 = {1}
 - axisShape[1] = 0（R 轴为 0），但 axisShape[0] = 3 > 0、axisShape[2] = 4 > 0 → **EMPTY_R**（不是 EMPTY_A）
 
-**Golden**：`isEmptyTensor=1, usedCoreNum=按 aTotal=12 切分`，output = `empty_r_output_value`。
+**Golden**：`isEmptyTensor=1, usedCoreNum=按 aTotal=12 切分`，归约结果 = `empty_r_output_value`；有 PostElewise 时继续后处理。
 
 **样例 4：EMPTY_A 短路**
 
@@ -210,6 +218,18 @@ MAX_PATTERN_RANK = 该算子合轴后 pattern 的**最大可能轴数**，用于
 - axisShape[0] = 0（A 轴为 0）→ **EMPTY_A**
 
 **Golden**：`isEmptyTensor=1, usedCoreNum=0, SetBlockDim(1)`，output = 空 tensor。
+
+**样例 5：固定尾 R 的退化形态**
+
+输入 shape `(2, 1)`，固定 reduce 最后一轴，reduce 轴 = {1}。
+
+- 初始 A/R 类型表：A0=2, R0=1
+- 步骤 1 去 1 轴：R0 删除 → 纯 A=2
+- 步骤 2、3 无变化
+- 步骤 4 补 R 增广：A>1 → 前置 `[A=1, R=1]`
+- 结果：pattern = `A R A`（ARA，axisNum=3，tail-A）
+
+**Golden**：`axisShape = [1, 1, 2]`，`axisNum = 3`，`isTailR = false`（奇数轴）；该算子 `MAX_PATTERN_RANK` 必须 ≥ 3。
 
 **校验要点**：
 1. 空 tensor 短路在合轴四步之前

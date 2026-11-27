@@ -124,7 +124,7 @@ reduction 范式有 **2 份** TilingData struct：
 #### 4.1.1 Base / Group TilingData
 
 ```cpp
-constexpr int32_t MAX_PATTERN_RANK = {RANK}; // 本算子最大rank值,替换为实际值
+constexpr int32_t MAX_PATTERN_RANK = {PATTERN_MAX_RANK}; // 合轴后 pattern 最大轴数，按 axis-preprocessing.md §5 推导
 struct ReduceGenericTilingData {
     // ─── pattern 描述 ───
     int32_t axisNum;                  // 2~MAX_PATTERN_RANK
@@ -224,7 +224,7 @@ struct ReduceEmptyTilingData {
 
 **2. 输出 TilingKey**：参考 [§3.1 TilingKey 定义](#31-tilingkey-定义) 和 [§3.2 TilingKey与kernel模板对应关系](#32-tilingkey与kernel模板对应关系)，按所选模板输出 `isGroup` / `isEmptyTensor` 各字段取值。
 
-**3. 输出 TilingData**：参考 [§4.1.1 Base / Group TilingData](#411-base--group-tilingdata) 和 [§4.1.2 Empty TilingData](#412-empty-tilingdata)，按所选模板确定对应的 TilingData struct：Base/Group 用 `ReduceGenericTilingData`，Empty 用 `ReduceEmptyTilingData`。按算子需要确定 `MAX_PATTERN_RANK`（影响 `axisShape`/`axisStride` 数组长度）。算子自定义字段（如 mean 的 `invRTotal`）追加在 `ReduceGenericTilingData` 末尾。
+**3. 输出 TilingData**：参考 [§4.1.1 Base / Group TilingData](#411-base--group-tilingdata) 和 [§4.1.2 Empty TilingData](#412-empty-tilingdata)，按所选模板确定对应的 TilingData struct：Base/Group 用 `ReduceGenericTilingData`，Empty 用 `ReduceEmptyTilingData`。按算子需要确定 `MAX_PATTERN_RANK`（合轴后 pattern 最大轴数，影响 `axisShape`/`axisStride` 数组长度，推导见 axis-preprocessing.md §5）。算子自定义字段（如 mean 的 `invRTotal`）追加在 `ReduceGenericTilingData` 末尾。
 
 ### 6.2 产出校验
 

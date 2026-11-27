@@ -68,6 +68,7 @@ preReducePhase 与 postReducePhase 各自独立分析：
 | 类别 | 路数 | dtype | 大小 | 物理来源 |
 |------|------|------|------|---------|
 | preReduceResult | 1 | fp32 | `preBufSize`（Phase 1 已分配） | Phase 1 已分配，Phase 2 CopyIn 写入，作为 ReduceAPI 的 src |
+| preReduceResultTail | 1 | fp32 | `preBufSize`（Phase 1 已分配） | 复用 Phase 1，Phase 2 作为 ReduceAPI 的 sharedTmpBuffer |
 | cacheBuf | 1 | fp32 | `a_len_ub × sizeof(fp32)`（写 [0] 位置） | 复用 Phase 1，ReduceAPI dst 写入 cacheBuf[0]（R 全载单 chunk，无需二分树层级），作为 reduceResult 供 postReducePhase 读取 |
 | postReducePhase buffer | `P_post` | D_T | `postBufSize`（= CeilAlign(aUnit × maxDtypeSize, blockSize)，aUnit = aUbFactor × innerAProdAlign） | Phase 2 专用，Init 时分配，Phase 1 不使用 |
 

@@ -9,7 +9,7 @@
 | 概念 | 一句话 |
 |------|--------|
 | **EMPTY_A** | A 轴含 0 → output 空 tensor，`usedCoreNum=0`，所有核早退 |
-| **EMPTY_R** | R 轴含 0 且 A 全非 0 → output = `empty_r_output_value`，按 a 元素数切分 |
+| **EMPTY_R** | R 轴含 0 且 A 全非 0 → 归约结果 = `empty_r_output_value`；有 PostElewise 时继续后处理，按 a 元素数切分 |
 | **aUbFactor** | 4 约束取 min：4KB buffer 下界 / 优先多核 / UB 上限 / aTotal 兜底 |
 | **UB 切分** | 按 a 元素数切（非 aLoop） |
 
