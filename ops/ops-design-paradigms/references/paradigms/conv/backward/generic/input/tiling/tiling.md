@@ -63,7 +63,7 @@ Normalized problem + layout + platform resources
 
 ### 2.2 模板与编译分支
 
-模板选择与 weight 变换（loadB2Condition）是两个独立决策：先按优先序选定求解模板，最终块形状确定后再按 [Tiling 绑定](../../../adapters/ascendc/input/tilingkey-templates.md) 的判定规则选择 loadB2Condition。同一 key 可以配合不同模板，enableFullLoad 和运行时字段继续决定执行行为；核体积为 1 时优先仅转置分支，且仍检查 stride/pad 的采样。
+模板选择与 weight 变换（loadB2Condition）是两个独立决策：先按优先序选定求解模板，最终块形状确定后再按 [Tiling 绑定（Ascend C）](../../../adapters/ascendc/input/tilingkey-templates.md) / [DSL](../../../adapters/dsl/input/tiling.md) 的判定规则选择 loadB2Condition。同一 key 可以配合不同模板，enableFullLoad 和运行时字段继续决定执行行为；核体积为 1 时优先仅转置分支，且仍检查 stride/pad 的采样。
 
 ### 2.3 扩展方式
 
@@ -308,7 +308,7 @@ Host 将前置处理的统一问题和本模板最终切分结果交给 Kernel�
 | initOutputFlag | 衔接前置初始化与主计算 |
 | iterateOrder | 当前为 1，任务解码仍按计算流程中的轴顺序 |
 
-`mValue/nValue/kValue`、任务计数、起点和尾长可以由几何与最终字段复算。dtype/format 和 loadB2Condition 绑定编译实例；无需把模板名再传给 Kernel。字段类型、共享结构和 key 编码见 [Ascend C Tiling 绑定](../../../adapters/ascendc/input/tilingkey-templates.md)。
+`mValue/nValue/kValue`、任务计数、起点和尾长可以由几何与最终字段复算。dtype/format 和 loadB2Condition 绑定编译实例；无需把模板名再传给 Kernel。字段类型、共享结构和 key 编码见 [Ascend C Tiling 绑定（Ascend C）](../../../adapters/ascendc/input/tilingkey-templates.md) / [DSL](../../../adapters/dsl/input/tiling.md)。
 
 发布前检查：每个有效 dedx 坐标唯一归属，所有有效 K/核深度贡献完整；Buffer 预算、物理末地址、API 范围与初始化依赖同时满足。大乘积先用宽整数检查，再转目标字段。
 

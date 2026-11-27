@@ -55,10 +55,11 @@
 ```
 
 - ②③ 在 host 侧完成，④ 在 NPU 上执行，⑤ 自动比对；
-- ④ 的执行形态两种：kernel 直调（`<<<>>>`）或 aclnn 直调（注册算子+两段式 API）——工程接入参考 [adapters/ascendc/example/conv3ddx_direct/](../../adapters/ascendc/example/conv3ddx_direct/README.md) 与 [conv3ddx_aclnn/](../../adapters/ascendc/example/conv3ddx_aclnn/README.md)；转置卷积变体（含 bias BT 通路与 output_padding 语义的 golden/判定口径）另见 [conv3dtranspose_direct/](../../adapters/ascendc/example/conv3dtranspose_direct/README.md) 与 aclnn 注册形态 [conv3dtranspose_aclnn/](../../adapters/ascendc/example/conv3dtranspose_aclnn/README.md)；
+- ④ 的 Ascend C 执行形态有两种：kernel 直调（`<<<>>>`）或 aclnn 直调（注册算子+两段式 API）——工程接入参考 [adapters/ascendc/example/conv3ddx_direct/](../../adapters/ascendc/example/conv3ddx_direct/README.md) 与 [conv3ddx_aclnn/](../../adapters/ascendc/example/conv3ddx_aclnn/README.md)；转置卷积变体（含 bias BT 通路与 output_padding 语义的 golden/判定口径）另见 [conv3dtranspose_direct/](../../adapters/ascendc/example/conv3dtranspose_direct/README.md) 与 aclnn 注册形态 [conv3dtranspose_aclnn/](../../adapters/ascendc/example/conv3dtranspose_aclnn/README.md)；
+- DSL 的 ④ 使用所选编译实例的 `@host` 入口启动，见 [DSL 入口与验证](../../adapters/dsl/kernel-entrance.md)；Golden、用例和比对规则仍按本页执行。
 - 失败用例经 ⑦ 定位后，根因若在范式知识，按「范式回写」关闭——用例是范式的试金石。
 
-**最小验证工程的组成**（两种执行形态通用）：
+**最小验证工程的组成**（职责通用；下表路径为 Ascend C 工程约定，DSL 按调用工程组织）：
 
 | 组件 | 职责 | 落地位置（见「参考代码指引」） |
 |------|------|---------|
@@ -130,7 +131,7 @@
 | 判定层 | 拦截对象 | 依赖 |
 |--------|---------|------|
 | 精度比对（第 5 节） | 数值错误 | 只依赖数学语义：三个 Tiling 模板是性能与任务划分决策而非正确性决策（standard 为兜底路径，任意合法规格均可求解），三种 weight 变换产生数学等价的 L0B（核体积 1 时"转置加逆序"的逆序为恒等，与"仅转置"一致），差异仅在编译实例与性能 |
-| tag 核对（第 2.5 节） | 偏离范式判定链的实现 | 判定链复现：模板选择（[tiling/tiling.md](tiling/tiling.md) 第 2 节）与 loadB2Condition（[tilingkey-templates](../../adapters/ascendc/input/tilingkey-templates.md) 第 2 节）均为确定性规则，按范式实现则同规格必然同命中 |
+| tag 核对（第 2.5 节） | 偏离范式判定链的实现 | 判定链复现：模板选择（[tiling/tiling.md](tiling/tiling.md) 第 2 节）与 loadB2Condition（[Ascend C 第 2 节](../../adapters/ascendc/input/tilingkey-templates.md#2-loadb2condition-判定与-key) / [DSL 第 3 节](../../adapters/dsl/input/tiling.md#3-weight-变换分支)）均为确定性规则，按范式实现则同规格必然同命中 |
 | 验收记录（第 9 节路径覆盖） | 实现完整性缺口 | 以 Host 最终选择证明三模板、三变换、初始化及驻留的命中映射 |
 
 由此得到的实现依赖分级：

@@ -1,6 +1,6 @@
 # 卷积反向范式档案
 
-本目录组织非量化浮点三维卷积的输入梯度、权重梯度和转置卷积生成知识。设计入口为 [patterns.md](patterns.md)，通用知识与 Ascend C 适配按 input、filter 分支组织。
+本目录组织非量化浮点三维卷积的输入梯度、权重梯度和转置卷积生成知识。设计入口为 [patterns.md](patterns.md)，通用知识、Ascend C 与 CANNBotDSL 适配均按 input、filter 分支组织。
 
 ## 1 典型算子
 
@@ -21,7 +21,7 @@
 | 外部布局 | 特征张量采用配对的 NCDHW 或 NDHWC；权重及 dedw 的布局组合以分支契约为准 |
 | 卷积属性 | stride、dilation、各轴两侧 pad、groups 按分支形状关系和最终 Tiling 准入条件校验；Transpose 另有 output_padding、目标形状和可选 bias 契约 |
 | 维度归一 | 以三维问题设计和执行；1D/2D 规格按 [前置处理](generic/preprocessing.md) 升维并保留轴语义 |
-| 开发语言与交付 | Ascend C；分别提供直调和 ACLNN 源码示例，由对应调用工程接入 |
+| 开发语言与交付 | Ascend C 提供直调和 ACLNN 源码示例；[CANNBotDSL](adapters/dsl/index.md) 提供同范围的接口映射、入口和实现步骤，由调用工程接入 |
 | 平台能力 | 从 platformInfo 和目标 SDK 获取资源及 API 能力，按最终布局、Tiling、搬运和同步约束判断可实现性 |
 
 input 采用 standard、small-shape、l1-resident 三种 Tiling 模板；filter 以 MN_StreamK 为计算主线，窗口、搬运与写回分支按其契约展开。范式知识与具体示例的实现范围分别在 [input 索引](generic/input/index.md)、[filter 索引](generic/filter/index.md) 和各示例 README 中说明。
@@ -33,7 +33,7 @@ input 采用 standard、small-shape、l1-resident 三种 Tiling 模板；filter 
 ```text
 op.paradigms contains ConvBackward
     -> conv/backward/patterns.md
-        -> generic/index.md + adapters/ascendc/index.md
+        -> generic/index.md + adapters/<language>/index.md
             -> input/index.md   (Conv3DDX / Conv3DTranspose)
             -> filter/index.md  (Conv3DDW)
 ```
@@ -47,7 +47,7 @@ op:
   language: ascendc
 ```
 
-两级公共索引说明共享术语、规格和能力，各分支索引维护自己的计算流、Tiling、Kernel、同步和验证知识。
+DSL 实现将上例 `op.language` 改为 `dsl`，进入 [DSL 适配索引](adapters/dsl/index.md)。两级公共索引说明共享术语、规格和能力，各分支索引维护自己的计算流、Tiling、Kernel、同步和验证知识。
 
 ## 3 后续扩展方向
 

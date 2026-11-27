@@ -69,7 +69,7 @@ img2col（窗口展开，也称 img2col）把每个 dedx 空间位置需要的 f
 | LoadL0c2Gm / F | L0C→dedx GM | 类型转换、NZ2DN/NZ2ND、有效范围写回 |
 | bias 装载（可选） | bias GM→L1→BT | FP32 通道段搬入 BT，首次乘加作 L0C 初值 |
 
-指令的语言中立语义、单位与地址公式见第 5.1 节；各语言的 API 实体与参数结构体见 [指令映射](../../adapters/ascendc/input/instruction-mapping.md)；bias 通路的装载与 MMAD 细节见 [bias 通路](../../adapters/ascendc/input/bias-bt-path.md)。两路的 K 位置一致；改变某一父布局时，同时重算子块定位。
+指令的语言中立语义、单位与地址公式见第 5.1 节；各语言的 API 实体与参数结构体见 [指令映射（Ascend C）](../../adapters/ascendc/input/instruction-mapping.md) / [DSL](../../adapters/dsl/input/instruction-mapping.md)；bias 通路的装载与 MMAD 细节见 [bias 通路（Ascend C）](../../adapters/ascendc/input/bias-bt-path.md) / [DSL](../../adapters/dsl/input/bias-bt-path.md)。两路的 K 位置一致；改变某一父布局时，同时重算子块定位。
 
 各阶段使用的长度口径如下，实际字段由适配层映射：
 
@@ -717,7 +717,7 @@ qW=0 时只取前三个输出窗口；qW=1 增加第四个窗口，真实核长�
 
 ### 5.1 指令与单位总表
 
-搬运与计算由五类指令构成。本节给出**语言中立的指令语义、单位与地址公式**；各开发语言的 API 实体、参数结构体与位域填充在适配层（AscendC 见 [instruction-mapping](../../adapters/ascendc/input/instruction-mapping.md)）。
+搬运与计算由五类指令构成。本节给出**语言中立的指令语义、单位与地址公式**；各开发语言的 API 实体、参数结构体与位域填充在适配层（AscendC 见 [instruction-mapping（Ascend C）](../../adapters/ascendc/input/instruction-mapping.md) / [DSL](../../adapters/dsl/input/instruction-mapping.md)）。
 
 | 指令 | 作用 | 关键单位 |
 |------|------|---------|
@@ -728,7 +728,7 @@ qW=0 时只取前三个输出窗口；qW=1 增加第四个窗口，真实核长�
 | FIXPIPE | L0C→GM，随路 NZ2DN/NZ2ND 还原 + FP32→FP16/BF16 | 源步幅以 64B C0 计 |
 | Fill（置零） | 片上区域预置零（插零间隔、尾块） | 32B 块 |
 
-**搬运矩阵轴义**：布局转换搬运以"矩阵"为单位组织数据。对 dedy，copyD 是当前 Cout 通道，copyN 是一行 Wo 或连续的 Ho×Wo，copyIdx 在逐行搬运时表示行号——copyN 不是 batch，copyD 也不是卷积深度 D。对 weight，三轴按 weight 变换分支分别绑定（见 [kernel 侧参数表](../../adapters/ascendc/input/instruction-mapping.md)）。
+**搬运矩阵轴义**：布局转换搬运以"矩阵"为单位组织数据。对 dedy，copyD 是当前 Cout 通道，copyN 是一行 Wo 或连续的 Ho×Wo，copyIdx 在逐行搬运时表示行号——copyN 不是 batch，copyD 也不是卷积深度 D。对 weight，三轴按 weight 变换分支分别绑定（见 [kernel 侧参数表（Ascend C）](../../adapters/ascendc/input/instruction-mapping.md) / [DSL](../../adapters/dsl/input/instruction-mapping.md)）。
 
 **逐元素地址公式**（FP16/BF16，忽略已加基址；copyIdx 为矩阵号）：
 
@@ -950,9 +950,9 @@ L1B [0 10 100 110] -- in-block transpose --> L0B [0 100 10 110]
 
 转置改变分形内的存储朝向；两条路径的逻辑 L0B 均以 K 为行、dedx 通道为列。固定核深度处理时，GM 权重的通道步幅仍包含完整 dk，不能套用二维核面积代替。
 
-**NDHWC 权重的逆序路径也使用 DN2NZ 语义**：此时组内输入通道 ci 是连续的 N 轴，dedy 通道 co 是跨 `cinG*kernelVolume` 的 D 轴——按张量格式名称选择转换方向会把两轴放反。所有源步幅保留原 GM 的 `cinG`，尾块只缩短有效长度；具体参数结构选择见适配层 [instruction-mapping](../../adapters/ascendc/input/instruction-mapping.md#3-weight-到-l1b)。
+**NDHWC 权重的逆序路径也使用 DN2NZ 语义**：此时组内输入通道 ci 是连续的 N 轴，dedy 通道 co 是跨 `cinG*kernelVolume` 的 D 轴——按张量格式名称选择转换方向会把两轴放反。所有源步幅保留原 GM 的 `cinG`，尾块只缩短有效长度；具体参数结构选择见适配层 [instruction-mapping（Ascend C）](../../adapters/ascendc/input/instruction-mapping.md#3-weight-到-l1b) / [DSL](../../adapters/dsl/input/instruction-mapping.md)。
 
-三种 weight 变换 的选择使用最终块形状，见 [分支判定](../../adapters/ascendc/input/tilingkey-templates.md#2-loadb2condition-判定与-key)。`1×1×1` 仅使空间逆序成为恒等映射；仅转置路径仍按 stride、边界和目标形状寻找 dedy。例如 `dedy=[1,2,3]、weight=[2]、strideW=2、pad=0`，目标 dedx 宽度为 5 时得到 `[2,0,4,0,6]`，其余空间轴为单维。
+三种 weight 变换 的选择使用最终块形状，见 [分支判定（Ascend C）](../../adapters/ascendc/input/tilingkey-templates.md#2-loadb2condition-判定与-key) / [DSL](../../adapters/dsl/input/tiling.md)。`1×1×1` 仅使空间逆序成为恒等映射；仅转置路径仍按 stride、边界和目标形状寻找 dedy。例如 `dedy=[1,2,3]、weight=[2]、strideW=2、pad=0`，目标 dedx 宽度为 5 时得到 `[2,0,4,0,6]`，其余空间轴为单维。
 
 ### 5.4 MMAD 与 dedx 写回
 
@@ -1358,7 +1358,7 @@ MTE2 行先装 L1B_R，再依次装 L1A，表示同一流水上的顺序。L1B �
 
 单槽复用按下面的依赖等待；双槽交替选择可写槽，仍分别等待该槽的上次读取完成。单槽时允许不同存储级之间重叠，但不能同时读写同一槽。发布归还可跟在读取提交后，下一次覆盖仍必须等待读取完成。
 
-各级槽按自己的频率轮转。K 增加推进输入槽，L0C 按完整输出块轮转；SDK 队列和事件见 [同步实现](../../adapters/ascendc/input/sync-implementation.md)。
+各级槽按自己的频率轮转。K 增加推进输入槽，L0C 按完整输出块轮转；SDK 队列和事件见 [同步实现（Ascend C）](../../adapters/ascendc/input/sync-implementation.md) / [DSL](../../adapters/dsl/input/sync-implementation.md)。
 
 ```text
 Same L1A/L1B slot: MTE2 write -> all MTE1 reads complete -> next MTE2 write

@@ -266,7 +266,7 @@ DX 入口使用无 bias 配置；Transpose 的输出形状由其前置处理确�
 ## 13 filter 分支记号
 
 
-> 以下记号用于 filter 分支，计算与实现资料分别从 [filter 通用索引](filter/index.md) 和 [filter 适配索引](../adapters/ascendc/filter/index.md) 进入。命名与 Host/Device 共享的 TilingData 字段对齐。
+> 以下记号用于 filter 分支，计算与实现资料分别从 [filter 通用索引](filter/index.md) 和 [filter 适配索引（Ascend C）](../adapters/ascendc/filter/index.md) / [DSL](../adapters/dsl/filter/index.md) 进入。命名与 Host/Device 共享的 TilingData 字段对齐。
 
 ### 13.1 核心记号速查（先背这张表）
 

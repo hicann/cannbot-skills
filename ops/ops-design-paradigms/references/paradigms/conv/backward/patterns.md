@@ -30,8 +30,9 @@
 | 开发语言 | 加载内容 | 入口 |
 |---|---|---|
 | ascendc | 公共规格 + 命中分支知识 + Ascend C 适配 | [adapters/ascendc/index.md](adapters/ascendc/index.md) |
+| dsl | 公共规格 + 命中分支知识 + CANNBotDSL 适配 | [adapters/dsl/index.md](adapters/dsl/index.md) |
 
-通用知识可用于独立的数学与方案讨论。实现时由适配层获取 platformInfo，核对资源、API 和执行能力，按实际 SDK 确定参数。
+通用知识可用于独立的数学与方案讨论。实现时由适配层获取平台信息，核对资源、API 和执行能力，按实际 SDK 与语言版本确定参数。
 
 ## 3 相关知识索引
 
@@ -41,6 +42,7 @@
 |---|---|---|---|
 | 通用知识 | [generic/index.md](generic/index.md)：统一术语、规格归一 | [generic/input/index.md](generic/input/index.md)：输入梯度与转置卷积 | [generic/filter/index.md](generic/filter/index.md)：权重梯度 |
 | Ascend C | [adapters/ascendc/index.md](adapters/ascendc/index.md)：平台能力与分支选择 | [input/index.md](adapters/ascendc/input/index.md)：API、Kernel、同步与示例 | [filter/index.md](adapters/ascendc/filter/index.md)：API、Kernel、同步与示例 |
+| CANNBotDSL | [adapters/dsl/index.md](adapters/dsl/index.md)：接口版本、能力与入口 | [input/index.md](adapters/dsl/input/index.md)：三模板、布局、同步与 bias | [filter/index.md](adapters/dsl/filter/index.md)：MN_StreamK、窗口、初始化与写回 |
 
 分支索引维护自己的场景、计算流、Tiling 模板、验证及实现文档；公共入口不逐项展开分支叶子知识。
 
@@ -60,7 +62,7 @@
 
 1. 先读公共索引，再进入一个求导分支和一个语言适配层；单个子问题最多展开 5 个叶子文档。
 2. D4 与 D5 联动核算。基本块、buffer 份数或流水改变后，重新检查容量、实际地址和生命周期。
-3. 编码前从分支适配索引选择对应调用形态的示例；示例解析器返回的是候选目录，按求导对象和调用方式选取。
-4. input 沿用已验证模板的切分约定；filter 的 MN_StreamK 在 Host 按形状和平台资源求解 baseM/baseN/baseK，通过 TilingData 发布，Kernel 按容量处理有效尾块。
+3. 编码前读取所选语言的分支适配索引。Ascend C 按调用形态选源码示例；DSL 按接口映射和 Kernel 步骤实现，片段的适用范围见其说明，不把 Ascend C 示例当作 DSL 工程。
+4. input 沿用已验证模板的切分约定；filter 的 MN_StreamK 在 Host 按形状和平台资源求解 baseM/baseN/baseK。适配层将结果绑定到对应语言的编译配置和运行参数，Kernel 按容量处理有效尾块。
 5. 缺少平台或 API 依据时记录受影响的具体结论。数学推导、Host 复算、编译和设备结果分别保存。
 6. 示例审查或运行中的修正回写所属规则，再从独立目录重新生成与验证。

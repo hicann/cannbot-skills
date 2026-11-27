@@ -24,7 +24,7 @@ standard 对应 InnerProduct 的基本计算路径，先选 L0 基本块，再�
 | 严格一维几何 | di=dout=dk=strideD=dilationD=1；hi=ho=hk=strideH=dilationH=1；D/H 两侧反向边界均为 0；wi>0 |
 | 计算配置 | 原始分组寻址（groupConvMode=0）、GM→L1 权重搬入（loadB1Condition=0）、普通完整核窗口；L0B 为转置加逆序 |
 | 已有计划 | standard 已完成求解，singleCoreM、singleCoreCin、baseM 均为正；沿用本范式的运行时配置 |
-| 能力 | 适配层确认当前平台与 SDK 可沿用该 M 划分及行宽寻址，见 [能力判定](../../../../../adapters/ascendc/buffer-and-types.md#13-能力判定) |
+| 能力 | 适配层确认当前平台与 SDK 可沿用该 M 划分及行宽寻址，见 [能力判定（Ascend C）](../../../../../adapters/ascendc/buffer-and-types.md#13-能力判定) / [DSL](../../../../../adapters/dsl/capability-mapping.md) |
 
 此时 M 沿宽度展开。能力尚未确认时保留已有 standard 计划；这项均衡调整不改变计算语义或块内布局。
 

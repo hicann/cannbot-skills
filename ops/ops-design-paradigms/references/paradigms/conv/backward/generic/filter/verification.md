@@ -1,6 +1,6 @@
 # 卷积反向权重梯度分支：验证方法
 
-本文给出用例、输入、Golden、比对、定位和范式回写，按 filter 分支自身语义验证。计算依据见 [scene](scene.md)、[compute-flow](compute-flow.md) 与 [Tiling](tiling/tiling.md)，API 检查见 [适配层](../../adapters/ascendc/filter/index.md)。
+本文给出用例、输入、Golden、比对、定位和范式回写，按 filter 分支自身语义验证。计算依据见 [scene](scene.md)、[compute-flow](compute-flow.md) 与 [Tiling](tiling/tiling.md)，API 检查见 [适配层（Ascend C）](../../adapters/ascendc/filter/index.md) / [DSL](../../adapters/dsl/filter/index.md)。
 
 ## 1 验证闭环总览
 

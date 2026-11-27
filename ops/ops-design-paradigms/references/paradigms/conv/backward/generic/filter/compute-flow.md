@@ -1,6 +1,6 @@
 # 卷积反向权重梯度分支：计算流程
 
-本文回答数据怎样存放、窗口怎样展开、任务怎样分配、归约怎样执行和 Buffer 怎样交接。计算模型见 [scene.md](scene.md)，切分规则见 [tiling/tiling.md](tiling/tiling.md)，API 字段见 [指令映射](../../adapters/ascendc/filter/instruction-mapping.md)。
+本文回答数据怎样存放、窗口怎样展开、任务怎样分配、归约怎样执行和 Buffer 怎样交接。计算模型见 [scene.md](scene.md)，切分规则见 [tiling/tiling.md](tiling/tiling.md)，API 字段见 [指令映射（Ascend C）](../../adapters/ascendc/filter/instruction-mapping.md) / [DSL](../../adapters/dsl/filter/instruction-mapping.md)。
 
 沿用 x、dedy、dedw、dedy_flat、x_win。A 路为 dedy，B 路为 x；L1A/L1B 保存父段，L0A/L0B 为本次计算操作数，L0C 保存 FP32 部分和。轴序均从慢到快，示意小分形只说明顺序。
 
@@ -609,7 +609,7 @@ Both paths -> same x_win values at the same (K,N) coordinates.
 
 普通路径在 Load3D 中完成整个核窗口；拆核路径在 GM→L1B 的选择中落实原 kh/kw，Load3D 只提取单位核。更换路径时，原核位置、源地址、窗口参数和目标 N 分形位置必须一起更新。
 
-普通父段保留原 x 的连续行带，pad 使用原空间点单位；拆核父段只保存固定核位置的有效采样点，pad 改用采样网格的点数。两条路径最终对应相同的 `(K,N)`，具体裁剪、行内起点和数值示例见 [指令映射](../../adapters/ascendc/filter/instruction-mapping.md#3-x-到-l1b)。
+普通父段保留原 x 的连续行带，pad 使用原空间点单位；拆核父段只保存固定核位置的有效采样点，pad 改用采样网格的点数。两条路径最终对应相同的 `(K,N)`，具体裁剪、行内起点和数值示例见 [指令映射（Ascend C）](../../adapters/ascendc/filter/instruction-mapping.md#3-x-到-l1b) / [DSL](../../adapters/dsl/filter/instruction-mapping.md)。
 
 ### 5.4 MMAD 与 dedw 写回
 
@@ -791,7 +791,7 @@ Fixpipe: write the one valid ci for each original kernel position
 
 MMAD 使用源码更新后的有效 m/n/k，分形容量另外对齐。源地址对齐不等于扩大有效输出，补齐槽也不能作为额外通道写回。
 
-这里区分数学有效范围与适配层的临时计算范围；例如有效 M=1 的计算可暂扩到 16，CopyOut 仍恢复为 1。各阶段实际尺寸及恢复顺序由 [Kernel 模板](../../adapters/ascendc/filter/kernel-template.md#6-compute-计算逻辑) 定义。
+这里区分数学有效范围与适配层的临时计算范围；例如有效 M=1 的计算可暂扩到 16，CopyOut 仍恢复为 1。各阶段实际尺寸及恢复顺序由 [Kernel 模板（Ascend C）](../../adapters/ascendc/filter/kernel-template.md#6-compute-计算逻辑) / [DSL](../../adapters/dsl/filter/kernel-template.md) 定义。
 
 ### 7.5 循环切换与状态生命周期
 
@@ -964,7 +964,7 @@ Final use : last consumer dependency -> queue End / TPipe cleanup
 
 首次空槽由队列或所选 SDK 的事件初态提供；每次 Load/Compute/CopyOut 成对发布和消费令牌。最后一次提交消费者之后发布归还依赖，下一次覆盖前等待该依赖；提交不等于已完成。
 
-全部任务结束后归还仍持有的父段和 L0C，End 释放队列事件，TPipe 完成固定事件收尾。空段不等待未生产的就绪事件。混合核声明、AIV→AIC 初始化通知、零贡献 L0C 交接和 SetScheduleMode 按 [filter 同步实现](../../adapters/ascendc/filter/sync-implementation.md) 配对。
+全部任务结束后归还仍持有的父段和 L0C，End 释放队列事件，TPipe 完成固定事件收尾。空段不等待未生产的就绪事件。混合核声明、AIV→AIC 初始化通知、零贡献 L0C 交接和 SetScheduleMode 按 [filter 同步实现（Ascend C）](../../adapters/ascendc/filter/sync-implementation.md) / [DSL](../../adapters/dsl/filter/sync-implementation.md) 配对。
 
 ## 9 检查点
 

@@ -224,11 +224,11 @@ dedy_expand、fmap、weight_rot 沿用 [input/scene.md](input/scene.md) 的逻�
 
 例如 D 轴取 `di=5、dout=2、dk=2、strideD=dilationD=2、前后pad=0`，深度1、3没有有效贡献；此时 strideD 与 dk 相等，仍由 dilationD 条件启用清零。这些条件来自无贡献区域与跳过路径，不能只用其中一条代替完整判断；qW 通过输出宽度和窗口边界参与处理。最终标志还与主计算覆盖检查一同发布。
 
-通用层产出清零条件、范围和依赖。适配层落实 API、执行单元及两种调用方式的接入，具体执行见 [adapters/ascendc/input/sync-implementation.md](../adapters/ascendc/input/sync-implementation.md)。写回方案未确定时，将清零决策标为待确定。
+通用层产出清零条件、范围和依赖。适配层落实 API、执行单元及两种调用方式的接入，具体执行见 [adapters/ascendc/input/sync-implementation.md（Ascend C）](../adapters/ascendc/input/sync-implementation.md) / [DSL](../adapters/dsl/input/sync-implementation.md)。写回方案未确定时，将清零决策标为待确定。
 
 ### 5.3 bias 前置（转置卷积）
 
-bias 缺省时 `hasBiasFlag_=false`。非空 bias 须为一维 FP32，长度 Cin；无元素的可选 Tensor 由包装层统一成缺省指针。输出通道的全局偏移为 `groupIdx*cinG+cinStart`，与 weight 的组内通道字段区分。带 bias 时，主计算还须为无贡献位置产生 bias：使用带 BT 的零乘积 MMAD，再按正常输出通路写回；预清零、L0C 首次初始化、bias 加一次分别承担各自职责，具体执行见 [adapters/ascendc/input/bias-bt-path.md](../adapters/ascendc/input/bias-bt-path.md)。
+bias 缺省时 `hasBiasFlag_=false`。非空 bias 须为一维 FP32，长度 Cin；无元素的可选 Tensor 由包装层统一成缺省指针。输出通道的全局偏移为 `groupIdx*cinG+cinStart`，与 weight 的组内通道字段区分。带 bias 时，主计算还须为无贡献位置产生 bias：使用带 BT 的零乘积 MMAD，再按正常输出通路写回；预清零、L0C 首次初始化、bias 加一次分别承担各自职责，具体执行见 [adapters/ascendc/input/bias-bt-path.md（Ascend C）](../adapters/ascendc/input/bias-bt-path.md) / [DSL](../adapters/dsl/input/bias-bt-path.md)。
 
 ## 6 示例
 

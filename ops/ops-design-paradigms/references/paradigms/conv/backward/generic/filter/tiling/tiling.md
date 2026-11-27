@@ -292,7 +292,7 @@ iterateOrder 取 `mValue>nValue ? 1 : 0`，控制任务内子块顺序。MN_Stre
 | usedCoreNum | blockDim 与任务轮转步长 |
 | streamkType | 当前为 0 |
 
-dtype/format、isSplitKernelHW 和模板编号可由编译实例传递；字段类型、共享结构和 key 在 [适配层绑定](../../../adapters/ascendc/filter/tilingkey-templates.md) 定义。归约阈值由 Kernel 的 CalcReduceSegments 消费，不作为另一份可自由修改的 Host 字段。
+dtype/format、isSplitKernelHW 和模板编号可由编译实例传递；字段类型、共享结构和 key 在 [适配层绑定（Ascend C）](../../../adapters/ascendc/filter/tilingkey-templates.md) / [DSL](../../../adapters/dsl/filter/tiling.md) 定义。归约阈值由 Kernel 的 CalcReduceSegments 消费，不作为另一份可自由修改的 Host 字段。
 
 ## 10 检查点
 

@@ -40,4 +40,4 @@
 1. 同一个 K 位置在 dedy_flat 与 x_win 中对应相同的 batch/dout/ho/wo；核坐标保持正向顺序。
 2. 模板、内部窗口/搬运/写回分支分别记录；最终字段满足准入后再生成 Kernel。
 3. 正确性模型、Host 复算、设备结果和性能结论分别留证；函数级构造不代替自然路由覆盖。
-4. API 与工程接入见 [filter 语言适配索引](../../adapters/ascendc/filter/index.md)。
+4. API 与工程接入按 [语言路由](../../patterns.md#2-语言路由) 进入所选语言的 filter 适配索引。
