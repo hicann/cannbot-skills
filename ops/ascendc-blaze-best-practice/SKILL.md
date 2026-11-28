@@ -118,6 +118,7 @@ skill_promotion: reusable | operator_local | none
 `preflight_risk` 不能写成已经发生的设备失败；编译/静态通过不能写成
 `device_verified`。设备结论必须标注 `sandbox` 或 `device_visible`、设备节点、
 架构、实际命令和返回码；没有同合同 baseline 时性能写 `NOT_EVALUATED`。
+
 具体 tile、flag、局部命名、binary hash 和单机告警保留在项目记录，不上升为
 Skill 常量。
 
