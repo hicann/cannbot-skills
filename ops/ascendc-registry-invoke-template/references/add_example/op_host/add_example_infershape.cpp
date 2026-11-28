@@ -37,6 +37,6 @@ static ge::graphStatus InferShape4AddExample(gert::InferShapeContext* context)
     return ge::GRAPH_SUCCESS;
 }
 
-IMPL_OP_INFERSHAPE(AddExample).InferShape(InferShape4AddExample);
+IMPL_OP_INFERSHAPE(AddExample).InferShape(InferShape4AddExample).InferOutDataTypeSameWithFirstInput();
 
 } // namespace ops

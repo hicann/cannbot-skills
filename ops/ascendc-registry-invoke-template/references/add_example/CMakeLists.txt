@@ -47,6 +47,8 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/op_graph")
     add_subdirectory(op_graph)
 endif()
 
+add_subdirectory(framework)
+
 # =============================================================================
 # IMPORTANT: cmake's default 'all' target does NOT build 'binary'!
 # To build kernel binary, use one of:
