@@ -363,6 +363,13 @@ def _load_module(path, name):
     return mod
 
 
+def measurement_inputs_path(op_dir):
+    """A separate profiling fixture can coexist with the Stage 4 case generator."""
+    folder = os.path.join(op_dir, "eval")
+    path = os.path.join(folder, "panko_inputs.py")
+    return path if os.path.isfile(path) else os.path.join(folder, "test_inputs.py")
+
+
 def _build_run_once(op_dir, op, op_file, device, inputs_file=None):
     """Convention: `custom/<op>/eval/test_inputs.py` exposes `build_inputs()` (or `INPUTS`) giving
     the args for the wrapper `op`. `op_file` accepts a path or an already imported module.
@@ -402,7 +409,7 @@ def _build_run_once(op_dir, op, op_file, device, inputs_file=None):
         inputs_file
         if isinstance(inputs_file, types.ModuleType)
         else _load_module(
-            inputs_file or os.path.join(op_dir, "eval", "test_inputs.py"), "test_inputs"
+            inputs_file or measurement_inputs_path(op_dir), "test_inputs"
         )
     )
     builder = getattr(ti, "build_inputs", None)
@@ -442,6 +449,12 @@ def main():
         "campaign's recorded latencies.",
     )
     a = ap.parse_args()
+    # Only this measurement process enables profiling. The correctness gate and
+    # the source snapshot delivered by the controller use the production kernel.
+    import pypto
+
+    sys.path.insert(0, os.path.abspath(a.op_dir))
+    pypto.set_debug_options(runtime_debug_mode=1)
     run_once = _build_run_once(a.op_dir, a.op, a.op_file, a.device, a.inputs)
     jsonio.emit(measure(run_once, a.warmup, a.runs, a.agg, op_dir=a.op_dir))
 

@@ -70,12 +70,16 @@ def execute(config, argv):
             os.environ.clear()
             os.environ.update(previous[3])
     result = dict(returncode=code, stdout=stdout.getvalue(), stderr=stderr.getvalue())
-    if code == 0 and argv and argv[0] == "record":
-        result["terminal"] = complete_stop(config)
-    elif code == 0 and argv and argv[0] == "stop":
+    if code != 0 or not argv or "--help" in argv or "-h" in argv:
+        return result
+    if argv[0] == "stop":
         verdict = json.loads(result["stdout"])
         result["finished"] = verdict["stop"]
         result["terminal"] = complete_stop(config, verdict)
+    elif argv[0] in ("init", "record") or (
+        argv[0] == "block" and not json.loads(result["stdout"]).get("code_hash")
+    ):
+        result["terminal"] = complete_stop(config)
     return result
 
 
@@ -94,7 +98,6 @@ def complete_stop(config, verdict=None):
             or not verdict.get("delivered_is_best")
         ):
             return None
-        harness.cmd_report(arguments)
     state = harness.load(config["op_dir"])
     terminal = dict(
         directive="STOP",
@@ -103,9 +106,14 @@ def complete_stop(config, verdict=None):
         delivered_code_hash=verdict.get("delivered_code_hash"),
     )
     path = Path(config["op_dir"]) / "optimization" / "controller-terminal.json"
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps(terminal))
-    temporary.replace(path)
+    try:
+        recorded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        recorded = None
+    if recorded != terminal:
+        with contextlib.redirect_stdout(io.StringIO()):
+            harness.cmd_report(arguments)
+        session_worker.write_json(path, terminal)
     return terminal
 
 

@@ -33,6 +33,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 import evaluation_session
@@ -40,6 +41,7 @@ import evaluation_session
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import jsonio  # noqa: E402
+from pypto_ast import device_only_helpers  # noqa: E402
 
 # The package needs `optuna`, which is a real dependency of the tile search and
 # of nothing else here. Absent, the search still runs with
@@ -52,7 +54,7 @@ import jsonio  # noqa: E402
 # alike, set every module to None, and let the run continue reporting
 # `tile_search: true` while the numbers were being chosen by the model instead.
 # Those are bugs and they must reach a traceback.
-OPTUNA_MIN_VERSION = (2, 0)  # `create_trial` / `add_trial`; developed against 4.9
+OPTUNA_MIN_VERSION = (2, 7)  # Fixed-distribution ask and Python 3.10 NumPy support.
 
 
 def _read_text(path, errors="replace"):
@@ -127,7 +129,7 @@ def bayesian_capability():
             "reason": (
                 f"optuna {version} < "
                 f"{'.'.join(str(x) for x in OPTUNA_MIN_VERSION)}; "
-                "the tile search needs trial.create_trial / study.add_trial"
+                "the tile search needs Study.ask(fixed_distributions) and Python 3.10-compatible dependencies"
             ),
         }
     return {"available": True, "optuna_version": version, "reason": None}
@@ -664,14 +666,7 @@ def _semantic_noop(st, op_dir, op_file, parent=None):
 
 
 def _op_file(st, op_dir):
-    """The working impl file to snapshot/restore. Prefer the explicit path stored at init;
-    fall back to <op_dir>/<op>_impl.py (the standard convention).
-    """
-    f = st.get("op_file")
-    if f:
-        return f
-    op = st.get("op")
-    return os.path.join(op_dir, f"{op}_impl.py") if op else None
+    return evaluation_session.resolve_op_file(op_dir, st.get("op"), st.get("op_file"))
 
 
 def _best_hash(st):
@@ -689,11 +684,22 @@ def _snapshot(op_dir, op_file, code_hash):
     """
     if not op_file or not code_hash or not os.path.exists(op_file):
         return False
+    temporary = None
     try:
         os.makedirs(_ndir(op_dir), exist_ok=True)
-        shutil.copyfile(op_file, _npath(op_dir, code_hash))
+        with tempfile.NamedTemporaryFile(dir=_ndir(op_dir), delete=False) as scratch:
+            temporary = scratch.name
+            with open(op_file, "rb") as source:
+                shutil.copyfileobj(source, scratch)
+        if _file_hash(temporary) != code_hash:
+            return False
+        os.replace(temporary, _npath(op_dir, code_hash))
+        temporary = None
     except OSError:
         return False
+    finally:
+        if temporary is not None:
+            os.unlink(temporary)
     return True
 
 
@@ -1344,7 +1350,7 @@ def _block_search(a, st, ctx, cfg):
     )
 
 
-def _block_apply_winner(st, ctx, result):
+def _block_apply_winner(a, st, ctx, result):
     """Write the winning tile config into the op_file, if the block found one."""
     if not result.get("best_config") or result.get("best_was_incumbent"):
         return
@@ -1354,10 +1360,11 @@ def _block_apply_winner(st, ctx, result):
     winner_hash = hashlib.sha256(new_src.encode("utf-8")).hexdigest()
     with open(ctx["op_file"], "w", encoding="utf-8") as f:
         f.write(new_src)
-    # Left OUT of the cache on purpose: `record` must see it as new, so it charges
-    # the one remaining evaluation and runs the ratchet.
-    st.setdefault("eval_cache", {}).pop(winner_hash, None)
+    _snapshot(a.op_dir, ctx["op_file"], winner_hash)
+    # An uncached winner is pending until `record` applies it to the ratchet.
+    winner_eval = st.setdefault("eval_cache", {}).pop(winner_hash, {})
     ctx["winner_hash"] = winner_hash
+    ctx["winner_metrics"] = winner_eval.get("m", {})
 
 
 def _block_fold(a, st, ctx, result, cfg):
@@ -1412,6 +1419,7 @@ def _block_fold(a, st, ctx, result, cfg):
             "device_trials": device_trials,
             "charged_now": ctx["charged"],
             "winner_hash": ctx["winner_hash"],
+            "winner_metrics": ctx.get("winner_metrics", {}),
             "started_at": ctx["started_at"],
             "ended_at": datetime.datetime.now(datetime.timezone.utc).isoformat(
                 timespec="seconds"
@@ -1498,7 +1506,7 @@ def _block_payload(a, ctx, result):
                 "resident at once), not a bound: count them and pass it."
             ),
             "note": (
-                "the winner is already written to the op_file and NOT yet charged; "
+                "the winner is already written to the op_file; "
                 "call `record` with this code_hash, s=1 and best_latency as p. "
                 "Do not dispatch the coder and do not re-measure."
             )
@@ -1506,6 +1514,38 @@ def _block_payload(a, ctx, result):
             else None,
         }
     )
+
+
+def _pending_block_winner(st):
+    """Return the last measured BO result until `record` consumes it."""
+    blocks = st.get("blocks")
+    if not blocks or st["progress"].get("stop_reason"):
+        return None
+    block = blocks[-1]
+    winner = block.get("winner_hash")
+    if winner and winner not in st.get("eval_cache", {}):
+        return block
+    return None
+
+
+def _refuse_pending_block_winner(st, **result):
+    winner = _pending_block_winner(st)
+    if winner is None:
+        return
+    out(
+        dict(
+            result,
+            refused=True,
+            error="block_winner_pending",
+            pending_record={
+                "parent": winner["action"],
+                "code_hash": winner["winner_hash"],
+                "s": 1,
+                "p": winner["best_latency"],
+            },
+        )
+    )
+    raise Refusal(3)
 
 
 def cmd_block(a):
@@ -1522,6 +1562,13 @@ def cmd_block(a):
     the pair (structure, tile) rather than a tile on its own.
     """
     st = load(a.op_dir)
+    _refuse_pending_block_winner(st, ran=False)
+    _refuse_if_search_stopped(st, a, ran=False)
+    pending = st["progress"].get("pending_code")
+    if pending:
+        digest = _file_hash(_op_file(st, a.op_dir))
+        if not pending["coder"] or digest != pending["base_hash"]:
+            _require_dispatched_code(st, a.parent, digest)
     cfg = st["config"]
     if bayesian is None or not cfg.get("bayesian_optimization_tile_search", False):
         out(
@@ -1560,7 +1607,7 @@ def cmd_block(a):
     if a.live_tiles:
         st["live_tiles"] = a.live_tiles
     result = _block_search(a, st, ctx, cfg)
-    _block_apply_winner(st, ctx, result)
+    _block_apply_winner(a, st, ctx, result)
     _block_fold(a, st, ctx, result, cfg)
     save(a.op_dir, st)
     _block_log(a, st, ctx, result)
@@ -1884,6 +1931,7 @@ def _init_state(a, cfg, opening):
         # The host wrapper as it stands at the baseline. Frozen for the run:
         # see `wrapper_signature`.
         "wrapper_signature": wrapper_signature(opening["source"]),
+        "wrapper_signature_version": 2,
     }
     st["nodes"]["held"] = []
     return st
@@ -2021,12 +2069,22 @@ def cmd_init(a):
     cfg = dict(DEFAULT_CONFIG)
     if a.config:
         cfg.update(json.loads(a.config))
+    budget = cfg["eval_budget"]
+    if budget is not None and (type(budget) is not int or budget < 1):
+        out(
+            {
+                "initialized": False,
+                "error": "invalid_eval_budget",
+                "reason": "eval_budget must be a positive integer including the baseline, or null",
+            }
+        )
+        raise Refusal(3)
     opening = {
         "cv": _init_code_version(a),
         "capability": _init_capability(cfg),
         "envelope": _init_envelope(a),
     }
-    op_file = a.op_file or os.path.join(a.op_dir, f"{a.op}_impl.py")
+    op_file = evaluation_session.resolve_op_file(a.op_dir, a.op, a.op_file)
     opening["preopt_hash"] = _init_baseline_hash(a, op_file)
     with open(op_file, encoding="utf-8", errors="replace") as f:
         opening["source"] = f.read()
@@ -2255,8 +2313,96 @@ def _restore_or_refuse(a, restore_hash, op_f):
     raise Refusal(3)
 
 
+def _remember_code(st, action_id, intent, proposal=None):
+    """Save the CODE handoff alongside the controller transition that issued it."""
+    refinement = st["progress"].get("refine") or {}
+    incumbent = refinement.get("best") or {}
+    handoff = {
+        "action_id": action_id,
+        "intent": intent,
+        "base_hash": incumbent.get("code_hash") or _best_hash(st),
+        "coder": True,
+    }
+    if proposal and proposal.get("applied"):
+        handoff.update(coder=False, candidate_hash=proposal["code_hash"])
+    st["progress"]["pending_code"] = handoff
+    return handoff
+
+
+def cmd_handoff(a):
+    """Persist a model-chosen variation on the current open refinement."""
+    st = load(a.op_dir)
+    _refuse_pending_block_winner(st, selected=None)
+    _refuse_if_search_stopped(st, a, selected=None)
+    progress = st["progress"]
+    pending = progress.get("pending_code")
+    if pending:
+        if pending["action_id"] != a.parent or pending["intent"] != a.intent:
+            out(dict(refused=True, error="code_pending", pending_code=pending))
+            raise Refusal(3)
+    else:
+        active = progress.get("refine") or {}
+        if active.get("action") != a.parent or not a.intent.strip():
+            out(dict(refused=True, error="no_matching_refinement"))
+            raise Refusal(3)
+        pending = _remember_code(st, a.parent, a.intent)
+        save(a.op_dir, st)
+    out(pending)
+
+
+def _reject_code(error, pending=None):
+    out(dict(refused=True, error=error, pending_code=pending))
+    raise Refusal(3)
+
+
+def cmd_ack_code(a):
+    """The editor acknowledges the controller's exact intent and the bytes it edited."""
+    st = load(a.op_dir)
+    _refuse_if_search_stopped(st, a, acknowledged=False)
+    pending = st["progress"].get("pending_code")
+    if not pending or not pending["coder"] or pending["action_id"] != a.parent:
+        _reject_code("no_matching_manual_code", pending)
+    if pending["intent"] != a.intent or pending["base_hash"] != a.base_hash or not a.summary.strip():
+        _reject_code("code_intent_mismatch", pending)
+    op_file = _op_file(st, a.op_dir)
+    digest = _file_hash(op_file)
+    if not digest or digest == pending["base_hash"]:
+        _reject_code("candidate_unchanged", pending)
+    if pending.get("candidate_hash"):
+        if pending["candidate_hash"] != digest:
+            _reject_code("acknowledged_code_changed", pending)
+    else:
+        if not _snapshot(a.op_dir, op_file, digest):
+            _reject_code("snapshot_failed", pending)
+        pending.update(candidate_hash=digest, summary=a.summary)
+        save(a.op_dir, st)
+    out(pending)
+
+
+def _require_dispatched_code(st, parent, digest):
+    pending = st["progress"].get("pending_code")
+    if not pending:
+        if st["config"].get("checkpoint_handoffs"):
+            _reject_code("code_handoff_required")
+        return
+    if pending["action_id"] != parent:
+        _reject_code("code_pending", pending)
+    if not digest or pending.get("candidate_hash") != digest:
+        _reject_code("code_ack_required", pending)
+
+
 def cmd_select(a):
     st = load(a.op_dir)
+    _refuse_pending_block_winner(st, selected=None)
+    _refuse_if_search_stopped(st, a, selected=None)
+    checkpoint = getattr(a, "resume", False) or st["config"].get("checkpoint_handoffs", False)
+    pending = st["progress"].get("pending_code")
+    if pending:
+        if checkpoint:
+            out({"pending_code": pending})
+            return
+        out(dict(refused=True, error="code_pending", pending_code=pending))
+        raise Refusal(3)
     _refuse_if_action_open(st)
     active = st["progress"]["active_stage"]
     staged = st["config"]["staged_prior"]
@@ -2292,6 +2438,9 @@ def cmd_select(a):
     proposal = _tile_bayes_propose(st, a.op_dir, best)
     if proposal:
         payload["bayesian_optimization"] = proposal
+    if checkpoint:
+        st["config"]["checkpoint_handoffs"] = True
+        payload["pending_code"] = _remember_code(st, best["id"], best["delta"], proposal)
     save(a.op_dir, st)
     out(payload)
 
@@ -2650,22 +2799,71 @@ def _halt_on_broken_chain(a, st, payload, chain_error, op_file):
     raise Refusal(3)
 
 
+def _settle_block_winner(a, st, winner):
+    if (
+        a.parent != winner["action"]
+        or a.code_hash != winner["winner_hash"]
+        or a.s != 1
+        or a.p != winner["best_latency"]
+    ):
+        _refuse_pending_block_winner(st, improved=False)
+
+    charge = winner["device_trials"] - winner["charged_now"]
+    pr = st["progress"]
+    budget = st["config"]["eval_budget"]
+    if budget is not None and pr["evals_used"] + charge > budget:
+        out(dict(improved=False, refused=True, error="block_winner_budget_mismatch"))
+        raise Refusal(3)
+    op_file = _op_file(st, a.op_dir)
+    if _file_hash(op_file) != a.code_hash and (
+        _file_hash(_npath(a.op_dir, a.code_hash)) != a.code_hash
+        or not _restore(a.op_dir, op_file, a.code_hash)
+    ):
+        out(dict(improved=False, refused=True, error="restore_failed", code_hash=a.code_hash))
+        raise Refusal(3)
+
+    # The block has already paid for this result, even if the ratchet rejects it.
+    pr["evals_used"] += charge
+    st["eval_cache"][a.code_hash] = dict(s=a.s, p=a.p, m=winner.get("winner_metrics", {}))
+
+
+def _take_record_handoff(a, st, winner):
+    """Only a measured BO winner may replace the bytes acknowledged by an editor."""
+    progress = st["progress"]
+    if winner is None:
+        _refuse_if_search_stopped(st, a, improved=False)
+        _require_dispatched_code(st, a.parent, a.code_hash)
+        pending = progress.get("pending_code")
+        if pending and _file_hash(_op_file(st, a.op_dir)) != a.code_hash:
+            _reject_code("candidate_changed_since_ack", pending)
+    else:
+        _settle_block_winner(a, st, winner)
+    return progress.pop("pending_code", None)
+
+
 def cmd_record(a):
     """One candidate evaluated inside local refinement of action `parent`."""
     st = load(a.op_dir)
     pr = st["progress"]
+    expected_start = getattr(a, "run_start", None)
+    if expected_start is not None and expected_start != pr.get("_start_ts"):
+        out(dict(refused=True, error="stale_run"))
+        raise Refusal(3)
     j = compute_j(a.s, a.p, st["target"]["P_ref"])
     cache = st.setdefault(
         "eval_cache", {}
     )  # memoize E(x) by code_hash (write-once = deterministic)
 
-    if _record_duplicate(a, st, pr, cache):
+    winner = _pending_block_winner(st)
+    pending = _take_record_handoff(a, st, winner)
+    if winner is None and _record_duplicate(a, st, pr, cache):
         return
     if _record_semantic_noop(a, st, pr, j):
         return
     _record_wrapper_drift(a, st, pr)
 
-    pr["evals_used"] += 1
+    if winner is None:
+        pr["evals_used"] += 1
     # A block winner is promoted through this path deliberately (so the ratchet
     # runs in exactly one place), but the block measured it and the CLI call
     # that promotes it carries no reading. Recover it from the block record
@@ -2677,6 +2875,10 @@ def cmd_record(a):
         _cli_pipes(a),
     )
     cache[a.code_hash] = {"s": a.s, "p": a.p, "m": m_eval}
+    if pending and pending.get("candidate_hash"):
+        st.setdefault("code_handoffs", []).append(dict(
+            pending, evaluated_hash=a.code_hash, through_block=winner is not None,
+        ))
     # Only now. Above this line the candidate may have been a byte-identical
     # resubmission, which is not a measurement of anything: telling the study a
     # value for a program it did not propose would poison the surrogate with a
@@ -2694,7 +2896,11 @@ def cmd_record(a):
     # guessing at tile numbers -- so `stagnation_K` would count the model's
     # guesses rather than BO trials, and six evaluations in seven would be
     # spent on exactly the thing the lever exists to replace.
-    proposal = None if stop_refine else _bayes_next(st, a.op_dir, a.parent)
+    proposal = None
+    if not stop_refine and not _stop_condition(st, a):
+        proposal = _bayes_next(st, a.op_dir, a.parent)
+    if pending and proposal and proposal.get("applied"):
+        _remember_code(st, a.parent, proposal.get("label") or a.parent, proposal)
     save(a.op_dir, st)
     verdict = "kept" if improved else ("tied" if (a.s and j == bar) else "reverted")
     append_log(
@@ -2736,6 +2942,7 @@ def _refine_and_bound(st, pr, parent, field):
 
 def _rollback(a, st, r):
     """Roll the working file back to the incumbent, as a measured regression would."""
+    st["progress"].pop("pending_code", None)
     _restore(
         a.op_dir,
         _op_file(st, a.op_dir),
@@ -2913,11 +3120,17 @@ def cmd_feasible(a):
     while a false acceptance costs one evaluation.
     """
     st = load(a.op_dir)
+    _refuse_pending_block_winner(st, feasible=False)
+    _refuse_if_search_stopped(st, a, feasible=False)
     pr = st["progress"]
     op_f = a.op_file or _op_file(st, a.op_dir)
+    if st["config"].get("checkpoint_handoffs"):
+        _require_dispatched_code(st, a.parent, _file_hash(op_f))
     retune = _retune_verdict(st, op_f)
 
     if _reject_semantic_noop(a, st, pr, op_f, retune):
+        return
+    if _reject_wrapper_drift(a, st, pr, op_f, retune):
         return
 
     if not st["config"].get("static_feasibility", True) or feasibility is None:
@@ -2932,8 +3145,6 @@ def cmd_feasible(a):
         m_l1=a.m_l1,
         k_l1=a.k_l1,
     )
-    if _reject_wrapper_drift(a, st, pr, op_f, retune):
-        return
     ok, why = feasibility.check(op_f, hw)
     if ok:
         out({"feasible": True, "reason": "", "checked": True, **retune})
@@ -3031,8 +3242,8 @@ def merge_refusals(rows, observed, structure, promote_after=REFUSAL_GLOBAL_AFTER
     return rows
 
 
-def wrapper_signature(src):
-    """Hash of everything in the file that is NOT a `@...jit` kernel.
+def wrapper_signature(src, version=2):
+    """Hash the host code surrounding the measured JIT region.
 
     The host wrapper is FROZEN for the whole run, and this is what enforces it.
 
@@ -3057,10 +3268,10 @@ def wrapper_signature(src):
     deliberate erring, since the alternative is deciding which statements are
     "work" and a module constant feeding the wrapper's padding is work.
 
-    Top-level jit functions are what this excludes. A kernel nested inside a
-    class or a factory would be hashed as wrapper, which would make every tile
-    rewrite look like drift -- no kernel in this repository is written that way,
-    and the check says so rather than guessing.
+    A top-level JIT entry can delegate its computation to Layer I and Layer H
+    functions. Their bodies may change when called exclusively by the kernel.
+    Their signatures and any helpers shared with the host stay frozen. Version
+    1 is the original boundary used by previously initialized campaigns.
 
     Returns None when the file does not parse -- callers treat that as "cannot
     tell" and say so, rather than passing a candidate the check never ran on.
@@ -3075,7 +3286,11 @@ def wrapper_signature(src):
             n, (ast.FunctionDef, ast.AsyncFunctionDef)
         ) and _decorated_jit(n)
 
-    shell = [n for n in tree.body if not _is_kernel(n)]
+    kernels = {node for node in tree.body if _is_kernel(node)}
+    if version == 2:
+        for helper in device_only_helpers(tree, kernels):
+            helper.body = []
+    shell = [node for node in tree.body if node not in kernels]
     dumped = ast.dump(ast.Module(body=shell, type_ignores=[]))
     return hashlib.sha256(dumped.encode("utf-8")).hexdigest()
 
@@ -3098,7 +3313,7 @@ def _wrapper_drift(st, path):
     if not want:
         return ""  # pre-dates the check; nothing to compare
     try:
-        got = wrapper_signature(_read_text(path))
+        got = wrapper_signature(_read_text(path), st.get("wrapper_signature_version", 1))
     except OSError:
         return ""
     if got is None:
@@ -3437,17 +3652,10 @@ def _advance_stage(st, pr):
     pr["stage_stagnation"] = 0
 
 
-def cmd_close(a):
-    """Attach the refinement's best candidate as a CLOSED node; update global best."""
-    st = load(a.op_dir)
-    pr = st["progress"]
-    _refuse_close(a, st, pr)
-    r = pr.get("refine")
-    if not r or r.get("action") != a.action or r["best"] is None:
-        _close_without_candidate(a, st, pr, r)
-        return
+def _attach_refinement_best(a, st, pr, r):
+    """Commit the measured local best on action close or campaign termination."""
     b = r["best"]
-    act = next((n for n in st["nodes"]["open"] if n["id"] == a.action), None)
+    act = next((n for n in st["nodes"]["open"] if n["id"] == r["action"]), None)
     stage = act["stage"] if act else pr["active_stage"]
     reboosted = []
     cid = _next_id(st, "x")
@@ -3463,7 +3671,7 @@ def cmd_close(a):
     )
     remaining = []
     for n in st["nodes"]["open"]:
-        if n["id"] != a.action:
+        if n["id"] != r["action"]:
             remaining.append(n)
     st["nodes"]["open"] = remaining  # consumed
     if b["J"] > pr["best_J"]:
@@ -3473,6 +3681,21 @@ def cmd_close(a):
         pr["stage_stagnation"] += 1
     _advance_stage(st, pr)
     pr["refine"] = None
+    return cid, reboosted
+
+
+def cmd_close(a):
+    """Attach the refinement's best candidate as a CLOSED node; update global best."""
+    st = load(a.op_dir)
+    pr = st["progress"]
+    _refuse_close(a, st, pr)
+    pr.pop("pending_code", None)
+    r = pr.get("refine")
+    if not r or r.get("action") != a.action or r["best"] is None:
+        _close_without_candidate(a, st, pr, r)
+        return
+    b = r["best"]
+    cid, reboosted = _attach_refinement_best(a, st, pr, r)
     save(a.op_dir, st)
     # leave the working file AT this action's best (= the new running best when it improved).
     _restore(a.op_dir, _op_file(st, a.op_dir), b["code_hash"])
@@ -3566,6 +3789,9 @@ def _apply_prunes(st, a, op_nodes, edits):
             n["pruned_on"] = sig
     st["nodes"]["open"] = [n for n in op_nodes if n["id"] not in permanent]
     st["nodes"]["pruned"] = sorted(set(st["nodes"].get("pruned", [])) | permanent)
+    pending = st["progress"].get("pending_code") or {}
+    if pending.get("action_id") in permanent | conditional:
+        st["progress"].pop("pending_code")
     return permanent, conditional, ignored_held, unknown, sig
 
 
@@ -3852,7 +4078,8 @@ def _device_verdict(st, a):
 def _stop_condition(st, a):
     """The first halt condition that has fired, or None."""
     pr, cfg = st["progress"], st["config"]
-    if pr["best_J"] >= 100:
+    local_best = (pr.get("refine") or {}).get("best")
+    if pr["best_J"] >= 100 or (local_best and local_best["J"] >= 100):
         return "success"
     if pr.get("converged"):
         return "converged"
@@ -3861,9 +4088,9 @@ def _stop_condition(st, a):
     if cfg.get("eval_budget") and pr["evals_used"] >= cfg["eval_budget"]:
         return "eval_budget"
     if (
-        not _live(st, a.op_dir)
+        pr.get("expansion_declined")
         and not pr.get("refine")
-        and pr.get("expansion_declined")
+        and not _live(st, a.op_dir)
     ):
         return "frontier_exhausted"
     if (
@@ -3872,6 +4099,15 @@ def _stop_condition(st, a):
     ):
         return "global_stagnation"
     return None
+
+
+def _refuse_if_search_stopped(st, a, **result):
+    """Send the caller to the controller's stop command before another candidate."""
+    reason = st["progress"].get("stop_reason") or _stop_condition(st, a)
+    if reason is None:
+        return
+    out(dict(result, refused=True, error="stop_required", reason=reason))
+    raise Refusal(3)
 
 
 def _deliver_best(st, a):
@@ -3924,9 +4160,12 @@ def _record_probe(st, a, probe):
 
 def cmd_stop(a):
     st = load(a.op_dir)
+    _refuse_pending_block_winner(st, stop=False)
     pr = st["progress"]
     pr["wall_clock_s"] = int(time.time() - pr["_start_ts"])
-    reason, probe = _device_verdict(st, a)
+    reason, probe = pr.get("stop_reason"), None
+    if reason is None:
+        reason, probe = _device_verdict(st, a)
     if reason is None:
         reason = _stop_condition(st, a)
     if reason is None and getattr(a, "force", ""):
@@ -3938,7 +4177,11 @@ def cmd_stop(a):
         reason = a.force
         pr["forced_stop"] = True
     if reason is not None:
+        refinement = pr.get("refine")
+        if refinement and refinement.get("best") and refinement["best"]["J"] > pr["best_J"]:
+            _attach_refinement_best(a, st, pr, refinement)
         _deliver_best(st, a)
+        pr.pop("pending_code", None)
         pr["stop_reason"] = reason  # sticky; the Stage-7 completion gate reads this
         evaluation_session.close_session(a.op_dir)
     if probe is not None:
@@ -4167,6 +4410,23 @@ def _parser_select(sub):
     q = sub.add_parser("select")
     q.set_defaults(fn=cmd_select)
     q.add_argument("--op-dir", required=True)
+    q.add_argument(
+        "--resume", action="store_true", help="reuse a pending CODE and preserve the working source",
+    )
+
+    q = sub.add_parser("handoff", help="checkpoint the next CODE intent on an open refinement")
+    q.set_defaults(fn=cmd_handoff)
+    q.add_argument("--op-dir", required=True)
+    q.add_argument("--parent", required=True)
+    q.add_argument("--intent", required=True)
+
+    q = sub.add_parser("ack-code", help="bind a manual edit to the selected action and snapshot")
+    q.set_defaults(fn=cmd_ack_code)
+    q.add_argument("--op-dir", required=True)
+    q.add_argument("--parent", required=True)
+    q.add_argument("--intent", required=True)
+    q.add_argument("--base-hash", required=True)
+    q.add_argument("--summary", required=True)
 
 
 def _parser_record(sub):
@@ -4176,6 +4436,7 @@ def _parser_record(sub):
     q.add_argument("--op-dir", required=True)
     q.add_argument("--parent", required=True)
     q.add_argument("--code-hash", dest="code_hash", required=True)
+    q.add_argument("--run-start", type=float, help="only settle the search generation that issued this measurement")
     q.add_argument("--s", type=int, required=True)
     q.add_argument("--p", type=float, default=0.0)
     # None, NOT 0.0. A reading that was never taken and a kernel that genuinely

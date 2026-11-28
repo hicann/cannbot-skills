@@ -89,7 +89,8 @@ def dtype_bytes_table():
     members = getattr(pypto, "DataType", None) if pypto is not None else None
     width_of = getattr(pypto, "bytes_of", None) if pypto is not None else None
     if members is not None and callable(width_of):
-        for member in members:
+        named = getattr(members, "__members__", None)
+        for member in named.values() if named is not None else members:
             width = _quietly(width_of, member)
             if isinstance(width, int) and width > 0:
                 table[member.name] = width
@@ -189,9 +190,12 @@ def _read_vec_tiles(node, env, info):
 
 def _read_cube_tiles(node, env, info):
     """`set_cube_tile_shapes(...)`, on the same all-or-nothing terms."""
-    groups = [_const_list(a, env) for a in node.args]
-    if groups and all(g for g in groups):
-        info["cube_tiles"].append(groups)
+    axes = ("m", "k", "n")
+    arguments = dict(zip(axes, node.args))
+    arguments.update((kw.arg, kw.value) for kw in node.keywords if kw.arg in axes)
+    m, k, n = (_const_list(arguments.get(axis), env) or [] for axis in axes)
+    if len(m) == 2 and len(k) in (2, 3) and len(n) == 2:
+        info["cube_tiles"].append([m, k, n])
     else:
         info["unresolved_cube"] = info.get("unresolved_cube", 0) + 1
 
@@ -291,25 +295,19 @@ def _vec_rules(info, hw):
 def _cube_rules(info, hw):
     db = info["dtype_bytes"]
     for groups in info["cube_tiles"]:
-        flat = []
-        for g in groups:
-            flat.extend(g)
-        for d in flat:
-            if d % 16 != 0:
-                return False, f"cube tile dim {d} is not 16-aligned"
+        # PyPTO aligns K and N at L0. M alignment depends on layout and transA,
+        # which a tile declaration alone cannot establish.
+        for axis, levels, limit in zip("mkn", groups, (hw.m_l1, hw.k_l1, hw.n_l1)):
+            l0 = levels[0]
+            if l0 <= 0 or any(l1 < l0 or l1 % l0 for l1 in levels[1:]):
+                return False, f"invalid {axis} cube L0/L1 sizes {levels}"
+            if axis in ("k", "n") and l0 % 16:
+                return False, f"{axis}L0={l0} is not 16-aligned"
+            if limit is not None and (l0 > limit or limit % l0):
+                return False, f"{axis}L0={l0} does not divide the configured {axis}L1={limit}"
         if hw.m_l1 is None or hw.k_l1 is None:
-            continue  # uncalibrated: alignment only
-        m, k = groups[0][0], groups[0][1]
-        if m > hw.m_l1:
-            return False, f"mL0={m} > mL1={hw.m_l1}"
-        if hw.m_l1 % m != 0:
-            return False, f"mL1={hw.m_l1} not divisible by mL0={m}"
-        if k > hw.k_l1:
-            return False, f"kL0={k} > kL1={hw.k_l1}"
-        if hw.k_l1 % k != 0:
-            return False, f"kL1={hw.k_l1} not divisible by kL0={k}"
-        n = groups[1][1] if len(groups) > 1 and len(groups[1]) > 1 else k
-        est_kb = (m * k + k * n) * db / 1024.0
+            continue
+        est_kb = _l1_kb(groups, db)
         if est_kb > hw.l1_budget_kb:
             return False, (f"L1 estimate {est_kb:.0f}KB > budget {hw.l1_budget_kb}KB")
     return True, ""
@@ -358,15 +356,12 @@ def ub_occupancy(path, hw=None):
 
 
 def _l1_kb(groups, db):
-    """L1 footprint of one cube call: the two operands the gate already charges.
-
-    L0A is [m_l0, k_l0] and L0B is [k_l0, n_l0]; L0C is an accumulator and is not
-    staged through the same budget. This is the identical expression used by
-    `_cube_rules` to REJECT -- read in the other direction.
-    """
-    m, k = groups[0][0], groups[0][1]
-    n = groups[1][1] if len(groups) > 1 and len(groups[1]) > 1 else k
-    return (m * k + k * n) * db / 1024.0
+    """L1 holds A[mL1, kL1a] and B[kL1b, nL1] in aligned tiles."""
+    m, k, n = groups
+    # A two-value K tile uses the same L1 size for both operands.
+    l1_sizes = (m[1], k[1], k[-1], n[1])
+    m_l1, k_l1a, k_l1b, n_l1 = ((size + 15) // 16 * 16 for size in l1_sizes)
+    return (m_l1 * k_l1a + k_l1b * n_l1) * db / 1024.0
 
 
 def l1_occupancy(path, hw=None):

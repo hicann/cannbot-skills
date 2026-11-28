@@ -61,6 +61,24 @@ def demo_wrapper(x):
 """
 
 
+LAYERED = """import pypto
+
+def layer_h(x):
+    return pypto.add(x, x)
+
+def layer_i(x):
+    pypto.set_vec_tile_shapes(64, 128)
+    return layer_h(x)
+
+@pypto.frontend.jit()
+def demo_kernel(x):
+    return layer_i(x)
+
+def demo_wrapper(x):
+    return demo_kernel(x)
+"""
+
+
 class WrapperSignatureTest(unittest.TestCase):
     """What counts as the wrapper, and what does not."""
 
@@ -77,6 +95,23 @@ class WrapperSignatureTest(unittest.TestCase):
                 )
             )
         )
+
+    def test_layer_i_and_transitive_layer_h_are_kernel_code(self):
+        candidate = LAYERED.replace("64, 128", "32, 128").replace("pypto.add", "pypto.mul")
+        self.assertEqual(harness.wrapper_signature(LAYERED), harness.wrapper_signature(candidate))
+
+    def test_helper_referenced_from_host_is_frozen_transitively(self):
+        for host in ("def host(x): return layer_i(x)", "callback = layer_i",
+                     "def host(f=layer_i): return f"):
+            with self.subTest(host=host):
+                src = LAYERED + "\n" + host + "\n"
+                self.assertNotEqual(harness.wrapper_signature(src),
+                                    harness.wrapper_signature(src.replace("pypto.add", "pypto.mul")))
+
+    def test_device_helper_default_is_evaluated_on_the_host(self):
+        src = LAYERED.replace("def layer_h(x):", "def layer_h(x, limit=4):")
+        self.assertNotEqual(harness.wrapper_signature(src),
+                            harness.wrapper_signature(src.replace("limit=4", "limit=8")))
 
     def test_a_decorator_option_is_not_wrapper_drift(self):
         """pass_options / runtime_options live on the kernel's decorator."""
@@ -171,6 +206,25 @@ class WrapperFreezeGateTest(unittest.TestCase):
         )
         res, _ = self._run(*feasible_argv(self.op_dir, self.op_file))
         self.assertTrue(res["feasible"], res)
+
+    def test_disabling_static_hardware_checks_keeps_the_wrapper_frozen(self):
+        result, _ = self._run(*init_argv(
+            self.op_dir, self.op_file, *CHIP_ARGS, "--config", '{"static_feasibility":false}'
+        ))
+        self.assertTrue(result["initialized"], result)
+
+        self.op_file.write_text(
+            KERNEL.replace("torch.empty_like(x)", "torch.zeros_like(x)"), encoding="utf-8"
+        )
+        result, _ = self._run(*feasible_argv(self.op_dir, self.op_file))
+        self.assertFalse(result["feasible"])
+        self.assertFalse(result["wrapper_frozen"])
+        self.assertEqual(self._state()["progress"]["evals_used"], 1)
+
+        self.op_file.write_text(KERNEL.replace("64, 128", "32, 128"), encoding="utf-8")
+        result, _ = self._run(*feasible_argv(self.op_dir, self.op_file))
+        self.assertTrue(result["feasible"], result)
+        self.assertFalse(result["checked"])
 
     def test_record_discards_a_measurement_taken_on_a_drifted_wrapper(self):
         """`feasible` is the cheap gate and is not mandatory, so the ratchet

@@ -63,7 +63,7 @@ def worker_alive(session):
         return False
     pid = int((session / "pid").read_text())
     result = subprocess.run(
-        [shutil.which("ps"), "-p", str(pid), "-o", "args="],
+        [shutil.which("ps"), "-ww", "-p", str(pid), "-o", "args="],
         capture_output=True,
         text=True,
         check=False,

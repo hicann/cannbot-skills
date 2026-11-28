@@ -51,6 +51,7 @@ class SessionTests(unittest.TestCase):
     def config(self):
         return {k: getattr(self.evaluator, k) for k in evaluation_session.CONFIG_FIELDS}
 
+    @patch.dict("os.environ", COLUMNS="80")
     def test_worker_reuse_dependency_change_and_cleanup(self):
         self.assertEqual(evaluation_session.request(self.evaluator)["test_rc"], 2)
         first = self.session()

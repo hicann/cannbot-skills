@@ -128,7 +128,9 @@ class PreparedInputs:
 
     def measurement(self, config):
         """Guard reusable profiling inputs before the unchanged measurement routine."""
-        path = Path(config["op_dir"]) / "eval" / "test_inputs.py"
+        from measure_latency import measurement_inputs_path
+
+        path = Path(measurement_inputs_path(config["op_dir"]))
         if not path.exists():
             return None
         if self.inputs is None:

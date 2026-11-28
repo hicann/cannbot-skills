@@ -39,14 +39,14 @@ def demo(a, b):
     return a + b
 """
 
-# `cube tile dim 17 is not 16-aligned` -- a certain violation, which is the only
+# `kL0=17 is not 16-aligned` -- a certain violation, which is the only
 # kind the static gate is allowed to reject on.
 INFEASIBLE_KERNEL = """import pypto
 
 
 @pypto.frontend.jit(runtime_options={"device_sched_mode": 1})
 def demo(a, b):
-    pypto.set_cube_tile_shapes([128, 64], [17, 64], [128, 64])
+    pypto.set_cube_tile_shapes([128, 128], [17, 34], [64, 128])
     return a + b
 """
 
@@ -134,7 +134,7 @@ class RefineCounterTest(unittest.TestCase):
             "--op",
             "demo",
             "--p-ref",
-            "100",
+            "50",
             "--preopt-p",
             "100",
             "--preopt-hash",

@@ -12,6 +12,10 @@
 | **L0C** | 128 KB | **256 KB（翻倍）** | Cube 输出，决定基本块 Tiling 上限 |
 | **UB** | 192 KB | **248 KB（每 AIV 可用）** | Vector 工作区，每 AIV 独立一份，SIMT/SIMD 共享 |
 
+### Cube 对齐
+
+BF16/FP16 的 Cube 对齐单位 `CUBE_ALIGN = 16` 个元素。检查 `kL0` 和 `nL0` 的对齐，并在 `a_trans=True` 时检查 `mL0`。具体约束见 [TileShape 检查](../../pypto-general-debug/references/tile-shapes.md)。
+
 ### UB 容量口径说明
 
 - 950 白皮书表 4-2 标注 "UB 512 KB per AI Core"，实际按 **AI Core 组（1 AIC + 2 AIV）** 计物理容量：

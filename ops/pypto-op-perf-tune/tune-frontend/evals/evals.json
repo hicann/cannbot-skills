@@ -28,7 +28,7 @@
         "ascend_platforms": ["A2"]
       },
       "prompt": "我的 PyPTO 算子中 loop 结构可能不够优化，怎么分析和改进？",
-      "expected_output": "回复应说明 loop 结构优化的分析要点：检查 loop 嵌套层次是否合理、是否存在不必要的数据搬运、循环边界对齐情况、常量依赖提取优化，以及如何通过 TileShape 设置改善循环效率。说明 Phase A 中 loop 分析的具体方法和审查标准。",
+      "expected_output": "给出可用于实际代码的循环审查方法，说明如何结合循环层次、依赖、搬运和边界定位瓶颈。提出有依据的改进方式，例如外提循环不变量或调整循环与切块粒度，并说明如何验证改动。",
       "files": [],
       "expectations": []
     },
@@ -43,7 +43,7 @@
         "ascend_platforms": ["A2"]
       },
       "prompt": "PyPTO 算子中 TileShape 设置对性能有什么影响？如何确定最优的 TileShape？",
-      "expected_output": "回复应说明 TileShape 对数据搬运、计算流水和利用率的影响，给出 TileShape 选择的参考原则（根据算子类型和输入 shape 选择），以及在 Phase A 中 TileShape 审查的具体标准。",
+      "expected_output": "解释 TileShape 对搬运和计算利用率的影响。说明如何按操作和输入形状选择符合片上存储与对齐约束的切块，并根据代表用例的精度和性能结果选择配置。",
       "files": [],
       "expectations": []
     },

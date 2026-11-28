@@ -5,16 +5,21 @@ description: PyPTO 算子性能调优编排器。控制调优流程按固定顺�
 
 # PyPTO 算子性能调优编排器
 
-## 角色
+## 调优入口
 
-你是性能调优流程控制器（orchestrator）。你的唯一职责是确保调优流程按照固定顺序严格执行、迭代轮次完整执行、Todo 清单实时更新。
+正式调优从性能分析 `S2_COLLECT → S3_ANALYZE` 开始，采集性能数据、建立基线并定位瓶颈。分析前完成 `INIT` 的目标和用例准备，并通过 `S1_SETUP` 的环境与精度门禁。分析后按[三级状态机](#三级状态机)和本次轮次决定是否进入 `S4_TUNE`，最后在 `S5_REPORT` 交付结果。
 
-你不负责具体的优化建议或代码修改，只负责：
-1. 控制流程推进
-2. 校验每一步的完成条件
-3. 强制维护 Todo 清单
-4. 阻止跳跃执行
-5. 控制迭代轮次的完整执行
+- **新任务**。先确认算子目录和量化目标。按 INIT 准备主测用例、覆盖集和 `run_cases.py`，再进入 S1a 检查环境。S1b 使用已准备的运行入口验证精度。用调用方提供的配置或技能默认值补齐可推导的选项。
+- **续跑**。读取当前任务的 Todo、阶段交接和已有测试产物，核对验收记录后从首个尚未完成的阶段继续。记录不足时，确认影响下一步的进度和缺失输入。
+- **方案讨论**。以用户确认的状态为起点，说明接下来各阶段要取得的结果、推进条件和最终交付物。把实际验证留给执行阶段。
+
+### 编排与执行
+
+阶段执行角色根据调优点清单提出改动、实施并实测。编排器按 [Todo 管理规范](#todo-管理规范)核验证据，在每轮 `ITER_RECORD` 和阶段转移时更新进度、判定下一步。
+
+### 调优轮次
+
+`tune_rounds` 由调用方传入，缺省为 3。设为 0 时，完成环境与精度检查、基线采集和分析后直接进入 S5 回归并出报告。正轮次在进入 S4 前准备代表用例集、Tile 边界清单和 A4 议程，按[结构变更台账门控](#phase_summary_f-结构变更台账门控)分配外层预算。
 
 ### ⛔ 禁止自主判断铁律
 
@@ -26,7 +31,7 @@ description: PyPTO 算子性能调优编排器。控制调优流程按固定顺�
 | 是否继续下一轮 | **退出条件表**（达标/连续无提升阈值/清单全尝试） | 禁止凭"觉得差不多了"提前终止 |
 | 是否进入下一阶段 | **PHASE_SUMMARY 摘要完整性校验** | 禁止不做摘要直接推进 |
 | 是否跳过某个优化点 | **调优点清单中的分析结论**（如"❌不适用"须标注原因） | 禁止跳过未尝试的优化点 |
-| 是否进行第 2/3 轮外循环 | **外循环轮次计数器 n < 3** | 禁止跳过剩余轮次 |
+| 是否开始下一轮外循环 | **未达标且有剩余预算** | 禁止跳过剩余轮次 |
 
 **⛔ 所有流程推进必须基于状态机转移条件的硬性判断，禁止用"我认为"替代条件检查。**
 
@@ -34,28 +39,23 @@ description: PyPTO 算子性能调优编排器。控制调优流程按固定顺�
 
 ## 三级状态机
 
-调优流程是一个严格的三级状态机，只有一个方向，禁止回退或跳跃。
+调优流程按三级状态机推进。迭代回退和 FRONTEND 重审按各自的转移条件执行。
 
 ### 第一级：主流程状态机
 
 ```
-INIT → S1_SETUP → S2_COLLECT → S3_ANALYZE → S4_TUNE → S5_REPORT → DONE
+INIT → S1_SETUP → S2_COLLECT → S3_ANALYZE → S4_TUNE（正轮次）→ S5_REPORT → DONE
 ```
 
 ### 第二级：S4_TUNE 子阶段状态机
 
 ```
-S4_TUNE = PHASE_FRONTEND → PHASE_SUMMARY_F
-    → [PHASE_SWIMLANE_n → PHASE_SUMMARY_S_n → PHASE_INCORE_n → PHASE_SUMMARY_I_n] × ≤3
-    → S5_REPORT
-
-提前退出点：
-  PHASE_SUMMARY_F:       达标 → S5_REPORT
-  PHASE_SUMMARY_I_n (n=1,2): 达标 → S5_REPORT，未达标 → SWIMLANE_{n+1}
-  PHASE_SUMMARY_I_3:     无条件 → S5_REPORT
+FRONTEND → PHASE_SUMMARY_F → 按台账重审或开始下一轮
+每轮 SWIMLANE_n → PHASE_SUMMARY_S_n → INCORE_n → PHASE_SUMMARY_I_n
+任一摘要达标，或需要开始下一轮时预算已耗尽 → S5_REPORT
 ```
 
-每个 PHASE_SUMMARY 是独立状态，负责：1) 生成阶段交接摘要  2) 通过 Task 工具启动新 subagent 会话进行隔离
+每个 PHASE_SUMMARY 都是交接点。校验本阶段的实测和台账，将剩余预算及下一阶段记入 `MEMORY.md`。
 
 ### 第三级：每个 PHASE 内部的迭代循环
 
@@ -114,27 +114,74 @@ S4_TUNE = PHASE_FRONTEND → PHASE_SUMMARY_F
 
 ### 第一级状态转移表
 
-| 当前状态 | 完成条件 | 转移到 | 强制动作 | ⛔ state_transition 门控 |
+零轮使用已有测试完成精度检查，并采集和分析基线，直接进入 S5。下表的代表用例集、`run_cases.py`、S2 详细泳道采集和 S4 调优门禁适用于正轮次。
+
+| 当前状态 | 完成条件 | 转移到 | 强制动作 | 独立编排的 state_transition 门控 |
 |---------|---------|--------|---------|------------------------|
-| INIT | 用户已提供目标（如"提升X倍"/"≤X us"）或用户确认 | S1_SETUP | 记录目标到 Todo，计算目标执行时间 | 完成时调用 `state_transition(opDir, "complete_stage", 0)` |
-| S1_SETUP | 环境检查全部通过（见下方「环境检查清单」）+ 精度通过 | S2_COLLECT | ⛔ S1a 环境检查：逐项检查环境；⛔ S1b 精度校验：环境通过后运行精度校验；⛔ 全部通过后强制创建完整 Todo | S1a通过时调用 `state_transition(opDir, "start_stage", 1)`，全部通过后调用 `state_transition(opDir, "complete_stage", 1)` |
-| S2_COLLECT | swimlane.json 存在 + ⛔ S-20 检查完成（max_workspace_kb 已按 NPU 推荐值设置，host_options 已配置） | S3_ANALYZE | ⛔ S2 阶段首次运行时检查 stdout 中 "Recommended: set max_workspace_kb near XXXX KB" 提示，提取推荐值设置到 runtime_options；同时设置 host_options={"compile_monitor_enable": 0} | 完成时调用 `state_transition(opDir, "start_stage", 2)` → 验证后调用 `complete_stage(2)` |
-| S3_ANALYZE | 性能报告文件存在 | S4_TUNE | 记录基准性能 | 完成时调用 `state_transition(opDir, "start_stage", 3)` → 验证后调用 `complete_stage(3)` |
-| S4_TUNE | ⛔ 提前达标（PHASE_SUMMARY_F / PHASE_SUMMARY_I_n 达标时直接→S5）或 外循环≤3轮全部完成（FRONTEND + [SWIMLANE→INCORE]×≤3 及其对应的 SUMMARY） | S5_REPORT | ⛔ 各PHASE间通过SUMMARY强制交接；⛔ 每轮外循环从SWIMLANE_n入口重新独立采集性能数据 | 每个 PHASE 完成时调用 `state_transition(opDir, "complete_stage", 4)` |
+| INIT | 用户已提供目标（如"提升X倍"/"≤X us"）或用户确认 | S1_SETUP | 记录目标到 Todo，计算目标执行时间；⛔ **确定 tuning case + covering set + 创建 run_cases.py**（见下方「covering set + runner 创建」），写入 Todo 并传入后续所有 S4 dispatch | 完成时调用 `state_transition(opDir, "complete_stage", 0)` |
+| S1_SETUP | 环境检查全部通过（见下方「环境检查清单」）+ 精度通过 | S2_COLLECT | ⛔ S1a 环境检查：逐项检查环境；⛔ S1b 精度校验：环境通过后运行 `run_cases.py --cases all`（精度模式，全 covering set）→ 验证 runner + 建立 per-case 精度基线；⛔ 全部通过后强制创建完整 Todo | S1a通过时调用 `state_transition(opDir, "start_stage", 1)`，全部通过后调用 `state_transition(opDir, "complete_stage", 1)` |
+| S2_COLLECT | swimlane.json 存在 + ⛔ S-20 检查完成（max_workspace_kb 已按 NPU 推荐值设置，host_options 已配置） | S3_ANALYZE | ⛔ S2 阶段首次运行时检查 stdout 中 "Recommended: set max_workspace_kb near XXXX KB" 提示，提取推荐值设置到 runtime_options；同时设置 host_options={"compile_monitor_enable": 0}；**tuning case 全 swimlane merge（重量级，S3 详细分析用）；covering set 其余 case 用 `run_cases.py --cases <non-tuning> --perf`（按同一计时口径采集逐用例基线）** | 完成时调用 `state_transition(opDir, "start_stage", 2)` → 验证后调用 `complete_stage(2)` |
+| S3_ANALYZE | 性能报告文件存在 | 正轮次进入 S4_TUNE，零轮进入 S5_REPORT | 记录基准性能：tuning case 详细 bubble/core/load 分析（from swimlane）+ covering set per-case E2E 基线表（tuning case from swimlane summary, 其余 from 各 case 的性能日志）→ 写入 MEMORY 作为 S4 ITer 比较基线 | 完成时调用 `state_transition(opDir, "start_stage", 3)` → 验证后调用 `complete_stage(3)` |
+| S4_TUNE | 任一 PHASE_SUMMARY 实测达标，或外层预算耗尽 | S5_REPORT | ⛔ 各PHASE间通过SUMMARY强制交接；⛔ 每轮外循环从SWIMLANE_n入口重新独立采集性能数据 | 每个 PHASE 完成时调用 `state_transition(opDir, "complete_stage", 4)` |
 | S5_REPORT | 报告文件已保存 | DONE | ⛔ 还原 debug_options | 完成时调用 `state_transition(opDir, "complete_stage", 5)` |
 
 ### 第二级状态转移表（S4_TUNE 内部）
 
-> **state_transition 调用说明**：表中所有 `state_transition` 调用均在**当前会话**中执行（即生成摘要的那个会话），在启动 Task subagent **之前**完成。新 subagent 通过摘要获取状态，不调用 state_transition。
+**⛔ 正轮次的 covering set + runner 创建（INIT 时，与 tuning case 同时确定）**：
 
-| 当前 PHASE | 进入动作 | 退出条件 | 转移到 | ⛔ state_transition 门控 |
+> 目的：tile/unroll 类优化（F-8/F-9/F-10/F-11/F-16/F-17/F-20/S-11/S-12）改变**编译期分支**——单 tuning case 实测无法覆盖其他分支取值的编译正确性与性能。covering set + run_cases.py runner 是这些优化的验证基线（分支验证 + 采纳决策见 basic-block-optimization.md §1b）。
+
+**步骤 1：确定 covering set（规则驱动，最小集）**：
+
+不从 cases.yaml 枚举"每个参数的每个取值"（过冗余）——按以下规则选出 **2-3 个精度 case + 编译期补漏**的最小集，覆盖结构极端值而非穷举：
+
+1. **锚点 case** = tuning case（主性能 case，必须在集合内——perf 信号须在其上）
+2. **边界 regime** = 与锚点 qualitatively 不同的 loop_count regime（如 decode 类（loop_count=1）vs prefill 类（loop_count 大））
+3. **覆盖 2 个最内层 loop + 每个 if-statement 的分支**：选一个 case 覆盖锚点未覆盖的 layout/causal/case 标量分支值（结构补集 case，如锚点用 layout A + flag=True，补集 case 用 layout B + flag=False）
+4. **编译期补漏（compile-only gap-fill）**：未被精度集覆盖的等价类分支（如某 case 标量=8, 某 case 标量=512, 某 loop_count=2/4）→ 用 `--compile-only` 快速检查（不做精度/性能实测），只验证编译正确性
+5. **每次 INIT 从当前 impl 的分支结构重新推导**（规则，不硬编码 case 列表）——分支结构随调优变化时，集合相应扩展
+
+**步骤 2：创建 run_cases.py（多 case 验证 runner）**：
+
+在算子目录创建 `run_cases.py`，以该算子的精度测试入口为基础。
+
+runner 规格：
+- **导入** `make_case_inputs`, `<op>_wrapper`, `<op>_golden`, `detailed_tensor_compare` 从现有 `test_<op>.py`（复用 env/path/compare 逻辑）
+- **CASES 表**：covering set 的 case_id → kwargs 字典（匹配 `_run` 签名；seed = SHA256(case_id)，对齐 `eval/test_inputs.py`）
+- **模式**：
+  - 默认（精度）：逐 case 调 `_run`（golden compare）；per-case `try/except`（不 raise）；输出 `[case N] layout=.. causal=.. -> PASS/FAIL` + `OVERALL: n/N` + exit code；`[PRECISION_PASS]` 仅全通过时打印
+  - `--compile-only`：wrapper 调两次（t1=compile+exec, t2=cached exec, compile≈t1−t2）；跳过 golden；输出 `[case N] compile 63s exec 0.9s -> OK`
+  - `--perf`：为每个 case 单独启动进程，在独立目录启用 PyPTO 设备性能采集。使用 [perf-analyzer](../perf-analyzer/SKILL.md) 读取新生成的 `bubble_analysis.log`，取所有核心的 `Core Total Work Time` 最大值。输出 `[case N] E2E XXXus` 并记录日志路径。采集缺失或 E2E 无效时，该次测量失败。
+- **选择器**：`--cases <id1>,<id2>,<id3>`（默认 = all）；`--l1-only` 保留为 `--cases <tuning-case-id>` 别名（S2 依赖）
+
+**步骤 3：验证 runner（INIT 退出条件）**：
+1. `py_compile run_cases.py` 通过
+2. `run_cases.py --cases <smallest> --compile-only` 通过（~2 min smoke）
+3. **交叉验证（一次性）**：对 tuning case 运行 `run_cases.py --cases <tuning-case-id> --perf`，与同次采集的 `AICore Prof Summary` 中 `AICore End-to-End Time` 核对，按摘要输出精度比较，并将结果写入 MEMORY。
+
+记录到 Todo + MEMORY：`tuning_case_set: [case_id, ...]`（精度集）+ `compile_only_gap_fill: [case_id, ...]` + runner 路径 + 交叉验证结果。每次 S4 dispatch 摘要须包含精度集 + 编译期补漏清单。
+
+**各 stage 使用方式（S4/S5 — S1b/S2/S3 见上表强制动作列）**：
+- **S4 迭代**：修改 tile/unroll 后，先对受影响的用例做精度验证，并对未覆盖的编译分支用 `--compile-only` 补漏。通过后用 `--perf` 逐用例对比 S3 基线，保存 `[case N]` 输出。按[采纳决策策略](../shared/optimization_catalog.md)处理改善和回退分歧。
+- **S5 / regression**：正轮次运行 `run_cases.py --cases all` 回归代表用例集。零轮沿用原精度测试。
+
+独立编排时，主会话负责表中 `state_transition` 调用，并在阶段交接前完成登记。具体派工方式见[独立编排的 Task 交接](references/phase-handoff.md#独立编排的-task-交接)。
+
+| 当前 PHASE | 进入动作 | 退出条件 | 转移到 | 独立编排的 state_transition 门控 |
 |-----------|---------|---------|--------|------------------------|
 | PHASE_FRONTEND | 加载 tune-frontend 子技能 + ⛔ 执行阶段A(全局分析:Loop+常量+Reshape+TileShape) + 阶段B(局部分析:数据操作) + ⛔ 编排器核查分析制品 + 生成优化点清单 | ⛔ 见「退出条件详细定义」 | PHASE_SUMMARY_F | 退出时调用 `state_transition(opDir, "start_stage", 4)` |
-| PHASE_SUMMARY_F | 生成 FRONTEND 阶段交接摘要 + ⛔ **检查是否已达标** + Task 启动新 subagent 进行隔离 | 摘要已生成 且 新 subagent 已启动 | 达标→S5_REPORT / 未达标→PHASE_SWIMLANE_1 | Task 启动前调用 `state_transition(opDir, "complete_stage", 4)` |
-| PHASE_SWIMLANE_n (n=1,2,3) | ⛔ **外循环第{n}轮**：独立采集性能数据(S2型) → 独立分析泳道图(S3型) → 加载 tune-swimlane 子技能 → ⛔ **核使用率分析** → 生成调优点清单 | ⛔ 见「退出条件详细定义」 | PHASE_SUMMARY_S_n | 退出时调用 `state_transition(opDir, "complete_stage", 4)` |
+| PHASE_SUMMARY_F | 生成并核验 FRONTEND 摘要、达标状态和结构变更台账 | 摘要及台账已校验 | 达标或预算耗尽→S5_REPORT / 未达标且有预算→按下方台账门控重审或进入 SWIMLANE | 派工前调用 `state_transition(opDir, "complete_stage", 4)` |
+| PHASE_SWIMLANE_n | ⛔ **外循环第{n}轮**：独立采集性能数据(S2型) → 独立分析泳道图(S3型) → 加载 tune-swimlane 子技能 → ⛔ **核使用率分析** → 生成调优点清单 | ⛔ 见「退出条件详细定义」 | PHASE_SUMMARY_S_n | 退出时调用 `state_transition(opDir, "complete_stage", 4)` |
 | PHASE_SUMMARY_S_n | 生成 SWIMLANE 阶段交接摘要 + 检查达标状态 + 按序列推进（见「阶段交接流程」） | 摘要已生成 | 达标→S5_REPORT / 未达标→PHASE_INCORE_n | - |
-| PHASE_INCORE_n (n=1,2,3) | ⛔ **外循环第{n}轮**：独立采集性能数据(S2型) → 独立分析性能数据(S3型) → 加载 tune-incore 子技能 → ⛔ 生成调优点清单 | ⛔ 见「退出条件详细定义」 | PHASE_SUMMARY_I_n | 退出时调用 `state_transition(opDir, "complete_stage", 4)` |
-| PHASE_SUMMARY_I_n | 生成 INCORE 阶段交接摘要 + 检查达标状态 + 按序列推进（见「阶段交接流程」） | 摘要已生成 | 达标→S5_REPORT / 未达标→PHASE_SWIMLANE_{n+1}(若还有) / 队列空→S5_REPORT | - |
+| PHASE_INCORE_n | ⛔ **外循环第{n}轮**：独立采集性能数据(S2型) → 独立分析性能数据(S3型) → 加载 tune-incore 子技能 → ⛔ 生成调优点清单 | ⛔ 见「退出条件详细定义」 | PHASE_SUMMARY_I_n | 退出时调用 `state_transition(opDir, "complete_stage", 4)` |
+| PHASE_SUMMARY_I_n | 生成 INCORE 阶段交接摘要 + 检查达标状态 + 按序列推进（见「阶段交接流程」） | 摘要已生成 | 达标或预算耗尽→S5_REPORT / 未达标且有剩余预算→PHASE_SWIMLANE_{n+1} | - |
+
+### PHASE_SUMMARY_F 结构变更台账门控
+
+1. 根据实测耗时和性能目标判定是否达标。达标后进入 S5，保留最终精度回归。
+2. 未达标时，检查 FRONTEND 台账是否记录了本轮采纳且尚未重审的结构级变更，以及首轮基线中尚未复核的结构标记。缺少台账或证据时，先补齐阶段交接。
+3. 有待复核的结构变更时，使用一轮剩余预算重跑 FRONTEND。清除旧的 `DO-NOT-RETRY` 标记，重做 A1–A4 并重新评估 F-1 至 F-21。重审完成后标记 `audited`。
+4. 待复核项清空后，有剩余预算才进入 SWIMLANE。一次 FRONTEND 重审和一轮 SWIMLANE→INCORE 各消耗一轮外层预算。预算耗尽时进入 S5 并记录未解决项。
 
 ### 第三级状态转移表（迭代轮次内部）
 
@@ -144,7 +191,7 @@ S4_TUNE = PHASE_FRONTEND → PHASE_SUMMARY_F
 |-----------|---------|---------|--------|---------|
 | ITER_START | 根据子技能阶段A/B分析结论和 [shared/optimization_catalog.md](../shared/optimization_catalog.md) 选择一个优化点。⛔ 必须按调优点清单选择下一个未尝试的优化点，禁止凭直觉选题。⛔ FRONTEND阶段：优化点必须引用阶段A或B分析表格中的具体行号。⛔ SWIMLANE/INCORE阶段：优化点必须引用前置分析结果中的具体数据。**无法写出"依据：XX表第N行"或"依据：[分析数据]" → 前置分析未完成 → 回退补充，禁止进入 ITER_MODIFY。** ⛔ 退出前提：只有调优点清单中所有项均已标记为 ✅已尝试 或 ❌已失败 或 ❌不适用(须注明原因) 时，才允许"无优化点可选→退出迭代循环"。**清单中存在未标记项时，禁止以"无优化点可选"为由退出，必须逐一尝试所有标记为 ⏳待尝试 的项。** | 确定了要改什么参数（含编号+分析依据） | ITER_MODIFY | 无优化点可选 **且 清单已全部标记** → 退出迭代循环（进入对应 PHASE_SUMMARY） |
 | ITER_MODIFY | 修改代码，只改一个参数 | 代码已修改 | ITER_VERIFY | - |
-| ITER_VERIFY | 运行测试用例验证精度 | 输出含 "passed" | ITER_MEASURE | → ITER_ROLLBACK |
+| ITER_VERIFY | 按[主技能步骤 1.2](../SKILL.md)逐个上板运行所需用例，记录验证时间、命令、结果和关键输出 | 每个用例均正常退出，输出含 `passed` 或 `success`，且无 `failed`、`error` 或 `timeout` | 通过后进入 ITER_MEASURE | 按[精度失败流程](#迭代轮次精度失败iter_verify)简单分析，仍无法通过则立即回退该项 |
 | ITER_MEASURE | 运行用例采集性能数据 | 新的性能数据已获取 | ITER_RECORD | → ITER_ROLLBACK |
 | ITER_RECORD | 更新 Todo 性能记录表 | Todo 已更新 | ITER_JUDGE | - |
 | ITER_JUDGE | 检查退出条件 | 判定结果 | ITER_START 或 退出迭代循环（进入对应 PHASE_SUMMARY） | - |
@@ -182,7 +229,7 @@ Step 0a: 独立性能数据分析
   └─ 将入口基准写入 Todo 作为本轮的 Baseline
 ```
 
-> **与 S2_COLLECT / S3_ANALYZE 的关系**：S2+S3 提供全局初始基准（Initial Baseline），PHASE_FRONTEND 直接复用此基准。3 轮外循环中每轮的 SWIMLANE_n/INCORE_n 入口独立采集提供的是**当前轮次基准（Round_n Baseline）**，因每轮间代码已变化，不可复用历史数据。
+> **与 S2_COLLECT / S3_ANALYZE 的关系**：S2+S3 提供全局初始基准（Initial Baseline），PHASE_FRONTEND 直接复用此基准。每轮的 SWIMLANE_n/INCORE_n 入口独立采集提供的是**当前轮次基准（Round_n Baseline）**，因每轮间代码已变化，不可复用历史数据。
 
 ### 各 PHASE 编排器职责
 
@@ -190,13 +237,13 @@ Step 0a: 独立性能数据分析
 
 | PHASE | 加载子技能 | 编排器核查的产出制品 | 退出后进入 |
 |-------|-----------|-------------------|-----------|
-| PHASE_FRONTEND | `tune-frontend` | 阶段A 全局分析制品 + 阶段B 局部分析制品 + 最终优化点排序清单（具体清单见 `../tune-frontend/SKILL.md`） | PHASE_SUMMARY_F |
+| PHASE_FRONTEND | `tune-frontend` | 阶段A 全局分析制品 + 阶段B 局部分析制品 + 最终优化点排序清单（具体清单见 `../tune-frontend/SKILL.md`）+ ⛔ **结构变更台账**（F-1~F-21 全表标记完整性 + 已采纳未回退优化点的 `结构级`/`配置级` 标注 + 首轮追加入口基线既有结构标记及 `audited` 状态）。⛔ **F-19 为必做项**（两种模式均须检查，详见 `../tune-frontend/SKILL.md` §1.2.4/§1.2.5） | PHASE_SUMMARY_F |
 | PHASE_SWIMLANE_n | `tune-swimlane` | 核使用率分析 + 调优点清单（具体清单见 `../tune-swimlane/SKILL.md`）；⛔ 泳道图重采次数记录在 Todo 中 | PHASE_SUMMARY_S_n |
 | PHASE_INCORE_n | `tune-incore` | 瓶颈 task 分析 + 调优点清单（具体清单见 `../tune-incore/SKILL.md`） | PHASE_SUMMARY_I_n |
 
 ⛔ **核查规则**：子技能声明的所有分析制品均已生成后，才允许进入 ITER 循环。缺少任何一项 → 要求补充分析，禁止跳过进入优化。
 
-⛔ **SWIMLANE 特有**：泳道图回流（核使用率/负载均衡调整后的重采）在当前会话内执行，不触发 Task subagent 隔离。只有 PHASE_SUMMARY 才触发 Task subagent 隔离。
+SWIMLANE 内因核使用率或负载均衡调整而重采泳道图时，继续当前阶段，退出阶段时再生成 PHASE_SUMMARY。
 
 ---
 
@@ -207,20 +254,15 @@ Step 0a: 独立性能数据分析
 ```
 □ Q1: 当前处于哪个状态？
       第一级: [INIT / S1 / S2 / S3 / S4 / S5 / DONE]
-      第二级: [FRONTEND / SUMMARY_F / SWIMLANE_n(n=1,2,3) / SUMMARY_S_n / INCORE_n(n=1,2,3) / SUMMARY_I_{1,2} / SUMMARY_I_3]（仅 S4 时）
+      第二级: [FRONTEND / SUMMARY_F / SWIMLANE_n / SUMMARY_S_n / INCORE_n / SUMMARY_I_n]（仅 S4 时）
       第三级: [ANALYZE_A / ANALYZE_B / SWIMLANE_STEP0 / SWIMLANE_CORE_USAGE / SWIMLANE_LOAD_BALANCE / START / MODIFY / VERIFY / MEASURE / RECORD / JUDGE / ROLLBACK]
               （FRONTEND: ANALYZE_A/B; SWIMLANE: SWIMLANE_STEP0/SWIMLANE_CORE_USAGE/SWIMLANE_LOAD_BALANCE/ITER; INCORE: START/...）
 
-□ Q1a: ⛔ 阶段交接检查（Task 返回后 / 启动新 Task 前必检）
-        PHASE_QUEUE 的执行进度：已执行 [已完成的PHASE列表]，下一个是 [PHASE名]
-        → Task 刚返回：摘要中达标状态 = ✅ → 跳出循环，进入 S5_REPORT
-        → Task 刚返回：摘要中达标状态 = ❌ → 继续启动下一个 PHASE 的 Task
-        → 队列已空（6个PHASE全部执行完）→ 进入 S5_REPORT
-
-□ Q1b: ⛔ Task 粒度检查（启动 Task subagent 前必检）
-        本次 Task 只包含一个 PHASE 吗？
-        → 一个 Task 包含 SWIMLANE + INCORE → ⛔ 禁止！必须拆分为两个独立 Task
-        → 一个 Task 只包含一个 PHASE → ✅ 允许
+□ Q1a: 阶段交接时核验 PHASE_SUMMARY
+        → 实测已达标：进入 S5_REPORT
+        → FRONTEND 未达标：按结构变更台账和剩余预算决定下一阶段
+        → SWIMLANE 未达标：继续本轮 INCORE
+        → INCORE 未达标：有剩余预算则开始下一轮，否则进入 S5_REPORT
 
 □ Q2: 当前子状态的完成条件是否满足？
        → 不满足 → 继续执行当前子状态，禁止推进
@@ -242,13 +284,11 @@ Step 0a: 独立性能数据分析
        → ITER_START → ITER_MODIFY → ITER_VERIFY  ❌（三个，太多了）
 
 □ Q4: 强制动作是否已完成？
-        → S1→S2: Todo 已创建？state_transition 已调用？
+        → S1→S2: Todo 已创建？
         → FRONTEND 阶段C 前置: 阶段A+B 分析制品已核查？
-        → PHASE→SUMMARY: 阶段交接摘要已生成？
-        → SUMMARY_F/S→下一PHASE: Task 已启动新 subagent 完成隔离？
-        → S5→DONE: debug_options 已还原？state_transition 已调用？
-        → ⛔ 当前状态转移是否需要调用 `state_transition` 工具？
-          查阅上方状态转移表的「state_transition 门控」列。需要则必须调用，禁止跳过。
+        → PHASE→SUMMARY: 阶段交接摘要已生成并校验？
+        → S5→DONE: debug_options 已还原？
+        → 独立编排时，在交接前核对状态转移表中的 state_transition 门控。
 
 □ Q5: Todo 是否最新？（⛔ 必须按下方规则逐项验证，仅问"是否已更新"不够）
        → 规则1: 刚完成 ITER_MEASURE/ROLLBACK → 迭代轮次记录表中必须有对应轮次的新行
@@ -303,6 +343,8 @@ Step 0a: 独立性能数据分析
 
 ### ⛔ 单参数原则
 
+逐步推进的限制适用于实际运行和状态转移。评审方案或交接下一轮任务时，给出从修改到留证、采纳或回退的完整操作说明。每轮在同设备、同用例上验证，记录命令、运行时间、退出码和精度标记。精度失败经简单分析仍未解决时立即回退该项，通过后才采集耗时、与基准比较并登记差值。[单变量迭代与精度回归](../SKILL.md#单变量迭代与精度回归)
+
 ```
 ITER_MODIFY 阶段，每次只允许修改一个优化参数：
 
@@ -313,22 +355,6 @@ ITER_MODIFY 阶段，每次只允许修改一个优化参数：
 ❌ 同时改 BLOCK_SIZE + TileShape
 ❌ 同时改 unroll_list + stitch_max_num
 ❌ 同时加两个新参数
-```
-
-### ⛔ 禁止跨 PHASE 打包 Task subagent
-
-```
-每个 Task subagent 只能执行一个 PHASE（SWIMLANE 或 INCORE），禁止将多个 PHASE 打包进同一个 Task。
-
-✅ 正确：Task 执行 SWIMLANE_1 → 返回 PHASE_SUMMARY_S_1 → 主 agent 判定路由 → 启动新 Task 执行 INCORE_1
-✅ 正确：Task 执行 INCORE_1 → 返回 PHASE_SUMMARY_I_1 → 主 agent 判定路由(未达标,n<3) → 启动新 Task 执行 SWIMLANE_2
-❌ 禁止：Task 同时执行 SWIMLANE_1 + INCORE_1 → 绕过了 PHASE_SUMMARY_S_1 检查点
-❌ 禁止：Task 同时执行 SWIMLANE_1 + INCORE_1 + SWIMLANE_2 + INCORE_2
-
-原因：
-1. 每个 PHASE_SUMMARY 是独立的路由决策点，主 agent 必须在检查点判定：达标→S5 / 未达标→下一PHASE
-2. 跨 PHASE 打包导致主 agent 失去路由控制权，外循环计数器无法正确递增
-3. 上下文膨胀：多个 PHASE 的调试日志、失败记录会使 subagent 上下文溢出
 ```
 
 ---
@@ -460,11 +486,13 @@ ITER_JUDGE 执行时，按以下顺序判断：
 ### S1_SETUP
 
 > S1_SETUP 包含两个子阶段：S1a 环境检查 + S1b 精度校验。环境检查通过后，继续精度校验。
-> **⛔ 门控要求**：`complete_stage(1)` 必须在 S1a（环境检查全部通过）和 S1b（精度校验通过）**两个子阶段均完成后**才能调用。任一子阶段未通过，禁止调用 `complete_stage(1)`。
-> 子阶段失败时使用 `fail_stage(1)` 标记，并在 Todo 中记录失败原因（区分环境问题或精度问题）。
+> **独立编排的 S1 登记**：`complete_stage(1)` 必须在 S1a（环境检查全部通过）和 S1b（精度校验通过）**两个子阶段均完成后**才能调用。任一子阶段未通过，禁止调用 `complete_stage(1)`。
+> 独立编排时，子阶段失败使用 `fail_stage(1)` 标记，并在 Todo 中记录失败原因（区分环境问题或精度问题）。
 > 精度校验流程详见主技能步骤 1.2。
 
 ### S2_COLLECT
+
+零轮核对指定用例在本次设备上的原始基线计时，正轮次检查以下采集文件。
 
 **⚠️ output 目录位于执行算子命令时的工作目录下，非固定位置。** 需在正确的工作目录下执行验证命令。
 
@@ -490,11 +518,11 @@ find . -name "performance_analysis_report.md" -type f
 
 ### S4_TUNE 各 PHASE
 
-**外循环控制**：SWIMLANE→INCORE 为一个外循环轮次，最多 3 轮。
+SWIMLANE→INCORE 为一轮。进入新一轮前按[结构变更台账门控](#phase_summary_f-结构变更台账门控)核对剩余预算。
 
-**回环说明（预期行为）**：INCORE 阶段执行 I-10/I-11（合并 gather / view 复用）修复 CV 通路 DDR 断点后，须回退至 SWIMLANE 下一轮重试 S-14 Mix合图。这种"合图未完成→进入 INCORE 修复→回退 SWIMLANE 重试"的回环是预期行为，不是异常——外循环机制天然支持此场景。
+**回环说明（预期行为）**：INCORE 阶段执行 I-10/I-11（合并 gather / view 复用）修复 CV 通路 DDR 断点后，有剩余预算时回到下一轮 SWIMLANE重试 S-14 Mix合图。这种"合图未完成→进入 INCORE 修复→回退 SWIMLANE 重试"的回环是预期行为，不是异常——外循环机制天然支持此场景。
 
-**算法级优化（INCORE 尾部子步骤）**：INCORE 调优点清单收敛但性能未达标时，不直接退出到 S5_REPORT，而是在 INCORE 阶段内继续执行算法级优化（A-D1~A-D3 / A-G1~A-G7，对应 top-level SKILL.md §4.3）。A-D1~A-D3 修复 CV 断点后同样回退 SWIMLANE 重试 S-14。
+**算法级优化（INCORE 尾部子步骤）**：INCORE 调优点清单收敛但性能未达标时，不直接退出到 S5_REPORT，而是在 INCORE 阶段内继续执行算法级优化（A-D1~A-D3 / A-G1~A-G7，对应 top-level SKILL.md §4.3）。A-D1~A-D3 修复 CV 断点后有剩余预算时同样回到 SWIMLANE 重试 S-14。
 
 **单 PHASE 退出条件**：⛔ 见「退出条件详细定义」
 
@@ -508,7 +536,7 @@ debug_options 已还原（runtime_debug_mode 移除或置 0）
 ```
 
 **S5_REPORT TODO 管理**：
-1. 更新 Todo 状态机进度：将所有状态（S1-S5）标记为 ✅
+1. 更新 Todo 状态机进度：标记已完成的阶段，为跳过的阶段记录原因
 2. 输出最终状态看板（见主技能步骤 5.1 的「最终调优状态」模板）
 3. Todo 中记录最终性能结果（基准→最终执行时间、累计提升百分比）和迭代统计（总轮次、成功率、最佳优化）
 4. 确认 debug_options 已还原的记录写入 Todo
@@ -519,36 +547,38 @@ debug_options 已还原（runtime_debug_mode 移除或置 0）
 
 ### ⛔ TODO 创建与执行铁律
 
-**⛔ 铁律 1：TODO 必须一次性创建完整，包含所有 3 轮外循环的每个子阶段**
+**⛔ 铁律 1：TODO 必须一次性创建完整，包含本次预算内的子阶段**
 
-S1_SETUP 全部通过后，必须立即创建包含以下所有阶段的完整 TODO，不得遗漏任何子阶段：
+S1_SETUP 全部通过后立即创建本次任务的 Todo。正轮次按下列阶段展开，零轮将 S4 标为跳过。
 
 ```
 S1 → S2(⛔含S-20检查) → S3 → S4 → S5
-  S4 = FRONTEND → SWIMLANE_1 → INCORE_1(含算法级优化A-D/A-G) → SWIMLANE_2 → INCORE_2 → SWIMLANE_3 → INCORE_3
+  S4 = FRONTEND → 按台账重审 → 按剩余预算展开 SWIMLANE_n → INCORE_n
   ⚠️ 任意 PHASE_SUMMARY 达标可提前跳到 S5，不要求全部跑完
   ⚠️ INCORE 收敛但未达标时，在 INCORE 内执行算法级优化（A-D1~A-D3 / A-G1~A-G7）
-  ⚠️ A-D1~A-D3 修复 CV 断点后须回退 SWIMLANE 下一轮重试 S-14（预期回环行为）
+  ⚠️ A-D1~A-D3 修复 CV 断点后有剩余预算时在下一轮 SWIMLANE重试 S-14（预期回环行为）
 ```
 
 TODO 中必须明确列出：
-- ✅ 全部 3 轮外循环的 SWIMLANE_n/INCORE_n 子阶段（创建时全量列出，达标时标记 ✅ 并跳过后续）
+- ✅ 本次预算覆盖的 SWIMLANE_n/INCORE_n 子阶段，因 FRONTEND 重审或提前达标而跳过的阶段标注原因
 - ✅ INCORE_n 内的算法级优化条目（A-D1~A-D3 / A-G1~A-G7），标注为 INCORE 子步骤
 - ✅ 每个子阶段的轮次数、连续无提升阈值（FRONTEND:5, SWIMLANE:8, INCORE:5, 算法级:3）
 - ✅ 失败累计计数器（所有 PHASE 共用）
 - ✅ 基准性能值和目标性能值
 
-**⛔ 铁律 2：严格按 TODO 清单执行，每个阶段不可跳过**
+**⛔ 铁律 2：编排器依据 TODO 核验门禁并逐阶段推进**
 
+- 按对应的 `tune-frontend`、`tune-swimlane` 或 `tune-incore` 子技能回传调优点、分析依据和验证结果。
+- 编排器核对这些证据，在状态转移时同步更新当前阶段、步骤完成状态和下一步，按门禁逐项推进。
 - 每步操作前必须确认当前状态与 TODO 中的"当前阶段"一致
 - 未在 TODO 中标记为 ✅ 的阶段，禁止进入
 - 每个 PHASE 退出时必须更新阶段状态为 ✅
 - PHASE 之间必须生成 PHASE_SUMMARY 交接摘要
 
-**⛔ 铁律 3：每次 ITER_RECORD 后必须立即刷新 TODO**
+**⛔ 铁律 3：每次 ITER_RECORD 后编排器立即将执行角色的证据写入 TODO**
 
-ITER_RECORD 执行后，必须立即通过 `todowrite` 更新以下内容（缺一不可）：
-- 迭代轮次记录表新增一行（含轮次编号、阶段、优化内容、执行时间、变化率、状态）
+ITER_RECORD 执行后，编排器通过 `todowrite` 更新以下内容（缺一不可）：
+- 在当前轮次和阶段新增一行。填写提出并实施建议的**执行角色**、调优点编号、分析表行或性能数据等**分析依据**，记录该角色回传的改动、精度结果和实测耗时，以及本轮变化率、结果类型与状态。
 - 当前迭代状态中的"当前最佳性能"和"累计提升%"
 - "连续无提升"计数器
 - "失败累计"计数器
@@ -562,10 +592,10 @@ ITER_RECORD 执行后，必须立即通过 `todowrite` 更新以下内容（缺�
 
 | 时机 | 动作 |
 |------|------|
-| S1_SETUP 全部通过后（S1a 环境检查 + S1b 精度校验） | ⛔ 立即创建完整 Todo（含全部 3 轮外循环子阶段），不创建禁止进入 S2 |
-| 每轮 ITER_RECORD 后 | ⛔ 必须立即刷新：新行 + 当前最佳 + 连续无提升 + 失败累计 |
+| S1_SETUP 全部通过后（S1a 环境检查 + S1b 精度校验） | ⛔ 立即创建完整 Todo（按本次轮次展开），不创建禁止进入 S2 |
+| 每轮 ITER_RECORD 后 | ⛔ 编排器登记执行角色回传的调优点和证据，刷新当前最佳、连续无提升和失败累计 |
 | 每个 PHASE 完成后 | ⛔ 更新阶段状态为 ✅ |
-| PHASE_SUMMARY 后 | ⛔ 附加交接摘要 + 更新状态机进度 |
+| PHASE_SUMMARY 后 | ⛔ 编排器附加交接摘要，按门禁更新当前阶段和下一步 |
 
 ### ⛔ TODO 完整性自检（所有阶段切换/退出前的强制门控）
 
@@ -576,8 +606,8 @@ ITER_RECORD 执行后，必须立即通过 `todowrite` 更新以下内容（缺�
 | ITER_MEASURE 完成 → 进入 ITER_RECORD 前 | 本轮执行时间是否已记录？ | 先记录再进 RECORD |
 | ITER_ROLLBACK 完成 → 进入 ITER_RECORD 前 | 回退原因(类型:列)是否已注明（编译失败/精度失败/性能回退）？ | 先注明原因再记录 |
 | ITER_JUDGE 判定退出 → 进入 PHASE_SUMMARY 前 | 迭代轮次记录表中最后一行状态列是否为 ✅ 或 ❌，无空状态行 | ⛔ 禁止退出，先补齐记录 |
-| PHASE_SUMMARY 完成 → 进入 Task subagent 前 | 阶段状态 ✅/⏸️ 与实际进度一致？轮次记录表无未闭合行？ | ⛔ 禁止进入 Task，先修正 Todo |
-| S5_REPORT 完成 → DONE | debug_options 已还原？所有状态标记为 ✅？ | ⛔ 禁止完成 |
+| PHASE_SUMMARY 完成 → 进入下一阶段前 | 阶段状态 ✅/⏸️ 与实际进度一致？轮次记录表无未闭合行？ | ⛔ 暂停交接，先修正 Todo |
+| S5_REPORT 完成 → DONE | debug_options 已还原？已执行阶段标记为 ✅，跳过的阶段已记明原因？ | ⛔ 禁止完成 |
 
 **⛔ 核验命令**：
 
@@ -592,7 +622,7 @@ todowrite  # 读取当前 Todo 清单
 
 **⛔ 强制原则**：任何时候，如果对 Todo 状态不确定，必须通过 `todowrite` 工具读取确认，禁止凭记忆假设 Todo 是最新的。
 
-### Todo 完整模板（S1_SETUP 全部通过后立即创建）
+### Todo 完整模板（按本次预算展开）
 
 ```markdown
 ## 📊 [算子名称] 性能调优进度
@@ -608,14 +638,15 @@ todowrite  # 读取当前 Todo 清单
 - ✅ S1: 环境检查 + 精度校验
 - 🔄 S2: 性能数据采集
 - ⏸️ S3: 性能数据分析
-- ⏸️ S4: 外循环调优 (当前第 [n]/3 轮)
+- ⏸️ S4: 外循环调优 (外层预算剩余 [剩余轮数] / [tune_rounds])
   - ⏸️ FRONTEND (轮次: 0, 连续无提升: 0/5, 失败累计: 0)
   - ⏸️ SWIMLANE_n (轮次: 0, 连续无提升: 0/8, 失败累计: 0)
   - ⏸️ INCORE_n (轮次: 0, 连续无提升: 0/5, 失败累计: 0)
 - ⏸️ S5: 生成调优报告
+- 下一步: [编排器按门禁登记的待办动作]
 
 ### 当前迭代状态
-- 外循环轮次: [n] / 3
+- 外层预算剩余: [剩余轮数] / [tune_rounds]
 - 当前阶段: [FRONTEND / SWIMLANE_n / INCORE_n]
 - 当前第三级状态: [ANALYZE_A / ANALYZE_B / SWIMLANE_STEP0 / SWIMLANE_CORE_USAGE / SWIMLANE_LOAD_BALANCE / ITER_START / MODIFY / VERIFY / MEASURE / RECORD / JUDGE / ROLLBACK]
 - 当前轮次: #N（全局递增 #1,#2,...，编号来自 catalog）
@@ -626,29 +657,31 @@ todowrite  # 读取当前 Todo 清单
 - 失败累计: W 轮
 
 ### 迭代轮次记录
-| 轮次 | 外循环 | 阶段 | 编号 | 优化内容 | 精度 | 执行时间(us) | 变化 | 结果类型 | 状态 |
-|------|--------|------|------|---------|------|-------------|------|---------|------|
-| 基准 | 0 | - | - | - | ✅ | XX | - | - | ✅ |
+| 轮次 | 外循环 | 阶段 | 执行角色 | 编号 | 分析依据 | 优化内容 | 精度 | 执行时间(us) | 变化 | 结果类型 | 状态 |
+|------|--------|------|---------|------|---------|---------|------|-------------|------|---------|------|
+| 基准 | 0 | - | - | - | - | - | ✅ | XX | - | - | ✅ |
 ```
 
 ### 迭代轮次记录更新示例
 
 ```markdown
-| 轮次 | 阶段 | 编号 | 优化内容 | 精度 | 执行时间(us) | 变化 | 结果类型 | 状态 |
-|------|------|------|---------|------|-------------|------|---------|------|
-| 基准 | 0 | - | - | - | ✅ | 79.34 | - | - | ✅ |
-| #1 | 1 | FRONTEND | F-1 | BLOCK_SIZE 128→64 | ✅ | 68.54 | -13.6% | 性能提升 | ✅ |
-| #2 | 1 | FRONTEND | F-8 | unroll_list [8,4,2,1] | ✅ | 74.44 | +8.6% | 性能回退 | ❌回退 |
-| #3 | 1 | FRONTEND | F-10 | TileShape 2560 | ❌ | - | - | 编译失败 | ❌回退 |
+| 轮次 | 外循环 | 阶段 | 执行角色 | 编号 | 分析依据 | 优化内容 | 精度 | 执行时间(us) | 变化 | 结果类型 | 状态 |
+|------|--------|------|---------|------|---------|---------|------|-------------|------|---------|------|
+| 基准 | 0 | - | - | - | - | - | ✅ | 79.34 | - | - | ✅ |
+| #1 | 1 | FRONTEND | 前端执行角色 | F-1 | 阶段 A 对应分析行 | BLOCK_SIZE 128→64 | ✅ | 68.54 | -13.6% | 性能提升 | ✅ |
+| #2 | 1 | FRONTEND | 前端执行角色 | F-8 | 阶段 A 对应分析行 | unroll_list [8,4,2,1] | ✅ | 74.44 | +8.6% | 性能回退 | ❌回退 |
+| #3 | 1 | FRONTEND | 前端执行角色 | F-19 | A1 Loop 结构分析行 | 内层批量化 unroll→M | ✅ | 52.10 | -30.1% | 性能提升 | ✅ |
+| #4 | 1 | FRONTEND | 前端执行角色 | F-10 | A4 TileShape 审查行 | TileShape 2560 | ❌ | - | - | 编译失败 | ❌回退 |
 
 ### 当前迭代状态
-- 外循环轮次: 1 / 3
+- 外层预算剩余: 3 / 3（初次 FRONTEND，示例）
 - 当前阶段: FRONTEND
 - 当前第三级状态: ITER_START
-- 当前轮次: #3
-- 当前最佳性能: 68.54 us（较基准 79.34 us 提升 13.6%）
+- 下一步: 核对 FRONTEND 调优点清单中的下一项
+- 当前轮次: #4
+- 当前最佳性能: 52.10 us（较基准 79.34 us 提升 34.3%）
 - 连续无提升: 0 / 5
-- 失败累计: 1 轮（#3 编译失败）
+- 失败累计: 1 轮（#4 编译失败）
 ```
 
 ### 状态看板（每5轮输出）
@@ -656,7 +689,7 @@ todowrite  # 读取当前 Todo 清单
 ```markdown
 ## 📊 调优状态看板
 
-外循环: [n] / 3 | 当前阶段: [阶段名] | 轮次: [N]
+外层预算剩余: [剩余轮数] / [tune_rounds] | 当前阶段: [阶段名] | 轮次: [N]
 当前最佳: [值] us | 基准: [值] us | 累计提升: [%]% | 目标: [值] us
 进度: ████████░░░░░░░░ [%]%
 
@@ -670,7 +703,7 @@ todowrite  # 读取当前 Todo 清单
 
 ## 阶段交接摘要
 
-> ⛔ 执行 PHASE_SUMMARY 前必须先阅读 [references/phase-handoff.md](references/phase-handoff.md)。该文档包含阶段交接流程、Task prompt 模板（变体 A/B）、隔离规则、摘要校验清单、摘要模板等**不可跳过的操作步骤**。
+生成 PHASE_SUMMARY 时，按[阶段交接要求](references/phase-handoff.md)填写模板并逐项校验。
 
 ---
 
@@ -683,7 +716,7 @@ todowrite  # 读取当前 Todo 清单
 | S1_SETUP 精度失败 | 换卡尝试（最多 3 次）→ 仍失败 → 停止，不修复，告知用户，状态机停留在 S1_SETUP |
 | 迭代性能回退（ITER_MEASURE） | ITER_ROLLBACK → ITER_RECORD（标记❌回退）→ ITER_JUDGE |
 | 执行超时（>300s） | 标记失败 → ITER_ROLLBACK → ITER_RECORD（记录超时）→ ITER_JUDGE |
-| 长期无法达标（3 个 PHASE 完成） | 最终摘要标注"未达标" → 建议重新设计算子 → 正常进入 S5_REPORT |
+| 外层预算耗尽仍未达标 | 最终摘要标注"未达标" → 建议重新设计算子 → 正常进入 S5_REPORT |
 
 ### 迭代轮次精度失败（ITER_VERIFY）
 

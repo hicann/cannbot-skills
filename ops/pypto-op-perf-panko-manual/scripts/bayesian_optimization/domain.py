@@ -62,7 +62,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # One home, shared with `predicates`: see pypto_ast. Not optional -- every tile
 # this module counts depends on knowing which calls are pypto's.
-from pypto_ast import pypto_roots  # noqa: E402
+from pypto_ast import kernel_callees, pypto_roots  # noqa: E402
 
 try:
     import feasibility  # noqa: E402
@@ -259,7 +259,7 @@ def vec_residency(src):
         for fn in ast.walk(tree)
         if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and _is_jit(fn)
     ]
-    scopes = kernels or [tree]
+    scopes = [*kernels, *kernel_callees(tree, kernels)] if kernels else [tree]
     res, ordinal, active = {}, -1, None
     tiles = set()  # names known to hold a tile-shaped tensor
     # ast.walk does not preserve statement order across nesting, so collect the

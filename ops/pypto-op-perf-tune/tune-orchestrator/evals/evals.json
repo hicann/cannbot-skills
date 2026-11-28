@@ -28,7 +28,7 @@
         "ascend_platforms": ["A2"]
       },
       "prompt": "PyPTO 性能调优流程编排中，Todo 清单如何维护和更新？",
-      "expected_output": "回复应说明 Todo 清单在调优流程中的作用：记录当前阶段和已完成/待完成步骤，实时更新每个阶段的完成状态，防止跳过关键步骤，以及在状态转移时自动更新清单内容。说明编排器不直接提供优化建议，而是控制流程推进。",
+      "expected_output": "说明编排器何时创建和更新 Todo，如何登记当前阶段、已完成和待完成步骤及每轮结果，以及如何核对记录后推进到下一轮或下一阶段。",
       "files": [],
       "expectations": []
     },
@@ -49,7 +49,7 @@
     },
     {
       "id": 4,
-      "title": "信息不足场景：追问调优阶段",
+      "title": "信息不足场景：确认调优输入",
       "config": {
         "max_tokens": 80000,
         "max_tokens_by_model": {
@@ -58,7 +58,7 @@
         "ascend_platforms": ["A2"]
       },
       "prompt": "我要对 PyPTO 算子做性能调优。",
-      "expected_output": "1. 回复应主动追问确定当前状态所需的基本信息（调优对象/算子工作目录、性能目标），而不是跳过流程直接给出具体调优建议。\n2. 回复应追问用户已有的性能数据与当前调优进度（是否已生成泳道图 / 性能分析报告、是否已进入某个调优阶段），以便编排器确定当前状态。\n3. 回复应说明需先补齐信息才能进入 S1_SETUP，编排器按 INIT → S1_SETUP → S2_COLLECT → S3_ANALYZE → S4_TUNE → S5_REPORT 的状态机推进而不跳过阶段。",
+      "expected_output": "先确认启动所需的算子目录和量化性能目标。若说明接下来的执行顺序，先准备验证用例和运行入口，环境检查及精度校验通过后才采集性能。",
       "files": [],
       "expectations": []
     },
@@ -73,8 +73,19 @@
         "ascend_platforms": ["A2"],
         "distractor_skills": ["tune-frontend", "tune-swimlane", "tune-incore", "perf-analyzer"]
       },
-      "prompt": "我想对 PyPTO 算子做完整的性能调优，从哪里开始？流程怎么走？",
-      "expected_output": "回复应聚焦编排器的角色：说明调优的整体流程和阶段划分，描述编排器如何控制流程推进和 Todo 清单更新，引导用户从性能分析开始（S2_COLLECT→S3_ANALYZE），然后依次进入各调优阶段。重点在于流程编排而非具体优化方法。",
+      "prompt": "我想对 PyPTO 算子做完整的性能调优，从哪里开始？流程怎么走？ 算子目录和目标已确认，环境与精度检查已通过。",
+      "expected_output": "沿用题目已确认的前置状态，从采集性能数据和分析瓶颈开始。概述如何依据分析结果推进分阶段调优、验证和交付报告，说明流程的推进依据或阶段交接。",
+      "files": [],
+      "expectations": []
+    },
+    {
+      "id": 6,
+      "title": "FRONTEND 结构变更后的路由",
+      "config": {
+        "ascend_platforms": ["A2"]
+      },
+      "prompt": "分步骤调优已完成首次 FRONTEND。性能未达标，台账记录了一项已采纳未复核的 F-19 循环结构变更，外层预算还剩 2 轮。决定下一步，并说明当性能已达标或预算为 0 时如何处理。",
+      "expected_output": "未达标且有待复核结构变更时，重跑 FRONTEND 并消耗一轮预算。清除旧的 DO-NOT-RETRY 标记，重做 A1 至 A4 和 F-1 至 F-21 核对，更新 audited 状态后再决定是否进入 SWIMLANE。达标时进入 S5 并保留精度回归。已有结构变更但预算耗尽时记录未解决项并进入 S5。",
       "files": [],
       "expectations": []
     }

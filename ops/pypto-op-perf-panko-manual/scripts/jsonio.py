@@ -32,9 +32,17 @@ import sys
 
 CHANNEL = "pypto.panko.stdout"
 
+
+class _StdoutHandler(logging.StreamHandler):
+    def emit(self, record):
+        # A resident harness redirects stdout to a new response for each command.
+        self.stream = sys.stdout
+        super().emit(record)
+
+
 _log = logging.getLogger(CHANNEL)
 if not _log.handlers:
-    _handler = logging.StreamHandler(sys.stdout)
+    _handler = _StdoutHandler(sys.stdout)
     _handler.setFormatter(logging.Formatter("%(message)s"))
     _log.addHandler(_handler)
     _log.setLevel(logging.INFO)

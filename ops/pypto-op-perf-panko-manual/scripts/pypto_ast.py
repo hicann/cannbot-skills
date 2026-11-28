@@ -44,3 +44,42 @@ def pypto_roots(tree):
         if isinstance(node, ast.Import):
             roots |= _pypto_aliases(node)
     return frozenset(roots)
+
+
+def kernel_callees(tree, kernels):
+    """Module functions directly or transitively called by the JIT entries."""
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    seen = set(kernels)
+    pending = list(kernels)
+    while pending:
+        function = pending.pop()
+        for statement in function.body:
+            for call in ast.walk(statement):
+                if isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
+                    callee = functions.get(call.func.id)
+                    if callee is not None and callee not in seen:
+                        seen.add(callee)
+                        pending.append(callee)
+    return seen.difference(kernels)
+
+
+def device_only_helpers(tree, kernels):
+    """Exclude helpers also used by host code, including callbacks and defaults."""
+    helpers = kernel_callees(tree, kernels)
+    private = {fn.name: fn for fn in helpers}
+    device = helpers.union(kernels)
+    host = [node for node in tree.body if node not in device]
+    for fn in device:
+        # A function's defaults, annotations and decorators execute on the host.
+        host.extend(node for node in ast.iter_child_nodes(fn) if node not in fn.body)
+    while host:
+        for node in ast.walk(host.pop()):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                shared = private.pop(node.id, None)
+                if shared is not None:
+                    host.extend(shared.body)
+    return private.values()

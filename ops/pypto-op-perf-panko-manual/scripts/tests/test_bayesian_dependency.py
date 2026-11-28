@@ -23,6 +23,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent))
 from _support import (
@@ -44,6 +45,17 @@ def demo(a, b):
     pypto.set_vec_tile_shapes(64, 128)
     return a + b
 """
+
+
+class CapabilityVersionTest(unittest.TestCase):
+    @unittest.skipIf(harness.bayesian is None, "requires optuna")
+    def test_requires_optuna_with_ask_and_python310_dependencies(self):
+        with patch("optuna.__version__", "2.6.0"):
+            capability = harness.bayesian_capability()
+            self.assertFalse(capability["available"])
+            self.assertIn("Study.ask", capability["reason"])
+        with patch("optuna.__version__", "2.7.0"):
+            self.assertTrue(harness.bayesian_capability()["available"])
 
 
 class MissingDependencyClassificationTest(unittest.TestCase):

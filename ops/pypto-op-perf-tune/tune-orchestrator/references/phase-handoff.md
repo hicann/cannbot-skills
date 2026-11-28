@@ -1,69 +1,18 @@
 # 阶段交接摘要（PHASE_SUMMARY_F / PHASE_SUMMARY_S / PHASE_SUMMARY_I）
 
-以下是 PHASE_SUMMARY 状态的执行规范。每个 PHASE 退出时进入对应的 PHASE_SUMMARY，⛔ 强制按以下顺序执行，禁止跳过任何一步。每个阶段的迭代上下文通过 Task subagent 隔离为结构化交接文档，确保后续阶段以干净上下文继续。
+每个阶段结束时生成 PHASE_SUMMARY，按下方清单核验实测数据、台账和达标状态，并将摘要写入 `MEMORY.md` 供下一阶段读取。
 
-## ⛔ 阶段交接流程（强制）
+## 阶段交接流程
 
-PHASE 执行顺序完全确定，主 agent 只需按序列依次启动 Task subagent，每次检查达标即可：
+1. 任一阶段实测达标，保留已采纳改动的验证证据，进入 S5_REPORT 完成回归。
+2. FRONTEND 未达标时，按[结构变更台账门控](../SKILL.md#phase_summary_f-结构变更台账门控)决定是否用一轮预算重审。
+3. 待复核项清空后，每轮依次执行 SWIMLANE、INCORE，分别校验摘要。一轮完成后，根据剩余预算决定是否开始下一轮。预算用尽时进入 S5_REPORT，记录未解决项。
 
-```
-固定序列：
-FRONTEND → SWIMLANE_1 → INCORE_1 → SWIMLANE_2 → INCORE_2 → SWIMLANE_3 → INCORE_3
-                                                                         ↓
-                                                                    全部完成 → S5_REPORT
-任意阶段达标 → 提前退出 → S5_REPORT
-```
+## 独立编排的 Task 交接
 
-主 agent 的执行逻辑：
+独立编排时，主会话执行 FRONTEND 并核验摘要。每次进入 SWIMLANE 或 INCORE，使用 `Task(subagent_type="pypto-op-optimizer")` 单独派发该阶段，并在 prompt 中传入已校验的摘要。执行者返回实测结果，由主会话决定下一步。下列模板用于独立派工。
 
-```
-PHASE_QUEUE = [SWIMLANE_1, INCORE_1, SWIMLANE_2, INCORE_2, SWIMLANE_3, INCORE_3]
-
-FRONTEND 在主会话中执行（复用 S2+S3 的性能数据）。
-FRONTEND 完成后：
-
-for phase in PHASE_QUEUE:
-    1. 生成阶段交接摘要
-    2. 校验摘要完整性
-    3. 启动 Task(phase)，subagent_type="pypto-op-optimizer"
-       ⛔ 每个 Task 只执行一个 PHASE
-    4. Task 返回后，检查摘要中「达标状态」：
-       ✅已达标 → break（跳出循环，进入 S5_REPORT）
-       ❌未达标 → continue（启动下一个 PHASE 的 Task）
-
-循环结束（达标提前退出 或 队列耗尽）→ S5_REPORT
-```
-
-**步骤细化**：
-
-```
-每个 PHASE 的交接：
-    ↓
-步骤1: 生成阶段交接摘要（按下方模板）
-    ↓
-步骤2: 校验摘要完整性（按下方校验清单逐项确认）
-    ↓
-步骤3: 启动 Task subagent
-    - 使用 Task 工具，subagent_type 选择 "pypto-op-optimizer"
-    - ⛔ 每个 Task 只执行一个 PHASE，禁止跨 PHASE 打包
-    - 将阶段交接摘要作为 prompt 的核心上下文传入
-    ↓
-步骤4: Task 返回后检查达标状态
-    - 摘要中达标状态 = ✅已达标 → 结束循环，进入 S5_REPORT
-    - 摘要中达标状态 = ❌未达标 → 继续下一个 PHASE（回到步骤1）
-```
-
-禁止事项：
-❌ 只生成摘要不启动 Task subagent
-❌ 跳过摘要直接启动 Task
-❌ 不在 Task prompt 中传入完整摘要就继续
-❌ 在当前会话中直接执行 SWIMLANE/INCORE（必须通过 Task subagent 隔离）
-❌ 将多个 PHASE 打包进同一个 Task
-❌ Task 返回后不检查达标状态就继续或跳到 S5
-
-## Task prompt 模板（两种变体）
-
-**变体 A — 继续下一阶段（PHASE_SUMMARY_F → SWIMLANE / PHASE_SUMMARY_S → INCORE / PHASE_SUMMARY_I_{1,2}→SWIMLANE_{n+1}）**：
+**变体 A — 继续下一阶段（PHASE_SUMMARY_F → SWIMLANE / PHASE_SUMMARY_S → INCORE / PHASE_SUMMARY_I_n→SWIMLANE_{n+1}）**：
 """
 你是 PyPTO 算子性能调优执行器。请执行以下任务：
 
@@ -74,7 +23,7 @@ for phase in PHASE_QUEUE:
 
 ## ⛔ 外循环状态（必须遵守）
 
-- 当前外循环轮次: [n] / 3
+- 当前 SWIMLANE→INCORE 轮次: [n]，剩余外层预算: [轮数]
 - 当前执行阶段: [SWIMLANE_n / INCORE_n]
 - ⛔ 本 Task 只负责当前这一个 PHASE 的执行和退出
 - ⛔ 退出当前 PHASE 后，生成 PHASE_SUMMARY 摘要返回给主 agent，由主 agent 决定路由（继续下一 PHASE / 达标→S5 / 外循环耗尽→S5）
@@ -111,7 +60,7 @@ for phase in PHASE_QUEUE:
 
 ## 报告生成步骤
 
-1. 更新 Todo：将所有状态（S1-S5）标记为 ✅
+1. 更新 Todo：标记已完成的阶段，为跳过的阶段记录原因
 2. 输出最终状态看板（目标达成、优化总结、性能趋势）
 3. 填充最终调优报告模板（性能对比、已采纳/已失败优化、最佳配置、调优记录）
 4. 保存报告到算子目录下：`{op_name}_tuning_report.md`
@@ -136,7 +85,7 @@ Task subagent 启动时，遵循以下信息传递规则：
 |---------|---------|------|
 | 已采纳优化 | ✅ 完整保留 | 包含具体修改和代码位置 |
 | 已失败优化 | ✅ 完整保留 | 避免重复尝试 |
-| 约束与发现 | ✅ 完整保留 | 后续阶段必须遵守 |
+| 约束与发现 | ✅ 完整保留 | 与实际验证记录交叉核对后应用 |
 | 当前代码配置 | ✅ 完整保留 | 需基于最新代码继续修改 |
 | 性能趋势 | ✅ 浓缩保留 | 只保留趋势摘要，不保留每轮详细日志 |
 | 中间调试日志 | ❌ 丢弃 | 如精度失败时的完整报错堆栈 |
@@ -146,22 +95,42 @@ Task subagent 启动时，遵循以下信息传递规则：
 
 ## 摘要校验清单
 
-**⛔ 生成摘要后必须逐项确认，确认后立即启动 Task subagent：**
+交接前逐项核对以下记录。
 
 - [ ] 性能数据是否与实际一致？（执行时间、利用率、气泡率）
 - [ ] 已采纳优化是否遗漏？（核对 Todo List 中的 ✅ 项）
 - [ ] 已失败优化是否遗漏？（核对 Todo List 中的 ❌ 项）
-- [ ] 约束与发现是否遗漏？（检查调优过程中的关键发现）
+- [ ] 约束与发现是否遗漏？对代码注释和前次交接中声称的精度或资源约束，查 `MEMORY.md` 中对应的验证记录。以 PASS 证据确认约束。对标记为 `DISPROVED`、`SUPERSEDED` 或 `INERT` 的约束解除限制，并重审受影响的优化项。FRONTEND 在 A4 分析时完成核对。
 - [ ] 代码配置是否是最新的？（包含所有已采纳的修改）
 - [ ] ⛔ Todo 完整性检查：
   - Todo 迭代轮次记录表中，所有已结束的轮次状态列是否均已填写 ✅ 或 ❌？
   - 阶段状态（S1-S5）是否与当前实际进度一致？
   - 当前迭代状态中的"当前轮次""连续无提升""失败累计"是否与轮次记录表一致？
-  - ❌ 任何一项不一致 → **禁止进入 Task subagent！必须先修正 Todo**
-- [ ] ⛔ 校验通过后，是否已启动 Task subagent？（未启动禁止进入下一阶段）
-- [ ] ⛔ 达标状态校验（Task 返回后检查）：
-  - 摘要中"达标状态"为 ✅已达标 → 进入 S5_REPORT
-  - 摘要中"达标状态"为 ❌未达标 → 继续启动下一个 PHASE 的 Task
+  - ❌ 任何一项不一致 → 先修正 Todo 再交接
+- [ ] ⛔ 代表用例 runner 门控（正轮次 INIT→S1 时检查）：
+  - `run_cases.py` 已创建（算子目录下的 `run_cases.py`）且 `py_compile` 通过？
+  - smoke 验证通过：`run_cases.py --cases <smallest> --compile-only` → OK？
+  - 交叉验证通过：`run_cases.py --cases <tuning-case-id> --perf` 从该次运行的 `bubble_analysis.log` 读取的 E2E 与同次 `AICore Prof Summary` 一致？
+  - `tuning_case_set`（精度集）+ `compile_only_gap_fill`（编译期补漏）已记录到 MEMORY + Todo？
+  - ❌ 任一缺失 → **禁止 dispatch S1！必须在 INIT 会话内补完**
+- [ ] ⛔ 代表用例数据门控（正轮次 S2→S3 时检查）：
+  - tuning case swimlane 数据存在（`merged_swimlane.json` / `bubble_analysis.log`）——重量级，S3 详细分析用
+  - covering set 其余 case 的 逐 case E2E 基线已采集（`run_cases.py --cases <non-tuning> --perf` 输出行）？
+  - ❌ tuning case swimlane 缺失 → 禁止用 逐 case E2E 替代——S3 bubble/core 分析依赖完整 swimlane
+- [ ] ⛔ S3 退出门控（S3→S4 转移时必查）：
+  - tuning case 详细性能报告存在（`performance_analysis_report.md`）？
+  - covering set per-case E2E 基线表已写入 MEMORY（tuning case from swimlane summary, 其余 from 各 case 的性能日志）→ 作为 S4 ITer 比较基线？
+  - ⛔ Tile 站点清单 + A4 议程骨架：`list_tile_boundaries.py <impl> --out _debug/tile_boundaries.txt --emit-agenda _debug/a4_agenda.md` 本次退出码为 0，两份产物的 impl SHA-256 均与当前源码一致，议程行数与报告站点数一致。源码改变后重新生成。三项均满足后进入 S4，以该清单作为 Rule 4 的站点集合。
+- [ ] ⛔ 达标状态校验（收到阶段摘要时检查）：
+  - 摘要中"达标状态"为 ✅已达标 → 进入 S5_REPORT（保留已采纳优化的验证证据，在 S5 完成精度回归）
+  - 摘要中"达标状态"为 ❌未达标 → 继续以下结构变更台账校验
+- [ ] ⛔ 结构变更台账校验（仅 FRONTEND 未达标时执行）：
+  - §2 表格中每个已采纳项是否均标注 结构级/配置级？
+  - F-1~F-21 全表标记是否完整（无 ⏳ 遗留）？
+  - ⛔ 分支验证证据完整性（tile/unroll 类 ITER，措辞无关门控）：台账中每个 tile 取值/unroll_list 变更类已采纳 ITER，必须含 `run_cases.py` 的 `[case N]` 输出行（受影响分支参数 + 验证 case + 逐 case 结果）。缺 → 摘要退回。"已在 tuning case 上精度通过"不满足本门控（见 SKILL.md §5 + §1b「分支验证」）
+  - ⛔ 精度集实测完整性（tile/unroll 类 ITER，措辞无关门控）：台账中每个 tile/unroll 类 ITER 是否含 `run_cases.py --cases <affected> --perf` 的 per-case `[case N] E2E XXXus` 行？分歧时是否记录了为回退 case 增设/修改的分支 + 重测数字（⛔ 禁止整体回退）？缺 → 摘要退回（判据是逐 case 数字）
+  - 首轮摘要是否包含入口基线既有结构标记清单及 audited 状态？
+  - 结构 delta 计算是否正确？delta 非空且未达标时，是否已按剩余预算重审或记录未解决项？
 
 ## 摘要模板
 
@@ -181,12 +150,19 @@ Task subagent 启动时，遵循以下信息传递规则：
 - 调优目标: [目标] us（差距: [%]%）
 - 达标状态: ✅已达标 / ❌未达标
 
-### 2. 已采纳优化
-| # | 轮次 | 优化项 | 修改内容 | 收益 | 代码位置 |
-|---|------|--------|---------|------|---------|
-| 1 | F-1 | BLOCK_SIZE | 128→64 | -13.6% | file:line |
+### 2. 已采纳优化（⛔ 结构变更台账）
+| # | 轮次 | 优化项 | 修改内容 | 变更类型（⛔必填：结构级/配置级） | 收益 | 代码位置 |
+|---|------|--------|---------|------|---------|---------|
+| 1 | F-1 | BLOCK_SIZE | 128→64 | 配置级 | -13.6% | file:line |
 
-### 3. 已失败优化（⛔ 禁止重试）
+> **⛔ 结构变更台账（FRONTEND 摘要必填，编排器 PHASE_SUMMARY_F 门控依据）**：
+> - 每个已采纳未回退优化点标注 `结构级`（循环消除/创建/合并/类型变更/外提改变了最内层循环/M轴重映射）或 `配置级`（tile/cache/pass option）
+> - **首轮追加**：入口基线既有结构标记清单（如已应用的 F-19 批量化、已消除的循环等，非本轮采纳但存在于代码中）+ `audited: yes/no` 状态（本轮已重审的标记置 yes）
+> - 结构 delta = 本轮结构级采纳数 +（仅首轮）未 audited 的基线结构标记数；delta 非空且未达标时，有剩余预算则重跑 FRONTEND（清除全部 DO-NOT-RETRY + 重跑完整阶段A + F- 全表重查）。预算耗尽则记录未解决项进入 S5，其他情况按阶段交接流程推进
+> - F-1~F-21 全表标记作为台账附表。未达标时，完成本轮仍适用的待尝试项后再交接
+> - **⛔ tile/unroll 类已采纳 ITER 附表（分支验证 + covering set 实测，缺失 = 门控退回）**：每个 tile 取值/unroll_list 变更类已采纳 ITER 一行——受影响分支参数 | 分支验证 case+结果（精度/compile-only）| covering set 逐 case 前后 µs（case_id: before→after）| 分歧处理（无分歧 = "一致改善"；有分歧 = 增设/修改的分支 + 重测数字）
+
+### 3. 已失败优化（⛔ 禁止重试；结构变更重跑轮次中该清单作废，须重新实测）
 | # | 轮次 | 尝试项 | 失败原因 | 已回退 |
 |---|------|--------|---------|--------|
 | 1 | F-2 | unroll_list | 性能回退+8.6% | ✅ |

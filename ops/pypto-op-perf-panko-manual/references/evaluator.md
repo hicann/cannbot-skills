@@ -21,7 +21,11 @@ the boundary and the arithmetic breaks: the kernel gets cheaper, the wrapper get
 expensive, `p` improves, and the ratchet keeps a candidate that is slower to run — 100 µs of
 kernel becoming 80 µs while 30 µs appears in the wrapper scores as a 20 µs win.
 
-- `init` records a signature of everything in `op_file` that is not a `@jit` kernel.
+- `init` records a signature of the host-visible code in `op_file`. In version 2, the
+  body of a module-level helper may change when only JIT code calls it, directly or
+  through other device-only helpers. Its signature, defaults and decorators stay frozen.
+  A helper referenced by host code is frozen in full. Searches initialized with version 1
+  retain their original rule that freezes every top-level definition outside the JIT entries.
 - `feasible` rejects a drifted candidate **before** any device time is spent.
 - `record` checks again and discards the measurement, because `feasible` is not mandatory
   and a number taken on a changed wrapper is not comparable with the rest of the campaign.
@@ -31,12 +35,10 @@ invisible; any change to what the host actually does is not. Actions that moved 
 host (F-16, F-21, F-22) are **not in the action catalogue** — with the wrapper frozen they
 are unreachable, and offering them would be offering candidates the gates reject.
 
-**Prerequisite: the kernel must carry `debug_options={"runtime_debug_mode": 1}`.** The
-profiler emits no AICore record without it — the library default is `0` — so a kernel written
-with the default is not measurable by this harness and `p` has no value at all. Every `p` a
-campaign records is taken under `runtime_debug_mode: 1`; whether the tile optimum found there
-is also the optimum at `0` is assumed, not verified, and the current instrumentation cannot
-verify it.
+The subprocess evaluator sets the PyPTO runtime profiling default to
+`runtime_debug_mode=1` before loading the implementation. Both the baseline and
+candidates use this setting. A kernel with an explicit debug override must
+allow profiling. Keep the production source and the controller's snapshot identical.
 
 ## Procedure
 
@@ -53,9 +55,11 @@ return (1, p)
 
 - **Static feasibility** runs first, on the source, before anything is compiled
   or launched. It rejects only configurations the hardware provably cannot
-  accept: tile dimensions that are not 16-aligned, an L0 tile larger than its
+  accept: cube K or N L0 sizes that are not 16-aligned, an L0 tile larger than its
   L1 tile, or a unified-buffer footprint over budget. A rejection consumes no
-  device time and therefore does not count against `eval_budget`; it does count
+  device time and therefore does not count against `eval_budget`. M alignment
+  depends on operand layout and transpose. The compiler checks it with the
+  actual operands, including single-row matrix products. Static rejection counts
   towards the action's stagnation counter, so an action that keeps proposing
   infeasible configurations is still abandoned. The check is deliberately
   conservative and rejects only when the violation is certain: a false

@@ -96,6 +96,14 @@ class _StubbedPypto:
 
 
 class DtypeTableTest(unittest.TestCase):
+    def test_pybind_enum_with_named_members(self):
+        sdk = _fake_pypto()
+        sdk.DataType = types.SimpleNamespace(__members__=_FakeDataType.__members__)
+        with _StubbedPypto(sdk):
+            table = feasibility.dtype_bytes_table()
+        self.assertEqual(table["DT_FP8"], 1)
+        self.assertNotIn("DT_INT4", table)
+
     def test_widths_come_from_pypto_when_it_is_importable(self):
         with _StubbedPypto(_fake_pypto()):
             table = feasibility.dtype_bytes_table()
@@ -306,6 +314,41 @@ def _our_gate(cfg, hw):
     """
     ok, _why = space.static_feasible({"cube#0": cfg}, hw)
     return ok
+
+
+class SourceCubeTileTest(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.path = Path(folder.name) / "kernel.py"
+
+    def write_tile(self, args):
+        self.path.write_text(f"pypto.set_cube_tile_shapes({args})\n", encoding="utf-8")
+
+    def test_single_row_from_attention_residual_reaches_device_evaluation(self):
+        self.write_tile("[1, 1], [64, 64], [64, 128], False")
+        self.assertEqual(feasibility.check(self.path), (True, ""))
+
+    def test_explicit_l1_sizes_for_each_operand(self):
+        self.write_tile("n=[64, 128], m=[1, 1], k=[32, 64, 96]")
+        # FP16 uses a padded M of 16. A needs 2 KiB and B needs 24 KiB.
+        hw = feasibility.HW(m_l1=1, k_l1=32, l1_budget_kb=26)
+        self.assertEqual(feasibility.check(self.path, hw), (True, ""))
+        self.assertEqual(feasibility.l1_occupancy(self.path, hw), 1.0)
+        hw.l1_budget_kb = 25
+        self.assertFalse(feasibility.check(self.path, hw)[0])
+
+    def test_invalid_axis_sizes_are_rejected_before_measurement(self):
+        for args in (
+            "[1, 1], [17, 34], [64, 128]",  # K alignment
+            "[1, 1], [64, 64], [1, 1]",  # N alignment
+            "[2, 3], [64, 64], [64, 128]",  # M subdivision
+            "[1, 1], [64, 64, 96], [64, 128]",  # B's K subdivision
+            "[0, 1], [64, 64], [64, 128]",  # invalid L0
+        ):
+            with self.subTest(args=args):
+                self.write_tile(args)
+                self.assertFalse(feasibility.check(self.path)[0])
 
 
 class CubeRuleAgreementTest(unittest.TestCase):

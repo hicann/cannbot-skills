@@ -129,7 +129,9 @@ def init_argv(op_dir, op_file, *extra, catalog=CATALOG):
     ]
     if catalog is not None:
         argv += ["--catalog", str(catalog)]
-    argv += ["--allow-unversioned", "--op-file", str(op_file)]
+    argv.append("--allow-unversioned")
+    if op_file is not None:
+        argv += ["--op-file", str(op_file)]
     return argv + list(extra)
 
 

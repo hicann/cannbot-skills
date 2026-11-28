@@ -38,6 +38,13 @@ CONFIG_FIELDS = (
 )
 
 
+def resolve_op_file(op_dir, op, op_file):
+    """Use the explicit implementation path or the operator's conventional filename."""
+    if op_file:
+        return op_file
+    return os.path.join(op_dir, f"{op}_impl.py") if op else None
+
+
 def close_session(op_dir):
     """Release only the worker identified by this operator's private session."""
     root = Path(op_dir).resolve() / "optimization" / ".evaluation"

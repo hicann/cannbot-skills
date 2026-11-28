@@ -1,12 +1,11 @@
 ---
 name: pypto-op-perf-panko-manual
-description: Stage 7 PANKO world-model + evaluator contract. Read ONLY by pypto-op-auto-tuner-panko. Defines one search cycle (evaluate, record, reflect, select) over the persisted tree, and the CODE/STOP directive returned to the orchestrator. No API key. Use when the user asks for PANKO search-based auto-tuning in Stage 7.
+description: Stage 7 PANKO world-model + evaluator contract. Run by the search executor. Defines evaluation, refinement and the CODE/STOP handoff over the persisted search tree. No API key. Use when the user asks for PANKO search-based auto-tuning in Stage 7.
 ---
 
 # pypto-op-perf-panko-manual — Stage 7 PANKO (world model + evaluator)
 
-**Read only by `pypto-op-auto-tuner-panko`.** The orchestrator does not read this skill; it only relays
-your directive and dispatches the coder. You never call `state_transition` (you are a subagent).
+## Search cycle
 
 You are the **World Model** (propose δ, reflect, rescore V, Insert/Update/Prune) **and the
 Evaluator** (run the frozen `E(x)→(s,p)`). The deterministic core — selection (argmax
@@ -67,14 +66,10 @@ a matmul re-admits the whole cube family. Do not try to work around the split;
 if you believe an action should be reachable, propose the transformation that
 creates its precondition (F-20 does this for reductions).
 
-**Scope: the kernel, not the call.** `p` is the AICore End-to-End Time of the `@jit`
-kernel. It is kernel-internal time, not the operator's end-to-end time. The host wrapper is
-FROZEN for the whole run: `init` records a signature of everything that is not a `@jit`
-kernel, and `feasible` and `record` both reject a candidate that changed it. Counting only
-the kernel orders two candidates correctly exactly while the uncounted part is identical
-between them; move work into the wrapper and `p` improves without the operator getting
-faster. Put every δ inside the kernel. Actions that moved work to the host are not in the
-catalogue.
+**Measurement scope.** `p` measures the AICore End-to-End Time of the JIT kernel, including
+work it delegates to device-only helpers. Keep host code frozen so candidate measurements
+remain comparable. The [evaluator contract](references/evaluator.md) defines which edits
+the controller accepts.
 
 **The chip envelope is derived, not assumed.** `init` reads the buffer capacities
 (UB / L0A / L0B / L0C / L1) and the cube/vector core counts out of the platform ini
@@ -94,11 +89,16 @@ reports the mismatch the moment it sees one. Where no runtime can be asked, the 
 proceeds and the state records `confirmed: unknown`, so a report can say whether the
 numbers were checked against silicon or only against a name.
 
-**Prerequisite: the kernel must carry `debug_options={"runtime_debug_mode": 1}`.** Without
-it the profiler emits no AICore record — the library default is `0` — and `p` has no value.
-See `references/evaluator.md`.
+Checkpointed searches use `evaluation_session.py --mode subprocess` for the baseline and
+`block --evaluation-mode subprocess` for BO. The measurement process enables PyPTO
+profiling before loading the kernel. Keep this mode for the entire search.
+Use the operator's representative inputs in `eval/panko_inputs.py` or the
+existing `eval/test_inputs.py`. Expose `build_inputs(device)` returning positional
+wrapper arguments or `INPUTS`. The device argument is the selected NPU index,
+so torch inputs use `torch.device("npu", int(device))`. Reuse the case generator,
+scalar arguments and workload specified by the user. See `references/evaluator.md`.
 
-**Dependency.** The tile search needs `optuna >= 2.0` (developed against 4.9).
+Use `optuna >= 2.7` for `Study.ask(fixed_distributions=...)` and Python 3.10-compatible NumPy dependencies.
 `init` runs a capability preflight and REFUSES when
 `bayesian_optimization_tile_search` is on and optuna is not importable: tile values
 are the one lever the model cannot propose, so running without it is a different
@@ -115,21 +115,15 @@ Every `init` reports `bayesian_optimization: {available, optuna_version, reason}
 and persists it, so a report names the algorithm that ran rather than the one that
 was configured.
 
-**Paths resolve from THIS SKILL, not from your working directory.** Let `SKILL_ROOT`
-be the directory this file is in — you know it, having just read this file from
-there. In a pypto-gym clone that is `cannbot-skills/ops/pypto-op-perf-panko-manual`; in a
-project the plugin was installed into it is `.opencode/skills/pypto-op-perf-panko-manual`
-(or your client's equivalent), a symlink to the same place. There is no
-`cannbot-skills/` tree in that project, so a path spelled from the repo root does
-not exist there.
+Set `SKILL_ROOT` to the absolute directory containing this `SKILL.md`. Resolve `scripts/` and `references/` from that directory.
 
 Let `HARNESS = python <SKILL_ROOT>/scripts/panko_harness.py`.
 
-Run INIT/STEP with `python <SKILL_ROOT>/scripts/evaluation_session.py --op-dir <op_dir> --op <op> --op-file <op_file> --device <DEVICE> --test-command '<test_command>' --lint-root <lint_root>`. It runs the full tests, lint, and frozen measurement in a resident worker. Pass `--evaluation-mode resident` to `HARNESS block` to reuse it for BO, keeping paths and commands consistent across dispatches. A terminal `HARNESS stop` closes it. On abort, run `python <SKILL_ROOT>/scripts/evaluation_session.py --close --op-dir <op_dir>`.
+Run the baseline with `python <SKILL_ROOT>/scripts/evaluation_session.py --mode subprocess --op-dir <op_dir> --op <op> --op-file <op_file> --device <DEVICE> --test-command '<test_command>' --lint-root <lint_root> --eval-timeout-s <eval_timeout_s>`. It runs the tests, lint and frozen measurement. STEP describes candidate evaluation. For searches without checkpoints, a caller using the resident worker passes `--mode resident` and enables profiling on its JIT kernel. A terminal `HARNESS stop` closes the worker. On abort, run `python <SKILL_ROOT>/scripts/evaluation_session.py --close --op-dir <op_dir>`.
 
-For additional reuse, select `--mode cached` (complete results and exact-source static failures) or `--mode prepared` (also guarded deterministic inputs and pure golden references). Before a new INIT's first measurement, call `evaluation_session.py --reset --op-dir <op_dir>` once; never reset a resumed STEP. It starts a new cache generation and removes stale terminal markers while preserving prior evidence. Use the same mode for BO's `--evaluation-mode`. Tests, references, SPEC, lint, configuration, runtime versions, host and environment invalidate the cache. Generated tuning notes do not. Set `PANKO_RUNTIME_SIGNATURE` when replacing runtime binaries without changing their version metadata or changing test dependencies outside the operator directory. Prepared mode requires deterministic tests and a pure `<op>_golden` in `<op>_golden.py`; unsupported fixtures keep fresh preparation. Tensor contents and versions are checked before reuse, including reference outputs.
+For searches without checkpoints, select `--mode cached` (complete results and exact-source static failures) or `--mode prepared` (also guarded deterministic inputs and pure golden references). Before a new INIT's first measurement, call `evaluation_session.py --reset --op-dir <op_dir>` once; never reset a resumed STEP. It starts a new cache generation and removes stale terminal markers while preserving prior evidence. Use the same mode for BO's `--evaluation-mode`. Tests, references, SPEC, lint, configuration, runtime versions, host and environment invalidate the cache. Generated tuning notes do not. Set `PANKO_RUNTIME_SIGNATURE` when replacing runtime binaries without changing their version metadata or changing test dependencies outside the operator directory. Prepared mode requires deterministic tests and a pure `<op>_golden` in `<op>_golden.py`; unsupported fixtures keep fresh preparation. Tensor contents and versions are checked before reuse, including reference outputs.
 
-To retain harness imports and API metadata, set `HARNESS = python <SKILL_ROOT>/scripts/harness_session.py --op-dir <op_dir> --`. Its arguments and stdout remain the original harness contract. After `record`, it runs the original stop check; a real stop with the best source restored runs the original report and writes `optimization/controller-terminal.json`. After recording, require its run_start to match progress._start_ts, its reason to match progress.stop_reason, and its delivered_code_hash to match the current best source before returning STOP. Forced stops do not create it. On abort, call `harness_session.py --op-dir <op_dir> --close` to release both owned workers. Its `--timeout` bounds a complete harness command (default 3600 seconds); set it to the command's BO budget.
+For checkpointed searches, or to retain harness imports and API metadata, set `HARNESS = python <SKILL_ROOT>/scripts/harness_session.py --op-dir <op_dir> --`. Its arguments and stdout remain the original harness contract. It checks for a natural stop after `init`, `record`, and any `block` that has no winner to record. A natural stop restores the best source, runs the report, and writes `optimization/controller-terminal.json`. Before returning STOP, verify that the terminal's `run_start`, `reason` and `delivered_code_hash` agree with the persisted run and the restored source. On abort, call `harness_session.py --op-dir <op_dir> --close` to release both owned workers. Its `--timeout` bounds a complete harness command (default 3600 seconds). Set it to the command's BO time budget.
 
 If the client exposes a resumable optimizer task/session ID, reuse it only within the same operator directory, role and search configuration; keep the coder's role separate. Always reload `search_state.json` and the current implementation before a resumed cycle. Start a new conversation when that scope changes. Context reuse does not replace the persisted state or bypass any transition.
 
@@ -144,7 +138,15 @@ so what it resolved is on the record.
   (`stagnation_K` / `staged_prior` / limits).
 - **STEP cycle** (`candidate_file` + `action_id` given): the candidate the coder just produced.
 
-Detect the mode by whether `candidate_file` is present.
+For a fresh search, start at INIT. For a checkpointed search with an existing
+`optimization/search_state.json`, check for a natural STOP or a measured BO winner awaiting
+`record` first (see STEP). If `progress.pending_code` exists, `select` returns that handoff.
+An acknowledged hash enters STEP directly. If the manual edit is outstanding, inspect the
+current bytes against `base_hash` and acknowledge the selected edit before measuring it.
+If `progress.refine` still has an action and no CODE is pending, continue that refinement.
+Use the last controller response when available. If it was lost, the `close` gate checks the
+persisted counters. If it refuses an early close, use `handoff` to continue the same action.
+For a caller passing individual cycles without checkpoints, `candidate_file` selects STEP.
 
 ## Code snapshots & greedy accumulation (harness-owned — do NOT restore/snapshot by hand)
 Node code lives under `custom/<op>/optimization/nodes/<code_hash>.py`. **The harness enforces greedy
@@ -155,8 +157,8 @@ any files:
   against those bytes. `init` **refuses** if `op_file` cannot be read, if a supplied hash disagrees
   with it, or if the snapshot cannot be written — a run whose baseline is missing has nothing for
   later cycles to stack on, and would silently accumulate onto whatever is in the working file.
-- `select` **restores the running global best into `op_file` before returning**, so the coder applies
-  this action's δ on top of the accumulated best (`restore_code_hash`/`restored` are echoed for logging).
+- Selecting a **new** action restores the running global best into `op_file` (`restore_code_hash` /
+  `restored`). Resuming an existing `pending_code` leaves its source in place.
   If that restore fails and the file is not already the best, `select` **refuses** rather than hand out
   an action: the response names the program the δ is to be applied to, and it has to be that program.
 - `record` snapshots a **kept** candidate → `nodes/<code_hash>.py`; on a **reverted** candidate it rolls
@@ -226,13 +228,36 @@ a genuinely non-monotone search, that is a different optimizer, not a setting he
    (no `--catalog`: it defaults to this skill's own. `--preopt-hash` is optional
    and verified against `op_file` if given.)
    - If `E(preopt)` reported core-util % / bubble %, pass them as `--preopt-util <u0> --preopt-bubble <b0>` — the harness then biases the frontier toward the actions that fix the current bottleneck (deterministic symptom → V boost). The harness re-applies this at every `close` from the measured metrics, so the frontier always points at the *current* bottleneck. **Required whenever `symptom_boost > 1`**: without them the harness cannot infer a symptom and profile anchoring silently does nothing. `init` returns a `warning` field when they are missing.
-3. `HARNESS select --op-dir custom/<op>` → action `a` (the harness restores the running best into `op_file`).
-4. Return `{"directive":"CODE","op_file":"<op_file>","action_id":"<a.id>","intent":"<a.delta>"}`.
-   - If `select` returned `bayesian_optimization.applied == true`, add `"coder": false` and set `intent` to what the
-     core already applied (e.g. `set_vec_tile_shapes(32, 256) [core/BO, seed=floor]`). See
-     "Tile actions" below.
+3. Check for a natural STOP before selecting a candidate. The baseline spends one
+   evaluation and may already meet the target or exhaust the budget. With
+   `harness_session.py`, read the terminal record after INIT. When running
+   `panko_harness.py` directly, issue `stop` and run `report` if it returns `stop:true`.
+4. Select the next action with `HARNESS select --op-dir <op_dir>`. A new selection starts
+   from the running best. A CODE directive carries the implementation path, action ID and intent.
+   - To save handoff checkpoints, set `checkpoint_handoffs=true` at INIT or run `select --resume`
+     on the first selection. For a checkpointed manual edit, read `progress.pending_code`, check
+     `base_hash` and apply the recorded intent. Acknowledge the edit before STEP.
+
+     ```sh
+     HARNESS ack-code --op-dir "$OP_DIR" --parent "$ACTION_ID" --base-hash "$BASE_SHA256" \
+       --intent "$STORED_INTENT" --summary "$CHANGE_SUMMARY"
+     ```
+
+     For a controller-written candidate (`coder: false`), enter STEP with `pending_code.candidate_hash`.
+   - Without checkpoints, dispatch the manual edit with `selected.id` and `selected.delta`.
+     If `bayesian_optimization.applied` is true, enter STEP directly with `bayesian_optimization.code_hash`.
 
 ## Cycle — STEP
+Check the persisted state for a terminal record before starting or resuming a
+candidate. If a controller command returns `error: stop_required`, call
+`HARNESS stop --op-dir custom/<op>` and relay its decision before evaluating
+again. When `block` returns a winner, record its `code_hash` and `best_latency`
+without another evaluation. If it returns no winner, check for STOP before
+continuing.
+If a resumed command returns `error: block_winner_pending`, call `record` with
+its `pending_record` values. The controller restores that measured candidate
+from its snapshot if needed. Check for STOP after recording it.
+
 0. **Check static feasibility first**: `HARNESS feasible --op-dir custom/<op> --parent <action_id> --op-file <candidate_file>`.
    On `feasible: false` the candidate never reaches the device: it costs no `eval_budget`, the harness has already
    rolled the working file back, and `stop_refine` tells you whether the action is now exhausted. Skip `probe` and
@@ -262,31 +287,40 @@ a genuinely non-monotone search, that is a different optimizer, not a setting he
      reason string names the binding constraint — read it and move the candidate to the other side of it. A
      `UB estimate 264KB (view 256KB + 2x tile 4KB) > budget 192KB` says the *view* is what does not fit, so
      shrinking the tile cannot help and enlarging it makes the message worse.
-0b. **Probe the cache — MANDATORY, never skip this.** `HARNESS probe --op-dir custom/<op> --code-hash <sha256(candidate_file)>`.
-   On `hit`: reuse the returned `(s, p)` and **skip `E`**. On miss: run step 1.
-   - `record` now **rejects** a hash it has already seen: no budget is charged, `n` is not
-     incremented, and no candidate is registered. Skipping `probe` therefore does not smuggle a
-     duplicate through, it only wastes a device measurement before the rejection.
-   - A hit means the candidate file is byte-identical to something already measured. The usual
-     cause is that the coder was handed the global best by `select` (see `already_measured` in its
-     output) or its own local best by a `record` rollback, and changed nothing. **That is evidence
-     the action does not apply to this kernel.** Do not re-issue the same δ: either propose a
-     materially different concrete δ, or close the action.
-1. Run `E(candidate_file)` → `(s, p)` (frozen method, `timeout`) — only on a cache miss.
-   Verify the hash you are about to evaluate differs from `already_measured` returned by `select`.
-2. `HARNESS record --op-dir custom/<op> --parent <action_id> --code-hash <sha256(candidate_file)> --s <s> --p <p> --util <util> --bubble <bubble>` → `{J, improved, n, stop_refine}`.
+1. For an ordinary candidate that passes feasibility, use the path selected at INIT.
+   - With `config.checkpoint_handoffs=true`, pass every acknowledged candidate to this command,
+     including hashes already in the cache:
+
+     ```sh
+     python3 "$SKILL_ROOT/scripts/evaluate_candidate.py" --op-dir "$OP_DIR" \
+       --parent "$ACTION_ID" --code-hash "$CANDIDATE_SHA256" --device "$DEVICE" \
+       --test-command "$TEST_COMMAND" --lint-root "$LINT_ROOT"
+     ```
+
+     A cache miss runs the frozen evaluation with `config.eval_timeout_s` and saves the result
+     before `record`. A completed `s=0`, including a candidate timeout, spends one evaluation.
+     An environment fault leaves the candidate pending. A retry reuses a receipt only when the
+     run, source hash and evaluation settings match. A cache hit for the current handoff goes
+     through the controller's duplicate handling, which restores the incumbent at zero cost.
+   - Without checkpoints, use `HARNESS probe --op-dir <op_dir> --code-hash <sha256>` first.
+     On a hit, reuse the cached result. On a miss, run the frozen `E(candidate_file)` and pass
+     `--parent <action_id> --code-hash <sha256> --s <s>` to `HARNESS record --op-dir <op_dir>`.
+     For a successful evaluation also pass `--p <latency>` and available utilization and bubble metrics.
+2. Follow the controller's `record` decision. A retry whose action and hash no longer match
+   the current handoff returns the cached result or STOP.
+   - Check for STOP after `record` before applying `stop_refine`. Read the terminal
+     record with `harness_session.py` or call `stop` with the bare CLI. If the run
+     stopped, return its reason and delivered best. Run `report` only with the bare CLI.
    - A response carrying `duplicate: true` means those bytes were already measured; nothing was
-     recorded and `n` is unchanged. Treat it as step 0b's `hit` case.
+     recorded and `n` is unchanged. Propose a distinct variation for the open action or close it when eligible.
    - The harness snapshots a kept candidate and rolls a reverted one back to the running best **for you** — no manual file ops. `improved` here means it **beat the running global best** (a candidate that only beats this action's own local best but is still slower than the global best is a regression → reverted, `n++`).
-   - If **not** `stop_refine`: **propose the next concrete candidate δ for this action.**
-     `close` will refuse. This is enforced now, not advised: an action abandoned
-     after one or two non-improving candidates has not been tested, it has been
-     sampled once or twice. If you believe the axis is exhausted, submit its
-     remaining values anyway — the duplicate check rejects them without
-     spending budget, and "I measured every
-     value" is a claim the tree can carry while "I judged it spent" is not. The
-     one case `close` still accepts early is an action that produced no candidate
-     at all, because the delta turned out to be inexpressible in this build. (specific parameter / config values, e.g. `cube_l1_reuse_setting={-1:2}`; never `<same δ>` or an open-ended "refine more" — picking each concrete variation is your search, not the coder's) and return `{"directive":"CODE","op_file":"<op_file>","action_id":"<action_id>","intent":"<next concrete δ>"}`.
+   - If `stop_refine` is false and the controller has already written the next tile candidate,
+     continue with its `coder: false` directive. Otherwise propose a concrete variation of the
+     current action. With checkpointed handoffs, use
+     `HARNESS handoff --op-dir <op_dir> --parent <action_id> --intent "<next variation>"`
+     to persist it before handing it to the editor.
+     Use `evolve` for a different optimization idea and wait for its selection.
+     Duplicate values cost no budget. Close early only if the action could produce no candidate.
 3. If `stop_refine`:
    1. `HARNESS close --op-dir custom/<op> --action <action_id>` (attach CLOSED, update global best).
    2. **Reflect** over the trajectory, then emit tree edits:
@@ -299,11 +333,11 @@ a genuinely non-monotone search, that is a different optimizer, not a setting he
       scale** (`references/action_catalog.json`: strong ≈ 0.9 / medium ≈ 0.6 / weak or speculative
       ≈ 0.3), so novel actions mix fairly with seeds — do not assign > 0.9 without hard evidence.
    3. `HARNESS stop --op-dir custom/<op>` → `{stop, reason}`.
-      - If `stop`: `HARNESS report --op-dir custom/<op>` (the harness has already restored the global-best
-        `op_file` for delivery); return `{"directive":"STOP","reason":"<reason>","best":{...}}`.
-      - Else: `HARNESS select --op-dir custom/<op>` → next action `a` (the harness restores the running
-        best into `op_file`); return `{"directive":"CODE","op_file":"<op_file>","action_id":"<a.id>","intent":"<a.delta>"}`.
-        Add `"coder": false` when `select` returned `bayesian_optimization.applied == true`.
+      - If `stop`, use the restored global-best `op_file` for delivery and return
+        `{"directive":"STOP","reason":"<reason>","best":{...}}`.
+        Run `HARNESS report --op-dir custom/<op>` if using the bare CLI.
+      - Otherwise select the next action as in INIT.
+        Return its CODE directive. A controller-written candidate carries `"coder": false`.
 
 
 ## Tile tuning: ask for a block, get one configuration back
@@ -352,10 +386,10 @@ Then: `record --parent <action_id> --code-hash <code_hash> --s 1 --p <best_laten
   tuning the concrete number is the core's; your search is which action to take
   and what the result implies for the *others*.
 
-**`aborted` naming environment faults ends the block. Whether it ends the RUN is
-not yours to decide — call `stop` and relay what it says.** The evaluator already
-waited the device out before reporting a fault at all, and `stop` then asks the
-device a question of its own before ending anything. Two answers come back:
+**`aborted` naming environment faults ends the block.** Record any winner the
+block returned, then call `stop` and relay its decision. The evaluator already
+waited for the device before reporting the fault. The controller checks whether
+the device is usable before ending the run:
 
 - `device_unavailable` — the probe confirmed it. Return the STOP.
 - `harness_fault` — the command never started; the fault is a bug here, not a
@@ -374,8 +408,9 @@ ago.
 normalization at INIT did not happen or did not succeed, and **no amount of
 searching will make the core own this kernel's tile.** Say so in your reflection.
 
-**Budget.** Every trial is a device evaluation. `charged` is what the block spent;
-the remaining one is charged by your `record`. `granted` is what the core allowed
+**Budget.** `charged` counts the block's immediately charged device evaluations.
+`record` adds any remaining charge for a measured winner. A winner replayed
+without new device evaluations uses its previous measurement. `granted` is what the core allowed
 after clamping your `--max-trials` against the remaining budget and the run-level
 share. A block stops on seven consecutive non-improving trials, so a converged
 block hands the rest back.
@@ -434,11 +469,8 @@ be the choice of action, and the reflection at `close`.
 core chose the number from its own Bayesian study and rewrote the tile call's
 argument list itself. Two consequences, and both are contractual:
 
-1. **Do NOT emit `CODE` for it.** Emit `{"directive":"CODE", ..., "coder": false}`
-   so the orchestrator skips the coder dispatch, or evaluate it yourself in this
-   same cycle. Handing this to the coder would overwrite the value the core just
-   wrote, and the study would receive the measurement of a program it did not
-   propose. The search would then learn nothing at all, silently.
+1. Emit `{"directive":"CODE", ..., "coder": false}` and go directly to STEP with
+   the hash of the source the controller wrote. That measurement belongs to its tile study.
 2. **Do not choose a tile number.** For these four actions the number is not
    yours. Your job is whether to select the action at all, and what the result
    implies for the *other* actions.
@@ -452,7 +484,7 @@ the other forty-four actions are not.
 tunable tile site, or the space is exhausted). Treat the action as an ordinary
 one and pick the δ yourself.
 
-## Return format (to the orchestrator) — exactly one JSON directive, nothing else
+## Cycle directives
 - `{"directive":"CODE","op_file":"custom/<op>/<op>_impl.py","action_id":"u13","intent":"<δ>"}`
 - `{"directive":"CODE","op_file":"custom/<op>/<op>_impl.py","action_id":"u10","intent":"<δ>","coder":false}`
   — the core already wrote it; the orchestrator must not dispatch the coder.
@@ -489,6 +521,6 @@ one and pick the δ yourself.
   `evolve --edits '{"exhausted":"<why>"}'`; only a declared exhaustion permits
   `frontier_exhausted`. Pruning is for retiring intents you have disproved, never for clearing
   the board.
-- Do not call `state_transition` (subagent). Do not change the frozen eval method or thresholds.
+- Keep the evaluation method and thresholds fixed throughout the search.
 - Preserve the operator's public contract (name / args / shape / dtype / layout); only the internal
   implementation is tuned. DEVICE is a per-run user parameter — never hard-code it.

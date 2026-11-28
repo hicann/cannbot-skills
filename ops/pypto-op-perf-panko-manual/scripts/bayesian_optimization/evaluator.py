@@ -471,15 +471,23 @@ class RealEvaluator:
             }
         if rc != 0:
             return 0, {
-                "reason": "test_command failed (golden/layout)",
+                "reason": "test_command timed out" if rc == 124 else "test_command failed (golden/layout)",
+                "test_rc": rc,
                 "detail": self._tail(),
             }
         if not self._lint_ok():
             return 0, {"reason": "lint gate failed", "detail": self._tail()}
         m = self._measure() or {}
         if m.get("p") is None:
+            marker = self._env_fault()
+            if marker is not None:
+                return 0, {
+                    "reason": f"environment fault: {marker}",
+                    "fault_kind": fault_kind(marker),
+                    "detail": self._tail(),
+                }
             return 0, {
-                "reason": "perf measure returned no latency",
+                "reason": m.get("reason", "perf measure returned no latency"),
                 "detail": self._tail(),
             }
         return 1, m
@@ -662,7 +670,9 @@ class RealEvaluator:
             )
             out = r.stdout or ""
         except subprocess.TimeoutExpired as e:
-            out = e.output if isinstance(e.output, str) else ""
+            output = e.output or b""
+            self._last_output = output if isinstance(output, str) else output.decode(errors="replace")
+            return {"reason": "perf measurement timed out", "timeout_s": self.eval_timeout_s}
         # Kept so `_env_fault` can see a device fault raised during measurement,
         # not only during the correctness command.
         self._last_output = out
