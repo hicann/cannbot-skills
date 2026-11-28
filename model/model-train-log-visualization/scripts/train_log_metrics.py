@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,18 +19,38 @@ from pathlib import Path
 ANSI_ESCAPE_RE = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]")
 VISIBLE_ESCAPE_RE = re.compile(r"␛\[[0-?]*[ -/]*[@-~]")
 
-# Numeric extractor that accepts comma separators, e.g. 7,234
-NUM_RE = r"([-+]?\d[\d,]*(?:\.\d+)?)"
+# Numeric extractor supporting comma separators, scientific notation, and
+# non-finite values. Keep all inner groups non-capturing because callers read
+# the numeric token from capture group 1 (and group 2 for memory percentage).
+FINITE_NUM_RE = (
+    r"(?:(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d*)?|\.\d+)"
+    r"(?:[eE][-+]?\d+)?"
+)
+NONFINITE_NUM_RE = r"(?i:nan|inf(?:inity)?)"
+NUM_RE = rf"([-+]?(?:{FINITE_NUM_RE}|{NONFINITE_NUM_RE}))"
+NUM_END_RE = r"(?![\w.,])"
 
-STEP_RE = re.compile(rf"\bstep:\s*{NUM_RE}")
-LOSS_RE = re.compile(rf"\bloss:\s*{NUM_RE}")
-GRAD_NORM_RE = re.compile(rf"\bgrad_norm:\s*{NUM_RE}")
-MEMORY_RE = re.compile(rf"\bmemory:\s*{NUM_RE}\s*GiB(?:\(\s*{NUM_RE}%\))?")
-TPS_RE = re.compile(rf"\btps:\s*{NUM_RE}")
-TFLOPS_RE = re.compile(rf"\btflops:\s*{NUM_RE}")
-MFU_RE = re.compile(rf"\bmfu:\s*{NUM_RE}%")
-ELAPSED_RE = re.compile(rf"\belapsed_time_per_step:\s*{NUM_RE}s")
-INDEXER_LOSS_RE = re.compile(rf"\bindexer\s+loss:\s*{NUM_RE}")
+STEP_RE = re.compile(rf"\bstep:\s*{NUM_RE}{NUM_END_RE}")
+# Callers mask AUX_LOSS_RE matches before searching this pattern, because
+# a plain \bloss: also matches the "loss" in prefixed aux losses.
+LOSS_RE = re.compile(rf"\bloss:\s*{NUM_RE}{NUM_END_RE}")
+GRAD_NORM_RE = re.compile(rf"\bgrad_norm:\s*{NUM_RE}{NUM_END_RE}")
+MEMORY_RE = re.compile(rf"\bmemory:\s*{NUM_RE}\s*GiB(?:\(\s*{NUM_RE}%\))?(?![\w.])")
+TPS_RE = re.compile(rf"\btps:\s*{NUM_RE}{NUM_END_RE}")
+TFLOPS_RE = re.compile(rf"\btflops:\s*{NUM_RE}{NUM_END_RE}")
+MFU_RE = re.compile(rf"\bmfu:\s*{NUM_RE}%(?![\w.])")
+ELAPSED_RE = re.compile(rf"\belapsed_time_per_step:\s*{NUM_RE}s(?![\w.])")
+# torchtitan-npu prints aux losses on their own line.
+AUX_STEP_RE = re.compile(rf"\baux_loss\s+step:\s*{NUM_RE}{NUM_END_RE}")
+INDEXER_LOSS_RE = re.compile(rf"\bindexer[\s_]+loss(?:/mean)?:\s*{NUM_RE}{NUM_END_RE}")
+# A loss field with a word prefix is an aux loss ("indexer loss:", "moe loss:",
+# "load balancing loss:", ...), never the main loss. Require each prefix token
+# to start with a letter so a preceding numeric value such as "1.0 loss:" is
+# not swallowed.
+AUX_LOSS_RE = re.compile(
+    rf"\b[A-Za-z][A-Za-z0-9_]*(?:[\s_-]+[A-Za-z][A-Za-z0-9_]*)*"
+    rf"[\s_-]+loss(?:/mean)?:\s*{NUM_RE}{NUM_END_RE}"
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +79,10 @@ def _search_float(pattern: re.Pattern[str], line: str) -> float | None:
     return _to_float(match.group(1))
 
 
+def _is_valid_step(value: float | None) -> bool:
+    return value is not None and math.isfinite(value) and value.is_integer()
+
+
 def _search_memory(line: str) -> tuple[float | None, float | None]:
     match = MEMORY_RE.search(line)
     if not match:
@@ -65,46 +90,6 @@ def _search_memory(line: str) -> tuple[float | None, float | None]:
     gib = _to_float(match.group(1))
     pct = _to_float(match.group(2)) if match.group(2) else None
     return gib, pct
-
-
-def _collect_optional_metrics(
-    line: str,
-    record: dict,
-    line_indexer_loss: float | None,
-    pending_indexer_loss: float | None,
-) -> None:
-    """从单行日志中提取可选指标，原地写入 record。"""
-    grad_norm = _search_float(GRAD_NORM_RE, line)
-    if grad_norm is not None:
-        record["grad_norm"] = grad_norm
-
-    memory_gib, memory_pct = _search_memory(line)
-    if memory_gib is not None:
-        record["memory_gib"] = memory_gib
-    if memory_pct is not None:
-        record["memory_pct"] = memory_pct
-
-    tps = _search_float(TPS_RE, line)
-    if tps is not None:
-        record["tps"] = tps
-
-    tflops = _search_float(TFLOPS_RE, line)
-    if tflops is not None:
-        record["tflops"] = tflops
-
-    mfu_pct = _search_float(MFU_RE, line)
-    if mfu_pct is not None:
-        record["mfu_pct"] = mfu_pct
-
-    elapsed = _search_float(ELAPSED_RE, line)
-    if elapsed is not None:
-        record["elapsed_time_per_step"] = elapsed
-
-    indexer_loss = line_indexer_loss
-    if indexer_loss is None:
-        indexer_loss = pending_indexer_loss
-    if indexer_loss is not None:
-        record["indexer_loss"] = indexer_loss
 
 
 def read_training_metrics(log_path: str | Path) -> tuple[list[dict], list[str]]:
@@ -117,23 +102,51 @@ def read_training_metrics(log_path: str | Path) -> tuple[list[dict], list[str]]:
     malformed_lines = 0
     duplicate_steps = 0
     pending_indexer_loss: float | None = None
+    pending_elapsed: float | None = None
+    indexer_by_step: dict[int, float] = {}
+    last_record: dict | None = None
 
     with path.open("r", encoding="utf-8", errors="replace") as handle:
         for line_no, raw_line in enumerate(handle, start=1):
             line = _clean_line(raw_line)
 
-            line_indexer_loss = _search_float(INDEXER_LOSS_RE, line)
-            if line_indexer_loss is not None:
-                pending_indexer_loss = line_indexer_loss
+            indexer_match = INDEXER_LOSS_RE.search(line)
+            line_indexer_loss = _to_float(indexer_match.group(1)) if indexer_match else None
+            line = AUX_LOSS_RE.sub(
+                lambda match: " " * (match.end() - match.start()), line
+            )
+            line_elapsed = _search_float(ELAPSED_RE, line)
 
             if "step:" not in line or "loss:" not in line:
+                # Aux-loss and elapsed-time lines are printed separately from the
+                # metrics line. The aux line carries its own step; the elapsed
+                # line does not, so it belongs to the most recent metrics record.
+                if line_indexer_loss is not None:
+                    aux_step = _search_float(AUX_STEP_RE, line)
+                    own_step = _search_float(STEP_RE, line)
+                    if _is_valid_step(aux_step):
+                        indexer_by_step[int(aux_step)] = line_indexer_loss
+                    elif _is_valid_step(own_step):
+                        # The aux-only line names its own step, so it must not
+                        # be attached to the previous record.
+                        indexer_by_step[int(own_step)] = line_indexer_loss
+                    elif last_record is not None:
+                        last_record.setdefault("indexer_loss", line_indexer_loss)
+                    else:
+                        pending_indexer_loss = line_indexer_loss
+                if line_elapsed is not None:
+                    if last_record is not None:
+                        last_record.setdefault("elapsed_time_per_step", line_elapsed)
+                    else:
+                        pending_elapsed = line_elapsed
                 continue
 
             step_val = _search_float(STEP_RE, line)
             loss_val = _search_float(LOSS_RE, line)
-            if step_val is None or loss_val is None:
+            if not _is_valid_step(step_val) or loss_val is None:
                 malformed_lines += 1
                 pending_indexer_loss = None
+                pending_elapsed = None
                 continue
 
             step = int(step_val)
@@ -142,7 +155,41 @@ def read_training_metrics(log_path: str | Path) -> tuple[list[dict], list[str]]:
                 "loss": loss_val,
             }
 
-            _collect_optional_metrics(line, record, line_indexer_loss, pending_indexer_loss)
+            grad_norm = _search_float(GRAD_NORM_RE, line)
+            if grad_norm is not None:
+                record["grad_norm"] = grad_norm
+
+            memory_gib, memory_pct = _search_memory(line)
+            if memory_gib is not None:
+                record["memory_gib"] = memory_gib
+            if memory_pct is not None:
+                record["memory_pct"] = memory_pct
+
+            tps = _search_float(TPS_RE, line)
+            if tps is not None:
+                record["tps"] = tps
+
+            tflops = _search_float(TFLOPS_RE, line)
+            if tflops is not None:
+                record["tflops"] = tflops
+
+            mfu_pct = _search_float(MFU_RE, line)
+            if mfu_pct is not None:
+                record["mfu_pct"] = mfu_pct
+
+            # elapsed_time_per_step may sit on this line or on the separate line
+            # that follows it; the latter was captured into pending_elapsed.
+            if line_elapsed is not None:
+                record["elapsed_time_per_step"] = line_elapsed
+            elif pending_elapsed is not None:
+                record["elapsed_time_per_step"] = pending_elapsed
+            pending_elapsed = None
+
+            indexer_loss = line_indexer_loss
+            if indexer_loss is None:
+                indexer_loss = pending_indexer_loss
+            if indexer_loss is not None:
+                record["indexer_loss"] = indexer_loss
             pending_indexer_loss = None
 
             if step in records_by_step:
@@ -150,6 +197,13 @@ def read_training_metrics(log_path: str | Path) -> tuple[list[dict], list[str]]:
                 warnings.append(f"duplicate step {step} at line {line_no}, keep latest record")
 
             records_by_step[step] = record
+            last_record = record
+
+    # Aux-loss lines that carried an explicit step are attributed after the fact,
+    # so their position relative to the metrics line does not matter.
+    for step, record in records_by_step.items():
+        if "indexer_loss" not in record and step in indexer_by_step:
+            record["indexer_loss"] = indexer_by_step[step]
 
     records = [records_by_step[s] for s in sorted(records_by_step)]
     if malformed_lines:
@@ -191,15 +245,21 @@ def align_by_common_steps(records_a: list[dict], records_b: list[dict]) -> Align
     )
 
 
-def compute_signed_errors(
+def compute_errors(
     values_a: list[float], values_b: list[float], baseline: str = "a"
 ) -> tuple[list[float], list[float]]:
+    """Return absolute errors and signed relative errors against the baseline.
+
+    A relative error is NaN when it is not well-defined: a zero baseline with a
+    non-zero difference, or a non-finite input. Callers must skip such points
+    instead of treating them as a perfect match.
+    """
     if len(values_a) != len(values_b):
         raise ValueError("values_a and values_b must have the same length")
     if baseline not in {"a", "b"}:
         raise ValueError("baseline must be 'a' or 'b'")
 
-    abs_errors: list[float] = []
+    absolute_errors: list[float] = []
     rel_errors: list[float] = []
 
     for a_val, b_val in zip(values_a, values_b, strict=True):
@@ -209,10 +269,15 @@ def compute_signed_errors(
         else:
             diff = a_val - b_val
             denom = abs(b_val)
-        abs_errors.append(diff)
-        rel_errors.append(diff / denom if denom != 0 else float("nan"))
+        absolute_errors.append(abs(diff))
+        if not math.isfinite(diff) or not math.isfinite(denom):
+            rel_errors.append(float("nan"))
+        elif denom == 0.0:
+            rel_errors.append(0.0 if diff == 0.0 else float("nan"))
+        else:
+            rel_errors.append(diff / denom)
 
-    return abs_errors, rel_errors
+    return absolute_errors, rel_errors
 
 
 def summarize_records(records: list[dict]) -> dict[str, float | int]:
