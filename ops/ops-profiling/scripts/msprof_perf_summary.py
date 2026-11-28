@@ -1803,7 +1803,7 @@ class _CompareSummaryInput:
 def _compute_compare_summary(csi: _CompareSummaryInput):
     """Compute the summary statistics dict for compare mode."""
     speedup_stats = _compute_speedup_stats(csi.speedups)
-    timing_stats = _compute_timing_stats(csi.ref_times, csi.asc_times)
+    timing_stats = _compute_timing_stats(csi.ref_times, csi.asc_times, csi.rows)
     return {
         "task": csi.out_dir.name,
         "task_dir": str(csi.out_dir),
@@ -1844,10 +1844,12 @@ def _compute_speedup_stats(speedups: list) -> dict:
     }
 
 
-def _compute_timing_stats(ref_times: list, asc_times: list) -> dict:
+def _compute_timing_stats(ref_times: list, asc_times: list, rows: list) -> dict:
     """Compute timing statistics for reference and AscendC implementations.
 
-    Returns a dict with mean/median/geomean/total for ref and asc, plus total_speedup.
+    Single-side timing statistics use every valid measurement on that side.
+    total_speedup uses only cases where both implementations have valid results,
+    preventing durations from different cases from being compared.
     """
     if ref_times:
         ref_stats = {
@@ -1871,11 +1873,17 @@ def _compute_timing_stats(ref_times: list, asc_times: list) -> dict:
         asc_stats = {"mean_asc_us": None, "median_asc_us": None,
                      "geomean_asc_us": None, "total_asc_us": None}
 
+    paired_rows = [
+        row
+        for row in rows
+        if row.get("ref_us") is not None
+        and row.get("asc_us") is not None
+        and row["asc_us"] > 0
+    ]
     total_speedup = None
-    if ref_times and asc_times:
-        asc_sum = sum(asc_times)
-        if asc_sum > 0:
-            total_speedup = sum(ref_times) / asc_sum
+    if paired_rows:
+        paired_asc_sum = sum(row["asc_us"] for row in paired_rows)
+        total_speedup = sum(row["ref_us"] for row in paired_rows) / paired_asc_sum
 
     return {**ref_stats, **asc_stats, "total_speedup": total_speedup}
 
