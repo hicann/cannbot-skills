@@ -49,6 +49,20 @@ cp "$REF/dav310/conv2d_launch.template"       "$DST/op_kernel/conv2d_launch.h"
 
 Depthwise 模板内 `#include "dwconv2d_tiling.h"`：把 `op_host` 与 `op_kernel` 都加入 include path（见 §3）。
 
+### 0.1 关键优化片段
+
+以下文件是 `annotated_excerpt`，提供关键循环与操作，按目标工程裁剪接入；不包含完整 Host、tiling 或 launch。策略与形状特点见 [经验 §10](../conv_common_perf_experience.md#10-形状特征选型与-dsl-实现经验)。
+
+| 文件 | 主要函数 | 接入位置 |
+|------|---------|---------|
+| [conv_cannbotdsl_fragments.py](conv_cannbotdsl_fragments.py) | `pointwise_cube_reduce`、`spatial_window_mmad`、`reduce_fp32_parts` | 权重梯度 K 循环与分片合并；片段要求输入/块尺寸满足所列对齐 |
+| 同上 | `publish_aiv_l1_slice`、`split_fp32`、`three_product_mmad`、`restore_scale_and_bias` | AIV 特征准备、L0 三乘积与 FP32 后处理 |
+| 同上 | `native_fma`、`load_fp32_phases`、`phase_fma`、`row_pair_fma` | `cbd.vf` 内的 Depthwise 计算与寄存器复用 |
+| [conv_ascendc_fragments.h](dav310/conv_ascendc_fragments.h) | `CompactAndStoreFp32`、`LoadContiguousPlanesFp32`、输入槽函数 | DAV_3510 Kernel 的输出压紧、DMA 与事件循环 |
+| 同上 | `AccumulateSharedRowFp32` | C API SIMD VF 内的共享行累加 |
+
+DSL 的形状、stride、环深和缩放按编译期配置传入；同一 RingBuffer 的生产/消费步数配对，Tensor `offset` 按字节计算。AscendC 片段使用 CANN 9.3 的 Reg/C API；缓冲分配、保护区初始化、事件预置和退出回收由调用方提供。不同片段的事件 ID 统一分配，输入槽与输出槽分别管理。
+
 ## 1. 工程接入（direct-launch 形态）
 
 ### 1.1 推荐目录

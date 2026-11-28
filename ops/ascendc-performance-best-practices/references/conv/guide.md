@@ -18,7 +18,7 @@ Conv 族（标准 Conv2D、Depthwise Conv2D、Conv3DDX 反卷积核拆分、Conv
 
 ```
 guide.md（本文件）
-├── conv_common_perf_experience.md          卷积性能优化策略集（经验，侧重 Depthwise）
+├── conv_common_perf_experience.md          卷积性能优化策略集（含形状特征选型、Vector 与 DSL）
 ├── conv2d_cube_tuning_guide.md             Conv2D Cube 模板翻译（循环/API/流水控制）
 ├── depthwise_conv_tuning.md                Depthwise 模板翻译（循环/API/流水控制）
 ├── conv3ddx_kernel_split_tuning_guide.md   Conv3DDX kernel split 模板翻译（kernel 拆分/子核轮转/AIC-AIV 事件）
@@ -34,6 +34,7 @@ guide.md（本文件）
 │   └── run_test.sh                        一键采集（环境变量驱动）
 └── templates/
     ├── usage_guide.md                      落地 / 接入 / 未实现能力扩展
+    ├── conv_cannbotdsl_fragments.py         DSL 关键片段（窗口流水、三乘积、分相 FMA）
     ├── conv2d_cube.md                      标准 Conv2D Cube 说明
     ├── dwconv2d_mix.md                     Depthwise __mix__ 说明
     ├── conv3ddx_kernel_split.md            Conv3DDX kernel split（stride≥2 kernel 拆分）说明
@@ -47,6 +48,7 @@ guide.md（本文件）
     ├── conv3ddx_ks_tiling.template           Conv3ddxKsCase + ValidateCase + Host tiling API（→ .h）
     ├── conv3ddx_ks_tiling_impl.template      KS Host tiling（→ .cpp，g++）
     └── dav310/
+        ├── conv_ascendc_fragments.h        AscendC 关键片段（压紧写回、搬运、共享行 FMA）
         ├── conv2d_kernel.template          Conv2DKernel<T>（→ .h）
         ├── conv2d_kernel_entry.template    __cube__ + launch（→ .cpp，bisheng）
         ├── conv2d_launch.template          launch 声明（→ .h）
@@ -62,6 +64,8 @@ guide.md（本文件）
 ```
 
 **阅读顺序**：本指南策略表 → `conv2d_cube.md` / `dwconv2d_mix.md` / `conv3ddx_kernel_split.md`（§3 实现现状） → 同名 `.template` → 模板翻译（`conv2d_cube_tuning_guide.md` / `depthwise_conv_tuning.md` / `conv3ddx_kernel_split_tuning_guide.md`）→ [usage_guide.md](templates/usage_guide.md)（**§4 模板实现现状**、接入、**§6 能力扩展**）。
+
+按形状特点裁剪优化片段时，先读 [经验 §10](conv_common_perf_experience.md#10-形状特征选型与-dsl-实现经验)，再按 [片段使用说明](templates/usage_guide.md#01-关键优化片段) 选择 DSL / AscendC 文件。
 
 ## 可复用 Kernel 模板
 
@@ -85,6 +89,7 @@ guide.md（本文件）
 | **bias_cmatrix_source** | 含 bias | bias→C2，`cmatrixSource=true` | 同上 |
 | **kernel_split_phase** | 反卷积 stride≥2 | 相位拆 kernel 为 stride² 个子核：A1 无洞连续搬（MTE2 ×s²）、K 缩短消无效 MMAD、子核 B1 全载 mStartPosition 选行、AIV interleave 重排输出 | [conv3ddx_kernel_split_tuning_guide.md](conv3ddx_kernel_split_tuning_guide.md) |
 | **streamk_deterministic** | Conv3DDW 尾轮输出块数不超过半核且累加轴可分 | 单核主轮 + 尾轮 BatchDout/Ho 分片 + 私有 workspace + AIV 固定树归约 | [conv3ddw_streamk_tuning_guide.md](conv3ddw_streamk_tuning_guide.md) |
+| **shape_specialization** | 输出块少、归约长、短核或后处理散写等形状特点 | 窗口分片、数值拆分、Vector 窗口复用、后处理布局；附 DSL / AscendC 片段文件 | [形状特征与 DSL 经验](conv_common_perf_experience.md#10-形状特征选型与-dsl-实现经验) |
 
 ## 未实现能力
 
